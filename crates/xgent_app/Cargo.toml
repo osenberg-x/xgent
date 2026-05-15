@@ -1,0 +1,21 @@
+[package]
+name = "xgent_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { workspace = true, features = [
+    "3d",
+    "ui",
+    "free_camera",
+    "bevy_gizmos",
+    "serialize",
+    "tonemapping_luts",
+    "png",
+] }
+xgent_settings = { path = "../xgent_settings" }
+xgent_provider = { path = "../xgent_provider" }
+xgent_tools = { path = "../xgent_tools" }
+xgent_mcp = { path = "../xgent_mcp" }
+xgent_agent = { path = "../xgent_agent" }
+xgent_ui = { path = "../xgent_ui" }

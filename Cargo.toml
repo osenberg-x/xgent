@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.dependencies]
+# Bevy 0.19 — path 依赖指向本地源码
+bevy = { path = "../bevy" }
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# HTTP 客户端
+reqwest = { version = "0.13", features = ["json", "stream"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 异步 trait
+async-trait = "0.1"
+
+# SSE 流式解析
+eventsource-stream = "0.2"
+
+# 操作系统 Keychain
+keyring = "3"
+
+# 压缩
+zstd = "0.13"
