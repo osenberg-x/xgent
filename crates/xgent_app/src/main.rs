@@ -1,4 +1,5 @@
 use bevy::{prelude::*, window::WindowResolution};
+use xgent_settings::{ProviderSettings, XgentSettingsPlugin};
 
 fn main() {
     App::new()
@@ -10,5 +11,9 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(XgentSettingsPlugin)
+        .add_systems(Update, |settings: Res<ProviderSettings>| {
+            info!("default_provider: {}", settings.default_provider);
+        })
         .run();
 }
