@@ -63,11 +63,39 @@ pub struct ProviderEntriesSettings {
     pub entries: HashMap<String, ProviderEntrySettings>,
 }
 
+impl ProviderEntriesSettings {
+    /// 获取指定 provider 的配置
+    pub fn get(&self, id: &str) -> Option<&ProviderEntrySettings> {
+        self.entries.get(id)
+    }
+
+    /// 从环境变量中读取 API Key
+    pub fn resolve_api_key(&self, id: &str) -> Option<String> {
+        self.entries.get(id).and_then(|config| {
+            if config.api_key_env.is_empty() {
+                None
+            } else {
+                std::env::var(&config.api_key_env).ok()
+            }
+        })
+    }
+}
+
 #[derive(Resource, SettingsGroup, Reflect, Default, Serialize, Deserialize, Debug, Clone)]
 #[reflect(Resource, SettingsGroup, Default)]
 #[settings_group(file = "providers")]
 pub struct McpServersSettings {
     pub servers: HashMap<String, McpServerSettings>,
+}
+
+impl McpServersSettings {
+    /// 获取所有已启用的 MCP Server
+    pub fn enabled_servers(&self) -> Vec<(&String, &McpServerSettings)> {
+        self.servers
+            .iter()
+            .filter(|(_, setting)| setting.enabled)
+            .collect()
+    }
 }
 
 #[derive(Reflect, Serialize, Deserialize, Debug, Clone)]
@@ -94,3 +122,53 @@ impl Default for McpServerSettings {
         }
     }
 }
+
+impl McpServerSettings {
+    pub fn trust_level(&self) -> McpTrustLevel {
+        match self.trust_level.as_str() {
+            "Trusted" => McpTrustLevel::Trusted,
+            "ReadOnly" => McpTrustLevel::ReadOnly,
+            _ => McpTrustLevel::ConfirmEach,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpTrustLevel {
+    Trusted,
+    ReadOnly,
+    ConfirmEach,
+}
+
+#[derive(Resource, SettingsGroup, Reflect, Default, Serialize, Deserialize, Debug, Clone)]
+#[reflect(Resource, SettingsGroup, Default)]
+pub struct AppSettings {
+    /// default dark
+    pub theme: String,
+}
+
+pub struct XgentSettingsPlugin;
+
+impl Plugin for XgentSettingsPlugin {
+    fn build(&self, app: &mut App) {
+        // PreferencesPlugin 必须先于其他使用 settings 的 Plugin 添加
+        app.add_plugins(PreferencesPlugin::new("dev.xgent"))
+            .init_resource::<ProviderSettings>()
+            .init_resource::<ProviderEntriesSettings>()
+            .init_resource::<McpServersSettings>()
+            .init_resource::<AppSettings>();
+
+        // SettingsGroup 资源会在 PreferencesPlugin::build 中自动初始化
+        // (从 TOML 文件加载，如果文件不存在则使用 Default)
+    }
+}
+
+// pub use bevy::settings::{
+//     PreferencesPlugin, SavePreferencesDeferred, SavePreferencesSync, SettingsGroup,
+// };
+
+// pub use {
+//     AppSettings, McpServerSettings, McpServersSettings, ProviderEntriesSettings,
+//     ProviderEntrySettings, ProviderSettings,
+// };
+//
