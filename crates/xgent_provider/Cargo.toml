@@ -10,3 +10,4 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 async-trait = { workspace = true }
 eventsource-stream = { workspace = true }
+thiserror = { workspace = true }
