@@ -21,3 +21,5 @@ keyring = "4.0.1"
 # 压缩
 zstd = "0.13.3"
 thiserror = "2.0.18"
+
+futures_core = "0.3.32"

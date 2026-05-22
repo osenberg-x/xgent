@@ -73,12 +73,11 @@ impl LLMProvider for OpenAICompatibleAdapter {
         tokio::spawn(async move {
             // 使用 eventsource-stream 解析 SSE
             let mut stream = response.bytes_stream().eventsource();
-
             while let Some(event) = stream.next().await {
-                match event {
+                match result {
                     Ok(event) => {
                         if event.data == "[DONE]" {
-                            let _ = tx.send(Ok(ChatStreamEvent::Done{
+                            let _ = tx.send(Ok(ChatStreamEvent::Done {
                                 usage: TokenUsage::default(),
                             })).await;
                             break;
@@ -86,56 +85,71 @@ impl LLMProvider for OpenAICompatibleAdapter {
 
                         // 解析 OpenAI SSE data JSON
                         match serde_json::from_str::<serde_json::Value>(&event.data) {
-                            // 解析 choices[0].delta
-                                                            if let Some(choices) = data.get("choices").and_then(|c| c.as_array()) {
-                                                                if let Some(choice) = choices.first() {
-                                                                    if let Some(delta) = choice.get("delta") {
-                                                                        // 文本内容
-                                                                        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                                                                            if !content.is_empty() {
-                                                                                if tx.send(Ok(ChatStreamEvent::Delta {
-                                                                                    content: content.to_string(),
-                                                                                })).await.is_err() {
-                                                                                    break;
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                        // 工具调用
-                                                                        if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
-                                                                            for tc in tool_calls {
-                                                                                let id = tc.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                                                                let function = tc.get("function");
-                                                                                let name = function.and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
-                                                                                let arguments = function.and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
-                                                                                if !name.is_empty() {
-                                                                                    if tx.send(Ok(ChatStreamEvent::ToolCall { id, name, arguments })).await.is_err() {
-                                                                                        break;
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }                           Ok(data) => {
+                            Ok(data) => {
+                                // 解析 choices[0].delta
+                                if let Some(choices) = data.get("choices").and_then(|c| c.as_array()) {
+                                    if let Some(choice) = choices.first() {
+                                        if let Some(delta) = choice.get("delta") {
+                                            // 文本内容
+                                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                                if !content.is_empty() {
+                                                    if tx.send(Ok(ChatStreamEvent::Delta {
+                                                        content: content.to_string(),
+                                                    })).await.is_err() {
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            // 工具调用
+                                            if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+                                                for tc in tool_calls {
+                                                    let id = tc.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                                    let function = tc.get("function");
+                                                    let name = function.and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
+                                                    let arguments = function.and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+                                                    if !name.is_empty() {
+                                                        if tx.send(Ok(ChatStreamEvent::ToolCall { id, name, arguments })).await.is_err() {
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             Err(e) => {
-                                return Err(ProviderError::Api{
-                                    status: 500,
-                                    message: e.to_string(),
-                                });
+                                let _ = tx.send(Err(ProviderError::Stream(e.to_string()))).await;
+                                break;
                             }
                         }
                     }
                     Err(e) => {
-                        return Err(ProviderError::Api{
-                            status: 500,
-                            message: e.to_string(),
-                        });
+                        let _ = tx.send(Err(ProviderError::Stream(e.to_string()))).await;
+                        break;
                     }
                 }
             }
         });
 
-        Ok(ChatStream::new(tx))
+        Ok(ChatStream::new(rx))
+    }
+
+    async fn health_check(&self) -> Result<(), ProviderError> {
+        let url = format!("{}/models", self.api_base.trim_end_matches('/'));
+        let response = self.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(ProviderError::Api {
+                status: response.status().as_u16(),
+                message: "Health check failed".to_string(),
+            })
+        }
     }
 }
