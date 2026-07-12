@@ -1,0 +1,12 @@
+[package]
+name = "xgent_settings"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { workspace = true, features = ["serialize"] }
+xgent_core = { path = "../xgent_core" }
+xgent_settings_core = { path = "../xgent_settings_core" }
+xui_i18n = { path = "../xui_i18n" }
+fluent = { workspace = true }
+unic-langid = { workspace = true }

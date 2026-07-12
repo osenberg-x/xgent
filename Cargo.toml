@@ -25,7 +25,6 @@ toml = "0.8"
 # 平台规范路径
 dirs = "5"
 # fluent i18n
-fluent = "0.2"
-fluent-resmgr = "0.1"
+fluent = "0.17"
 fluent-langneg = "0.1"
-unic-langid = "0.1"
+unic-langid = "0.9"
