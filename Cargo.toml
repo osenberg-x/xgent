@@ -20,3 +20,12 @@ eventsource-stream = "0.2.3"
 thiserror = "2.0.18"
 # futures core（流式处理）
 futures = "0.3.32"
+# TOML 序列化（配置存储）
+toml = "0.8"
+# 平台规范路径
+dirs = "5"
+# fluent i18n
+fluent = "0.2"
+fluent-resmgr = "0.1"
+fluent-langneg = "0.1"
+unic-langid = "0.1"

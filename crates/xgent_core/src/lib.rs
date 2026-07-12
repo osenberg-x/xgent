@@ -8,3 +8,5 @@ pub mod ids;
 pub mod methods;
 pub mod notifications;
 pub mod proto;
+
+pub use error::{XgentError, XgentResult};
