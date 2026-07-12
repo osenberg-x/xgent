@@ -7001,6 +7001,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bec9e4a500ca8864c5b47b8b482a73d62e4237670e5b5f1d6b9e3cae50f28f2b"
 
 [[package]]
+name = "xgent_agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bevy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "xgent_context",
+ "xgent_core",
+ "xgent_provider",
+ "xgent_settings",
+ "xgent_settings_core",
+ "xgent_tools",
+]
+
+[[package]]
 name = "xgent_context"
 version = "0.1.0"
 dependencies = [
