@@ -1,0 +1,10 @@
+[package]
+name = "xui_i18n"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "极小的 i18n 字符串源 trait，框架无关。"
+keywords = ["i18n", "trait"]
+
+[dependencies]
+# 无依赖，纯标准库
