@@ -1,0 +1,22 @@
+[package]
+name = "xgent_provider"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+xgent_core = { path = "../xgent_core" }
+xgent_settings_core = { path = "../xgent_settings_core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+eventsource-stream = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+futures-core = { workspace = true }
+bytes = { workspace = true }
+tokio-stream = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
