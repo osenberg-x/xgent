@@ -37,7 +37,7 @@ pub trait LlmProvider: Send + Sync {
 }
 
 /// 模型信息。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelInfo {
     /// 模型 id（API 实际标识，如 `"gpt-4"`）
     pub id: String,

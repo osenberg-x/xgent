@@ -25,6 +25,13 @@ futures-core = "0.3.32"
 bytes = "1"
 # tokio stream 扩展
 tokio-stream = "0.1"
+# 文件监听
+notify = "8"
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
+# 跨平台 Unix domain socket 抽象（Windows named pipe 兼容）
+tokio-util = { version = "0.7", features = ["io"] }
 # TOML 序列化（配置存储）
 toml = "0.8"
 # 平台规范路径
