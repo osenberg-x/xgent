@@ -7075,6 +7075,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "xgent_tools"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "xgent_core",
+ "xgent_settings_core",
+]
+
+[[package]]
 name = "xkbcommon-dl"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
