@@ -11,10 +11,8 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 
 use xgent_agent::{Conversation, DeltaMessage, DoneMessage, ErrorMessage, UserInputMessage};
-use xgent_settings::Localizer;
 use xui::input::{ChatInput, ChatInputSubmitted};
 
-use crate::i18n::tr;
 use crate::layout::ChatPanelMarker;
 use crate::theme::{Theme, space};
 
@@ -61,20 +59,17 @@ fn spawn_chat_panel(
     mut commands: Commands,
     q_panel: Query<Entity, With<ChatPanelMarker>>,
     theme: Res<Theme>,
-    loc: Res<Localizer>,
     mut entities: ResMut<ChatPanelEntities>,
 ) {
     let Ok(panel) = q_panel.single() else {
         return;
     };
     let font = theme.font_size;
-    let placeholder = tr(&loc, "chat-placeholder");
-
     let font_size = FontSize::Px(font);
     let current_text = commands
         .spawn((
             Node {
-                width: px(100.0),
+                width: Val::Percent(100.0),
                 padding: UiRect::all(px(space::SM)),
                 ..default()
             },
@@ -92,7 +87,7 @@ fn spawn_chat_panel(
     let message_list = commands
         .spawn((
             Node {
-                width: px(100.0),
+                width: Val::Percent(100.0),
                 flex_grow: 1.0,
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(px(space::SM)),
@@ -108,7 +103,7 @@ fn spawn_chat_panel(
     let input_entity = commands
         .spawn((
             Node {
-                width: px(100.0),
+                width: Val::Percent(100.0),
                 min_height: px(40.0),
                 padding: UiRect::all(px(space::SM)),
                 border: UiRect::all(px(1.0)),
@@ -116,21 +111,20 @@ fn spawn_chat_panel(
             },
             BackgroundColor(theme.panel),
             BorderColor::all(theme.border),
+            TextFont {
+                font_size,
+                ..default()
+            },
+            TextColor(theme.text_dim),
+            EditableText {
+                // 多行输入，placeholder 由初始空值 + text_dim 颜色呈现
+                allow_newlines: true,
+                ..default()
+            },
             ChatInput::multiline(),
             AutoFocus,
             ChatInputMarker,
         ))
-        .with_children(|input| {
-            input.spawn((
-                Text::new(placeholder),
-                TextFont {
-                    font_size,
-                    ..default()
-                },
-                TextColor(theme.text_dim),
-                EditableText::default(),
-            ));
-        })
         .id();
 
     commands
@@ -184,7 +178,7 @@ fn finalize_on_done(
     commands.entity(list).with_children(|p| {
         p.spawn((
             Node {
-                width: px(100.0),
+                width: Val::Percent(100.0),
                 padding: UiRect::all(px(space::SM)),
                 ..default()
             },

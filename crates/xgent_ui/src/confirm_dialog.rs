@@ -62,8 +62,8 @@ fn show_on_request(
                 position_type: PositionType::Absolute,
                 top: px(0.0),
                 left: px(0.0),
-                width: px(100.0),
-                height: px(100.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()

@@ -50,8 +50,8 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
     commands
         .spawn((
             Node {
-                width: px(100.0),
-                height: px(100.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 ..default()
             },
@@ -63,7 +63,7 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
             parent
                 .spawn((
                     Node {
-                        width: px(100.0),
+                        width: Val::Percent(100.0),
                         height: px(size::TOP_BAR_H),
                         padding: UiRect::horizontal(px(crate::theme::space::MD)),
                         align_items: AlignItems::Center,
@@ -90,7 +90,7 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
             parent
                 .spawn((
                     Node {
-                        width: px(100.0),
+                        width: Val::Percent(100.0),
                         flex_grow: 1.0,
                         flex_direction: FlexDirection::Row,
                         ..default()
@@ -102,7 +102,7 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                     main.spawn((
                         Node {
                             width: px(size::FILE_PANEL_W),
-                            height: px(100.0),
+                            height: Val::Percent(100.0),
                             padding: UiRect::all(px(crate::theme::space::SM)),
                             flex_direction: FlexDirection::Column,
                             border: UiRect::right(px(1.0)),
@@ -117,8 +117,9 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                     // 对话侧栏
                     main.spawn((
                         Node {
-                            width: px(size::CHAT_SIDEBAR_W),
-                            height: px(100.0),
+                            flex_grow: 1.0,
+                            min_width: px(size::CHAT_SIDEBAR_W),
+                            height: Val::Percent(100.0),
                             padding: UiRect::all(px(crate::theme::space::SM)),
                             flex_direction: FlexDirection::Column,
                             border: UiRect::left(px(1.0)),
@@ -133,7 +134,7 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
             // 状态栏
             parent.spawn((
                 Node {
-                    width: px(100.0),
+                    width: Val::Percent(100.0),
                     height: px(size::STATUS_BAR_H),
                     padding: UiRect::horizontal(px(crate::theme::space::SM)),
                     align_items: AlignItems::Center,

@@ -12,6 +12,7 @@ mod startup;
 use std::sync::Arc;
 
 use bevy::prelude::*;
+use bevy::log::LogPlugin;
 use clap::Parser;
 use xgent_agent::bridge::{AgentBridge, AgentBridgeConfig};
 use xgent_context::OnDemandContextProvider;
@@ -43,13 +44,7 @@ pub struct Args {
 }
 
 fn main() {
-    // 日志
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // 日志由 Bevy LogPlugin 统一管理（见下方 DefaultPlugins 配置）
 
     let args = Args::parse();
 
@@ -116,13 +111,18 @@ fn main() {
 
     // 组装 App
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "XGent".into(),
+    app.add_plugins(DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "XGent".into(),
+                ..default()
+            }),
             ..default()
-        }),
-        ..default()
-    }))
+        })
+        .set(LogPlugin {
+            filter: "xgent=info,xgent_daemon=info".into(),
+            ..default()
+        }))
     .add_plugins((
         xui::XuiPlugin,
         xgent_settings::XgentSettingsPlugin,
