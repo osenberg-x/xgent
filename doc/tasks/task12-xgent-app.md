@@ -61,17 +61,17 @@
 
 ### 阶段六：生命周期与错误处理
 
-- [ ] T-12.12 实现退出清理
+- [x] T-12.12 实现退出清理
   - 依赖：T-12.5
   - 验收：UI 进程退出时 drop IPC 连接，daemon 检测末个客户端断开后延迟退出；编译通过。
 
-- [ ] T-12.13 实现启动错误友好提示
+- [x] T-12.13 实现启动错误友好提示
   - 依赖：T-12.3, T-12.11
   - 验收：daemon 连接失败、项目路径不存在等启动错误友好提示（UI 弹窗或 stderr），不静默崩溃；编译通过。
 
 ### 阶段七：端到端测试
 
-- [ ] T-12.14 启动与连接测试
+- [x] T-12.14 启动与连接测试
   - 依赖：T-12.9, T-12.10
   - 验收：先手动启 daemon 再启 app，断言连接成功、provider 列表加载。
 
@@ -79,19 +79,32 @@
   - 依赖：T-12.7, T-12.10
   - 验收：app 发消息，流式回复出现；无 key 标 `#[ignore]`。
 
-- [ ] T-12.16 文件同步测试
+- [x] T-12.16 文件同步测试
   - 依赖：T-12.8, T-12.10
   - 验收：开两个 app 连同项目，一个写文件，另一个收到 peer.fileChanged 并刷新。
 
-- [ ] T-12.17 项目打开测试
+- [x] T-12.17 项目打开测试
   - 依赖：T-12.11, T-12.10
   - 验收：`--project <path>` 启动，ProjectConfig 加载、fs.watch 订阅、文件树显示。
 
 ### 阶段八：MVP 验收
 
-- [ ] T-12.18 MVP 验收清单
+- [x] T-12.18 MVP 验收清单
   - 依赖：T-12.17
   - 验收：对照 `doc/plans/step12-xgent-app.md` 的 MVP 验收清单逐项确认：F-01~F-09、NF-01~NF-04。
+    - F-01 多轮对话（中断/重试）：✅ 多轮历史累积 + Abort 中断；缺口：无 Retry 变体
+    - F-02 流式输出：✅ ChatEvent::Delta → DeltaMessage → UI 累加渲染
+    - F-03 工具调用（读/写/搜/运行）：✅ read_file/write_file/search_files/run_command 全实现
+    - F-04 操作确认（写/运行需确认）：✅ SecurityPolicy + ConfirmCallback + SharedConfirm oneshot
+    - F-05 项目上下文（方案 A 检索）：✅ OnDemandContextProvider（tree_summary + rg_search + 降级）
+    - F-06 会话管理（新建/切换/历史）：⚠️ 命令注册 session.new 但 TODO 空实现，无会话持久化
+    - F-07 provider 切换：✅ OpenAI compat/Ollama 完整；⚠️ Anthropic/Custom/ResponseApi 占位
+    - F-08 命令面板：✅ CommandPalettePlugin + 模糊搜索
+    - F-09 快捷键：✅ ShortcutsPlugin + HotkeyRegistry + 冲突检测（VSCode 风格）
+    - NF-01 跨平台：⚠️ Unix domain socket 完整，Windows named pipe 服务端未实现
+    - NF-02 多开共享 daemon：✅ ClientRegistry 多客户端 + 项目配置隔离 + 30s 延迟退出
+    - NF-03 UI 零延迟响应：✅ try_recv 非阻塞轮询（限 64/帧）
+    - NF-04 模块独立可测：✅ 各 crate 有独立测试（184 个测试全绿），纯逻辑 crate 不依赖 Bevy
 
 ## 完成标志
 

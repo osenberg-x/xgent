@@ -1,0 +1,29 @@
+[package]
+name = "xgent_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { workspace = true }
+xgent_core = { path = "../xgent_core" }
+xgent_settings = { path = "../xgent_settings" }
+xgent_settings_core = { path = "../xgent_settings_core" }
+xgent_agent = { path = "../xgent_agent" }
+xgent_tools = { path = "../xgent_tools" }
+xgent_context = { path = "../xgent_context" }
+xgent_ui = { path = "../xgent_ui" }
+xui = { path = "../xui" }
+xui_i18n = { path = "../xui_i18n" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

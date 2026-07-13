@@ -40,11 +40,12 @@ mod tests {
             if args.is_empty() {
                 format!("[{lang}]{key}", lang = self.lang)
             } else {
-                let pairs: Vec<String> = args
-                    .iter()
-                    .map(|(n, v)| format!("{n}={v}"))
-                    .collect();
-                format!("[{lang}]{key}({args})", lang = self.lang, args = pairs.join(","))
+                let pairs: Vec<String> = args.iter().map(|(n, v)| format!("{n}={v}")).collect();
+                format!(
+                    "[{lang}]{key}({args})",
+                    lang = self.lang,
+                    args = pairs.join(",")
+                )
             }
         }
 
@@ -63,10 +64,7 @@ mod tests {
     #[test]
     fn mock_get_with_args() {
         let s = MockSource { lang: "en-US" };
-        let args = [
-            ("name", "world".to_string()),
-            ("count", "3".to_string()),
-        ];
+        let args = [("name", "world".to_string()), ("count", "3".to_string())];
         assert_eq!(s.get("greet", &args), "[en-US]greet(name=world,count=3)");
     }
 
