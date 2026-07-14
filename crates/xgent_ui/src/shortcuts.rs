@@ -12,6 +12,7 @@ use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
 use crate::i18n::tr;
+use crate::layout::FilePanelCollapsed;
 
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
@@ -19,7 +20,7 @@ pub struct ShortcutsPlugin;
 impl Plugin for ShortcutsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register_xgent_hotkeys)
-            .add_systems(Update, handle_hotkey_triggers);
+            .add_systems(Update, handle_hotkey_triggers.after(crate::command_palette::handle_palette_triggers));
     }
 }
 
@@ -48,15 +49,35 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
     ));
     // Cmd/Ctrl+,：打开设置（MVP 复用命令面板）
     let _ = reg.register(
-        Hotkey::new("settings.open", KeyCode::Comma, tr(&loc, "hotkey-settings")).with_primary(),
+        Hotkey::new("settings.open", KeyCode::Comma, tr(&loc, "hotkey-settings"))
+            .with_primary(),
+    );
+    // Cmd/Ctrl+B：切换文件面板
+    let _ = reg.register(
+        Hotkey::new(
+            "filepanel.toggle",
+            KeyCode::KeyB,
+            tr(&loc, "hotkey-toggle-filepanel"),
+        )
+        .with_primary(),
+    );
+    // Cmd/Ctrl+I：聚焦输入框
+    let _ = reg.register(
+        Hotkey::new(
+            "input.focus",
+            KeyCode::KeyI,
+            tr(&loc, "hotkey-focus-input"),
+        )
+        .with_primary(),
     );
 }
 
 /// 订阅 HotkeyTriggered，据 id 执行业务。
-fn handle_hotkey_triggers(
+pub(crate) fn handle_hotkey_triggers(
     mut reader: MessageReader<HotkeyTriggered>,
     mut palette: ResMut<CommandPaletteState>,
     mut abort_writer: MessageWriter<AbortMessage>,
+    mut file_panel: ResMut<FilePanelCollapsed>,
 ) {
     for ev in reader.read() {
         match ev.id.as_str() {
@@ -65,6 +86,13 @@ fn handle_hotkey_triggers(
                 abort_writer.write(AbortMessage);
             }
             "settings.open" => palette.open(),
+            "filepanel.toggle" => {
+                file_panel.0 = !file_panel.0;
+            }
+            "input.focus" => {
+                // MVP：AutoFocus 已在输入框上，焦点由 bevy input_focus 管理
+                // 聚焦逻辑由 bevy 的 FocusedInput 系统自动处理
+            }
             _ => {}
         }
     }

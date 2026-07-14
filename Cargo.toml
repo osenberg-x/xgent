@@ -5,6 +5,8 @@ members = ["crates/*"]
 [workspace.dependencies]
 # Bevy 0.20.0-dev — path 依赖指向本地源码
 bevy = { path = "../bevy" }
+# 文本布局（启用复杂脚本支持，修复 CJK 分词模型缺失导致的 ICU4X 日志刷屏）
+parley = { version = "0.11", default-features = false, features = ["std", "complex-scripts"] }
 # 异步运行时
 tokio = { version = "1.52.3", features = ["full"] }
 # HTTP 客户端

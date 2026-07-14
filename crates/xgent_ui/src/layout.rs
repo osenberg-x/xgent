@@ -1,7 +1,9 @@
-//! 三区布局：顶栏 + 主区（文件面板 + 对话侧栏）+ 状态栏。
+//! 三区布局：顶栏 + 主区（文件面板 + 对话主区）+ 状态栏。
 //!
 //! 各区域挂 marker 组件（如 [`TopBarMarker`]），供子系统（chat_panel、status_bar 等）
 //! 在启动时向其挂子节点。
+//!
+//! 文件面板可通过 `Cmd+B` 切换折叠/展开，折叠时宽度变为 0。
 
 use bevy::prelude::*;
 
@@ -23,7 +25,7 @@ pub struct MainAreaMarker;
 #[derive(Component, Default)]
 pub struct FilePanelMarker;
 
-/// 对话侧栏容器。
+/// 对话主区容器。
 #[derive(Component, Default)]
 pub struct ChatPanelMarker;
 
@@ -31,18 +33,24 @@ pub struct ChatPanelMarker;
 #[derive(Component, Default)]
 pub struct StatusBarMarker;
 
+/// 文件面板折叠状态。
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FilePanelCollapsed(pub bool);
+
 /// 布局插件。
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Theme>()
-            .add_systems(Startup, spawn_layout);
+            .init_resource::<FilePanelCollapsed>()
+            .add_systems(Startup, spawn_layout)
+            .add_systems(Update, toggle_file_panel_width.after(crate::shortcuts::handle_hotkey_triggers));
     }
 }
 
 /// 启动时 spawn 全屏根节点与三区容器。
-fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
+pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
     // 相机（UI 渲染需要）
     commands.spawn(Camera2d);
 
@@ -68,6 +76,7 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                         padding: UiRect::horizontal(px(crate::theme::space::MD)),
                         align_items: AlignItems::Center,
                         flex_direction: FlexDirection::Row,
+                        column_gap: px(crate::theme::space::SM),
                         border: UiRect::bottom(px(1.0)),
                         ..default()
                     },
@@ -114,11 +123,10 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                         FilePanelMarker,
                     ));
 
-                    // 对话侧栏
+                    // 对话主区
                     main.spawn((
                         Node {
                             flex_grow: 1.0,
-                            min_width: px(size::CHAT_SIDEBAR_W),
                             height: Val::Percent(100.0),
                             padding: UiRect::all(px(crate::theme::space::SM)),
                             flex_direction: FlexDirection::Column,
@@ -147,6 +155,24 @@ fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                 StatusBarMarker,
             ));
         });
+}
+
+/// 文件面板折叠状态变化时更新宽度。
+fn toggle_file_panel_width(
+    collapsed: Res<FilePanelCollapsed>,
+    mut q: Query<&mut Node, With<FilePanelMarker>>,
+) {
+    if !collapsed.is_changed() {
+        return;
+    }
+    let Ok(mut node) = q.single_mut() else {
+        return;
+    };
+    node.width = if collapsed.0 {
+        Val::Px(0.0)
+    } else {
+        px(size::FILE_PANEL_W)
+    };
 }
 
 /// 把 f32 转为 [`FontSize`]。

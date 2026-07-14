@@ -4,19 +4,25 @@
 //! 固化为历史消息节点并清空当前；输入框发送语义由 [`xui::ChatInput`] 处理，
 //! 提交时转发为 [`UserInputMessage`]。
 //!
+//! 用户消息右对齐（`bubble_user`），助手消息左对齐（`bubble_assistant`）。
+//! 消息列表自动滚动到底部。
+//!
 //! 消息列表 MVP 用简单列容器 + 每条消息一个文本节点；大列表虚拟化留待后续接入 xui::VirtualList。
 
 use bevy::input_focus::AutoFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::ScrollPosition;
 
-use xgent_agent::{Conversation, DeltaMessage, DoneMessage, ErrorMessage, UserInputMessage};
+use xgent_agent::{
+    Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage, UserInputMessage,
+};
 use xui::input::{ChatInput, ChatInputSubmitted};
 
 use crate::layout::ChatPanelMarker;
 use crate::theme::{Theme, space};
 
-/// 历史消息容器（消息列表）。
+/// 历史消息容器（消息列表，可滚动）。
 #[derive(Component, Default)]
 pub struct MessageListMarker;
 
@@ -28,11 +34,16 @@ pub struct CurrentAssistantText;
 #[derive(Component, Default)]
 pub struct ChatInputMarker;
 
+/// 输入框边框标记（用于忙时变色）。
+#[derive(Component, Default)]
+pub struct ChatInputBorderMarker;
+
 /// 对话面板关键实体句柄（启动时填充）。
 #[derive(Resource, Default)]
 pub struct ChatPanelEntities {
     pub message_list: Option<Entity>,
     pub current_text: Option<Entity>,
+    pub input: Option<Entity>,
 }
 
 /// 对话面板插件。
@@ -41,7 +52,7 @@ pub struct ChatPanelPlugin;
 impl Plugin for ChatPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChatPanelEntities>()
-            .add_systems(Startup, spawn_chat_panel)
+            .add_systems(Startup, spawn_chat_panel.after(crate::layout::spawn_layout))
             .add_systems(
                 Update,
                 (
@@ -49,12 +60,16 @@ impl Plugin for ChatPanelPlugin {
                     finalize_on_done,
                     on_error,
                     forward_input_submission,
-                ),
+                    spawn_user_message,
+                    auto_scroll_to_bottom,
+                    update_input_border,
+                )
+                    .after(xgent_agent::agent_loop::agent_poll_system),
             );
     }
 }
 
-/// 启动时在对话侧栏内 spawn 消息列表 + 输入框。
+/// 启动时在对话主区内 spawn 消息列表 + 输入框。
 fn spawn_chat_panel(
     mut commands: Commands,
     q_panel: Query<Entity, With<ChatPanelMarker>>,
@@ -66,11 +81,13 @@ fn spawn_chat_panel(
     };
     let font = theme.font_size;
     let font_size = FontSize::Px(font);
+
     let current_text = commands
         .spawn((
             Node {
-                width: Val::Percent(100.0),
+                max_width: Val::Percent(80.0),
                 padding: UiRect::all(px(space::SM)),
+                border_radius: BorderRadius::all(px(6.0)),
                 ..default()
             },
             BackgroundColor(theme.bubble_assistant),
@@ -95,6 +112,7 @@ fn spawn_chat_panel(
                 row_gap: px(space::SM),
                 ..default()
             },
+            ScrollPosition::default(),
             MessageListMarker,
         ))
         .add_child(current_text)
@@ -104,12 +122,14 @@ fn spawn_chat_panel(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                min_height: px(40.0),
+                min_height: px(60.0),
+                max_height: px(200.0),
                 padding: UiRect::all(px(space::SM)),
                 border: UiRect::all(px(1.0)),
+                border_radius: BorderRadius::all(px(4.0)),
                 ..default()
             },
-            BackgroundColor(theme.panel),
+            BackgroundColor(theme.bg),
             BorderColor::all(theme.border),
             TextFont {
                 font_size,
@@ -117,13 +137,13 @@ fn spawn_chat_panel(
             },
             TextColor(theme.text_dim),
             EditableText {
-                // 多行输入，placeholder 由初始空值 + text_dim 颜色呈现
                 allow_newlines: true,
                 ..default()
             },
             ChatInput::multiline(),
             AutoFocus,
             ChatInputMarker,
+            ChatInputBorderMarker,
         ))
         .id();
 
@@ -134,6 +154,58 @@ fn spawn_chat_panel(
 
     entities.message_list = Some(message_list);
     entities.current_text = Some(current_text);
+    entities.input = Some(input_entity);
+}
+
+/// 用户提交输入时，在消息列表中 spawn 用户消息气泡（右对齐）。
+fn spawn_user_message(
+    mut reader: MessageReader<ChatInputSubmitted>,
+    entities: Res<ChatPanelEntities>,
+    theme: Res<Theme>,
+    mut commands: Commands,
+) {
+    let Some(list) = entities.message_list else {
+        return;
+    };
+    let Some(current) = entities.current_text else {
+        return;
+    };
+    let font = theme.font_size;
+    for ev in reader.read() {
+        if ev.text.is_empty() {
+            continue;
+        }
+        // 在当前助手节点之前插入用户消息气泡
+        commands.entity(list).with_children(|p| {
+            // 右对齐行容器
+            p.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::FlexEnd,
+                    ..default()
+                },
+            ))
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        max_width: Val::Percent(80.0),
+                        padding: UiRect::all(px(space::SM)),
+                        border_radius: BorderRadius::all(px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.bubble_user),
+                    Text::new(ev.text.clone()),
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                ));
+            });
+        });
+        // 把当前助手节点移到列表末尾（在用户消息之后）
+        commands.entity(list).add_child(current);
+    }
 }
 
 /// 订阅 DeltaMessage，累加到当前助手消息节点。
@@ -174,22 +246,32 @@ fn finalize_on_done(
         return;
     }
     let font = theme.font_size;
-    // 在消息列表插入历史副本
+    // 在消息列表插入历史副本（左对齐行容器 + 助手气泡）
     commands.entity(list).with_children(|p| {
         p.spawn((
             Node {
                 width: Val::Percent(100.0),
-                padding: UiRect::all(px(space::SM)),
+                justify_content: JustifyContent::FlexStart,
                 ..default()
             },
-            BackgroundColor(theme.bubble_assistant),
-            Text::new(content),
-            TextFont {
-                font_size: FontSize::Px(font),
-                ..default()
-            },
-            TextColor(theme.text),
-        ));
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Node {
+                    max_width: Val::Percent(80.0),
+                    padding: UiRect::all(px(space::SM)),
+                    border_radius: BorderRadius::all(px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(theme.bubble_assistant),
+                Text::new(content),
+                TextFont {
+                    font_size: FontSize::Px(font),
+                    ..default()
+                },
+                TextColor(theme.text),
+            ));
+        });
     });
     // 清空当前节点
     commands.entity(current).insert(Text::new(String::new()));
@@ -216,11 +298,63 @@ fn on_error(
 pub fn forward_input_submission(
     mut reader: MessageReader<ChatInputSubmitted>,
     mut writer: MessageWriter<UserInputMessage>,
-    _conv: Res<Conversation>,
+    conv: Res<Conversation>,
 ) {
+    // agent 忙时忽略发送
+    if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
+        return;
+    }
     for ev in reader.read() {
+        if ev.text.is_empty() {
+            continue;
+        }
         writer.write(UserInputMessage {
             text: ev.text.clone(),
         });
+    }
+}
+
+/// 消息列表自动滚动到底部（新消息到达时）。
+fn auto_scroll_to_bottom(
+    entities: Res<ChatPanelEntities>,
+    mut q_scroll: Query<&mut ScrollPosition, With<MessageListMarker>>,
+    q_list: Query<&Children, With<MessageListMarker>>,
+    q_node: Query<&ComputedNode>,
+) {
+    let Some(list) = entities.message_list else {
+        return;
+    };
+    let Ok(mut scroll) = q_scroll.single_mut() else {
+        return;
+    };
+    let Ok(children) = q_list.get(list) else {
+        return;
+    };
+    // 计算内容总高度
+    let mut total_height = 0.0;
+    for child in children.iter() {
+        if let Ok(node) = q_node.get(child) {
+            total_height += node.size.y + 8.0; // row_gap
+        }
+    }
+    // 设置滚动位置到底部
+    scroll.0.y = total_height;
+}
+
+/// 根据 Conversation 状态更新输入框边框颜色（忙时变色）。
+fn update_input_border(
+    conv: Res<Conversation>,
+    theme: Res<Theme>,
+    mut q: Query<&mut BorderColor, With<ChatInputBorderMarker>>,
+) {
+    let Ok(mut border) = q.single_mut() else {
+        return;
+    };
+    let is_busy = conv.status != ConversationStatus::Idle
+        && conv.status != ConversationStatus::Error;
+    if is_busy {
+        border.set_all(theme.accent);
+    } else {
+        border.set_all(theme.border);
     }
 }

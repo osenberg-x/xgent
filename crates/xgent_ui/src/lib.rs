@@ -16,6 +16,8 @@ pub mod settings_panel;
 pub mod shortcuts;
 pub mod status_bar;
 pub mod theme;
+pub mod top_bar;
+pub mod tool_panel;
 
 use bevy::prelude::*;
 
@@ -29,12 +31,14 @@ impl Plugin for XgentUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             layout::LayoutPlugin,
+            top_bar::TopBarPlugin,
             chat_panel::ChatPanelPlugin,
             file_panel::FilePanelPlugin,
             status_bar::StatusBarPlugin,
             command_palette::CommandPalettePlugin,
             settings_panel::SettingsPanelPlugin,
             confirm_dialog::ConfirmDialogPlugin,
+            tool_panel::ToolPanelPlugin,
             shortcuts::ShortcutsPlugin,
         ));
     }

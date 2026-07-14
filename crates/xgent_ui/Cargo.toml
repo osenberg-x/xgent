@@ -10,6 +10,7 @@ xgent_settings = { path = "../xgent_settings" }
 xgent_agent = { path = "../xgent_agent" }
 xgent_tools = { path = "../xgent_tools" }
 xui = { path = "../xui" }
+parley = { workspace = true }
 xui_i18n = { path = "../xui_i18n" }
 serde = { workspace = true }
 serde_json = { workspace = true }

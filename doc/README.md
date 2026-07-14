@@ -24,3 +24,5 @@
 - `plans/step2-xgent-settings.md` — xgent_settings 详细编码指导
 - `plans/step3-xgent-provider.md` — xgent_provider 详细编码指导
 - `plans/step4-xgent-tools.md` — xgent_tools 详细编码指导
+
+- `design/ui-design.md` — UI 界面设计（布局、面板、交互流、视觉规范、快捷键表）

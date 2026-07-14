@@ -23,7 +23,7 @@ pub struct ConfirmDialogPlugin;
 
 impl Plugin for ConfirmDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (show_on_request, hide_on_decision));
+        app.add_systems(Update, (show_on_request, hide_on_decision).after(xgent_agent::agent_loop::agent_poll_system));
     }
 }
 
@@ -42,7 +42,11 @@ fn show_on_request(
     };
     // 若已存在弹窗则更新文本，否则新建
     let text = if req.0.summary.is_empty() {
-        tr(&loc, "confirm-write-file").replace("{ $path }", &req.0.tool_id)
+        crate::i18n::tr_with(
+            &loc,
+            "confirm-write-file",
+            &[("path", req.0.tool_id.clone())],
+        )
     } else {
         req.0.summary.clone()
     };
@@ -101,6 +105,7 @@ fn show_on_request(
                 },))
                     .with_children(|btns| {
                         btns.spawn((
+                            Button,
                             Node {
                                 padding: UiRect::all(px(space::SM)),
                                 ..default()
@@ -115,6 +120,7 @@ fn show_on_request(
                             ConfirmAllowMarker,
                         ));
                         btns.spawn((
+                            Button,
                             Node {
                                 padding: UiRect::all(px(space::SM)),
                                 ..default()

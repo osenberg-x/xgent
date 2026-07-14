@@ -1,7 +1,7 @@
-//! 状态栏：当前 provider/model、会话状态、流式指示。
+//! 状态栏：当前 provider/model、会话状态、token 指示。
 
 use bevy::prelude::*;
-use xgent_agent::{Conversation, ConversationStatus, ProviderInfo};
+use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
 
 use crate::layout::StatusBarMarker;
 use crate::theme::Theme;
@@ -10,13 +10,24 @@ use crate::theme::Theme;
 #[derive(Component, Default)]
 pub struct StatusTextMarker;
 
+/// 累计 token 用量（UI 侧粗略估算）。
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct TokenUsage {
+    /// 累计 token 数
+    pub total: u64,
+}
+
 /// 状态栏插件。
 pub struct StatusBarPlugin;
 
 impl Plugin for StatusBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_status_bar)
-            .add_systems(Update, update_status_text);
+        app.init_resource::<TokenUsage>()
+            .add_systems(
+                Startup,
+                spawn_status_bar.after(crate::layout::spawn_layout),
+            )
+            .add_systems(Update, (update_status_text, track_token_usage).after(xgent_agent::agent_loop::agent_poll_system));
     }
 }
 
@@ -44,10 +55,11 @@ fn spawn_status_bar(
     });
 }
 
-/// 每帧根据 Conversation / ProviderInfo 更新状态栏文本。
+/// 每帧根据 Conversation / ProviderInfo / TokenUsage 更新状态栏文本。
 fn update_status_text(
     conv: Res<Conversation>,
     info: Res<ProviderInfo>,
+    tokens: Res<TokenUsage>,
     theme: Res<Theme>,
     mut q: Query<&mut Text, With<StatusTextMarker>>,
 ) {
@@ -68,6 +80,34 @@ fn update_status_text(
         ConversationStatus::Aborting => "中断中…".to_string(),
         ConversationStatus::Error => "出错".to_string(),
     };
+    let token_label = if tokens.total > 0 {
+        format!("  ·  ↑ {} tokens", format_tokens(tokens.total))
+    } else {
+        String::new()
+    };
     let _ = theme;
-    text.0 = format!("{}  ·  {}", provider_label, status_label);
+    text.0 = format!("{}  ·  {}{}", provider_label, status_label, token_label);
+}
+
+/// 收到 DoneMessage 时递增 token 估算。
+fn track_token_usage(
+    mut reader: MessageReader<DoneMessage>,
+    conv: Res<Conversation>,
+    mut tokens: ResMut<TokenUsage>,
+) {
+    if reader.read().next().is_none() {
+        return;
+    }
+    // 粗略估算：当前助手回复的字数 / 4
+    let estimated = (conv.current_assistant_text.len() as u64) / 4;
+    tokens.total += estimated.max(1);
+}
+
+/// 格式化 token 数（k 单位）。
+fn format_tokens(n: u64) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
 }

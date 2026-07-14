@@ -131,6 +131,7 @@ fn main() {
         crate::fs_event_bridge::FsEventBridgePlugin,
     ))
     .insert_resource(args)
+    .insert_resource(xgent_ui::file_panel::ProjectRoot { path: project_root.clone() })
     .insert_resource(Localizer::default())
     .insert_resource(Strings(Box::new(Localizer::default())))
     .insert_resource(bridge)
