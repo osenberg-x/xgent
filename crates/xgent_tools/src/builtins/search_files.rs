@@ -149,8 +149,8 @@ async fn read_and_match(
     let rel = path
         .strip_prefix(root)
         .unwrap_or(path)
-        .display()
-        .to_string();
+        .to_string_lossy()
+        .replace('\\', "/");
     for (i, line) in content.lines().enumerate() {
         if *count >= MAX_RESULTS {
             return;

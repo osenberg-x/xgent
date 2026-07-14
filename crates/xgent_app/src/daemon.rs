@@ -24,8 +24,7 @@ pub async fn connect_or_spawn_daemon() -> Result<IpcClient> {
     }
     // 未运行 → 拉起 daemon 进程
     spawn_daemon_process(&path)?;
-    wait_for_socket(&path).await?;
-    let client = IpcClient::connect(&path)
+    let client = wait_and_connect(&path)
         .await
         .with_context(|| format!("daemon 拉起后仍无法连接: {}", path.display()))?;
     tracing::info!("已拉起 daemon 并连接: {}", path.display());
@@ -56,14 +55,20 @@ fn spawn_daemon_process(_socket_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 轮询等待 socket 文件出现且可连接。
-async fn wait_for_socket(path: &Path) -> Result<()> {
+/// 轮询等待 daemon 就绪并返回已连接的客户端。
+///
+/// Unix：socket 文件出现即可连接；
+/// Windows：named pipe 无文件系统表示，直接重试连接。
+async fn wait_and_connect(path: &Path) -> Result<IpcClient> {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        if path.exists() {
-            return Ok(());
+    loop {
+        if Instant::now() >= deadline {
+            break;
+        }
+        if let Ok(c) = IpcClient::connect(path).await {
+            return Ok(c);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    anyhow::bail!("等待 daemon socket 超时: {}", path.display())
+    anyhow::bail!("等待 daemon 就绪超时: {}", path.display())
 }

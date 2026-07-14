@@ -36,12 +36,15 @@ impl ProviderClient for MockProvider {
     ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), String> {
         let (tx, rx) = mpsc::channel(8);
         let events = self.events.clone();
-        tokio::spawn(async move {
-            for ev in events {
-                if tx.send(ev).await.is_err() {
-                    break;
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                for ev in events {
+                    if tx.send(ev).await.is_err() {
+                        break;
+                    }
                 }
-            }
+            });
         });
         Ok((StreamId(1), rx))
     }

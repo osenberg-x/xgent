@@ -1,25 +1,24 @@
-//! JSON-RPC 客户端：经本地 socket（Unix domain socket）与 daemon 通信。
+//! JSON-RPC 客户端：经本地 IPC 通道（Unix domain socket / Windows named pipe）与 daemon 通信。
 //!
 //! 协议：换行分隔的 JSON-RPC 2.0（每行一个 Request/Response/Notification）。
-//! 读 socket 在 tokio task 长驻：有 id 的 Response 唤醒对应 pending oneshot；
+//! 读 IPC 通道在 tokio task 长驻：有 id 的 Response 唤醒对应 pending oneshot；
 //! 无 id 的 Notification 经 broadcast 推送给订阅者。
 
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::net::unix::OwnedWriteHalf;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use xgent_core::proto::{Notification, Request, Response};
 
-/// IPC 客户端：经本地 socket 调用 daemon。
+/// IPC 客户端：经本地通道调用 daemon。
 #[derive(Clone)]
 pub struct IpcClient {
-    /// 写请求的 socket（互斥）
-    writer: Arc<Mutex<OwnedWriteHalf>>,
+    /// 写请求的通道端（互斥）
+    writer: Arc<Mutex<Pin<Box<dyn AsyncWrite + Send>>>>,
     /// 待响应请求的 oneshot 表：id -> sender
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Response>>>>,
     /// 通知广播：所有订阅者都能收到
@@ -29,10 +28,13 @@ pub struct IpcClient {
 }
 
 impl IpcClient {
-    /// 连接到已运行的 daemon socket。
+    /// 连接到已运行的 daemon。
+    ///
+    /// - Unix：经 Unix domain socket 连接
+    /// - Windows：经 named pipe 连接
     pub async fn connect(socket_path: &std::path::Path) -> Result<Self> {
-        let stream = UnixStream::connect(socket_path).await?;
-        let (read_half, write_half) = stream.into_split();
+        let (reader, writer) = connect_stream(socket_path).await?;
+
         let (notif_tx, _) = broadcast::channel::<Notification>(128);
         let pending = Arc::new(Mutex::new(HashMap::<u64, oneshot::Sender<Response>>::new()));
 
@@ -41,7 +43,7 @@ impl IpcClient {
             let notif_tx = notif_tx.clone();
             let pending = pending.clone();
             tokio::spawn(async move {
-                let mut reader = BufReader::new(read_half);
+                let mut reader = BufReader::new(reader);
                 let mut line = String::new();
                 loop {
                     line.clear();
@@ -75,7 +77,7 @@ impl IpcClient {
         }
 
         Ok(Self {
-            writer: Arc::new(Mutex::new(write_half)),
+            writer: Arc::new(Mutex::new(writer)),
             pending,
             notif_tx,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -118,4 +120,43 @@ impl IpcClient {
         }
         Ok(resp.result.unwrap_or(serde_json::Value::Null))
     }
+}
+
+/// 跨平台 IPC 连接：返回已 split 的读写两半。
+///
+/// - Unix：`UnixStream::connect` + `into_split()`
+/// - Windows：`NamedPipeClient::connect` + `tokio::io::split()`
+#[cfg(unix)]
+async fn connect_stream(
+    socket_path: &std::path::Path,
+) -> Result<(
+    Pin<Box<dyn AsyncRead + Send>>,
+    Pin<Box<dyn AsyncWrite + Send>>,
+)> {
+    let stream = tokio::net::UnixStream::connect(socket_path).await?;
+    let (read_half, write_half) = stream.into_split();
+    Ok((Box::pin(read_half), Box::pin(write_half)))
+}
+
+/// 跨平台 IPC 连接：返回已 split 的读写两半。
+///
+/// - Unix：`UnixStream::connect` + `into_split()`
+/// - Windows：`NamedPipeClient::connect` + `tokio::io::split()`
+#[cfg(windows)]
+async fn connect_stream(
+    pipe_name: &std::path::Path,
+) -> Result<(
+    Pin<Box<dyn AsyncRead + Send>>,
+    Pin<Box<dyn AsyncWrite + Send>>,
+)> {
+    use tokio::net::windows::named_pipe::ClientOptions;
+    use tokio::io;
+
+    // named pipe 客户端可能需要重试：daemon 刚拉起时 pipe 尚未就绪
+    let stream = ClientOptions::new().open(pipe_name).map_err(|e| {
+        anyhow::anyhow!("连接 named pipe 失败: {} ({})", pipe_name.display(), e)
+    })?;
+
+    let (read_half, write_half) = io::split(stream);
+    Ok((Box::pin(read_half), Box::pin(write_half)))
 }

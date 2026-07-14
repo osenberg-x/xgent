@@ -119,7 +119,12 @@ async fn bind_and_serve(socket_path: &std::path::Path, shared: Shared) -> anyhow
                 Ok((stream, _)) => {
                     let shared = shared_clone.clone();
                     tokio::spawn(async move {
-                        let session = Session::new(stream, shared);
+                        let (read_half, write_half) = stream.into_split();
+                        let conn = crate::session::ConnStream {
+                            read: Box::pin(read_half),
+                            write: Box::pin(write_half),
+                        };
+                        let session = Session::new(conn, shared);
                         session.handle().await;
                     });
                 }
@@ -132,7 +137,57 @@ async fn bind_and_serve(socket_path: &std::path::Path, shared: Shared) -> anyhow
     Ok(())
 }
 
-#[cfg(not(unix))]
-async fn bind_and_serve(_socket_path: &std::path::Path, _shared: Shared) -> anyhow::Result<()> {
-    anyhow::bail!("Windows named pipe 支持待实现（MVP 阶段）")
+/// 绑定 named pipe 并 accept 连接，spawn session task。
+#[cfg(windows)]
+async fn bind_and_serve(pipe_name: &std::path::Path, shared: Shared) -> anyhow::Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let name = pipe_name
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("管道名不是合法 UTF-8: {}", pipe_name.display()))?;
+
+    // 创建首个 server 实例
+    let first_server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(name)?;
+
+    let shared_clone = shared.clone();
+    let name = name.to_string();
+    tokio::spawn(async move {
+        let mut listener = Some(first_server);
+        loop {
+            // 取出待 accept 的 server 实例（首个或上轮预创建的）
+            let server = listener.take().expect("listener 应在循环顶部被填充");
+
+            // 先预创建下一个 server 实例，以便后续客户端立即连接
+            let next = ServerOptions::new().create(&name);
+            match next {
+                Ok(s) => listener = Some(s),
+                Err(e) => {
+                    tracing::warn!("创建 named pipe 实例失败: {e}");
+                    listener = None;
+                }
+            }
+
+            // 等待客户端连接当前 server 实例
+            match server.connect().await {
+                Ok(()) => {
+                    let shared = shared_clone.clone();
+                    tokio::spawn(async move {
+                        let (read_half, write_half) = tokio::io::split(server);
+                        let conn = crate::session::ConnStream {
+                            read: Box::pin(read_half),
+                            write: Box::pin(write_half),
+                        };
+                        let session = Session::new(conn, shared);
+                        session.handle().await;
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("named pipe connect 失败: {e}");
+                }
+            }
+        }
+    });
+    Ok(())
 }

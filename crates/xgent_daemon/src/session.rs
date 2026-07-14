@@ -4,7 +4,8 @@
 //! 所有输出（Response 与 Notification）经统一 writer task 写回 socket，
 //! 避免读写半边竞争。连接断开时注销并触发退出计时。
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::pin::Pin;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use xgent_core::config::{ConfigReadRequest, ConfigWriteRequest};
 use xgent_core::fs::WatchRequest;
@@ -14,8 +15,16 @@ use xgent_core::proto::{Notification, Request, Response, RpcError};
 
 use crate::server::Shared;
 
-#[cfg(unix)]
-type ConnStream = tokio::net::UnixStream;
+/// 已连接的 IPC 流的读写两半（trait object，跨平台抽象）。
+///
+/// - Unix：`tokio::net::UnixStream::into_split()` 得到 `OwnedReadHalf` / `OwnedWriteHalf`
+/// - Windows：`tokio::net::windows::NamedPipeServer` 经 `tokio::io::split()` 得到两半
+///
+/// 统一装箱为 trait object，`Session` 不关心底层具体类型。
+pub struct ConnStream {
+    pub read: Pin<Box<dyn AsyncRead + Send>>,
+    pub write: Pin<Box<dyn AsyncWrite + Send>>,
+}
 
 /// 写回客户端的一行消息（Response 或 Notification）。
 enum Outgoing {
@@ -47,8 +56,8 @@ impl Session {
 
     /// 处理整个连接生命周期。
     pub async fn handle(self) {
-        let (read_half, write_half) = self.stream.into_split();
-        let mut reader = BufReader::new(read_half);
+        let mut reader = BufReader::new(self.stream.read);
+        let mut writer = self.stream.write;
 
         // 统一输出 channel：所有 Response/Notification 经此发送给 writer task
         let (out_tx, mut out_rx) = mpsc::channel::<Outgoing>(128);
@@ -62,7 +71,6 @@ impl Session {
         self.shared.lifecycle.on_connect();
 
         // writer task：消费 out_rx，逐行写回 socket
-        let mut writer = write_half;
         let writer_task = tokio::spawn(async move {
             while let Some(msg) = out_rx.recv().await {
                 let line = msg.to_json_line();
@@ -120,10 +128,7 @@ trait IntoNotificationSender {
 
 impl IntoNotificationSender for mpsc::Sender<Outgoing> {
     fn into_notification_sender(self) -> mpsc::Sender<Notification> {
-        // 这里需一个转发 task 把 Notification 包成 Outgoing 发到 self。
-        // 但 self 会 move 进 task。为避免无限 task，直接返回一个分离 sender。
-        // 实际方案：registry 存 Notification sender，session 用转发 task 桥接。
-        // 此处简化：创建新 channel，spawn task 把 Notification 转 Outgoing 转发。
+        // 创建新 channel，spawn task 把 Notification 转 Outgoing 转发。
         let (n_tx, mut n_rx) = mpsc::channel::<Notification>(128);
         let out_tx = self;
         tokio::spawn(async move {
