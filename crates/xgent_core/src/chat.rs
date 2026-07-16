@@ -29,6 +29,25 @@ pub struct ChatRequest {
     pub tools: Option<Vec<ToolSchema>>,
 }
 
+/// 错误分类，按"用户可采取的行动"划分（见 CONTEXT.md「ErrorKind」）。
+///
+/// UI 不感知 HTTP 状态码——daemon 侧负责把 `ProviderError::Api{status,body}`
+/// 映射到 `AuthFailed`（401/403）或 `ProviderError`（其余）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorKind {
+    /// provider 未就绪（闸门拦截：未配/缺字段），引导开 settings_panel
+    NotConfigured,
+    /// provider 鉴权失败（API key 错/失效），引导检查 key
+    AuthFailed,
+    /// 连接/超时，可重试
+    Network,
+    /// SSE/JSON 解析失败，可重试
+    StreamParse,
+    /// provider 返回非鉴权类错误，含原始 message 供排查
+    ProviderError,
+}
+
 /// provider 流式输出的事件
 ///
 /// 用 `#[serde(tag = "type")]` 使 JSON-RPC notification 可据 `type` 字段分发，
@@ -47,7 +66,12 @@ pub enum ChatEvent {
     /// 流结束
     Done { usage: TokenUsage },
     /// 出错
-    Error { message: String },
+    Error {
+        /// 错误分类
+        kind: ErrorKind,
+        /// 可读错误原文
+        message: String,
+    },
 }
 
 /// token 用量
@@ -160,11 +184,12 @@ mod tests {
     #[test]
     fn chat_event_error_roundtrip() {
         let e = ChatEvent::Error {
+            kind: ErrorKind::Network,
             message: "boom".into(),
         };
         let j = serde_json::to_string(&e).unwrap();
         let e2: ChatEvent = serde_json::from_str(&j).unwrap();
-        assert!(matches!(e2, ChatEvent::Error { message } if message == "boom"));
+        assert!(matches!(e2, ChatEvent::Error { kind: ErrorKind::Network, message } if message == "boom"));
     }
 
     #[test]

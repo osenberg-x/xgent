@@ -33,7 +33,7 @@ impl ProviderClient for MockProvider {
     async fn chat(
         &self,
         _req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), String> {
+    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
         let (tx, rx) = mpsc::channel(8);
         let events = self.events.clone();
         std::thread::spawn(move || {
@@ -85,6 +85,8 @@ fn test_app_with_executor(mock_events: Vec<ChatEvent>, executor: Arc<ToolExecuto
         .insert_resource(crate::provider_state::ProviderInfo {
             id: "mock".into(),
             model: "mock-model".into(),
+            ready: true,
+            kind: None,
         });
     // 显式设默认 tool_policy 避免确认阻塞
     app
@@ -177,6 +179,7 @@ fn delta_then_done_message_sequence() {
 #[test]
 fn error_message_propagates() {
     let mut app = test_app(vec![ChatEvent::Error {
+        kind: xgent_core::chat::ErrorKind::ProviderError,
         message: "boom".into(),
     }]);
     app.world_mut()

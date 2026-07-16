@@ -13,6 +13,10 @@ pub struct ProviderInfo {
     pub id: String,
     /// 模型名
     pub model: String,
+    /// provider 是否就绪（按 kind 分判据，由 config_bridge 刷新时判定）
+    pub ready: bool,
+    /// provider 类型（就绪判据按 kind 分，如 Ollama 无 key 合法）
+    pub kind: Option<xgent_settings_core::global::ProviderKind>,
 }
 
 /// 最近一次上下文检索结果。

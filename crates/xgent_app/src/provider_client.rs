@@ -30,16 +30,20 @@ impl ProviderClient for IpcProviderClient {
     async fn chat(
         &self,
         req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), String> {
-        let params = serde_json::to_value(&req).map_err(|e| e.to_string())?;
+    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        let params = serde_json::to_value(&req)
+            .map_err(|e| (xgent_core::chat::ErrorKind::ProviderError, e.to_string()))?;
         let result = self
             .ipc
             .call_ok(xgent_core::methods::PROVIDER_CHAT, params)
             .await
-            .map_err(|e| e.to_string())?;
-        let stream_id: u64 = result["stream_id"]
-            .as_u64()
-            .ok_or_else(|| "响应缺少 stream_id".to_string())?;
+            .map_err(|e| (xgent_core::chat::ErrorKind::Network, e.to_string()))?;
+        let stream_id: u64 = result["stream_id"].as_u64().ok_or_else(|| {
+            (
+                xgent_core::chat::ErrorKind::StreamParse,
+                "响应缺少 stream_id".to_string(),
+            )
+        })?;
         let stream_id = StreamId(stream_id);
 
         // 订阅通知，过滤该 stream 的 provider.* 通知转 ChatEvent
@@ -70,11 +74,16 @@ impl ProviderClient for IpcProviderClient {
                         Some(ChatEvent::Done { usage })
                     }
                     notifications::PROVIDER_ERROR => {
+                        // 解析 kind（daemon 侧映射后的 ErrorKind），缺省回退 ProviderError
+                        let kind = serde_json::from_value::<xgent_core::chat::ErrorKind>(
+                            notif.params["kind"].clone(),
+                        )
+                        .unwrap_or(xgent_core::chat::ErrorKind::ProviderError);
                         let message = notif.params["message"]
                             .as_str()
                             .unwrap_or("未知错误")
                             .to_string();
-                        Some(ChatEvent::Error { message })
+                        Some(ChatEvent::Error { kind, message })
                     }
                     _ => None,
                 };

@@ -28,8 +28,21 @@ pub fn agent_poll_system(
 ) {
     // 1. 处理用户输入
     for ev in user_input.read() {
-        if conv.status != ConversationStatus::Idle {
+        if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
             // 忙碌时忽略（UI 应已禁用输入）
+            continue;
+        }
+        // 从 Error 恢复：清空残留的错误文本（错误不进历史）
+        if conv.status == ConversationStatus::Error {
+            conv.current_assistant_text.clear();
+        }
+        // 闸门：provider 未就绪时不构造请求，发引导错误
+        if !provider.ready {
+            error.write(ErrorMessage {
+                kind: xgent_core::chat::ErrorKind::NotConfigured,
+                message: "未配置 Provider，请先在设置中配置 API 信息".to_string(),
+            });
+            conv.status = ConversationStatus::Error;
             continue;
         }
         conv.push_user(&ev.text);
@@ -136,9 +149,9 @@ fn handle_agent_event(
             conv.status = ConversationStatus::Idle;
             done.write(DoneMessage);
         }
-        AgentEvent::Error(msg) => {
+        AgentEvent::Error { kind, message } => {
             conv.status = ConversationStatus::Error;
-            error.write(ErrorMessage(msg));
+            error.write(ErrorMessage { kind, message });
         }
     }
 }

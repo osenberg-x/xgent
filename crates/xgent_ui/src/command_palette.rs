@@ -268,13 +268,16 @@ pub(crate) fn handle_palette_triggers(
     mut reader: MessageReader<PaletteTriggered>,
     mut state: ResMut<CommandPaletteState>,
     mut loc: ResMut<Localizer>,
+    mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
 ) {
     for ev in reader.read() {
         match ev.command_id.as_str() {
             "lang.switch.en" => loc.switch("en-US"),
             "lang.switch.zh" => loc.switch("zh-CN"),
             "session.new" => { /* TODO: 重置会话 */ }
-            "settings.open" => { /* TODO: 打开设置面板 */ }
+            "settings.open" => {
+                settings_state.open = true;
+            }
             _ => {}
         }
         state.close();

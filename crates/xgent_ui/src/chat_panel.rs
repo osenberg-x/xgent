@@ -205,6 +205,8 @@ fn spawn_user_message(
         });
         // 把当前助手节点移到列表末尾（在用户消息之后）
         commands.entity(list).add_child(current);
+        // 清空当前助手节点（清除上一轮的错误文本或残留内容）
+        commands.entity(current).insert(Text::new(String::new()));
     }
 }
 
@@ -288,9 +290,16 @@ fn on_error(
         return;
     };
     for ev in reader.read() {
+        let prefix = match ev.kind {
+            xgent_core::chat::ErrorKind::NotConfigured => "⚠ [未配置] ",
+            xgent_core::chat::ErrorKind::AuthFailed => "⚠ [鉴权失败] ",
+            xgent_core::chat::ErrorKind::Network => "⚠ [网络] ",
+            xgent_core::chat::ErrorKind::StreamParse => "⚠ [解析] ",
+            xgent_core::chat::ErrorKind::ProviderError => "⚠ ",
+        };
         commands
             .entity(entity)
-            .insert((Text::new(format!("⚠ {}", ev.0)), TextColor(theme.accent)));
+            .insert((Text::new(format!("{prefix}{}", ev.message)), TextColor(theme.accent)));
     }
 }
 

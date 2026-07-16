@@ -186,6 +186,7 @@ impl LlmProvider for OpenAiCompatProvider {
                         if let Err(e) = handle_chunk(&v, &tx, &mut tool_calls).await {
                             let _ = tx
                                 .send(ChatEvent::Error {
+                                    kind: e.to_error_kind(),
                                     message: e.to_string(),
                                 })
                                 .await;
@@ -195,6 +196,7 @@ impl LlmProvider for OpenAiCompatProvider {
                     Err(e) => {
                         let _ = tx
                             .send(ChatEvent::Error {
+                                kind: e.to_error_kind(),
                                 message: e.to_string(),
                             })
                             .await;

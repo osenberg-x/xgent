@@ -124,16 +124,16 @@ fn handle_top_bar_buttons(
     q_new: Query<&Interaction, (With<NewSessionButtonMarker>, Changed<Interaction>)>,
     q_settings: Query<&Interaction, (With<SettingsButtonMarker>, Changed<Interaction>)>,
     mut palette: ResMut<CommandPaletteState>,
+    mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
 ) {
     for i in q_new.iter() {
         if *i == Interaction::Pressed {
-            // MVP：直接打开命令面板触发 session.new
             palette.open();
         }
     }
     for i in q_settings.iter() {
         if *i == Interaction::Pressed {
-            palette.open();
+            settings_state.open = !settings_state.open;
         }
     }
 }

@@ -25,7 +25,7 @@ use xgent_tools::{SideEffect, ToolCtx, ToolExecutor};
 pub trait ProviderClient: Send + Sync {
     /// 发起流式对话，返回 (StreamId, ChatEvent 接收端)。
     async fn chat(&self, req: ChatRequest)
-    -> Result<(StreamId, mpsc::Receiver<ChatEvent>), String>;
+    -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>;
 }
 
 /// 共享确认状态：异步任务等待的 oneshot 由 ECS 回填决策。
@@ -90,7 +90,7 @@ pub enum AgentEvent {
     /// 对话完成
     Done,
     /// 对话出错
-    Error(String),
+    Error { kind: xgent_core::chat::ErrorKind, message: String },
 }
 
 /// 桥接配置参数（供 Plugin / xgent_app 注入）。
@@ -182,8 +182,8 @@ async fn run_conversation(
 ) {
     let (_sid, mut stream) = match provider.chat(req).await {
         Ok(s) => s,
-        Err(e) => {
-            let _ = event_tx.send(AgentEvent::Error(e)).await;
+        Err((kind, msg)) => {
+            let _ = event_tx.send(AgentEvent::Error { kind, message: msg }).await;
             return;
         }
     };
@@ -218,8 +218,8 @@ async fn run_conversation(
                 let _ = event_tx.send(AgentEvent::Done).await;
                 break;
             }
-            ChatEvent::Error { message } => {
-                let _ = event_tx.send(AgentEvent::Error(message)).await;
+            ChatEvent::Error { kind, message } => {
+                let _ = event_tx.send(AgentEvent::Error { kind, message }).await;
                 break;
             }
         }

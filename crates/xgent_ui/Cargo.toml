@@ -7,6 +7,7 @@ edition = "2024"
 bevy = { workspace = true, features = ["ui", "bevy_ui_widgets", "default_font"] }
 xgent_core = { path = "../xgent_core" }
 xgent_settings = { path = "../xgent_settings" }
+xgent_settings_core = { path = "../xgent_settings_core" }
 xgent_agent = { path = "../xgent_agent" }
 xgent_tools = { path = "../xgent_tools" }
 xui = { path = "../xui" }

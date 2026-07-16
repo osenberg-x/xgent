@@ -4,6 +4,7 @@
 //! 把 IPC 封装为 agent bridge 用的 ProviderClient、打开项目、运行 Bevy App。
 
 mod daemon;
+mod config_bridge;
 mod fs_event_bridge;
 mod ipc_client;
 mod provider_client;
@@ -12,13 +13,12 @@ mod startup;
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy::log::LogPlugin;
 use clap::Parser;
 use xgent_agent::bridge::{AgentBridge, AgentBridgeConfig};
 use xgent_context::OnDemandContextProvider;
 use xgent_settings::Localizer;
 use xgent_settings_core::paths::daemon_socket_path;
-use xgent_settings_core::store::ProjectConfigStore;
+use xgent_settings_core::store::{GlobalConfigStore, ProjectConfigStore};
 use xgent_tools::ToolExecutor;
 use xui::i18n_bridge::Strings;
 
@@ -44,7 +44,19 @@ pub struct Args {
 }
 
 fn main() {
-    // 日志由 Bevy LogPlugin 统一管理（见下方 DefaultPlugins 配置）
+    // 初始化日志：tracing-subscriber 默认启用 tracing-log 特性，
+    // 自动桥接 log crate → tracing，故 icu_provider 的日志也会被 EnvFilter 过滤。
+    // 不使用 Bevy 的 LogPlugin（它会重复设置全局 subscriber），改为手动初始化。
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(
+                // wgpu/naga 噪音降级；icu_provider 的 data error warn 降级为 error
+                "info,wgpu=error,naga=warn,icu_provider=error",
+            )
+        });
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .init();
 
     let args = Args::parse();
 
@@ -99,35 +111,45 @@ fn main() {
     // 加载项目配置
     let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
 
-    // 派生当前 provider/model
+    // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model）
+    let global_config = GlobalConfigStore::load().unwrap_or_default();
+
+    // 派生当前 provider/model：命令行 > 项目配置 > 全局配置
     let provider_id = args
         .provider
         .clone()
-        .or(project_config.provider_override.clone());
-    let (provider_id, model) = derive_provider_model(provider_id, args.model.clone());
+        .or(project_config.provider_override.clone())
+        .or_else(|| {
+            let id = global_config.default_provider.clone();
+            if id.is_empty() { None } else { Some(id) }
+        });
+    let model = args
+        .model
+        .clone()
+        .or_else(|| {
+            let m = global_config.default_model.clone();
+            if m.is_empty() { None } else { Some(m) }
+        });
+    let (provider_id, model) = derive_provider_model(provider_id, model);
 
     // 通知订阅端（fs/config 桥接用）
     let notif_rx = ipc.subscribe();
 
     // 组装 App
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins
-        .set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "XGent".into(),
-                ..default()
-            }),
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "XGent".into(),
             ..default()
-        })
-        .set(LogPlugin {
-            filter: "xgent=info,xgent_daemon=info".into(),
-            ..default()
-        }))
+        }),
+        ..default()
+    }).disable::<bevy::log::LogPlugin>())
     .add_plugins((
         xui::XuiPlugin,
         xgent_settings::XgentSettingsPlugin,
         xgent_agent::XgentAgentPlugin,
         xgent_ui::XgentUiPlugin,
+        crate::config_bridge::ConfigBridgePlugin,
         crate::fs_event_bridge::FsEventBridgePlugin,
     ))
     .insert_resource(args)
@@ -139,10 +161,11 @@ fn main() {
         client: ipc.clone(),
     })
     .insert_resource(NotifPump { rx: notif_rx })
-    .insert_resource(xgent_settings::ProjectConfigRes(project_config))
     .insert_resource(xgent_agent::ProviderInfo {
         id: provider_id,
         model,
+        ready: false,
+        kind: None,
     })
     .add_systems(Startup, crate::startup::open_project);
 
@@ -153,9 +176,10 @@ fn main() {
     app.run();
 }
 
-/// 从参数与项目配置派生 provider id 与 model。
+/// 从参数与配置派生 provider id 与 model。
+///
+/// 优先级：命令行 > 项目配置 > 全局配置。三者皆空时返回空串，
+/// UI 侧据此判断未配置状态并提示用户设置 provider。
 fn derive_provider_model(provider_id: Option<String>, model: Option<String>) -> (String, String) {
-    let pid = provider_id.unwrap_or_else(|| "openai".to_string());
-    let m = model.unwrap_or_else(|| "gpt-4o-mini".to_string());
-    (pid, m)
+    (provider_id.unwrap_or_default(), model.unwrap_or_default())
 }

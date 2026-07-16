@@ -63,7 +63,7 @@ impl ProviderPool {
             .cloned()
             .ok_or_else(|| format!("配置中无 provider: {id}"))?;
         drop(cfg);
-        let provider: Arc<dyn LlmProvider> = Arc::from(build_provider(&provider_cfg));
+        let provider: Arc<dyn LlmProvider> = Arc::from(build_provider(id, &provider_cfg));
         let mut map = self.providers.write().await;
         map.insert(id.to_string(), provider.clone());
         Ok(provider)
@@ -112,9 +112,9 @@ fn chat_event_to_notification(stream_id: StreamId, ev: ChatEvent) -> Notificatio
             notifications::PROVIDER_DONE,
             serde_json::json!({ "stream_id": stream_id.0, "usage": usage }),
         ),
-        ChatEvent::Error { message } => (
+        ChatEvent::Error { kind, message } => (
             notifications::PROVIDER_ERROR,
-            serde_json::json!({ "stream_id": stream_id.0, "message": message }),
+            serde_json::json!({ "stream_id": stream_id.0, "kind": kind, "message": message }),
         ),
     };
     Notification::new(method, value)
@@ -152,11 +152,13 @@ mod tests {
     #[test]
     fn error_event_to_notification() {
         let ev = ChatEvent::Error {
+            kind: xgent_core::chat::ErrorKind::Network,
             message: "boom".into(),
         };
         let n = chat_event_to_notification(StreamId(9), ev);
         assert_eq!(n.method, "provider.error");
         assert_eq!(n.params["message"], "boom");
+        assert_eq!(n.params["kind"], "network");
     }
 
     #[test]

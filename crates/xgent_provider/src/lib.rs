@@ -20,34 +20,21 @@ use xgent_settings_core::{ProviderConfig, ProviderKind};
 
 /// 从配置构造 provider 实例。
 ///
+/// `id` 为 providers map 的 key（如 `"openai"`、`"deepseek"`），作为 provider 标识。
 /// 据 [`ProviderKind`] 选择适配器；Ollama 兼容模式复用 `OpenAiCompatProvider`。
-pub fn build_provider(cfg: &ProviderConfig) -> Box<dyn LlmProvider> {
+pub fn build_provider(id: &str, cfg: &ProviderConfig) -> Box<dyn LlmProvider> {
     match cfg.kind {
         ProviderKind::OpenAiCompat | ProviderKind::Ollama => {
             Box::new(OpenAiCompatProvider::new(
-                // id 由调用方在更高层注入；此处用 api_base 派生占位
-                derive_id(&cfg.api_base),
+                id.to_string(),
                 cfg.api_base.clone(),
                 cfg.api_key.clone(),
             ))
         }
-        ProviderKind::ResponseApi => Box::new(ResponseApiProvider::new(derive_id(&cfg.api_base))),
-        ProviderKind::Anthropic => Box::new(AnthropicProvider::new(derive_id(&cfg.api_base))),
-        ProviderKind::Custom => Box::new(CustomApiProvider::new(derive_id(&cfg.api_base))),
+        ProviderKind::ResponseApi => Box::new(ResponseApiProvider::new(id.to_string())),
+        ProviderKind::Anthropic => Box::new(AnthropicProvider::new(id.to_string())),
+        ProviderKind::Custom => Box::new(CustomApiProvider::new(id.to_string())),
     }
-}
-
-/// 从 api_base 简单派生 provider id（取 host 末段，仅占位）。
-///
-/// 真实 id 应由调用方（daemon 配置层）按 providers map 的 key 注入。
-fn derive_id(api_base: &str) -> String {
-    api_base
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("provider")
-        .to_string()
 }
 
 #[cfg(test)]
@@ -62,11 +49,8 @@ mod tests {
             api_key: "sk-x".into(),
             ..Default::default()
         };
-        let p = build_provider(&cfg);
-        assert_eq!(p.id(), "v1");
-        // 健康检查会因无网络失败，但类型应正确
-        let id = p.id().to_string();
-        assert!(!id.is_empty());
+        let p = build_provider("openai", &cfg);
+        assert_eq!(p.id(), "openai");
     }
 
     #[test]
@@ -77,8 +61,8 @@ mod tests {
             api_key: String::new(),
             ..Default::default()
         };
-        let p = build_provider(&cfg);
-        assert_eq!(p.id(), "v1");
+        let p = build_provider("ollama", &cfg);
+        assert_eq!(p.id(), "ollama");
     }
 
     #[test]
@@ -88,8 +72,8 @@ mod tests {
             api_base: "https://api.openai.com/v1".into(),
             ..Default::default()
         };
-        let p = build_provider(&cfg);
-        assert_eq!(p.id(), "v1");
+        let p = build_provider("openai-resp", &cfg);
+        assert_eq!(p.id(), "openai-resp");
     }
 
     #[test]
@@ -99,9 +83,8 @@ mod tests {
             api_base: "https://api.anthropic.com".into(),
             ..Default::default()
         };
-        let p = build_provider(&cfg);
-        // 无路径段时 rsplit 返回整个 host
-        assert_eq!(p.id(), "api.anthropic.com");
+        let p = build_provider("anthropic", &cfg);
+        assert_eq!(p.id(), "anthropic");
     }
 
     #[test]
@@ -111,15 +94,7 @@ mod tests {
             api_base: "https://custom.example.com/api".into(),
             ..Default::default()
         };
-        let p = build_provider(&cfg);
-        assert_eq!(p.id(), "api");
-    }
-
-    #[test]
-    fn derive_id_handles_edge_cases() {
-        assert_eq!(derive_id("https://api.openai.com/v1"), "v1");
-        assert_eq!(derive_id("https://api.openai.com/v1/"), "v1");
-        assert_eq!(derive_id(""), "provider");
-        assert_eq!(derive_id("https://x"), "x");
+        let p = build_provider("custom", &cfg);
+        assert_eq!(p.id(), "custom");
     }
 }

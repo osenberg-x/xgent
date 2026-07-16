@@ -66,6 +66,26 @@ pub enum ProviderError {
     Config(String),
 }
 
+impl ProviderError {
+    /// 把 ProviderError 映射为 UI 侧 ErrorKind（ADR 0003）。
+    ///
+    /// UI 不感知 HTTP 状态码：401/403 → AuthFailed，其余 Api → ProviderError。
+    pub fn to_error_kind(&self) -> xgent_core::chat::ErrorKind {
+        match self {
+            ProviderError::Network(_) => xgent_core::chat::ErrorKind::Network,
+            ProviderError::Stream(_) => xgent_core::chat::ErrorKind::StreamParse,
+            ProviderError::Config(_) => xgent_core::chat::ErrorKind::NotConfigured,
+            ProviderError::Api { status, .. } => {
+                if *status == 401 || *status == 403 {
+                    xgent_core::chat::ErrorKind::AuthFailed
+                } else {
+                    xgent_core::chat::ErrorKind::ProviderError
+                }
+            }
+        }
+    }
+}
+
 impl From<reqwest::Error> for ProviderError {
     fn from(e: reqwest::Error) -> Self {
         ProviderError::Network(e.to_string())

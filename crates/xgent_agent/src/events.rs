@@ -55,4 +55,7 @@ pub struct DoneMessage;
 
 /// 对话出错（agent → UI）。
 #[derive(Message)]
-pub struct ErrorMessage(pub String);
+pub struct ErrorMessage {
+    pub kind: xgent_core::chat::ErrorKind,
+    pub message: String,
+}
