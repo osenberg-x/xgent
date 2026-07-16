@@ -48,7 +48,10 @@ impl Plugin for ConfigBridgePlugin {
         let (tx, rx) = mpsc::channel::<RefreshResult>(16);
         app.insert_resource(PendingRefresh { rx })
             .insert_resource(RefreshSender(tx))
-            .add_systems(Update, (save_provider_config, drain_pending_refresh));
+            .add_systems(
+                Update,
+                (save_provider_config, drain_pending_refresh, refresh_on_startup),
+            );
     }
 }
 
@@ -156,6 +159,37 @@ fn drain_pending_refresh(
             }
         });
     }
+}
+
+/// 启动时主动刷新一次 [`ProviderInfo`]。
+///
+/// `main` 注入的 `ProviderInfo` 派生自本地全局配置快照，其 `model` 仅取
+/// `default_model`（常为空），且 `ready` 固定为 `false`——并不反映 daemon 侧
+/// 权威状态。若不在启动后触发一次刷新，重启时即便磁盘配置完整，UI 也会显示
+/// model 为空、provider 未就绪，让用户误以为配置丢失而重新填写。
+///
+/// 用 `Local<bool>` 去重，整个进程生命周期只触发一次：`id` 非空即 spawn
+/// [`spawn_refresh`]，结果经 channel 由 `drain_pending_refresh` 回填。
+fn refresh_on_startup(
+    mut triggered: Local<bool>,
+    provider_info: Res<ProviderInfo>,
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+    refresh_tx: Res<RefreshSender>,
+) {
+    if *triggered {
+        return;
+    }
+    if provider_info.id.is_empty() {
+        return;
+    }
+    *triggered = true;
+    let ipc = ipc.client.clone();
+    let tx = refresh_tx.0.clone();
+    let dp = provider_info.id.clone();
+    bridge.runtime.handle().spawn(async move {
+        spawn_refresh(&ipc, &tx, dp).await;
+    });
 }
 
 /// 异步重读 default provider 配置，判定就绪，发 RefreshResult。

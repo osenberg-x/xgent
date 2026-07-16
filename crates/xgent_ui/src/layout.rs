@@ -102,6 +102,10 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                         width: Val::Percent(100.0),
                         flex_grow: 1.0,
                         flex_direction: FlexDirection::Row,
+                        // 防止子容器（文件面板/对话主区）被各自内容撑破后溢出：
+                        // min_height: 0 允许纵向收缩，overflow: clip 兜底裁剪。
+                        min_height: Val::ZERO,
+                        overflow: Overflow::clip(),
                         ..default()
                     },
                     MainAreaMarker,
@@ -131,6 +135,11 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                             padding: UiRect::all(px(crate::theme::space::SM)),
                             flex_direction: FlexDirection::Column,
                             border: UiRect::left(px(1.0)),
+                            // 主轴纵向需 min_height:0 防 message_list 撑破；
+                            // 交叉轴横向需 min_width:0 防文本宽内容挤占文件面板。
+                            min_width: Val::ZERO,
+                            min_height: Val::ZERO,
+                            overflow: Overflow::clip(),
                             ..default()
                         },
                         BackgroundColor(theme.panel),

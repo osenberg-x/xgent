@@ -61,10 +61,15 @@ impl Plugin for ChatPanelPlugin {
                     on_error,
                     forward_input_submission,
                     spawn_user_message,
-                    auto_scroll_to_bottom,
                     update_input_border,
                 )
                     .after(xgent_agent::agent_loop::agent_poll_system),
+            )
+            // 自动滚动放在布局之后，读到当帧最新的 content_size，避免使用上一帧
+            // 高度导致流式停止时差最后一行。
+            .add_systems(
+                PostUpdate,
+                auto_scroll_to_bottom.after(bevy::ui::UiSystems::PostLayout),
             );
     }
 }
@@ -105,10 +110,22 @@ fn spawn_chat_panel(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
+                // overflow 关键：ScrollPosition 只在 Scroll 轴生效（见
+                // ui_node.rs ScrollPosition 文档）。clip 仅裁剪渲染、不影响布局，内容
+                // 仍会撑大容器；Hidden 才"影响布局再裁剪"。故：
+                //   y: Scroll  → 让 ScrollPosition 生效，纵向滚动
+                //   x: Hidden  → 影响布局+裁剪，防宽内容撑破挤占文件面板
+                min_height: Val::ZERO,
+                min_width: Val::ZERO,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::ZERO,
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(px(space::SM)),
-                overflow: Overflow::clip_y(),
+                overflow: Overflow {
+                    x: OverflowAxis::Hidden,
+                    y: OverflowAxis::Scroll,
+                },
                 row_gap: px(space::SM),
                 ..default()
             },
@@ -124,6 +141,7 @@ fn spawn_chat_panel(
                 width: Val::Percent(100.0),
                 min_height: px(60.0),
                 max_height: px(200.0),
+                flex_shrink: 0.0,
                 padding: UiRect::all(px(space::SM)),
                 border: UiRect::all(px(1.0)),
                 border_radius: BorderRadius::all(px(4.0)),
@@ -324,31 +342,26 @@ pub fn forward_input_submission(
     }
 }
 
-/// 消息列表自动滚动到底部（新消息到达时）。
+/// 消息列表自动滚动到底部（流式累加或新消息到达时跟随到底）。
+///
+/// 滚动位置单位为逻辑像素，`ComputedNode` 的 `size`/`content_size` 为物理像素，
+/// 须乘 `inverse_scale_factor` 转换。直接读列表容器自身的 `content_size`（由
+/// `ui_layout_system` 测量得到），无需手算子节点高度累加——后者会漏掉 padding、
+/// gap 的布局结果与缩放，导致 clamp 后 `scroll_position` 停在 0、内容从底部
+/// 被裁剪而不可见（详见 Bevy `examples/ui/scroll_and_overflow/scroll.rs` 的惯用法）。
 fn auto_scroll_to_bottom(
-    entities: Res<ChatPanelEntities>,
-    mut q_scroll: Query<&mut ScrollPosition, With<MessageListMarker>>,
-    q_list: Query<&Children, With<MessageListMarker>>,
-    q_node: Query<&ComputedNode>,
+    mut q_scroll: Query<(&mut ScrollPosition, &ComputedNode), With<MessageListMarker>>,
 ) {
-    let Some(list) = entities.message_list else {
+    let Ok((mut scroll, node)) = q_scroll.single_mut() else {
         return;
     };
-    let Ok(mut scroll) = q_scroll.single_mut() else {
-        return;
-    };
-    let Ok(children) = q_list.get(list) else {
-        return;
-    };
-    // 计算内容总高度
-    let mut total_height = 0.0;
-    for child in children.iter() {
-        if let Ok(node) = q_node.get(child) {
-            total_height += node.size.y + 8.0; // row_gap
-        }
-    }
-    // 设置滚动位置到底部
-    scroll.0.y = total_height;
+    // 物理像素 → 逻辑像素
+    let scale = node.inverse_scale_factor;
+    let content_height = node.content_size.y * scale;
+    let viewport_height = node.size.y * scale;
+    // 内容超过视口时滚到底部；不足时回 0（避免残留偏移）。
+    let max_offset = (content_height - viewport_height).max(0.0);
+    scroll.0.y = max_offset;
 }
 
 /// 根据 Conversation 状态更新输入框边框颜色（忙时变色）。
