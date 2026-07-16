@@ -330,6 +330,7 @@ fn text_input_node(
             ..default()
         },
         TextColor(theme.text),
+        bevy::text::TextCursorStyle::default(),
         marker,
         EditableText::default(),
     )

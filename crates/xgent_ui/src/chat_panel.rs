@@ -136,6 +136,7 @@ fn spawn_chat_panel(
                 ..default()
             },
             TextColor(theme.text_dim),
+            bevy::text::TextCursorStyle::default(),
             EditableText {
                 allow_newlines: true,
                 ..default()
