@@ -18,6 +18,7 @@ use xgent_agent::{
     Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage, UserInputMessage,
 };
 use xui::input::{ChatInput, ChatInputSubmitted};
+use xui::mouse_wheel_scroll::MouseWheelScrolled;
 
 use crate::layout::ChatPanelMarker;
 use crate::theme::{Theme, space};
@@ -46,12 +47,20 @@ pub struct ChatPanelEntities {
     pub input: Option<Entity>,
 }
 
+/// 消息列表"贴底跟随"状态：`true` 时随内容增长滚到底，用户上滚后置 `false`、
+/// 重新滚回底部时恢复 `true`。避免流式累加期间抢夺用户正在阅读的历史位置。
+#[derive(Resource, Default, Clone, Copy)]
+pub struct MessageListStickBottom(pub bool);
+
 /// 对话面板插件。
 pub struct ChatPanelPlugin;
 
 impl Plugin for ChatPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChatPanelEntities>()
+            // 初始即贴底：首屏与首轮对话自动跟到底，用户上滚后改由
+            // maintain_stick_bottom 维护此标志。
+            .insert_resource(MessageListStickBottom(true))
             .add_systems(Startup, spawn_chat_panel.after(crate::layout::spawn_layout))
             .add_systems(
                 Update,
@@ -63,13 +72,20 @@ impl Plugin for ChatPanelPlugin {
                     spawn_user_message,
                     update_input_border,
                 )
-                    .after(xgent_agent::agent_loop::agent_poll_system),
+                    .after(xgent_agent::agent_loop::agent_poll_system)
             )
-            // 自动滚动放在布局之后，读到当帧最新的 content_size，避免使用上一帧
-            // 高度导致流式停止时差最后一行。
+            // 自动滚动与贴底状态维护放在布局之后（PostLayout），此时
+            // content_size 为本帧最新值。顺序：先 maintain 再 auto_scroll。
+            //
+            // maintain 只在本帧有滚轮事件时（MouseWheelScrolled 为真）刷新贴底
+            // 标志——读用户滚轮提交后的 ScrollPosition 判断是否离开底部；无滚轮
+            // 时保持原值，避免内容增长导致 max_offset 变大时误判离开底部。
+            // auto_scroll 随后只在 stick 为真时推到底，不会覆盖用户手动滚动。
             .add_systems(
                 PostUpdate,
-                auto_scroll_to_bottom.after(bevy::ui::UiSystems::PostLayout),
+                (maintain_stick_bottom, auto_scroll_to_bottom)
+                    .after(bevy::ui::UiSystems::PostLayout)
+                    .chain(),
             );
     }
 }
@@ -342,7 +358,44 @@ pub fn forward_input_submission(
     }
 }
 
-/// 消息列表自动滚动到底部（流式累加或新消息到达时跟随到底）。
+/// 维护 [`MessageListStickBottom`]：用户上滚离开底部时置 `false`，重新滚回底部
+/// 附近时恢复 `true`。在 `PostUpdate` 的 `PostLayout` 之后、且在
+/// [`auto_scroll_to_bottom`] **之前**运行（见插件 `.chain()`），读到的是用户
+/// 滚轮在 `Update` 阶段提交后的 `ScrollPosition`——尚未被 `auto_scroll` 推回。
+///
+/// **仅在本帧有滚轮事件时刷新**（通过 [`MouseWheelScrolled`] 标志判断），无滚轮
+/// 时保持 `stick` 原值不动。这样内容增长导致 `max_offset` 变大时不会误判为
+/// "用户离开底部"——`auto_scroll` 仍能正常把列表推到新底部。
+///
+/// 判定阈值 `STICK_THRESHOLD`：`scroll.y >= max_offset - threshold` 即视为贴底。
+/// `max_offset` 取本帧布局后的 `content_size`/`size`。
+fn maintain_stick_bottom(
+    mut stick: ResMut<MessageListStickBottom>,
+    mut scrolled: ResMut<MouseWheelScrolled>,
+    q_scroll: Query<(&ScrollPosition, &ComputedNode), With<MessageListMarker>>,
+) {
+    // 无滚轮事件 → 不动 stick，避免内容增长误判离开底部。
+    if !scrolled.0 {
+        return;
+    }
+    // 消费标志，下帧自动归 false（send_scroll_events 只在滚轮时置真）。
+    scrolled.0 = false;
+
+    let Ok((scroll, node)) = q_scroll.single() else {
+        return;
+    };
+    let scale = node.inverse_scale_factor;
+    let max_offset = ((node.content_size.y - node.size.y) * scale).max(0.0);
+    const STICK_THRESHOLD: f32 = 32.0;
+    let at_bottom = scroll.0.y >= max_offset - STICK_THRESHOLD || max_offset == 0.0;
+    // 贴底 → 置真；离开 → 置假。只在状态变化时写，避免无谓变更检测。
+    if stick.0 != at_bottom {
+        stick.0 = at_bottom;
+    }
+}
+
+/// 消息列表"贴底跟随"：当 [`MessageListStickBottom`] 为真时，把 `ScrollPosition.y`
+/// 推到最大偏移；用户上滚后标志为假，则保留其手动滚动位置，不抢夺阅读位置。
 ///
 /// 滚动位置单位为逻辑像素，`ComputedNode` 的 `size`/`content_size` 为物理像素，
 /// 须乘 `inverse_scale_factor` 转换。直接读列表容器自身的 `content_size`（由
@@ -350,6 +403,7 @@ pub fn forward_input_submission(
 /// gap 的布局结果与缩放，导致 clamp 后 `scroll_position` 停在 0、内容从底部
 /// 被裁剪而不可见（详见 Bevy `examples/ui/scroll_and_overflow/scroll.rs` 的惯用法）。
 fn auto_scroll_to_bottom(
+    stick: Res<MessageListStickBottom>,
     mut q_scroll: Query<(&mut ScrollPosition, &ComputedNode), With<MessageListMarker>>,
 ) {
     let Ok((mut scroll, node)) = q_scroll.single_mut() else {
@@ -361,7 +415,9 @@ fn auto_scroll_to_bottom(
     let viewport_height = node.size.y * scale;
     // 内容超过视口时滚到底部；不足时回 0（避免残留偏移）。
     let max_offset = (content_height - viewport_height).max(0.0);
-    scroll.0.y = max_offset;
+    if stick.0 {
+        scroll.0.y = max_offset;
+    }
 }
 
 /// 根据 Conversation 状态更新输入框边框颜色（忙时变色）。

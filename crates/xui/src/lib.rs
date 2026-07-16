@@ -11,6 +11,7 @@ pub mod command_palette;
 pub mod hotkeys;
 pub mod i18n_bridge;
 pub mod input;
+pub mod mouse_wheel_scroll;
 pub mod shortcuts;
 pub mod virtual_list;
 
@@ -38,6 +39,7 @@ impl Plugin for XuiPlugin {
             CommandPalettePlugin,
             InputEnhancePlugin,
             ShortcutsPlugin,
+            mouse_wheel_scroll::MouseWheelScrollPlugin,
         ))
         .init_resource::<HotkeyRegistry>();
     }
