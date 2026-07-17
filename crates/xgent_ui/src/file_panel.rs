@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use bevy::ecs::hierarchy::ChildOf;
 use bevy::prelude::*;
 use bevy::ui::ScrollPosition;
 
@@ -19,6 +20,11 @@ pub struct FileTreeMarker;
 /// 文件内容预览区标记。
 #[derive(Component, Default)]
 pub struct FilePreviewMarker;
+
+/// 目录子项容器标记（展开时在此 spawn 子条目）。
+#[derive(Component, Default)]
+pub struct DirChildrenMarker;
+
 
 /// 目录条目标记（记录路径与展开状态）。
 #[derive(Component, Default)]
@@ -46,7 +52,7 @@ impl Plugin for FilePanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProjectRoot>()
             .add_systems(Startup, spawn_file_panel.after(crate::layout::spawn_layout))
-            .add_systems(Update, (handle_file_click, rebuild_file_tree));
+            .add_systems(Update, (handle_file_click, handle_dir_click, rebuild_file_tree));
     }
 }
 
@@ -162,36 +168,57 @@ fn rebuild_file_tree(
 }
 
 /// spawn 一个文件树条目（目录或文件）。
+/// 目录节点 = 外层 Column 容器 + Button 行（带展开图标）+ 子容器 Node（展开时往此 spawn 子项）。
+/// 子项缩进由子容器的左 padding 累积（每层 `space::LG` = 16px）。
 fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Theme, font: f32) {
-    let icon = if entry.is_dir { "📁" } else { "📄" };
     if entry.is_dir {
-        parent.spawn((
-            Button,
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::left(px(space::SM)),
-                ..default()
-            },
-            Text::new(format!("{} {}", icon, entry.name)),
-            TextFont {
-                font_size: FontSize::Px(font),
-                ..default()
-            },
-            TextColor(theme.text),
-            DirEntry {
-                path: entry.path.clone(),
-                expanded: false,
-            },
-        ));
+        // 外层 Column：目录行 + 子项容器
+        parent
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
+            ))
+            .with_children(|col| {
+                // 目录行（Button + 展开/折叠图标）
+                col.spawn((
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        ..default()
+                    },
+                    Text::new(format!("📁 ▸ {}", entry.name)),
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                    DirEntry {
+                        path: entry.path.clone(),
+                        expanded: false,
+                    },
+                ));
+                // 子项容器（折叠态空，展开时 spawn 子条目）
+                col.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::left(px(space::LG)),
+                        ..default()
+                    },
+                    DirChildrenMarker,
+                ));
+            });
     } else {
         parent.spawn((
             Button,
             Node {
                 width: Val::Percent(100.0),
-                padding: UiRect::left(px(space::SM)),
                 ..default()
             },
-            Text::new(format!("{} {}", icon, entry.name)),
+            Text::new(format!("📄 {}", entry.name)),
             TextFont {
                 font_size: FontSize::Px(font),
                 ..default()
@@ -239,5 +266,59 @@ fn handle_file_click(
                 TextColor(theme.text_dim),
             ));
         });
+    }
+}
+
+/// 处理目录条目点击：展开/折叠切换，在子项容器 spawn/despawn 子条目。
+fn handle_dir_click(
+    mut commands: Commands,
+    mut q_dirs: Query<
+        (&mut DirEntry, &Interaction, &mut Text, &ChildOf),
+        Changed<Interaction>,
+    >,
+    q_children: Query<&Children>,
+    q_dir_children: Query<Entity, With<DirChildrenMarker>>,
+    theme: Res<Theme>,
+) {
+    let font = theme.font_size;
+    for (mut dir, interaction, mut text, parent) in q_dirs.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 拿外层 Column 的 children，找 DirChildrenMarker 子容器
+        let Ok(col_children) = q_children.get(parent.0) else {
+            continue;
+        };
+        let child_container = col_children
+            .iter()
+            .find(|&c| q_dir_children.get(c).is_ok());
+        let Some(child_container) = child_container else {
+            continue;
+        };
+
+        let name = dir
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if dir.expanded {
+            // 折叠
+            dir.expanded = false;
+            *text = Text::new(format!("📁 ▸ {}", name));
+            commands.entity(child_container).despawn_children();
+        } else {
+            // 展开：读子目录内容，spawn 到子容器
+            dir.expanded = true;
+            *text = Text::new(format!("📁 ▾ {}", name));
+            let entries = list_dir(&dir.path);
+            commands
+                .entity(child_container)
+                .with_children(|p| {
+                    for entry in &entries {
+                        spawn_entry(p, entry, &theme, font);
+                    }
+                });
+        }
     }
 }

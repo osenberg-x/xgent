@@ -148,9 +148,17 @@ impl Plugin for ChatPanelPlugin {
 ### 5. file_panel.rs
 
 ```rust
-// 文件树：从项目根遍历（复用 xgent_context 的目录树逻辑或单独遍历）
-// 文件内容：点击文件 → 读（tokio task）→ 渲染（MVP 只读）
-// 订阅 FileChangedEvent → 刷新打开的文件
+// 文件树：从项目根遍历，缩进树形展示（详见 doc/design/ui-design.md 5.1）
+//   - 双击目录展开/折叠，展开后在下方缩进展示子项（目录优先 + 字母序）
+//   - 懒加载：初始只展开根第一层；深层目录首次双击才读（tokio task）
+//   - 已展开目录内容缓存内存；折叠/再展开不重读，除非 FileChangedEvent 标 stale
+//   - 节点超 500 接 xui::VirtualList 虚拟滚动 + entity pool 复用
+//   - .gitignore 简单匹配（target/ .git/ node_modules/ .xgent/）；P1+ 接 ignore crate
+//   - 加载中 / 空 / 读取失败 占位态
+// 文件内容：单击文件 → 读（tokio task）→ 内容区渲染（MVP 只读）
+//   - 双击文件：MVP 同单击；P1 编辑器上线后切到编辑器视图打开
+// 订阅 FileChangedEvent → 沿 path 上溯找最近已展开祖先，标 stale 后台刷新子项
+//   （保持已展开子目录的展开状态）；若该文件正在内容区展示，刷新内容
 ```
 
 ### 6. command_palette.rs
