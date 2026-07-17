@@ -83,7 +83,7 @@
 | 编号 | 功能 | 描述 | 优先级 |
 |:---|:---|:---|:---|
 | F-10 | Git 集成 | diff 查看、commit、回溯到某次提交。 | P1（优先级可放低） |
-| F-11 | 内置编辑器 | 完整的代码编辑器（查看 + 编辑）；是否复用现有编辑器组件待实现时从技术角度评估。 | P1 |
+| F-11 | 内置编辑器 | 中等能力边界：多行编辑 + 行号 + undo/redo + 查找替换 + tree-sitter 语法高亮（MVP 仅 Rust）。不含 LSP、不含 split view。详见 `doc/design/editor-design.md`。 | P1 |
 | F-12 | 成本统计 | token 消耗与成本统计。 | P1 |
 | F-13 | MCP 支持 | 接入外部 MCP 服务器/工具。 | P1 |
 | F-14 | 自定义工具 | 用户可定义自己的工具/工作流。 | P2（架构需考虑） |
@@ -203,9 +203,9 @@
 以下点已决策并落入正文，仅作记录：
 
 - **OQ-01（已决策）**：支持 OpenAI / Anthropic / Ollama 等，及第三方兼容接口（OpenAI compatible）、新的响应式接口（如 Response API）、自定义 API。见 F-07。
-- **OQ-02（已决策）**：内置编辑器为完整编辑器；是否复用现有组件待实现时从技术角度评估。见 F-11。
+- **OQ-02（已决策）**：内置编辑器为中等能力边界（多行+行号+undo/redo+查找+tree-sitter 高亮，MVP 仅 Rust）；基于 bevy_ui 自造（`xui::CodeEditor`，可独立发布），egui 混合方案作 P1+ 备选。完整能力边界（+LSP+split view）留后续。见 F-11 与 `doc/design/editor-design.md`。
 - **OQ-03（已决策）**：快捷键参考 VSCode 体系。见 F-09。
 - **OQ-04（已决策）**：默认一只宠物 + 用户上传自定义外观。见 4.3。
 - **OQ-06（已决策）**：共享全局配置，项目配置隔离；同一项目多客户端共享同步文件状态。见 NF-02。
-- **OQ-08（已决策）**：采用演进式路径——MVP 与编辑器上线前用选项 1（A 无索引·按需读取 → B tree-sitter repo map）；**内置编辑器（F-11）上线后**依次升级为 C（向量 RAG）→ D（LSP/AST）→ E（混合检索），以支撑编辑器场景的强检索需求。索引层与 agent 之间走抽象接口，未来 Web 端可注入不同实现。详见 `doc/notes/context-retrieval-research.md`。
+- **OQ-08（已决策）**：采用演进式路径——MVP 与编辑器上线前用选项 1（A 无索引·按需读取 → B tree-sitter repo map）；**内置编辑器（F-11）上线触发到 C（向量 RAG）**，D（LSP/AST）**延后**到 LSP 真正接入时（即编辑器升完整边界），E（混合检索）跟随 D。分段理由：中等边界不含 LSP，D 依赖 LSP，解耦避免编辑器上线就硬依赖 LSP。索引层与 agent 之间走抽象接口，未来 Web 端可注入不同实现。详见 `doc/notes/context-retrieval-research.md` 与 `doc/decisions/0010-oq08-检索升级路径分段-编辑器到c-d延后.md`。
 - **OQ-09（已决策）**：国际化从一开始就考虑。见 NF-05。

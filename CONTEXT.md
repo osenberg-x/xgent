@@ -69,3 +69,41 @@ _Avoid_: 并行模式
 **ToolError**:
 工具执行错误类型：`Failed(String)`/`Aborted`/`Timeout(u64)`。`Tool::execute` 返回 `Result<ToolResult, ToolError>`。语义区分：`Aborted` 让 agent loop 走 abort 路径（停止后续工具）；`Failed`/`Timeout` 走错误回灌路径（错误文本回灌 LLM 让模型自纠）。非 ToolError 的 panic 由 agent loop catch 块兜底为 `is_error:true` 的 ToolResult。
 _Avoid_: 工具异常、tool exception
+
+## 编辑器（F-11，P1）
+
+**CodeEditor**:
+xui 提供的通用代码编辑器组件（裸件），基于 bevy_ui 自造。中等能力边界：多行编辑 + 行号 + undo/redo + 查找替换 + tree-sitter 语法高亮。不含 LSP、不含 split view。放 xui crate（可独立发布），依赖 tree-sitter + grammar。
+_Avoid_: 编辑器、editor widget
+
+**EditorBuffer**:
+单个打开文件的可变内存表示：路径、文本内容、光标、选区、undo 栈、脏标记（未保存修改）。一个 EditorBuffer 对应一个编辑器标签页。多标签页 = 多 EditorBuffer。落盘前 buffer 是真相之源；落盘后与磁盘一致。
+_Avoid_: 文档、file model
+
+**脏 buffer**:
+EditorBuffer 的 `dirty` 标记为真——用户有未保存的本地修改。脏 buffer 检测到外部文件变更时不静默重载，弹窗让用户三选（丢弃本地 / 保留本地 / 对比合并）。未脏 buffer 检测到外部变更时静默重载。这是"未保存修改 vs 外部修改"冲突的协调策略。
+_Avoid_: 未保存、modified
+
+**UI-only Tier**:
+新增 ToolTier 变体（与 Read/Write/Exec 并列），标记"只修改 UI 元数据不修改 workspace 状态"的动作：打开文件、跳转行、滚动、选区、切换标签页。默认 Approved（不走 NeedsConfirmation）。agent 驱动编辑器动作走此 tier，避免每次跳转都弹确认框。WriteFile 工具仍走 Write tier / NeedsConfirmation。
+_Avoid_: 编辑器工具、view action
+
+**EditorCommand**:
+agent 驱动编辑器动作的 ECS Event 载荷：`OpenFile{path,line}` / `GoTo{line,col}` / `SetSelection{range}` / `ScrollTo{line}` / `CloseTab{path}`。由 agent 经 UI-only Tier 工具调用发出生，编辑器系统订阅执行。反向（编辑器 → agent）经 EditorState Resource 暴露，由 @ 引用显式拉取，不走 Event。
+_Avoid_: 编辑器指令、editor action
+
+**EditorState**:
+Bevy Resource，聚合所有打开 EditorBuffer 的只读视图：当前活跃标签、各 buffer 路径/光标/选区/脏标记。agent 不被动注入此状态，仅在用户显式 @ 引用时由 ContextProvider 查询并组装为 ContextChunk。类似 Cursor 的 @ 引用机制。
+_Avoid_: 编辑器上下文、editor context
+
+**@ 引用**:
+用户在对话输入框用 `@` 前缀显式请求编辑器状态作为上下文的语法。MVP 三种：`@file:<path>` 拉取文件内容；`@cursor` 拉取当前光标位置所在符号/行；`@selection` 拉取当前选区文本。由输入解析器识别，转 ContextQuery 给 ContextProvider。不主动注入，用户控制上下文边界。
+_Avoid_: 文件引用、mention
+
+**用户保存**:
+用户在编辑器按保存（Cmd+S）的落盘路径：直接 `fs::write`，**不经 WriteFile 工具、不经 NeedsConfirmation 确认**。落盘后通知 daemon 广播 peer.fileChanged 给同项目其他客户端。与 agent 调 WriteFile 工具（走 Write tier / NeedsConfirmation）是两条独立路径——用户主动行为默认信任，agent 行为默认需确认。
+_Avoid_: 手动保存、save action
+
+**grammar 分发（D-06）**:
+tree-sitter grammar 的打包与加载策略。P1 编辑器 MVP 阶段**只内置 Rust 一种语言 grammar**（随二进制发布），验证编辑器可行性后再扩展。不做按需下载、不做 lazy load。理由：最小可行、离线可用、避免网络/缓存层复杂度。后续多语言需求出现时再评估扩展策略。
+_Avoid_: grammar 加载、tree-sitter 打包
