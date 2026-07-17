@@ -3,14 +3,11 @@
 //! 集中管理避免字符串硬编码不一致。这些是 daemon 通过 JSON-RPC 通知
 //! 单向推送给 UI 的事件名。
 
-/// provider 流式对话增量文本（[`crate::chat::ChatEvent::Delta`]）
-pub const PROVIDER_DELTA: &str = "provider.delta";
-/// provider 工具调用（[`crate::chat::ChatEvent::ToolCall`]）
-pub const PROVIDER_TOOL_CALL: &str = "provider.toolCall";
-/// provider 流结束（[`crate::chat::ChatEvent::Done`]）
-pub const PROVIDER_DONE: &str = "provider.done";
-/// provider 出错（[`crate::chat::ChatEvent::Error`]）
-pub const PROVIDER_ERROR: &str = "provider.error";
+/// provider 流式事件（透传整个 [`crate::chat::ChatEvent`] JSON）
+///
+/// daemon 不解析 ChatEvent 内部结构，只透传 JSON（见 ADR-0006）。
+/// params: `{ stream_id, event: <ChatEvent JSON> }`
+pub const PROVIDER_EVENT: &str = "provider.event";
 /// 文件变更（[`crate::fs::FileChanged`]）
 pub const FS_CHANGED: &str = "fs.changed";
 /// 配置变更（[`crate::config::ConfigChanged`]）
@@ -25,10 +22,7 @@ mod tests {
     #[test]
     fn notifications_are_nonempty_unique() {
         let all = [
-            PROVIDER_DELTA,
-            PROVIDER_TOOL_CALL,
-            PROVIDER_DONE,
-            PROVIDER_ERROR,
+            PROVIDER_EVENT,
             FS_CHANGED,
             CONFIG_CHANGED,
             PEER_FILE_CHANGED,

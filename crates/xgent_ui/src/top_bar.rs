@@ -29,7 +29,11 @@ pub struct TopBarPlugin;
 impl Plugin for TopBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_top_bar.after(crate::layout::spawn_layout))
-            .add_systems(Update, (update_provider_label, handle_top_bar_buttons).after(crate::command_palette::handle_palette_triggers));
+            .add_systems(
+                Update,
+                (update_provider_label, handle_top_bar_buttons)
+                    .after(crate::command_palette::handle_palette_triggers),
+            );
     }
 }
 

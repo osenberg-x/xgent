@@ -99,33 +99,54 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-### 2. security.rs — 安全策略
+### 2. security.rs — 安全策略判定
+
+`resolve_policy` 综合配置覆盖、工具静态 tier 与动态 `approval_for(input)`，得出最终执行策略。
 
 ```rust
-use crate::tool::SecurityPolicy;
+use crate::tool::{SecurityPolicy, Tool, ToolTier};
+use serde_json::Value;
 use xgent_settings_core::project::ToolPolicyConfig;
 
-/// 综合判定：配置优先覆盖，未配置时用工具建议默认值（但工具默认本身也是 NeedsConfirmation）
-/// （参考成熟 code agent：信任可配置，默认需确认）
+/// 综合判定工具的最终安全策略。
+///
+/// 决议顺序：
+/// 1. `policy.denied` 命中 → [`SecurityPolicy::Denied`]
+/// 2. `policy.approved` 命中 → [`SecurityPolicy::Approved`]
+/// 3. `tool.approval_for(input)` 动态 tier（MVP 阶段 Read/Write/Exec
+///    全映射 [`SecurityPolicy::NeedsConfirmation`]）
+/// 4. 兜底 [`SecurityPolicy::NeedsConfirmation`]
 pub fn resolve_policy(
     tool_id: &str,
-    tool_default: SecurityPolicy,
+    tier: ToolTier,
+    input: &Value,
+    tool: &dyn Tool,
     policy: &ToolPolicyConfig,
 ) -> SecurityPolicy {
-    // 配置显式降级为拒绝
+    // 1. 配置显式 denied 优先
     if policy.denied.iter().any(|t| t == tool_id) {
         return SecurityPolicy::Denied;
     }
-    // 配置显式提升为自动执行
+    // 2. 配置显式 approved 次之
     if policy.approved.iter().any(|t| t == tool_id) {
         return SecurityPolicy::Approved;
     }
-    // 未配置：用工具建议默认值（内置工具的建议默认均为 NeedsConfirmation）
-    tool_default
+    // 3. 动态 approval_for（可能比静态 tier 更严格，如 run_command 危险命令）
+    let _effective_tier = tool.approval_for(input);
+    // 4. MVP 默认：Read/Write/Exec 全映射 NeedsConfirmation
+    let _ = tier;
+    SecurityPolicy::NeedsConfirmation
 }
 ```
 
-**说明**：所有内置工具的 `policy()` 返回的“建议默认值”均为 `NeedsConfirmation`（包括只读的 ReadFile/SearchFiles）。用户可在项目或全局配置中把常用只读工具提升为 `Approved` 以减少打扰，危险工具可降为 `Denied`。这与架构安全模型 11.1 一致。
+**决议路径说明（4 步顺序）**：
+
+1. **配置 denied 命中 → `Denied`**：`policy.denied` 列表包含 `tool_id` 即拒绝，最高优先级。
+2. **配置 approved 命中 → `Approved`**：`policy.approved` 列表包含 `tool_id` 即自动执行（需未被 denied）。
+3. **动态 `approval_for(input)`**：调用工具自身的 `approval_for`，允许工具按输入动态收紧 tier（如 `run_command` 对 `rm -rf /` 提升 tier）。MVP 阶段此值仅记录，不改变结果。
+4. **兜底 `NeedsConfirmation`**：未命中任何配置时，Read/Write/Exec 全部映射为 `NeedsConfirmation`，需用户确认后执行。
+
+**说明**：MVP 默认所有 tier 均为 `NeedsConfirmation`（包括只读的 ReadFile/SearchFiles）。用户可在项目或全局配置中把常用只读工具提升为 `Approved` 以减少打扰，危险工具可降为 `Denied`。`tier` 参数保留为显式参数，便于未来在 yolo 模式下按 tier 自动批准 Read 工具。这与架构安全模型 11.1 一致。
 
 ### 3. confirm.rs — 确认请求/响应
 

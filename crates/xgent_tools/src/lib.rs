@@ -8,6 +8,7 @@
 pub mod builtins;
 pub mod confirm;
 pub mod executor;
+pub mod mcp;
 pub mod path;
 pub mod security;
 pub mod tool;
@@ -17,7 +18,10 @@ pub use confirm::{ConfirmDecision, ConfirmRequest};
 pub use executor::{ConfirmCallback, ToolExecutor};
 pub use path::resolve_in_project;
 pub use security::resolve_policy;
-pub use tool::{SecurityPolicy, SideEffect, Tool, ToolCtx, ToolResult};
+pub use tool::{
+    Concurrency, SecurityPolicy, SideEffect, Tool, ToolCtx, ToolError, ToolResult, ToolTier,
+    ToolUpdateCallback,
+};
 
 use std::sync::Arc;
 

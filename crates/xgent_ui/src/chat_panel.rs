@@ -15,7 +15,8 @@ use bevy::text::EditableText;
 use bevy::ui::ScrollPosition;
 
 use xgent_agent::{
-    Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage, UserInputMessage,
+    Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage, SteeringMessage,
+    UserInputMessage,
 };
 use xui::input::{ChatInput, ChatInputSubmitted};
 use xui::mouse_wheel_scroll::MouseWheelScrolled;
@@ -72,7 +73,7 @@ impl Plugin for ChatPanelPlugin {
                     spawn_user_message,
                     update_input_border,
                 )
-                    .after(xgent_agent::agent_loop::agent_poll_system)
+                    .after(xgent_agent::agent_loop::agent_poll_system),
             )
             // 自动滚动与贴底状态维护放在布局之后（PostLayout），此时
             // content_size 为本帧最新值。顺序：先 maintain 再 auto_scroll。
@@ -213,30 +214,28 @@ fn spawn_user_message(
         // 在当前助手节点之前插入用户消息气泡
         commands.entity(list).with_children(|p| {
             // 右对齐行容器
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    justify_content: JustifyContent::FlexEnd,
-                    ..default()
-                },
-            ))
-            .with_children(|row| {
-                row.spawn((
-                    Node {
-                        max_width: Val::Percent(80.0),
-                        padding: UiRect::all(px(space::SM)),
-                        border_radius: BorderRadius::all(px(6.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme.bubble_user),
-                    Text::new(ev.text.clone()),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text),
-                ));
-            });
+            p.spawn((Node {
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::FlexEnd,
+                ..default()
+            },))
+                .with_children(|row| {
+                    row.spawn((
+                        Node {
+                            max_width: Val::Percent(80.0),
+                            padding: UiRect::all(px(space::SM)),
+                            border_radius: BorderRadius::all(px(6.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.bubble_user),
+                        Text::new(ev.text.clone()),
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
+                        TextColor(theme.text),
+                    ));
+                });
         });
         // 把当前助手节点移到列表末尾（在用户消息之后）
         commands.entity(list).add_child(current);
@@ -285,30 +284,28 @@ fn finalize_on_done(
     let font = theme.font_size;
     // 在消息列表插入历史副本（左对齐行容器 + 助手气泡）
     commands.entity(list).with_children(|p| {
-        p.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::FlexStart,
-                ..default()
-            },
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Node {
-                    max_width: Val::Percent(80.0),
-                    padding: UiRect::all(px(space::SM)),
-                    border_radius: BorderRadius::all(px(6.0)),
-                    ..default()
-                },
-                BackgroundColor(theme.bubble_assistant),
-                Text::new(content),
-                TextFont {
-                    font_size: FontSize::Px(font),
-                    ..default()
-                },
-                TextColor(theme.text),
-            ));
-        });
+        p.spawn((Node {
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::FlexStart,
+            ..default()
+        },))
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        max_width: Val::Percent(80.0),
+                        padding: UiRect::all(px(space::SM)),
+                        border_radius: BorderRadius::all(px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.bubble_assistant),
+                    Text::new(content),
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                ));
+            });
     });
     // 清空当前节点
     commands.entity(current).insert(Text::new(String::new()));
@@ -332,29 +329,37 @@ fn on_error(
             xgent_core::chat::ErrorKind::StreamParse => "⚠ [解析] ",
             xgent_core::chat::ErrorKind::ProviderError => "⚠ ",
         };
-        commands
-            .entity(entity)
-            .insert((Text::new(format!("{prefix}{}", ev.message)), TextColor(theme.accent)));
+        commands.entity(entity).insert((
+            Text::new(format!("{prefix}{}", ev.message)),
+            TextColor(theme.accent),
+        ));
     }
 }
 
-/// 订阅 xui 的 ChatInputSubmitted，转发为 agent 的 UserInputMessage。
+/// 订阅 xui 的 ChatInputSubmitted，转发为 agent 的 UserInputMessage 或 SteeringMessage。
+///
+/// Idle/Error 时发 UserInputMessage（新对话）；
+/// Streaming/ToolRunning/Confirming/Thinking 时发 SteeringMessage（注入到当前对话，MVP 不中断工具）。
 pub fn forward_input_submission(
     mut reader: MessageReader<ChatInputSubmitted>,
-    mut writer: MessageWriter<UserInputMessage>,
+    mut user_writer: MessageWriter<UserInputMessage>,
+    mut steering_writer: MessageWriter<SteeringMessage>,
     conv: Res<Conversation>,
 ) {
-    // agent 忙时忽略发送
-    if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
-        return;
-    }
     for ev in reader.read() {
         if ev.text.is_empty() {
             continue;
         }
-        writer.write(UserInputMessage {
-            text: ev.text.clone(),
-        });
+        if conv.status == ConversationStatus::Idle || conv.status == ConversationStatus::Error {
+            user_writer.write(UserInputMessage {
+                text: ev.text.clone(),
+            });
+        } else {
+            // agent 执行中：发 Steering，注入到当前对话
+            steering_writer.write(SteeringMessage {
+                text: ev.text.clone(),
+            });
+        }
     }
 }
 
@@ -429,8 +434,8 @@ fn update_input_border(
     let Ok(mut border) = q.single_mut() else {
         return;
     };
-    let is_busy = conv.status != ConversationStatus::Idle
-        && conv.status != ConversationStatus::Error;
+    let is_busy =
+        conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error;
     if is_busy {
         border.set_all(theme.accent);
     } else {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use xgent_agent::bridge::ProviderClient;
-use xgent_core::chat::{ChatEvent, ChatRequest, TokenUsage};
+use xgent_core::chat::{ChatEvent, ChatRequest};
 use xgent_core::ids::StreamId;
 use xgent_core::notifications;
 
@@ -57,33 +57,15 @@ impl ProviderClient for IpcProviderClient {
                     continue;
                 }
                 let ev = match notif.method.as_str() {
-                    notifications::PROVIDER_DELTA => {
-                        let text = notif.params["text"].as_str().unwrap_or("").to_string();
-                        Some(ChatEvent::Delta { text })
-                    }
-                    notifications::PROVIDER_TOOL_CALL => {
-                        let id = notif.params["id"].as_str().unwrap_or("").to_string();
-                        let name = notif.params["name"].as_str().unwrap_or("").to_string();
-                        let args = notif.params["args"].clone();
-                        Some(ChatEvent::ToolCall { id, name, args })
-                    }
-                    notifications::PROVIDER_DONE => {
-                        let usage: TokenUsage =
-                            serde_json::from_value(notif.params["usage"].clone())
-                                .unwrap_or_default();
-                        Some(ChatEvent::Done { usage })
-                    }
-                    notifications::PROVIDER_ERROR => {
-                        // 解析 kind（daemon 侧映射后的 ErrorKind），缺省回退 ProviderError
-                        let kind = serde_json::from_value::<xgent_core::chat::ErrorKind>(
-                            notif.params["kind"].clone(),
-                        )
-                        .unwrap_or(xgent_core::chat::ErrorKind::ProviderError);
-                        let message = notif.params["message"]
-                            .as_str()
-                            .unwrap_or("未知错误")
-                            .to_string();
-                        Some(ChatEvent::Error { kind, message })
+                    notifications::PROVIDER_EVENT => {
+                        // daemon 透传整个 ChatEvent JSON（见 ADR-0006），反序列化
+                        match serde_json::from_value::<ChatEvent>(notif.params["event"].clone()) {
+                            Ok(ev) => Some(ev),
+                            Err(_) => {
+                                // 未知事件类型或畸形 JSON：跳过（向前兼容）
+                                None
+                            }
+                        }
                     }
                     _ => None,
                 };

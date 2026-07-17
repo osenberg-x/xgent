@@ -1,12 +1,17 @@
 //! 工具执行器：调度工具、处理安全策略与确认流程。
+//!
+//! 对齐 ADR-0007：`execute` 签名加入 `CancellationToken`，返回
+//! `Result<ToolResult, ToolError>`；`resolve_policy` 用新签名
+//! （传 `tool.tier()` + `tool` 引用 + `input`）。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 use crate::confirm::{ConfirmDecision, ConfirmRequest};
 use crate::security::resolve_policy;
-use crate::tool::{SecurityPolicy, Tool, ToolCtx, ToolResult};
+use crate::tool::{SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult};
 
 /// 确认回调 trait：传入确认请求，返回一个可 await 的决策接收端。
 ///
@@ -57,39 +62,51 @@ impl ToolExecutor {
     /// 执行工具调用。
     ///
     /// 流程：
-    /// 1. 解析最终策略（配置覆盖工具默认）；
-    /// 2. `Denied` 直接拒绝；
+    /// 1. 解析最终策略（配置 denied → approved → tool.approval_for → MVP 默认）；
+    /// 2. `Denied` → `Ok(ToolResult{is_error:true})`（逻辑失败回灌 LLM）；
     /// 3. `Approved` 或会话级 AllowAll 命中 → 直接执行；
-    /// 4. `NeedsConfirmation` → 经 `confirm` 获取决策，Allow/AllowAll 后执行。
+    /// 4. `NeedsConfirmation` → 经 `confirm` 获取决策，Allow/AllowAll 后执行；
+    ///    `Deny` → 同 Denied 逻辑。
+    ///
+    /// `ToolError::Aborted` 透传给调用方（agent loop 走 abort 路径）。
+    /// 工具返回 `Ok(ToolResult{is_error:true})` 时 executor 仍返回 `Ok`
+    /// （非异常失败，错误文本回灌 LLM）。
     pub async fn execute(
         &self,
         tool_id: &str,
         input: serde_json::Value,
         ctx: &ToolCtx,
+        signal: CancellationToken,
         confirm: &dyn ConfirmCallback,
-    ) -> ToolResult {
+    ) -> Result<ToolResult, ToolError> {
         let tool = match self.tools.get(tool_id) {
             Some(t) => t,
             None => {
-                return ToolResult {
+                return Ok(ToolResult {
                     output: format!("未知工具: {tool_id}"),
-                    success: false,
+                    is_error: true,
                     side_effect: None,
-                };
+                });
             }
         };
-        let policy = resolve_policy(tool_id, tool.policy(), &ctx.tool_policy);
+        let policy = resolve_policy(
+            tool_id,
+            tool.tier(),
+            &input,
+            tool.as_ref(),
+            &ctx.tool_policy,
+        );
         match policy {
-            SecurityPolicy::Denied => ToolResult {
-                output: "已被策略拒绝（denied）".into(),
-                success: false,
+            SecurityPolicy::Denied => Ok(ToolResult {
+                output: "工具被策略拒绝".into(),
+                is_error: true,
                 side_effect: None,
-            },
-            SecurityPolicy::Approved => tool.execute(input, ctx).await,
+            }),
+            SecurityPolicy::Approved => tool.execute(input, ctx, signal, None).await,
             SecurityPolicy::NeedsConfirmation => {
                 // 会话级 AllowAll 命中则跳过确认
                 if self.allowed_all.lock().await.contains(tool_id) {
-                    return tool.execute(input, ctx).await;
+                    return tool.execute(input, ctx, signal, None).await;
                 }
                 let req = ConfirmRequest {
                     tool_id: tool_id.to_string(),
@@ -104,29 +121,29 @@ impl ToolExecutor {
                 {
                     Ok(rx) => rx,
                     Err(_) => {
-                        return ToolResult {
+                        return Ok(ToolResult {
                             output: "确认请求超时".into(),
-                            success: false,
+                            is_error: true,
                             side_effect: None,
-                        };
+                        });
                     }
                 };
                 match rx.await {
-                    Ok(ConfirmDecision::Allow) => tool.execute(input, ctx).await,
+                    Ok(ConfirmDecision::Allow) => tool.execute(input, ctx, signal, None).await,
                     Ok(ConfirmDecision::AllowAll) => {
                         self.allowed_all.lock().await.insert(tool_id.to_string());
-                        tool.execute(input, ctx).await
+                        tool.execute(input, ctx, signal, None).await
                     }
-                    Ok(ConfirmDecision::Deny) => ToolResult {
+                    Ok(ConfirmDecision::Deny) => Ok(ToolResult {
                         output: "用户拒绝".into(),
-                        success: false,
+                        is_error: true,
                         side_effect: None,
-                    },
-                    Err(_) => ToolResult {
+                    }),
+                    Err(_) => Ok(ToolResult {
                         output: "确认被取消".into(),
-                        success: false,
+                        is_error: true,
                         side_effect: None,
-                    },
+                    }),
                 }
             }
         }
@@ -136,8 +153,9 @@ impl ToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SideEffect;
-    use serde_json::json;
+    use crate::tool::{Concurrency, ToolError, ToolTier, ToolUpdateCallback};
+    use serde_json::{Value, json};
+    use xgent_core::chat::ToolSchema;
     use xgent_settings_core::project::ToolPolicyConfig;
 
     /// 自动允许所有确认的 mock 回调。
@@ -187,10 +205,12 @@ mod tests {
                 "nope",
                 serde_json::json!({}),
                 &ctx(dir.path(), Default::default()),
+                CancellationToken::new(),
                 &AutoAllow,
             )
-            .await;
-        assert!(!r.success);
+            .await
+            .unwrap();
+        assert!(r.is_error);
         assert!(r.output.contains("未知工具"));
     }
 
@@ -206,10 +226,12 @@ mod tests {
                 "read_file",
                 json!({"path": "a.txt"}),
                 &ctx(dir.path(), policy(&[], &["read_file"])),
+                CancellationToken::new(),
                 &AutoAllow,
             )
-            .await;
-        assert!(!r.success);
+            .await
+            .unwrap();
+        assert!(r.is_error);
         assert!(r.output.contains("拒绝"));
     }
 
@@ -225,10 +247,12 @@ mod tests {
                 "read_file",
                 json!({"path": "a.txt"}),
                 &ctx(dir.path(), policy(&["read_file"], &[])),
+                CancellationToken::new(),
                 &AutoDeny,
             )
-            .await;
-        assert!(r.success);
+            .await
+            .unwrap();
+        assert!(!r.is_error);
         assert_eq!(r.output, "hi");
     }
 
@@ -244,10 +268,12 @@ mod tests {
                 "read_file",
                 json!({"path": "a.txt"}),
                 &ctx(dir.path(), Default::default()),
+                CancellationToken::new(),
                 &AutoAllow,
             )
-            .await;
-        assert!(r.success);
+            .await
+            .unwrap();
+        assert!(!r.is_error);
         assert_eq!(r.output, "hi");
     }
 
@@ -263,10 +289,12 @@ mod tests {
                 "read_file",
                 json!({"path": "a.txt"}),
                 &ctx(dir.path(), Default::default()),
+                CancellationToken::new(),
                 &AutoDeny,
             )
-            .await;
-        assert!(!r.success);
+            .await
+            .unwrap();
+        assert!(r.is_error);
         assert!(r.output.contains("用户拒绝"));
     }
 
@@ -292,19 +320,23 @@ mod tests {
             "read_file",
             json!({"path": "a.txt"}),
             &ctx(dir.path(), Default::default()),
+            CancellationToken::new(),
             &AllowAll,
         )
-        .await;
+        .await
+        .unwrap();
         // 第二次调用应无需确认——用 AutoDeny 验证（若仍确认会被拒绝）
         let r = exec
             .execute(
                 "read_file",
                 json!({"path": "a.txt"}),
                 &ctx(dir.path(), Default::default()),
+                CancellationToken::new(),
                 &AutoDeny,
             )
-            .await;
-        assert!(r.success, "AllowAll 后应跳过确认直接执行");
+            .await
+            .unwrap();
+        assert!(!r.is_error, "AllowAll 后应跳过确认直接执行");
         assert_eq!(r.output, "hi");
     }
 
@@ -317,11 +349,16 @@ mod tests {
                 "write_file",
                 json!({"path": "out.txt", "content": "x"}),
                 &ctx(dir.path(), policy(&["write_file"], &[])),
+                CancellationToken::new(),
                 &AutoDeny,
             )
-            .await;
-        assert!(r.success);
-        assert!(matches!(r.side_effect, Some(SideEffect::FileWritten(_))));
+            .await
+            .unwrap();
+        assert!(!r.is_error);
+        assert!(matches!(
+            r.side_effect,
+            Some(crate::tool::SideEffect::FileWritten(_))
+        ));
     }
 
     #[tokio::test]
@@ -333,5 +370,73 @@ mod tests {
         assert!(ids.contains(&"write_file"));
         assert!(ids.contains(&"search_files"));
         assert!(ids.contains(&"run_command"));
+    }
+
+    /// 可中断的 mock 工具：execute 内 tokio::select! 监听 signal.cancelled()，
+    /// 未取消则等待 1s 完成。用于测试 CancellationToken 中断路径。
+    struct SleepTool;
+
+    #[async_trait::async_trait]
+    impl Tool for SleepTool {
+        fn id(&self) -> &str {
+            "sleep"
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: "sleep".into(),
+                description: "sleep 1s".into(),
+                input_schema: json!({"type":"object"}),
+            }
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::Read
+        }
+        fn concurrency(&self) -> Concurrency {
+            Concurrency::Shared
+        }
+        fn summarize(&self, _input: &Value) -> String {
+            "sleep".into()
+        }
+        async fn execute(
+            &self,
+            _input: Value,
+            _ctx: &ToolCtx,
+            signal: CancellationToken,
+            _on_update: Option<&ToolUpdateCallback>,
+        ) -> Result<ToolResult, ToolError> {
+            tokio::select! {
+                _ = signal.cancelled() => Err(ToolError::Aborted),
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    Ok(ToolResult {
+                        output: "done".into(),
+                        is_error: false,
+                        side_effect: None,
+                    })
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_returns_aborted_error() {
+        // CancellationToken cancel 后 execute 返回 ToolError::Aborted
+        let exec = ToolExecutor::new(vec![Arc::new(SleepTool)]);
+        let dir = tempfile::tempdir().unwrap();
+        let token = CancellationToken::new();
+        // 先 cancel，再执行（模拟中断已发生）
+        token.cancel();
+        let r = exec
+            .execute(
+                "sleep",
+                json!({}),
+                &ctx(dir.path(), Default::default()),
+                token,
+                &AutoAllow,
+            )
+            .await;
+        match r {
+            Err(ToolError::Aborted) => {} // 期望
+            other => panic!("期望 ToolError::Aborted，得到 {other:?}"),
+        }
     }
 }

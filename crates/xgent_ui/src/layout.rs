@@ -45,7 +45,10 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<Theme>()
             .init_resource::<FilePanelCollapsed>()
             .add_systems(Startup, spawn_layout)
-            .add_systems(Update, toggle_file_panel_width.after(crate::shortcuts::handle_hotkey_triggers));
+            .add_systems(
+                Update,
+                toggle_file_panel_width.after(crate::shortcuts::handle_hotkey_triggers),
+            );
     }
 }
 

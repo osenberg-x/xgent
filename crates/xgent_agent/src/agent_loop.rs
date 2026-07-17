@@ -23,6 +23,8 @@ pub fn agent_poll_system(
     mut user_input: MessageReader<UserInputMessage>,
     mut abort: MessageReader<AbortMessage>,
     mut decision: MessageReader<ConfirmDecisionMessage>,
+    mut steering: MessageReader<SteeringMessage>,
+    mut followup: MessageReader<FollowUpMessage>,
     provider: Res<crate::provider_state::ProviderInfo>,
     context: Res<crate::provider_state::ContextState>,
 ) {
@@ -45,6 +47,7 @@ pub fn agent_poll_system(
             conv.status = ConversationStatus::Error;
             continue;
         }
+        conv.ensure_session_store(&bridge.project_root);
         conv.push_user(&ev.text);
         conv.status = ConversationStatus::Thinking;
         // 构造请求（上下文已在 context Resource 中预检索）
@@ -62,6 +65,33 @@ pub fn agent_poll_system(
     for _ in abort.read() {
         let _ = bridge.cmd_tx.try_send(AgentCommand::Abort);
         conv.status = ConversationStatus::Aborting;
+    }
+
+    // 2b. 处理 steering：用户在 agent 执行中插话（注入到当前对话，MVP 不中断工具）
+    for ev in steering.read() {
+        let _ = bridge.cmd_tx.try_send(AgentCommand::Steering {
+            text: ev.text.clone(),
+        });
+    }
+
+    // 2c. 处理 follow-up：agent 停止后注入后续消息
+    for ev in followup.read() {
+        if conv.status != ConversationStatus::Idle {
+            // 仅 Idle 时接受 follow-up（非 Idle 用 steering）
+            continue;
+        }
+        conv.push_user(&ev.text);
+        conv.status = ConversationStatus::Thinking;
+        let req = build_request(
+            &conv.messages,
+            &context.result,
+            &provider.id,
+            &provider.model,
+            None,
+        );
+        let _ = bridge.cmd_tx.try_send(AgentCommand::FollowUp {
+            text: ev.text.clone(),
+        });
     }
 
     // 3. 处理确认决策：经 SharedConfirm 回填给等待的 async task
@@ -131,13 +161,13 @@ fn handle_agent_event(
         AgentEvent::ToolResult {
             tool_id,
             output,
-            success,
+            is_error,
             ..
         } => {
             tool_result.write(ToolResultMessage {
                 tool_id,
                 output,
-                success,
+                is_error,
             });
         }
         AgentEvent::ConfirmRequest(req) => {
@@ -146,6 +176,7 @@ fn handle_agent_event(
         }
         AgentEvent::Done => {
             conv.finalize_assistant();
+            conv.persist_last_assistant();
             conv.status = ConversationStatus::Idle;
             done.write(DoneMessage);
         }

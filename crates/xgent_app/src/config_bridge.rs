@@ -13,8 +13,8 @@
 
 use bevy::prelude::*;
 use tokio::sync::mpsc;
-use xgent_agent::bridge::AgentBridge;
 use xgent_agent::ProviderInfo;
+use xgent_agent::bridge::AgentBridge;
 use xgent_core::config::{ConfigReadRequest, ConfigScope, ConfigWriteRequest};
 use xgent_core::methods;
 use xgent_settings_core::global::{ProviderConfig, ProviderKind};
@@ -50,7 +50,11 @@ impl Plugin for ConfigBridgePlugin {
             .insert_resource(RefreshSender(tx))
             .add_systems(
                 Update,
-                (save_provider_config, drain_pending_refresh, refresh_on_startup),
+                (
+                    save_provider_config,
+                    drain_pending_refresh,
+                    refresh_on_startup,
+                ),
             );
     }
 }
@@ -80,7 +84,10 @@ fn save_provider_config(
         bridge.runtime.handle().spawn(async move {
             // 写 provider 各字段
             let fields: [(&str, serde_json::Value); 4] = [
-                ("kind", serde_json::to_value(kind).unwrap_or(serde_json::Value::Null)),
+                (
+                    "kind",
+                    serde_json::to_value(kind).unwrap_or(serde_json::Value::Null),
+                ),
                 ("api_base", serde_json::Value::String(api_base)),
                 ("api_key", serde_json::Value::String(api_key)),
                 ("model_overrides", serde_json::Value::String(model)),
@@ -193,7 +200,11 @@ fn refresh_on_startup(
 }
 
 /// 异步重读 default provider 配置，判定就绪，发 RefreshResult。
-async fn spawn_refresh(ipc: &std::sync::Arc<crate::ipc_client::IpcClient>, tx: &mpsc::Sender<RefreshResult>, dp: String) {
+async fn spawn_refresh(
+    ipc: &std::sync::Arc<crate::ipc_client::IpcClient>,
+    tx: &mpsc::Sender<RefreshResult>,
+    dp: String,
+) {
     // 读整个 provider 配置
     let key = format!("providers.{dp}");
     let read_req = ConfigReadRequest {

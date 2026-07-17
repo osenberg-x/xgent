@@ -24,10 +24,10 @@ fn response_parses_with_id() {
 
 #[test]
 fn notification_parses_no_id() {
-    let line = r#"{"jsonrpc":"2.0","method":"provider.delta","params":{"stream_id":1,"text":"hi"}}"#;
+    let line = r#"{"jsonrpc":"2.0","method":"provider.event","params":{"stream_id":1,"event":{"type":"textDelta","text":"hi"}}}"#;
     let n: Notification = serde_json::from_str(line).unwrap();
-    assert_eq!(n.method, "provider.delta");
-    assert_eq!(n.params["text"], "hi");
+    assert_eq!(n.method, "provider.event");
+    assert_eq!(n.params["event"]["text"], "hi");
     // 通知无 id 字段
     assert!(!line.contains(r#""id""#));
 }
@@ -42,19 +42,23 @@ fn error_response_parses() {
 }
 
 /// 验证 provider_client 的通知→ChatEvent 路由逻辑（纯函数式，不连 IPC）。
+///
+/// daemon 透传整个 ChatEvent JSON（见 ADR-0006），UI 侧反序列化。
 #[test]
-fn route_provider_delta_notification_to_chat_event() {
+fn route_provider_event_notification_to_chat_event() {
     use xgent_core::chat::ChatEvent;
     let notif = Notification::new(
-        xgent_core::notifications::PROVIDER_DELTA,
-        serde_json::json!({"stream_id": 5, "text": "hello"}),
+        xgent_core::notifications::PROVIDER_EVENT,
+        serde_json::json!({
+            "stream_id": 5,
+            "event": ChatEvent::TextDelta { text: "hello".into() }
+        }),
     );
-    // 模拟路由判定
+    // 模拟 provider_client 的路由判定
     match notif.method.as_str() {
-        xgent_core::notifications::PROVIDER_DELTA => {
-            let text = notif.params["text"].as_str().unwrap().to_string();
-            let ev = ChatEvent::Delta { text };
-            assert!(matches!(ev, ChatEvent::Delta { text } if text == "hello"));
+        xgent_core::notifications::PROVIDER_EVENT => {
+            let ev: ChatEvent = serde_json::from_value(notif.params["event"].clone()).unwrap();
+            assert!(matches!(ev, ChatEvent::TextDelta { text } if text == "hello"));
         }
         _ => unreachable!(),
     }

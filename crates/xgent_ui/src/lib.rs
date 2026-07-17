@@ -16,8 +16,8 @@ pub mod settings_panel;
 pub mod shortcuts;
 pub mod status_bar;
 pub mod theme;
-pub mod top_bar;
 pub mod tool_panel;
+pub mod top_bar;
 
 use bevy::prelude::*;
 

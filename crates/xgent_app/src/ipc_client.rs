@@ -149,13 +149,13 @@ async fn connect_stream(
     Pin<Box<dyn AsyncRead + Send>>,
     Pin<Box<dyn AsyncWrite + Send>>,
 )> {
-    use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::io;
+    use tokio::net::windows::named_pipe::ClientOptions;
 
     // named pipe 客户端可能需要重试：daemon 刚拉起时 pipe 尚未就绪
-    let stream = ClientOptions::new().open(pipe_name).map_err(|e| {
-        anyhow::anyhow!("连接 named pipe 失败: {} ({})", pipe_name.display(), e)
-    })?;
+    let stream = ClientOptions::new()
+        .open(pipe_name)
+        .map_err(|e| anyhow::anyhow!("连接 named pipe 失败: {} ({})", pipe_name.display(), e))?;
 
     let (read_half, write_half) = io::split(stream);
     Ok((Box::pin(read_half), Box::pin(write_half)))

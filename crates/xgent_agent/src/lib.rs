@@ -5,20 +5,24 @@
 
 pub mod agent_loop;
 pub mod bridge;
+pub mod compaction;
 pub mod conversation;
 pub mod events;
 pub mod format;
 pub mod provider_state;
+pub mod session_store;
 
 #[cfg(test)]
 mod bridge_tests;
 
 pub use agent_loop::agent_poll_system;
 pub use bridge::{AgentBridge, AgentBridgeConfig, AgentCommand, AgentEvent, ProviderClient};
+pub use compaction::{CompactionError, CompactionProvider, CompactionResult};
 pub use conversation::{Conversation, ConversationStatus};
 pub use events::*;
 pub use format::build_request;
 pub use provider_state::{ContextState, ProviderInfo};
+pub use session_store::{SessionStore, session_file_path};
 
 use bevy::prelude::*;
 
@@ -39,6 +43,8 @@ impl Plugin for XgentAgentPlugin {
             .add_message::<ConfirmDecisionMessage>()
             .add_message::<DoneMessage>()
             .add_message::<ErrorMessage>()
+            .add_message::<SteeringMessage>()
+            .add_message::<FollowUpMessage>()
             .init_resource::<Conversation>()
             .init_resource::<ProviderInfo>()
             .init_resource::<ContextState>()

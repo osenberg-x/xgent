@@ -6,10 +6,13 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::Path;
+use tokio_util::sync::CancellationToken;
 use xgent_core::chat::ToolSchema;
 
 use crate::path::resolve_in_project;
-use crate::tool::{Tool, ToolCtx, ToolResult};
+use crate::tool::{
+    Concurrency, Tool, ToolCtx, ToolError, ToolResult, ToolTier, ToolUpdateCallback,
+};
 
 /// 递归搜索限制的最大结果数与最大深度，避免超大仓库卡死。
 const MAX_RESULTS: usize = 200;
@@ -39,6 +42,14 @@ impl Tool for SearchFiles {
         }
     }
 
+    fn tier(&self) -> ToolTier {
+        ToolTier::Read
+    }
+
+    fn concurrency(&self) -> Concurrency {
+        Concurrency::Shared
+    }
+
     fn summarize(&self, input: &Value) -> String {
         let pattern = input["pattern"].as_str().unwrap_or("?");
         match input["path"].as_str() {
@@ -47,23 +58,29 @@ impl Tool for SearchFiles {
         }
     }
 
-    async fn execute(&self, input: Value, ctx: &ToolCtx) -> ToolResult {
+    async fn execute(
+        &self,
+        input: Value,
+        ctx: &ToolCtx,
+        _signal: CancellationToken,
+        _on_update: Option<&ToolUpdateCallback>,
+    ) -> Result<ToolResult, ToolError> {
         let Some(pattern) = input["pattern"].as_str() else {
-            return ToolResult {
+            return Ok(ToolResult {
                 output: "缺少参数 pattern".into(),
-                success: false,
+                is_error: true,
                 side_effect: None,
-            };
+            });
         };
         let start_rel = input["path"].as_str().unwrap_or(".");
         let start = match resolve_in_project(&ctx.project_root, start_rel) {
             Ok(p) => p,
             Err(e) => {
-                return ToolResult {
+                return Ok(ToolResult {
                     output: e,
-                    success: false,
+                    is_error: true,
                     side_effect: None,
-                };
+                });
             }
         };
 
@@ -83,11 +100,11 @@ impl Tool for SearchFiles {
         if count >= MAX_RESULTS {
             output.push_str(&format!("\n（已达最大结果数 {MAX_RESULTS}，截断）\n"));
         }
-        ToolResult {
+        Ok(ToolResult {
             output,
-            success: true,
+            is_error: false,
             side_effect: None,
-        }
+        })
     }
 }
 
@@ -194,8 +211,16 @@ mod tests {
             project_root: root.clone(),
             tool_policy: Default::default(),
         };
-        let r = SearchFiles.execute(json!({"pattern": "foo"}), &ctx).await;
-        assert!(r.success);
+        let r = SearchFiles
+            .execute(
+                json!({"pattern": "foo"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!r.is_error);
         assert!(r.output.contains("src/a.rs:1"));
         assert!(r.output.contains("b.txt:1"));
     }
@@ -210,8 +235,16 @@ mod tests {
         tokio::fs::write(dir.path().join("x.txt"), "abc")
             .await
             .unwrap();
-        let r = SearchFiles.execute(json!({"pattern": "zzz"}), &ctx).await;
-        assert!(r.success);
+        let r = SearchFiles
+            .execute(
+                json!({"pattern": "zzz"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!r.is_error);
         assert!(r.output.contains("未找到"));
     }
 
@@ -230,8 +263,14 @@ mod tests {
             tool_policy: Default::default(),
         };
         let r = SearchFiles
-            .execute(json!({"pattern": "findme"}), &ctx)
-            .await;
+            .execute(
+                json!({"pattern": "findme"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
         assert!(!r.output.contains("target/junk.rs"), "应忽略 target 目录");
     }
 

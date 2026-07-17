@@ -45,10 +45,7 @@ pub struct FilePanelPlugin;
 impl Plugin for FilePanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProjectRoot>()
-            .add_systems(
-                Startup,
-                spawn_file_panel.after(crate::layout::spawn_layout),
-            )
+            .add_systems(Startup, spawn_file_panel.after(crate::layout::spawn_layout))
             .add_systems(Update, (handle_file_click, rebuild_file_tree));
     }
 }
@@ -111,11 +108,7 @@ fn list_dir(dir: &PathBuf) -> Vec<DirContent> {
             continue;
         }
         let is_dir = path.is_dir();
-        entries.push(DirContent {
-            name,
-            path,
-            is_dir,
-        });
+        entries.push(DirContent { name, path, is_dir });
     }
     entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
         (true, false) => std::cmp::Ordering::Less,
@@ -169,12 +162,7 @@ fn rebuild_file_tree(
 }
 
 /// spawn 一个文件树条目（目录或文件）。
-fn spawn_entry(
-    parent: &mut ChildSpawnerCommands,
-    entry: &DirContent,
-    theme: &Theme,
-    font: f32,
-) {
+fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Theme, font: f32) {
     let icon = if entry.is_dir { "📁" } else { "📄" };
     if entry.is_dir {
         parent.spawn((

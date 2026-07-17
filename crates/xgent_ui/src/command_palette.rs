@@ -4,8 +4,8 @@
 //! 键盘：↑↓ 导航、Enter 执行、Esc 关闭。
 //! 面板打开/关闭由快捷键 `Cmd+Shift+P` 触发（见 [`crate::shortcuts`]）。
 
-use bevy::input::keyboard::KeyCode;
 use bevy::input::ButtonInput;
+use bevy::input::keyboard::KeyCode;
 use bevy::input_focus::AutoFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -238,7 +238,12 @@ fn rebuild_list(
             let Some(cmd) = registry.commands.get(idx) else {
                 continue;
             };
-            let is_selected = idx == state.filtered.get(state.selected).copied().unwrap_or(usize::MAX);
+            let is_selected = idx
+                == state
+                    .filtered
+                    .get(state.selected)
+                    .copied()
+                    .unwrap_or(usize::MAX);
             let bg = if is_selected {
                 BackgroundColor(Color::srgba(0.36, 0.62, 0.92, 0.3))
             } else {
@@ -256,7 +261,11 @@ fn rebuild_list(
                     font_size: FontSize::Px(font),
                     ..default()
                 },
-                TextColor(if is_selected { theme.text } else { theme.text_dim }),
+                TextColor(if is_selected {
+                    theme.text
+                } else {
+                    theme.text_dim
+                }),
                 PaletteItemMarker { index: idx },
             ));
         }

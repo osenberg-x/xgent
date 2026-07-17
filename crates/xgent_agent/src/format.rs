@@ -1,50 +1,48 @@
 //! chat 请求构造：把消息历史与上下文结果组装为 [`ChatRequest`]。
 
 use xgent_context::provider::ContextResult;
-use xgent_core::chat::{ChatMessage, ChatRequest, Role, ToolSchema};
+use xgent_core::chat::{AgentMessage, ChatRequest, Role, ToolSchema, convert_to_llm};
 
-/// agent system 提示词。
-const SYSTEM_PROMPT: &str = "你是 XGent，一个面向个人开发者的 AI 代码助手。\
-你通过工具读写文件、运行命令来协助编码。请优先使用工具完成实际操作，\
-给出简洁准确的说明。仅在你确定安全时建议执行命令。";
+/// agent system 提示词模板。
+///
+/// 在编译期由 `include_str!` 内联 `prompts/system.md`；运行时再拼接项目上下文
+/// （目录树摘要 + 相关上下文片段）注入为 system message。
+const SYSTEM_PROMPT: &str = include_str!("prompts/system.md");
 
 /// 构造对话请求。
 ///
-/// 注入顺序：system（角色 + 上下文）→ 历史消息。
+/// 注入顺序：system（角色 + 上下文）→ 历史消息（经 convert_to_llm 转换）。
+/// Conversation 持有 AgentMessage[]，调用 LLM 前过滤 UI-only 类型（见 ADR-0005）。
+///
+/// 系统提示词来自 `prompts/system.md`（include_str! 编译期内联），项目上下文
+/// （目录树与相关片段）在运行时通过 format! 拼接到该提示词之后。
 pub fn build_request(
-    messages: &[ChatMessage],
+    messages: &[AgentMessage],
     context: &ContextResult,
     provider: &str,
     model: &str,
     tools: Option<Vec<ToolSchema>>,
 ) -> ChatRequest {
-    let mut all = Vec::new();
+    let mut all = convert_to_llm(messages);
 
-    // system message：角色 + 上下文
+    // system message：角色模板 + 项目上下文（插到最前）
     let mut system = String::from(SYSTEM_PROMPT);
     if let Some(tree) = &context.tree_summary {
-        system.push_str("\n\n## 项目结构\n```\n");
+        system.push_str("\n\n## 项目结构\n");
         system.push_str(tree);
-        system.push_str("\n```");
     }
     if !context.chunks.is_empty() {
         system.push_str("\n\n## 相关上下文\n");
         for chunk in &context.chunks {
             system.push_str(&format!(
-                "\n### {}\n（{}）\n```\n{}\n```",
+                "### {}（{}）\n```\n{}\n```\n",
                 chunk.path.display(),
                 chunk.relevance,
                 chunk.content
             ));
         }
     }
-    all.push(ChatMessage {
-        role: Role::System,
-        content: system,
-    });
-
-    // 历史消息
-    all.extend_from_slice(messages);
+    all.insert(0, xgent_core::chat::ChatMessage::text(Role::System, system));
 
     ChatRequest {
         provider: provider.to_string(),
@@ -59,21 +57,44 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use xgent_context::provider::ContextChunk;
+    use xgent_core::chat::{AgentMessage, ContentBlock, UserMessage};
+
+    /// 从 content blocks 提取所有 Text 块拼接为字符串（测试辅助）。
+    fn text_of(content: &[ContentBlock]) -> String {
+        content
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    /// 构造纯文本 UserMessage（测试辅助）。
+    fn user_msg(text: &str) -> AgentMessage {
+        AgentMessage::User(UserMessage {
+            content: vec![ContentBlock::Text { text: text.into() }],
+            timestamp: 0,
+        })
+    }
 
     #[test]
     fn build_request_includes_system_and_history() {
-        let msgs = vec![ChatMessage {
-            role: Role::User,
-            content: "hi".into(),
-        }];
+        let msgs = vec![user_msg("hi")];
         let ctx = ContextResult::default();
         let req = build_request(&msgs, &ctx, "openai", "gpt-4", None);
         assert_eq!(req.provider, "openai");
         assert_eq!(req.model, "gpt-4");
         assert_eq!(req.messages.len(), 2); // system + user
         assert_eq!(req.messages[0].role, Role::System);
-        assert!(req.messages[0].content.contains("XGent"));
-        assert_eq!(req.messages[1].content, "hi");
+        let sys_text = text_of(&req.messages[0].content);
+        // 系统提示词来自模板（include_str! 加载 system.md），含 XGent 角色
+        assert!(sys_text.contains("XGent"));
+        assert!(sys_text.contains("工具使用规则"));
+        assert!(sys_text.contains("工作流程"));
+        assert!(sys_text.contains("交付契约"));
+        assert_eq!(text_of(&req.messages[1].content), "hi");
         assert!(req.tools.is_none());
     }
 
@@ -90,10 +111,25 @@ mod tests {
             total_tokens: 10,
         };
         let req = build_request(&[], &ctx, "p", "m", None);
-        let sys = &req.messages[0].content;
-        assert!(sys.contains("项目结构"));
-        assert!(sys.contains("src/main.rs"));
-        assert!(sys.contains("相关上下文"));
-        assert!(sys.contains("fn main(){}"));
+        let sys_text = text_of(&req.messages[0].content);
+        assert!(sys_text.contains("项目结构"));
+        assert!(sys_text.contains("src/main.rs"));
+        assert!(sys_text.contains("相关上下文"));
+        assert!(sys_text.contains("fn main(){}"));
+    }
+
+    #[test]
+    fn build_request_filters_notification() {
+        let msgs = vec![
+            user_msg("hi"),
+            AgentMessage::Notification(xgent_core::chat::NotificationMessage {
+                text: "UI-only".into(),
+                timestamp: 0,
+            }),
+        ];
+        let ctx = ContextResult::default();
+        let req = build_request(&msgs, &ctx, "p", "m", None);
+        // Notification 被过滤，只剩 system + user
+        assert_eq!(req.messages.len(), 2);
     }
 }

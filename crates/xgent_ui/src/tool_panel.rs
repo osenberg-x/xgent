@@ -36,7 +36,10 @@ pub struct ToolPanelPlugin;
 
 impl Plugin for ToolPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_tool_card, update_tool_result).after(xgent_agent::agent_loop::agent_poll_system));
+        app.add_systems(
+            Update,
+            (spawn_tool_card, update_tool_result).after(xgent_agent::agent_loop::agent_poll_system),
+        );
     }
 }
 
@@ -74,58 +77,56 @@ fn spawn_tool_card(
             ))
             .with_children(|card| {
                 // 工具名 + 参数摘要 + 状态标识
-                card.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Row,
-                        column_gap: px(space::SM),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|header| {
-                    // 工具图标
-                    header.spawn((
-                        Text::new("🔧"),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
-                    // 工具名
-                    header.spawn((
-                        Text::new(ev.tool_id.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
-                    // 参数摘要
-                    header.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        Text::new(summary),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
-                    // 状态标识（初始为"执行中"）
-                    header.spawn((
-                        Text::new(tr(&loc, "tool-running")),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.accent),
-                        ToolStatusLabelMarker,
-                    ));
-                });
+                card.spawn((Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::SM),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },))
+                    .with_children(|header| {
+                        // 工具图标
+                        header.spawn((
+                            Text::new("🔧"),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.text),
+                        ));
+                        // 工具名
+                        header.spawn((
+                            Text::new(ev.tool_id.clone()),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.text),
+                        ));
+                        // 参数摘要
+                        header.spawn((
+                            Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            },
+                            Text::new(summary),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.text_dim),
+                        ));
+                        // 状态标识（初始为"执行中"）
+                        header.spawn((
+                            Text::new(tr(&loc, "tool-running")),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.accent),
+                            ToolStatusLabelMarker,
+                        ));
+                    });
                 // 结果区域（初始隐藏）
                 card.spawn((
                     Node {
@@ -163,15 +164,15 @@ fn update_tool_result(
             if card.tool_id != ev.tool_id {
                 continue;
             }
-            let status_label = if ev.success {
-                tr(&loc, "tool-done")
-            } else {
+            let status_label = if ev.is_error {
                 tr(&loc, "tool-failed")
-            };
-            let status_color = if ev.success {
-                Color::srgba(0.3, 0.8, 0.4, 1.0)
             } else {
+                tr(&loc, "tool-done")
+            };
+            let status_color = if ev.is_error {
                 Color::srgba(0.9, 0.3, 0.3, 1.0)
+            } else {
+                Color::srgba(0.3, 0.8, 0.4, 1.0)
             };
             {
                 let mut q_status = params.p0();

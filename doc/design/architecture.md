@@ -332,7 +332,7 @@ trait ContextProvider {
 
 - 全局配置（daemon 协调）：provider 列表、API key、全局偏好。TOML 存平台规范路径。
 - 项目配置（本地隔离）：项目级 provider 覆盖、上下文策略、工具白名单。TOML 存 `<project>/.xgent/config.toml`。
-- 会话历史：SQLite，存平台路径下 `sessions.db`。
+- 会话历史：JSONL append-only（主存储），存 `<project>/.xgent/sessions/<session_id>.jsonl`。元数据索引/prompt 历史/模型使用统计保留 SQLite（P1）。见 ADR-0008。
 - daemon 侧 `ConfigStore` 持有全局配置并协调多客户端读写（文件锁 + 变更通知）。
 
 ### 6.5 IPC 协议契约

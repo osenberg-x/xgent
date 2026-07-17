@@ -122,11 +122,7 @@ fn toggle_panel(
 }
 
 /// spawn 设置面板 overlay。
-fn spawn_panel(
-    commands: &mut Commands,
-    theme: &Theme,
-    loc: &Localizer,
-) {
+fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
     let font = theme.font_size;
     commands
         .spawn((
@@ -187,53 +183,51 @@ fn spawn_panel(
                     },
                     TextColor(theme.text_dim),
                 ));
-                card.spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: px(space::SM),
-                        ..default()
-                    },
-                ))
-                .with_children(|row| {
-                    let kinds = [
-                        (
-                            xgent_settings_core::global::ProviderKind::OpenAiCompat,
-                            tr(loc, "settings-kind-openai-compat"),
-                        ),
-                        (
-                            xgent_settings_core::global::ProviderKind::ResponseApi,
-                            tr(loc, "settings-kind-response-api"),
-                        ),
-                        (
-                            xgent_settings_core::global::ProviderKind::Anthropic,
-                            tr(loc, "settings-kind-anthropic"),
-                        ),
-                        (
-                            xgent_settings_core::global::ProviderKind::Ollama,
-                            tr(loc, "settings-kind-ollama"),
-                        ),
-                    ];
-                    for (kind, label) in kinds {
-                        row.spawn((
-                            Button,
-                            Node {
-                                padding: UiRect::all(px(space::SM)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.bar),
-                            Text::new(label),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(theme.text),
-                            KindButton {
-                                kind,
-                                selected: false,
-                            },
-                        ));
-                    }
-                });
+                card.spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::SM),
+                    ..default()
+                },))
+                    .with_children(|row| {
+                        let kinds = [
+                            (
+                                xgent_settings_core::global::ProviderKind::OpenAiCompat,
+                                tr(loc, "settings-kind-openai-compat"),
+                            ),
+                            (
+                                xgent_settings_core::global::ProviderKind::ResponseApi,
+                                tr(loc, "settings-kind-response-api"),
+                            ),
+                            (
+                                xgent_settings_core::global::ProviderKind::Anthropic,
+                                tr(loc, "settings-kind-anthropic"),
+                            ),
+                            (
+                                xgent_settings_core::global::ProviderKind::Ollama,
+                                tr(loc, "settings-kind-ollama"),
+                            ),
+                        ];
+                        for (kind, label) in kinds {
+                            row.spawn((
+                                Button,
+                                Node {
+                                    padding: UiRect::all(px(space::SM)),
+                                    ..default()
+                                },
+                                BackgroundColor(theme.bar),
+                                Text::new(label),
+                                TextFont {
+                                    font_size: FontSize::Px(font),
+                                    ..default()
+                                },
+                                TextColor(theme.text),
+                                KindButton {
+                                    kind,
+                                    selected: false,
+                                },
+                            ));
+                        }
+                    });
 
                 // API Base
                 card.spawn((
@@ -311,11 +305,7 @@ fn spawn_panel(
 }
 
 /// 创建一个 EditableText 输入框节点。
-fn text_input_node(
-    theme: &Theme,
-    font: f32,
-    marker: impl Component,
-) -> impl Bundle {
+fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bundle {
     (
         Node {
             padding: UiRect::all(px(space::SM)),
@@ -384,10 +374,22 @@ fn handle_save_button(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        let provider_id = q_id.single().map(|e| e.value().to_string()).unwrap_or_default();
-        let api_base = q_base.single().map(|e| e.value().to_string()).unwrap_or_default();
-        let api_key = q_key.single().map(|e| e.value().to_string()).unwrap_or_default();
-        let model = q_model.single().map(|e| e.value().to_string()).unwrap_or_default();
+        let provider_id = q_id
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
+        let api_base = q_base
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
+        let api_key = q_key
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
+        let model = q_model
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
 
         if !provider_id.is_empty() {
             writer.write(SaveProviderConfigMessage {

@@ -18,6 +18,18 @@ pub struct UserInputMessage {
 #[derive(Message)]
 pub struct AbortMessage;
 
+/// Steering 消息：用户在 agent 执行中插话（UI → agent，注入到当前对话）。
+#[derive(Message)]
+pub struct SteeringMessage {
+    pub text: String,
+}
+
+/// Follow-up 消息：agent 停止后注入后续消息继续对话（UI → agent）。
+#[derive(Message)]
+pub struct FollowUpMessage {
+    pub text: String,
+}
+
 /// provider 流式 delta（agent → UI）。
 #[derive(Message)]
 pub struct DeltaMessage {
@@ -36,7 +48,8 @@ pub struct ToolCallMessage {
 pub struct ToolResultMessage {
     pub tool_id: String,
     pub output: String,
-    pub success: bool,
+    /// 是否为逻辑失败（语义反转：true 表示失败）
+    pub is_error: bool,
 }
 
 /// 需要用户确认（agent → UI，触发弹窗）。

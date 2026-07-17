@@ -23,7 +23,11 @@ async fn mock_daemon_respond(listener: UnixListener) {
     let req: Request = serde_json::from_str(line.trim()).unwrap();
     let resp = Response::ok(req.id, serde_json::json!({"echo": req.method}));
     let resp_line = serde_json::to_string(&resp).unwrap();
-    reader.get_mut().write_all(resp_line.as_bytes()).await.unwrap();
+    reader
+        .get_mut()
+        .write_all(resp_line.as_bytes())
+        .await
+        .unwrap();
     reader.get_mut().write_all(b"\n").await.unwrap();
 }
 
@@ -37,7 +41,11 @@ async fn mock_daemon_notif(listener: UnixListener) {
     let req: Request = serde_json::from_str(line.trim()).unwrap();
     let resp = Response::ok(req.id, serde_json::json!({"stream_id": 42}));
     let resp_line = serde_json::to_string(&resp).unwrap();
-    reader.get_mut().write_all(resp_line.as_bytes()).await.unwrap();
+    reader
+        .get_mut()
+        .write_all(resp_line.as_bytes())
+        .await
+        .unwrap();
     reader.get_mut().write_all(b"\n").await.unwrap();
 
     // 推送一条 fs.changed 通知
@@ -50,7 +58,11 @@ async fn mock_daemon_notif(listener: UnixListener) {
         }),
     );
     let notif_line = serde_json::to_string(&notif).unwrap();
-    reader.get_mut().write_all(notif_line.as_bytes()).await.unwrap();
+    reader
+        .get_mut()
+        .write_all(notif_line.as_bytes())
+        .await
+        .unwrap();
     reader.get_mut().write_all(b"\n").await.unwrap();
 }
 
@@ -146,7 +158,11 @@ async fn config_read_request_response() {
         let req: Request = serde_json::from_str(line.trim()).unwrap();
         let resp = Response::ok(req.id, serde_json::json!({"value": "openai"}));
         let resp_line = serde_json::to_string(&resp).unwrap();
-        reader.get_mut().write_all(resp_line.as_bytes()).await.unwrap();
+        reader
+            .get_mut()
+            .write_all(resp_line.as_bytes())
+            .await
+            .unwrap();
         reader.get_mut().write_all(b"\n").await.unwrap();
     });
 
@@ -192,7 +208,11 @@ async fn fs_watch_request_response() {
 
         let resp = Response::ok(req.id, serde_json::json!({"ok": true}));
         let resp_line = serde_json::to_string(&resp).unwrap();
-        reader.get_mut().write_all(resp_line.as_bytes()).await.unwrap();
+        reader
+            .get_mut()
+            .write_all(resp_line.as_bytes())
+            .await
+            .unwrap();
         reader.get_mut().write_all(b"\n").await.unwrap();
     });
 
@@ -234,14 +254,14 @@ async fn error_response_from_daemon() {
         let req: Request = serde_json::from_str(line.trim()).unwrap();
         let resp = Response::err(
             req.id,
-            xgent_core::proto::RpcError::new(
-                xgent_core::proto::METHOD_NOT_FOUND,
-                "未知方法",
-                None,
-            ),
+            xgent_core::proto::RpcError::new(xgent_core::proto::METHOD_NOT_FOUND, "未知方法", None),
         );
         let resp_line = serde_json::to_string(&resp).unwrap();
-        reader.get_mut().write_all(resp_line.as_bytes()).await.unwrap();
+        reader
+            .get_mut()
+            .write_all(resp_line.as_bytes())
+            .await
+            .unwrap();
         reader.get_mut().write_all(b"\n").await.unwrap();
     });
 

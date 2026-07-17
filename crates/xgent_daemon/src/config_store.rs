@@ -101,8 +101,8 @@ impl ConfigCoordinator {
                 let id = parts[1].to_string();
                 if parts.len() == 2 {
                     // 写入/替换整个 ProviderConfig
-                    let pc: ProviderConfig = serde_json::from_value(value.clone())
-                        .map_err(|e| {
+                    let pc: ProviderConfig =
+                        serde_json::from_value(value.clone()).map_err(|e| {
                             XgentError::Config(format!("provider 配置反序列化失败: {e}"))
                         })?;
                     self.config.providers.insert(id, pc);
@@ -148,9 +148,8 @@ fn read_provider_field(pc: &ProviderConfig, field: &str) -> Value {
 fn write_provider_field(pc: &mut ProviderConfig, field: &str, value: &Value) -> XgentResult<()> {
     match field {
         "kind" => {
-            pc.kind = serde_json::from_value(value.clone()).map_err(|e| {
-                XgentError::Config(format!("provider.kind 反序列化失败: {e}"))
-            })?;
+            pc.kind = serde_json::from_value(value.clone())
+                .map_err(|e| XgentError::Config(format!("provider.kind 反序列化失败: {e}")))?;
         }
         "api_base" => pc.api_base = parse_string(field, value)?,
         "api_key" => pc.api_key = parse_string(field, value)?,
@@ -172,9 +171,7 @@ fn write_provider_field(pc: &mut ProviderConfig, field: &str, value: &Value) -> 
                 as u32;
         }
         _ => {
-            return Err(XgentError::Config(format!(
-                "未知 provider 字段: {field}"
-            )));
+            return Err(XgentError::Config(format!("未知 provider 字段: {field}")));
         }
     }
     Ok(())
@@ -247,10 +244,12 @@ mod tests {
     #[test]
     fn write_provider_field_creates_entry() {
         let mut c = ConfigCoordinator::with_config(empty_config());
-        c.write("providers.myai.api_base", json!("https://api.example.com/v1"))
-            .unwrap();
-        c.write("providers.myai.api_key", json!("sk-xxx"))
-            .unwrap();
+        c.write(
+            "providers.myai.api_base",
+            json!("https://api.example.com/v1"),
+        )
+        .unwrap();
+        c.write("providers.myai.api_key", json!("sk-xxx")).unwrap();
         assert_eq!(
             c.read("providers.myai.api_base"),
             json!("https://api.example.com/v1")
@@ -263,8 +262,11 @@ mod tests {
     #[test]
     fn write_provider_model_overrides_inserts_default_key() {
         let mut c = ConfigCoordinator::with_config(empty_config());
-        c.write("providers.myai.api_base", json!("https://api.example.com/v1"))
-            .unwrap();
+        c.write(
+            "providers.myai.api_base",
+            json!("https://api.example.com/v1"),
+        )
+        .unwrap();
         // 写 model_overrides：插入式，设 model_overrides["default"]
         c.write("providers.myai.model_overrides", json!("gpt-4o"))
             .unwrap();

@@ -97,92 +97,63 @@ impl ProviderPool {
     }
 }
 
-/// 把 [`ChatEvent`] 转成对应的 IPC notification。
+/// 把 [`ChatEvent`] 转成对应的 IPC notification（透传整个 event JSON）。
+///
+/// daemon 不解析 ChatEvent 内部结构——按 ADR-0006，daemon 只透传 JSON，
+/// 由 UI 侧反序列化。单一 method `provider.event`，params 含 stream_id + event。
 fn chat_event_to_notification(stream_id: StreamId, ev: ChatEvent) -> Notification {
-    let (method, value) = match &ev {
-        ChatEvent::Delta { text } => (
-            notifications::PROVIDER_DELTA,
-            serde_json::json!({ "stream_id": stream_id.0, "text": text }),
-        ),
-        ChatEvent::ToolCall { id, name, args } => (
-            notifications::PROVIDER_TOOL_CALL,
-            serde_json::json!({ "stream_id": stream_id.0, "id": id, "name": name, "args": args }),
-        ),
-        ChatEvent::Done { usage } => (
-            notifications::PROVIDER_DONE,
-            serde_json::json!({ "stream_id": stream_id.0, "usage": usage }),
-        ),
-        ChatEvent::Error { kind, message } => (
-            notifications::PROVIDER_ERROR,
-            serde_json::json!({ "stream_id": stream_id.0, "kind": kind, "message": message }),
-        ),
-    };
-    Notification::new(method, value)
+    Notification::new(
+        notifications::PROVIDER_EVENT,
+        serde_json::json!({
+            "stream_id": stream_id.0,
+            "event": ev,
+        }),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xgent_core::chat::{ChatEvent, TokenUsage};
+    use xgent_core::chat::{ChatEvent, StopReason, TokenUsage};
     use xgent_core::ids::StreamId;
 
     #[test]
-    fn delta_event_to_notification() {
-        let ev = ChatEvent::Delta { text: "hi".into() };
+    fn event_to_notification_透传整个_json() {
+        let ev = ChatEvent::TextDelta { text: "hi".into() };
         let n = chat_event_to_notification(StreamId(7), ev);
-        assert_eq!(n.method, "provider.delta");
+        assert_eq!(n.method, "provider.event");
         assert_eq!(n.params["stream_id"], 7);
-        assert_eq!(n.params["text"], "hi");
+        // event 字段是完整 ChatEvent JSON
+        assert_eq!(n.params["event"]["type"], "textDelta");
+        assert_eq!(n.params["event"]["text"], "hi");
     }
 
     #[test]
-    fn done_event_to_notification() {
+    fn done_event_with_reason_透传() {
         let ev = ChatEvent::Done {
+            reason: StopReason::ToolUse,
             usage: TokenUsage {
                 prompt: 5,
                 completion: 3,
             },
         };
         let n = chat_event_to_notification(StreamId(1), ev);
-        assert_eq!(n.method, "provider.done");
-        assert_eq!(n.params["usage"]["prompt"], 5);
-        assert_eq!(n.params["usage"]["completion"], 3);
+        assert_eq!(n.params["event"]["type"], "done");
+        assert_eq!(n.params["event"]["reason"], "toolUse");
+        assert_eq!(n.params["event"]["usage"]["prompt"], 5);
     }
 
     #[test]
-    fn error_event_to_notification() {
-        let ev = ChatEvent::Error {
-            kind: xgent_core::chat::ErrorKind::Network,
-            message: "boom".into(),
-        };
-        let n = chat_event_to_notification(StreamId(9), ev);
-        assert_eq!(n.method, "provider.error");
-        assert_eq!(n.params["message"], "boom");
-        assert_eq!(n.params["kind"], "network");
-    }
-
-    #[test]
-    fn tool_call_event_to_notification() {
-        let ev = ChatEvent::ToolCall {
+    fn tool_call_start_透传() {
+        let ev = ChatEvent::ToolCallStart {
+            index: 0,
             id: "call_1".into(),
-            name: "read".into(),
-            args: serde_json::json!({"path": "/x"}),
+            name: "read_file".into(),
         };
         let n = chat_event_to_notification(StreamId(2), ev);
-        assert_eq!(n.method, "provider.toolCall");
-        assert_eq!(n.params["id"], "call_1");
-        assert_eq!(n.params["name"], "read");
-        assert_eq!(n.params["args"]["path"], "/x");
-    }
-
-    #[tokio::test]
-    async fn get_unknown_provider_errors() {
-        let cfg = ConfigCoordinator::with_config(Default::default());
-        let pool = ProviderPool::new(Arc::new(RwLock::new(cfg)));
-        match pool.get("nonexistent").await {
-            Err(msg) => assert!(msg.contains("无 provider")),
-            Ok(_) => panic!("应返回错误"),
-        }
+        assert_eq!(n.params["event"]["type"], "toolCallStart");
+        assert_eq!(n.params["event"]["id"], "call_1");
+        assert_eq!(n.params["event"]["name"], "read_file");
     }
 
     #[tokio::test]

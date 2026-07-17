@@ -7273,8 +7273,10 @@ dependencies = [
  "bevy",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "xgent_context",
  "xgent_core",
  "xgent_provider",
@@ -7408,6 +7410,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "xgent_core",
  "xgent_settings_core",
 ]

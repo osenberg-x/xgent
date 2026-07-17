@@ -23,7 +23,10 @@ pub struct ConfirmDialogPlugin;
 
 impl Plugin for ConfirmDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (show_on_request, hide_on_decision).after(xgent_agent::agent_loop::agent_poll_system));
+        app.add_systems(
+            Update,
+            (show_on_request, hide_on_decision).after(xgent_agent::agent_loop::agent_poll_system),
+        );
     }
 }
 

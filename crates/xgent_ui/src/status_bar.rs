@@ -23,11 +23,12 @@ pub struct StatusBarPlugin;
 impl Plugin for StatusBarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TokenUsage>()
+            .add_systems(Startup, spawn_status_bar.after(crate::layout::spawn_layout))
             .add_systems(
-                Startup,
-                spawn_status_bar.after(crate::layout::spawn_layout),
-            )
-            .add_systems(Update, (update_status_text, track_token_usage).after(xgent_agent::agent_loop::agent_poll_system));
+                Update,
+                (update_status_text, track_token_usage)
+                    .after(xgent_agent::agent_loop::agent_poll_system),
+            );
     }
 }
 

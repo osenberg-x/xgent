@@ -3,8 +3,8 @@
 //! 职责：解析命令行参数、组装所有 UI 侧插件、探测/拉起 daemon、建立 IPC 连接、
 //! 把 IPC 封装为 agent bridge 用的 ProviderClient、打开项目、运行 Bevy App。
 
-mod daemon;
 mod config_bridge;
+mod daemon;
 mod fs_event_bridge;
 mod ipc_client;
 mod provider_client;
@@ -47,16 +47,13 @@ fn main() {
     // 初始化日志：tracing-subscriber 默认启用 tracing-log 特性，
     // 自动桥接 log crate → tracing，故 icu_provider 的日志也会被 EnvFilter 过滤。
     // 不使用 Bevy 的 LogPlugin（它会重复设置全局 subscriber），改为手动初始化。
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            tracing_subscriber::EnvFilter::new(
-                // wgpu/naga 噪音降级；icu_provider 的 data error warn 降级为 error
-                "info,wgpu=error,naga=warn,icu_provider=error",
-            )
-        });
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(
+            // wgpu/naga 噪音降级；icu_provider 的 data error warn 降级为 error
+            "info,wgpu=error,naga=warn,icu_provider=error",
+        )
+    });
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let args = Args::parse();
 
@@ -64,10 +61,7 @@ fn main() {
     let project_root = match std::fs::canonicalize(&args.project) {
         Ok(p) => p,
         Err(_) => {
-            eprintln!(
-                "错误：项目路径不存在或无法访问: {}",
-                args.project.display()
-            );
+            eprintln!("错误：项目路径不存在或无法访问: {}", args.project.display());
             std::process::exit(1);
         }
     };
@@ -94,22 +88,21 @@ fn main() {
         }
     };
     let ipc = Arc::new(ipc);
-
     // 构造 agent bridge 依赖
     let provider =
         Arc::new(IpcProviderClient::new(ipc.clone())) as Arc<dyn xgent_agent::ProviderClient>;
     let executor = Arc::new(ToolExecutor::with_defaults());
     let context = Arc::new(OnDemandContextProvider::new(project_root.clone()))
         as Arc<dyn xgent_context::ContextProvider>;
+    // 加载项目配置（bridge 需 tool_policy）
+    let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
     let bridge = AgentBridge::new(AgentBridgeConfig {
         provider,
         executor,
         context,
         project_root: project_root.clone(),
+        tool_policy: project_config.tool_policy.clone(),
     });
-
-    // 加载项目配置
-    let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
 
     // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model）
     let global_config = GlobalConfigStore::load().unwrap_or_default();
@@ -123,13 +116,10 @@ fn main() {
             let id = global_config.default_provider.clone();
             if id.is_empty() { None } else { Some(id) }
         });
-    let model = args
-        .model
-        .clone()
-        .or_else(|| {
-            let m = global_config.default_model.clone();
-            if m.is_empty() { None } else { Some(m) }
-        });
+    let model = args.model.clone().or_else(|| {
+        let m = global_config.default_model.clone();
+        if m.is_empty() { None } else { Some(m) }
+    });
     let (provider_id, model) = derive_provider_model(provider_id, model);
 
     // 通知订阅端（fs/config 桥接用）
@@ -137,13 +127,17 @@ fn main() {
 
     // 组装 App
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "XGent".into(),
-            ..default()
-        }),
-        ..default()
-    }).disable::<bevy::log::LogPlugin>())
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "XGent".into(),
+                    ..default()
+                }),
+                ..default()
+            })
+            .disable::<bevy::log::LogPlugin>(),
+    )
     .add_plugins((
         xui::XuiPlugin,
         xgent_settings::XgentSettingsPlugin,
@@ -153,7 +147,9 @@ fn main() {
         crate::fs_event_bridge::FsEventBridgePlugin,
     ))
     .insert_resource(args)
-    .insert_resource(xgent_ui::file_panel::ProjectRoot { path: project_root.clone() })
+    .insert_resource(xgent_ui::file_panel::ProjectRoot {
+        path: project_root.clone(),
+    })
     .insert_resource(Localizer::default())
     .insert_resource(Strings(Box::new(Localizer::default())))
     .insert_resource(bridge)

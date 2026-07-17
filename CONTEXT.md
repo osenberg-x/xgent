@@ -31,3 +31,41 @@ _Avoid_: provider 表单、配置表单
 **Provider 配置（MVP）**:
 F-07 在 MVP 阶段的"Provider 切换"边界：用户在 settings_panel 填最小可用字段集（含选 `kind` 下拉），保存后经 daemon 全局配置生效。`kind` 下拉 MVP 暴露 4 变体（`OpenAiCompat`/`ResponseApi`/`Anthropic`/`Ollama`），隐藏 `Custom`——因 `Custom` 需配套的请求模板/header 映射 UI，MVP 未实现，暴露只产半成品配置。MVP 的"自定义 API"由 `OpenAiCompat` + 用户填任意 `api_base` 覆盖（兼容大量第三方接口），真正的 `Custom` provider 留 F-14 或后续。运行时切换 UI（不重启换 provider）MVP 不做，当前选中 = `default_provider`。
 _Avoid_: provider 管理、provider 切换面板
+
+## Agent 核心类型（O1-O4 优化后）
+
+**ChatEvent**:
+provider 流式输出的事件枚举（跨进程协议类型，UI ↔ daemon）。细粒度变体：`Start`→（`TextStart`/`TextDelta`/`TextEnd` | `ThinkingStart`/`ThinkingDelta`/`ThinkingEnd` | `ToolCallStart`/`ToolCallDelta`/`ToolCallEnd`）*→`Done{reason,usage}`|`Error`。`#[serde(tag="type")]` 使 JSON-RPC notification 按 `type` 字段分发。MVP 不发射 Thinking 事件（OpenAiCompat 不解析 reasoning），变体定义预留给 Anthropic 适配器。
+_Avoid_: 流式 chunk、stream event
+
+**StopReason**:
+`ChatEvent::Done` 的字段，标记流结束原因：`Stop`/`ToolUse`/`Length`/`Aborted`/`Error`。**agent loop 不依赖 reason 决定是否继续**——`tool_calls.is_empty()` 才决定（对齐 omp）。reason 供 UI 展示与错误恢复参考（如 Length 后是否重试）。
+_Avoid_: finish_reason、停止原因
+
+**AgentMessage**:
+agent 层消息枚举：`User`/`Assistant`/`ToolResult`/`Notification`。`Notification` 是 UI-only（不发给 LLM）。Conversation 持有 `Vec<AgentMessage>`，调用 LLM 前经 `convert_to_llm` 过滤 UI-only 类型。对齐 omp 的 AgentMessage 设计。
+_Avoid_: 消息、message
+
+**ChatMessage**:
+LLM 层消息类型（provider 接收的格式）：`{ role: Role, content: Vec<ContentBlock> }`。**结构化**——content 是块数组，非字符串。对齐 Anthropic 协议原生形态；OpenAiCompat 的 `message_to_json` 按 role 展开为 OpenAI 协议形态（assistant+ToolCall→content+tool_calls 字段；Tool→role:tool+content+tool_call_id）。区别于 AgentMessage：ChatMessage 是 LLM 可理解子集，无 UI-only 变体。
+_Avoid_: LLM message、provider message
+
+**ContentBlock**:
+消息内容块枚举：`Text`/`ToolCall{id,name,args}`/`ToolResult{tool_call_id,content,is_error}`/`Image{data,mime_type}`。ChatMessage.content 与 AssistantMessage.content 共用。MVP 不实现 Image 的 UI 上传，类型定义保留。
+_Avoid_: content part、消息块
+
+**ToolTier**:
+工具安全分级（静态）：`Read`（读操作无副作用）/`Write`（修改 workspace/session 状态）/`Exec`（执行代码/shell，高危）。`Tool::tier()` 返回静态值，`Tool::approval_for(&input)` 可按参数动态升级（如 RunCommand 检测 `rm -rf` 始终返回 Exec）。区别于 SecurityPolicy——后者是运行时决议结果，由 `resolve_policy` 从 ToolTier + 用户配置推导。
+_Avoid_: 工具级别、approval level
+
+**SecurityPolicy**:
+工具运行时安全决议结果（非 trait 方法返回值）：`Approved`/`NeedsConfirmation`/`Denied`。由 `resolve_policy(tool_id, tier, input, tool, policy)` 按"配置 denied → 配置 approved → tool.approval_for 动态 tier → MVP 默认全 NeedsConfirmation"顺序推导。MVP 默认全 NeedsConfirmation；P1 引入 ApprovalMode（always-ask/write/yolo）后 Read 在 yolo 下自动批准。
+_Avoid_: 工具策略、approval
+
+**Concurrency**:
+工具并发模式：`Shared`（可与其他 Shared 工具并行）/`Exclusive`（独占，等前序全部完成）。`Tool::concurrency()` 声明。内置工具：ReadFile/SearchFiles=Shared，WriteFile/RunCommand=Exclusive。
+_Avoid_: 并行模式
+
+**ToolError**:
+工具执行错误类型：`Failed(String)`/`Aborted`/`Timeout(u64)`。`Tool::execute` 返回 `Result<ToolResult, ToolError>`。语义区分：`Aborted` 让 agent loop 走 abort 路径（停止后续工具）；`Failed`/`Timeout` 走错误回灌路径（错误文本回灌 LLM 让模型自纠）。非 ToolError 的 panic 由 agent loop catch 块兜底为 `is_error:true` 的 ToolResult。
+_Avoid_: 工具异常、tool exception

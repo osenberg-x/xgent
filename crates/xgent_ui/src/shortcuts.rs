@@ -20,7 +20,10 @@ pub struct ShortcutsPlugin;
 impl Plugin for ShortcutsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register_xgent_hotkeys)
-            .add_systems(Update, handle_hotkey_triggers.after(crate::command_palette::handle_palette_triggers));
+            .add_systems(
+                Update,
+                handle_hotkey_triggers.after(crate::command_palette::handle_palette_triggers),
+            );
     }
 }
 
@@ -49,8 +52,7 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
     ));
     // Cmd/Ctrl+,：打开设置（MVP 复用命令面板）
     let _ = reg.register(
-        Hotkey::new("settings.open", KeyCode::Comma, tr(&loc, "hotkey-settings"))
-            .with_primary(),
+        Hotkey::new("settings.open", KeyCode::Comma, tr(&loc, "hotkey-settings")).with_primary(),
     );
     // Cmd/Ctrl+B：切换文件面板
     let _ = reg.register(
@@ -63,12 +65,7 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
     );
     // Cmd/Ctrl+I：聚焦输入框
     let _ = reg.register(
-        Hotkey::new(
-            "input.focus",
-            KeyCode::KeyI,
-            tr(&loc, "hotkey-focus-input"),
-        )
-        .with_primary(),
+        Hotkey::new("input.focus", KeyCode::KeyI, tr(&loc, "hotkey-focus-input")).with_primary(),
     );
 }
 
