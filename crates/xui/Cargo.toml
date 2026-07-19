@@ -11,6 +11,11 @@ repository = "https://github.com/earendil-works/xgent"
 bevy = { workspace = true }
 xui_i18n = { path = "../xui_i18n" }
 thiserror = { workspace = true }
+# tree-sitter 语法高亮（MVP 仅 Rust grammar，随二进制发布，不做按需下载）
+tree-sitter = "0.23"
+tree-sitter-rust = "0.23"
+# 文本 rope：大文件 O(log n) 行/字符访问，cheap clone 供 undo 快照
+ropey = { workspace = true }
 
 [dev-dependencies]
 bevy = { workspace = true, features = ["bevy_ui_widgets"] }

@@ -9,6 +9,7 @@
 pub mod chat_panel;
 pub mod command_palette;
 pub mod confirm_dialog;
+pub mod editor;
 pub mod file_panel;
 pub mod i18n;
 pub mod layout;
@@ -39,6 +40,7 @@ impl Plugin for XgentUiPlugin {
             settings_panel::SettingsPanelPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
+            editor::EditorPlugin,
             shortcuts::ShortcutsPlugin,
         ));
     }

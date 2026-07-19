@@ -2,11 +2,13 @@
 //!
 //! 提供工具抽象 [`Tool`] trait、内置工具（ReadFile/WriteFile/SearchFiles/RunCommand）、
 //! 安全策略分级（Approved/NeedsConfirmation/Denied）与执行器 [`ToolExecutor`]。
+//! P1 新增 [`EditorTool`]（UI-only Tier，agent 驱动编辑器动作，默认 Approved）。
 //!
 //! 不依赖 Bevy——工具是纯异步逻辑。Bevy 桥接放 xgent_agent。
 
 pub mod builtins;
 pub mod confirm;
+pub mod editor_tool;
 pub mod executor;
 pub mod mcp;
 pub mod path;
@@ -15,6 +17,7 @@ pub mod tool;
 
 pub use builtins::{ReadFile, RunCommand, SearchFiles, WriteFile};
 pub use confirm::{ConfirmDecision, ConfirmRequest};
+pub use editor_tool::{EditorCommandRequest, EditorCommandSink, EditorTool};
 pub use executor::{ConfirmCallback, ToolExecutor};
 pub use path::resolve_in_project;
 pub use security::resolve_policy;

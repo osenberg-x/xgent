@@ -12,9 +12,17 @@ pub mod hotkeys;
 pub mod i18n_bridge;
 pub mod input;
 pub mod mouse_wheel_scroll;
+pub mod scrollbar;
+pub mod scroll_area;
 pub mod shortcuts;
+pub mod text_editor;
 pub mod virtual_list;
-
+pub use text_editor::{
+    EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope, TextEditor,
+    TextEditorPlugin, TextEditorUpdateSet,
+};
+pub use scroll_area::{ScrollArea, ScrollAreaMarker, ScrollAreaPlugin, StickToBottom};
+pub use scrollbar::{Scrollbar, ScrollbarPlugin, ScrollbarThumb, ScrollbarTrack};
 pub use command_palette::{
     CommandKind, CommandPalettePlugin, CommandPaletteState, CommandRegistry, PaletteCommand,
     PaletteTriggered,
@@ -24,7 +32,6 @@ pub use i18n_bridge::{Strings, tr, tr_with};
 pub use input::{ChatInput, ChatInputSubmitted, InputEnhancePlugin, SendModifier};
 pub use shortcuts::{HotkeyTriggered, ShortcutsPlugin};
 pub use virtual_list::{VirtualItemBuilder, VirtualList, VirtualListPlugin};
-
 use bevy::prelude::*;
 
 /// `xui` 插件：注册所有子组件插件与快捷键注册表。
@@ -39,7 +46,10 @@ impl Plugin for XuiPlugin {
             CommandPalettePlugin,
             InputEnhancePlugin,
             ShortcutsPlugin,
+            text_editor::TextEditorPlugin,
             mouse_wheel_scroll::MouseWheelScrollPlugin,
+            scroll_area::ScrollAreaPlugin,
+            scrollbar::ScrollbarPlugin,
         ))
         .init_resource::<HotkeyRegistry>();
     }

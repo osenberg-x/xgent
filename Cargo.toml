@@ -42,3 +42,7 @@ dirs = "5"
 fluent = "0.17"
 fluent-langneg = "0.1"
 unic-langid = "0.9"
+# 高性能同步原语（Mutex/RwLock 替代 std::sync）
+parking_lot = "0.12"
+# 文本 rope：大文件 O(log n) 行/字符访问，cheap clone 供 undo 快照
+ropey = "1.6"

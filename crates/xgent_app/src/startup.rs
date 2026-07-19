@@ -30,7 +30,7 @@ pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
         if let Err(e) = ipc.call_ok(xgent_core::methods::FS_WATCH, params).await {
             tracing::warn!("订阅 fs.watch 失败: {e}");
         } else {
-            tracing::info!("已订阅项目文件变更: {}", root.display());
+            tracing::debug!("已订阅项目文件变更: {}", root.display());
         }
     });
 }

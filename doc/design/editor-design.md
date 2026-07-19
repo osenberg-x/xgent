@@ -296,9 +296,45 @@ impl Plugin for CodeEditorPlugin {
 # 既有：bevy, xui_i18n
 tree-sitter = "0.23"
 tree-sitter-rust = "0.23"   # grammar 随二进制入
+ropey = "1.6"                # 文本 rope：大文件 O(log n) 行/字符访问
 ```
 
-注：tree-sitter 版本以实际发布时最新稳定为准，上述版本号为占位。
+注：版本以实际发布时最新稳定为准，上述版本号为占位。
+
+### 5.5 文本数据结构（Rope）
+
+`TextEditor` 内部文本载体为 `ropey::Rope`（非 `Vec<String>` 行表）：
+- 行/字符访问 O(log n)，大文件（>10k 行）不再 O(n) 全文拷贝。
+- cheap clone（O(1)），未来 undo 栈可存 `Rope` 快照而非 `String`。
+- `spans_for_line` 用 `rope.line_to_byte(row)` 定位行首，`rope.get_line(row)` 取行切片。
+- 与 `bevy::text::EditableText` 的关系：`EditableText` 是用户输入入口（IME/光标），
+  `update_syntax_highlight` 系统从 `EditableText` 同步文本到 `rope`（可编辑态），
+  或由业务层直接写 `rope`（只读虚拟化态，文件读取后）。`rope` 是渲染与解析的权威源。
+
+**不引入 tree-house / helix-core**：二者均 MPL-2.0，作为库依赖虽不触发文件级 copyleft，
+但 XGent 选择全 MIT 依赖栈（ropey MIT + tree-sitter MIT + tree-sitter-rust MIT），
+代价是自造 Transaction/History/Selection/Movement（线性 undo 栈 + 单光标，够中等能力边界）。
+
+### 5.6 渲染架构（单层 Text 流式布局）
+
+放弃"每逻辑行一个绝对定位行容器"模型——该模型在长行软换行时崩溃：
+一逻辑行被 parley 布局成多个视觉行，固定行高的行容器装不下，
+溢出到下一逻辑行造成覆盖（实测 `text_layout_h=48 > container_h=44`）。
+
+**新模型：单层 Text 流式布局**：
+- `VirtualContentMarker` 占位节点撑高滚动范围（`height = line_count × line_height`）
+- 其下挂一个 `VirtualTextMarker`（Text 节点），内容是可见行区间 `[start, end)`
+  的所有行拼接（行间 `\n`），带 TextSpan 高亮
+- Text 节点挂 `LineHeight::Px(line_height)`，parley 给每行精确像素高度——
+  软换行的视觉行也在该行行盒内，不溢出到下一逻辑行。**这是消除行间覆盖的关键**
+- Text 节点 `position: absolute, top = -(start × line_height)`，让可见行对齐视口顶部
+- 视口外内容靠 buffer 容器 `overflow: Hidden` 裁剪
+
+参考 helix-tui `Paragraph` widget + `WordWrapper`：单层文本流式布局，
+软换行由布局引擎处理，行高由 `LineHeight` 精确控制，无逐行独立容器。
+
+性能：只渲染可见行区间（视口高度/行高 + 2×overscan），内存 O(可见行)。
+滚动时若区间不变则只更新 `top` 偏移，区间变化才重建 TextSpan 子树。
 
 ---
 

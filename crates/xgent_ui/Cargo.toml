@@ -15,6 +15,9 @@ parley = { workspace = true }
 xui_i18n = { path = "../xui_i18n" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 bevy = { workspace = true, features = ["ui", "bevy_ui_widgets", "default_font", "bevy_dev_tools"] }
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
