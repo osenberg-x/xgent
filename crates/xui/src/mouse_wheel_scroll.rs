@@ -84,10 +84,14 @@ fn send_scroll_events(
     }
 }
 
-/// 把 [`Scroll`] delta 累加到命中的可滚动节点的 `ScrollPosition`，并做 `[0, max]`
-/// 钳位。到达边界时消费该轴 delta 以停止向上传播，避免父容器被误带动。
+/// 把 [`Scroll`] delta 累加到命中的可滚动节点的 `ScrollPosition`，到达边界时
+/// 停止向上传播，避免父容器被误带动。
 ///
-/// 钳位以 `ComputedNode` 当帧布局结果为准（`content_size` - `size`）。
+/// 不在此处手动 clamp `ScrollPosition`：`ComputedNode.content_size()` 是上一帧
+/// 布局结果，若占位撑高节点刚更新（content_size 变大但布局尚未重跑），按过时
+/// 的 `max_offset` 钳位会把 `scroll_position` 锁死在 0，滚轮完全失效。
+/// bevy 布局系统（`UiSystems::Layout`，`PostUpdate`）自身会用当帧最新 content_size
+/// 对 `ScrollPosition` 做 `[0, max]` 钳位，无需此处重复。
 fn on_scroll_handler(
     mut scroll: On<Scroll>,
     mut query: Query<(&mut ScrollPosition, &Node, &ComputedNode)>,
@@ -106,7 +110,7 @@ fn on_scroll_handler(
             scroll_position.x <= 0.0
         };
         if !at_edge {
-            scroll_position.x = (scroll_position.x + delta.x).clamp(0.0, max_offset.x.max(0.0));
+            scroll_position.x += delta.x;
             delta.x = 0.0;
         }
     }
@@ -118,7 +122,7 @@ fn on_scroll_handler(
             scroll_position.y <= 0.0
         };
         if !at_edge {
-            scroll_position.y = (scroll_position.y + delta.y).clamp(0.0, max_offset.y.max(0.0));
+            scroll_position.y += delta.y;
             delta.y = 0.0;
         }
     }
