@@ -2,7 +2,7 @@
 //!
 //! 综合配置覆盖、工具 tier 与动态 `approval_for(input)`，得出最终执行策略。
 //! 决议顺序：配置 denied → 配置 approved → 工具 `approval_for(input)` 动态 tier
-//! → MVP 默认全 `NeedsConfirmation`。
+//! → 按 tier 推导默认策略（`UiOnly`→`Approved`，其余→`NeedsConfirmation`）。
 
 use crate::tool::{SecurityPolicy, Tool, ToolTier};
 use serde_json::Value;
@@ -13,10 +13,10 @@ use xgent_settings_core::project::ToolPolicyConfig;
 /// 决议顺序：
 /// 1. `policy.denied` 命中 → [`SecurityPolicy::Denied`]
 /// 2. `policy.approved` 命中 → [`SecurityPolicy::Approved`]
-/// 3. `tool.approval_for(input)` 动态 tier（MVP 阶段 Read/Write/Exec
-///    全映射 [`SecurityPolicy::NeedsConfirmation`]）
-/// 4. 兜底 [`SecurityPolicy::NeedsConfirmation`]
-///
+/// 3. `tool.approval_for(input)` 动态 tier（保留供未来更严格判定）
+/// 4. 按 tier 推导默认：
+///    - [`ToolTier::UiOnly`] → [`SecurityPolicy::Approved`]（仅 UI 状态变更，无副作用）
+///    - `Read`/`Write`/`Exec` → [`SecurityPolicy::NeedsConfirmation`]（MVP 默认全需确认）
 /// `tool` 参数用于调用 `approval_for`；`tier` 为工具静态分层（由调用方
 /// 传入 `tool.tier()`），保留为显式参数便于未来在 yolo 模式下按 tier
 /// 自动批准 Read 工具。
@@ -37,9 +37,13 @@ pub fn resolve_policy(
     }
     // 3. 动态 approval_for（可能比静态 tier 更严格，如 run_command 危险命令）
     let _effective_tier = tool.approval_for(input);
-    // 4. MVP 默认：Read/Write/Exec 全映射 NeedsConfirmation
-    let _ = tier;
-    SecurityPolicy::NeedsConfirmation
+    // 4. 按 tier 推导默认策略：
+    //    - `UiOnly`（编辑器动作，仅 UI 状态变更，无副作用）→ `Approved`
+    //    - `Read`/`Write`/`Exec` → `NeedsConfirmation`（MVP 默认全需确认）
+    match tier {
+        ToolTier::UiOnly => SecurityPolicy::Approved,
+        ToolTier::Read | ToolTier::Write | ToolTier::Exec => SecurityPolicy::NeedsConfirmation,
+    }
 }
 
 #[cfg(test)]
@@ -196,6 +200,7 @@ mod tests {
                 ToolTier::Read => "read_file",
                 ToolTier::Write => "write_file",
                 ToolTier::Exec => "run_command",
+                ToolTier::UiOnly => "editor",
             };
             let tool = MockTool {
                 id: tool_id,
@@ -224,5 +229,39 @@ mod tests {
                 "tier {tier:?} 默认应为 NeedsConfirmation"
             );
         }
+    }
+
+    /// UiOnly tier 默认为 Approved（不走 NeedsConfirmation），
+    /// 但配置 denied 仍可拒绝、approved 显式批准仍生效。
+    /// 详见 `doc/design/editor-design.md` 6.4 节。
+    #[test]
+    fn uionly_tier_default_approved() {
+        let tool = MockTool {
+            id: "editor.open_file",
+            tier: ToolTier::UiOnly,
+            approval: None,
+        };
+        let p_default = ToolPolicyConfig::default();
+        assert_eq!(
+            resolve_policy("editor.open_file", ToolTier::UiOnly, &json!({}), &tool, &p_default),
+            SecurityPolicy::Approved,
+            "UiOnly 默认应为 Approved"
+        );
+    }
+
+    /// UiOnly 仍可被配置 denied 拒绝。
+    #[test]
+    fn uionly_tier_denied_overrides() {
+        let tool = MockTool {
+            id: "editor.open_file",
+            tier: ToolTier::UiOnly,
+            approval: None,
+        };
+        let p = policy(&[], &["editor.open_file"]);
+        assert_eq!(
+            resolve_policy("editor.open_file", ToolTier::UiOnly, &json!({}), &tool, &p),
+            SecurityPolicy::Denied,
+            "UiOnly 被 denied 配置拒绝"
+        );
     }
 }

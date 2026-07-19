@@ -13,6 +13,8 @@ use xui::shortcuts::HotkeyTriggered;
 
 use crate::i18n::tr;
 use crate::layout::FilePanelCollapsed;
+use crate::editor::EditorView;
+use crate::editor::tabs::CycleTabRequest;
 
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
@@ -67,6 +69,28 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
     let _ = reg.register(
         Hotkey::new("input.focus", KeyCode::KeyI, tr(&loc, "hotkey-focus-input")).with_primary(),
     );
+    // Cmd/Ctrl+Shift+E：切换到编辑器视图
+    let _ = reg.register(
+        Hotkey::new("editor.view", KeyCode::KeyE, tr(&loc, "hotkey-editor-view"))
+            .with_primary()
+            .with_shift(),
+    );
+    // Cmd/Ctrl+Shift+D：切换回对话视图
+    let _ = reg.register(
+        Hotkey::new("chat.view", KeyCode::KeyD, tr(&loc, "hotkey-chat-view"))
+            .with_primary()
+            .with_shift(),
+    );
+    // Cmd/Ctrl+W：关闭当前标签
+    let _ = reg.register(
+        Hotkey::new("editor.close_tab", KeyCode::KeyW, tr(&loc, "hotkey-editor-close-tab"))
+            .with_primary(),
+    );
+    // Cmd/Ctrl+Tab：循环切换标签
+    let _ = reg.register(
+        Hotkey::new("editor.cycle_tab", KeyCode::Tab, tr(&loc, "hotkey-editor-cycle-tab"))
+            .with_primary(),
+    );
 }
 
 /// 订阅 HotkeyTriggered，据 id 执行业务。
@@ -75,20 +99,36 @@ pub(crate) fn handle_hotkey_triggers(
     mut palette: ResMut<CommandPaletteState>,
     mut abort_writer: MessageWriter<AbortMessage>,
     mut file_panel: ResMut<FilePanelCollapsed>,
+    mut view: ResMut<EditorView>,
+    mut cycle_writer: MessageWriter<CycleTabRequest>,
 ) {
     for ev in reader.read() {
         match ev.id.as_str() {
             "palette.open" | "palette.open_files" => palette.open(),
             "chat.abort" => {
-                abort_writer.write(AbortMessage);
+                // 编辑器视图激活时，Esc 优先退出编辑器视图而非中断对话
+                if *view == EditorView::Editor {
+                    *view = EditorView::Chat;
+                } else {
+                    abort_writer.write(AbortMessage);
+                }
             }
             "settings.open" => palette.open(),
             "filepanel.toggle" => {
                 file_panel.0 = !file_panel.0;
             }
-            "input.focus" => {
-                // MVP：AutoFocus 已在输入框上，焦点由 bevy input_focus 管理
-                // 聚焦逻辑由 bevy 的 FocusedInput 系统自动处理
+            "input.focus" => {}
+            "editor.view" => {
+                *view = EditorView::Editor;
+            }
+            "chat.view" => {
+                *view = EditorView::Chat;
+            }
+            "editor.close_tab" => {
+                // 关闭当前标签：MVP 留给 UI 按钮处理
+            }
+            "editor.cycle_tab" => {
+                cycle_writer.write(CycleTabRequest { forward: true });
             }
             _ => {}
         }

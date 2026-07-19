@@ -66,7 +66,7 @@ cargo fmt                         # 格式化
 cargo clippy --workspace          # lint
 ```
 
-**注意**：构建依赖本地 `../bevy` 源码（0.19.0），确保该目录存在。编码时按需查阅 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。
+**注意**：构建依赖本地 `../bevy` 源码（0.19.0），确保该目录存在。编码时按需查阅 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。参考实现：zed 源码位于 `/Users/xdo/ws/zed`（gpui + editor 滚动抽象可借鉴，但底层 UI 库不同，仅作设计参考）。
 
 ---
 

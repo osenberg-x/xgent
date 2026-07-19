@@ -64,6 +64,13 @@ pub enum Concurrency {
 /// 用于 `resolve_policy` 推导运行时 [`SecurityPolicy`]。MVP 阶段
 /// Read/Write/Exec 全映射为 `NeedsConfirmation`；P1 引入 ApprovalMode 后
 /// Read 在 yolo 模式下可自动批准。
+/// 工具分层。
+///
+/// 用于 `resolve_policy` 推导运行时 [`SecurityPolicy`]。MVP 阶段
+/// Read/Write/Exec 全映射为 `NeedsConfirmation`；P1 引入 ApprovalMode 后
+/// Read 在 yolo 模式下可自动批准。P1 编辑器引入 `UiOnly` 变体，
+/// 默认 `Approved`（不走 `NeedsConfirmation`）——agent 驱动编辑器动作
+/// 仅触发 UI 状态变更，无文件/命令副作用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolTier {
     /// 只读（如 read_file、search_files）
@@ -72,6 +79,11 @@ pub enum ToolTier {
     Write,
     /// 执行（如 run_command）
     Exec,
+    /// UI-only（如 editor.* 工具：仅驱动 UI 状态，不直接 IO）
+    ///
+    /// `resolve_policy` 对 `UiOnly` 默认返回 [`SecurityPolicy::Approved`]，
+    /// 不走 `NeedsConfirmation`。详见 `doc/design/editor-design.md` 6.4 节。
+    UiOnly,
 }
 
 /// 工具执行错误。

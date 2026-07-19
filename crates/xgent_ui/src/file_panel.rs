@@ -231,12 +231,13 @@ fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Th
     }
 }
 
-/// 处理文件条目点击（读取内容预览）。
+/// 处理文件条目点击：代码文件打开编辑器，其他文件在预览区显示。
 fn handle_file_click(
     q_files: Query<(&FileEntry, &Interaction), Changed<Interaction>>,
     q_preview: Query<Entity, With<FilePreviewMarker>>,
     theme: Res<Theme>,
     mut commands: Commands,
+    mut open_writer: MessageWriter<crate::editor::tabs::OpenFileRequest>,
 ) {
     let Ok(preview) = q_preview.single() else {
         return;
@@ -246,14 +247,20 @@ fn handle_file_click(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        // 读取文件内容（同步，MVP 简化）
+        // 代码文件 → 打开编辑器
+        if is_code_file(&file.path) {
+            open_writer.write(crate::editor::tabs::OpenFileRequest {
+                path: file.path.clone(),
+                line: None,
+            });
+            continue;
+        }
+        // 非代码文件 → 预览（读取内容，截断 1000 行）
         let content = match std::fs::read_to_string(&file.path) {
             Ok(c) => c,
             Err(e) => format!("读取失败: {e}"),
         };
-        // 截断到前 1000 行
         let truncated: String = content.lines().take(1000).collect::<Vec<_>>().join("\n");
-        // 清除旧预览内容并写入新内容
         commands.entity(preview).despawn_children();
         commands.entity(preview).with_children(|p| {
             p.spawn((
@@ -267,6 +274,14 @@ fn handle_file_click(
             ));
         });
     }
+}
+
+/// 判断是否为代码文件（按扩展名）。
+fn is_code_file(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("rs" | "toml" | "json" | "md" | "txt" | "js" | "ts" | "py" | "go" | "c" | "cpp" | "h" | "yml" | "yaml")
+    )
 }
 
 /// 处理目录条目点击：展开/折叠切换，在子项容器 spawn/despawn 子条目。
