@@ -29,6 +29,7 @@ crates/xgent_agent/
     ├── agent_loop.rs       # AgentLoopSystem：驱动对话循环
     ├── bridge.rs          # tokio 桥接：ProviderClient、ToolExecutor、ContextProvider 的异步 task 与 ECS channel
     ├── events.rs          # agent 对外 Events 与 Messages
+    ├── session_store.rs      # 会话 JSONL 持久化（ADR-0008）：open/append/load_all
     └── format.rs          # chat 格式化：ChatRequest 构造
 ```
 
@@ -67,40 +68,45 @@ use xgent_core::chat::{ChatEvent, ChatMessage};
 use xgent_tools::confirm::ConfirmRequest;
 
 /// 用户输入消息（UI → agent）
-#[derive(Event)]
-pub struct UserInputEvent { pub text: String }
+#[derive(Message)]
+pub struct UserInputMessage { pub text: String }
 
 /// 中断当前对话（UI → agent）
-#[derive(Event)]
-pub struct AbortEvent;
+#[derive(Message)]
+pub struct AbortMessage;
+
+/// Steering：agent 执行中插话（UI → agent，不中断工具，注入到当前对话）
+#[derive(Message)]
+pub struct SteeringMessage { pub text: String }
+
+/// Follow-up：agent 停止后继续对话（UI → agent）
+#[derive(Message)]
+pub struct FollowUpMessage { pub text: String }
 
 /// provider 流式 delta（agent → UI）
-#[derive(Event)]
-pub struct DeltaEvent { pub text: String }
+#[derive(Message)]
+pub struct DeltaMessage { pub text: String }
 
-/// 工具调用开始（agent → UI，展示工具执行中）
-#[derive(Event)]
-pub struct ToolCallEvent { pub tool_id: String, pub input: serde_json::Value }
+/// 工具调用开始（agent → UI）
+#[derive(Message)]
+pub struct ToolCallMessage { pub tool_id: String, pub input: serde_json::Value }
 
-/// 工具执行完成（agent → UI）
-#[derive(Event)]
-pub struct ToolResultEvent { pub tool_id: String, pub output: String, pub success: bool }
+/// 工具执行完成（agent → UI）。`is_error` 语义反转：true 表示逻辑失败
+#[derive(Message)]
+pub struct ToolResultMessage { pub tool_id: String, pub output: String, pub is_error: bool }
 
 /// 需要用户确认（agent → UI，触发弹窗）
-#[derive(Event)]
-pub struct ConfirmRequestEvent(pub ConfirmRequest);
-
-/// 用户确认决策（UI → agent）
-#[derive(Event)]
-pub struct ConfirmDecisionEvent { pub decision: ConfirmDecision }
+#[derive(Message)]
+pub struct ConfirmRequestMessage(pub ConfirmRequest);
 
 /// 对话完成（agent → UI）
-#[derive(Event)]
-pub struct DoneEvent;
+#[derive(Message)]
+pub struct DoneMessage;
 
 /// 对话出错（agent → UI）
-#[derive(Event)]
-pub struct ErrorEvent(pub String);
+#[derive(Message)]
+pub struct ErrorMessage { pub kind: ErrorKind, pub message: String }
+
 ```
 
 ### 2. conversation.rs — 会话状态 Resource
@@ -148,20 +154,48 @@ pub struct AgentBridge {
 
 /// 命令（ECS → 异步任务）
 pub enum AgentCommand {
+    /// 发起对话
     StartLoop { req: ChatRequest },
+    /// 中断当前对话（cancel CancellationToken）
     Abort,
+    /// 用户确认决策
     ConfirmDecision(ConfirmDecision),
+    /// Steering：用户在 agent 执行中插话（注入到当前对话，MVP 不中断工具）
+    Steering { text: String },
+    /// Follow-up：agent 停止后注入后续消息继续对话
+    FollowUp { text: String },
 }
 
 /// 异步任务 → ECS 的事件 channel
 pub enum AgentEvent {
     Delta(String),
     ToolCall { tool_id: String, input: serde_json::Value },
-    ToolResult { tool_id: String, output: String, success: bool },
+    /// `is_error` 语义反转（对齐 omp）：true 表示逻辑失败
+    ToolResult { tool_id: String, output: String, is_error: bool, side_effect: Option<SideEffect> },
     ConfirmRequest(ConfirmRequest),
     Done,
-    Error(String),
+    Error { kind: ErrorKind, message: String },
 }
+```
+
+**双层循环 `run_agent_loop`**（对齐 ADR-0007/0006，见 optimization O4）：
+- 外层：Follow-up 驱动（agent 准备停止时注入新消息继续）。
+- 内层：tool-call + steering——LLM → tool → continue，直到 `tool_calls.is_empty()`。
+- Abort：`CancellationToken::cancel()`，`stream_llm_response` 与 `executor.execute` 都 `tokio::select!` 监听，立即中断。
+- Steering：MVP 不中断工具，在工具完成后 `try_recv` 注入到 `req.messages`。
+- 工具结果回灌为 `AgentMessage::ToolResult`（经 `convert_to_llm` 转换为 `ChatMessage`）。
+
+```rust
+async fn run_agent_loop(
+    provider: &Arc<dyn ProviderClient>,
+    executor: &Arc<ToolExecutor>,
+    ctx: &ToolCtx,
+    mut req: ChatRequest,
+    event_tx: &mpsc::Sender<AgentEvent>,
+    shared_confirm: &SharedConfirm,
+    cancel_token: &tokio_util::sync::CancellationToken,
+    steering_rx: &mut mpsc::Receiver<AgentCommand>,  // 接收 Steering/Abort
+) { /* 外层 follow-up loop { 内层 tool-call+steering loop } */ }
 ```
 
 **桥接模式**：
@@ -256,11 +290,9 @@ impl Plugin for XgentAgentPlugin {
 4. **流式累加**：`current_assistant_text` 在 delta 期间累加，Done 时存入 messages 历史。
 5. **工具执行桥接**：ToolExecutor 在 tokio task 执行（异步），确认流程经 ConfirmRequest 事件回 ECS 弹窗，决策经 ConfirmDecisionEvent 回 task。task 等待 oneshot channel。
 6. **上下文检索**：每次新对话轮，在构造 ChatRequest 前异步调 `ContextProvider::retrieve`，结果注入 system message。检索是异步 task，不阻塞 ECS 帧。
-7. **中断**：Abort 命令通过 channel 通知 task；task 检测到 abort 信号后取消 provider 流（drop stream receiver）。
-8. **会话持久化**：Done 时把 messages 存 SQLite（经 settings_core 的 sessions_db_path），MVP 可先内存，持久化在 step11/12 完善。
+7. **中断（CancellationToken）**：每对话创建独立 `CancellationToken`，Abort 时 `cancel()`。`stream_llm_response` 与 `executor.execute` 都经 `tokio::select!` 监听，立即返回；RunCommand 的子进程被 kill。`ToolError::Aborted` 让 agent loop 走 abort 路径。见 ADR-0007。
+8. **会话持久化（JSONL）**：`SessionStore`（`session_store.rs`，见 ADR-0008）同步 append `<project>/.xgent/sessions/<session_id>.jsonl`——会话开始 append Header，每次 AssistantMessage 完成（Done）append Message entry。`Conversation.session_store` 在首次对话时经 `ensure_session_store` 初始化。
 9. **不直接依赖 daemon 连接**：agent 通过 `ProviderClient`（IPC 封装）调 daemon，此封装可放 agent crate 或 xgent_app。MVP 先放 agent，用 trait 抽象使未来可换本地直连实现（单进程调试时）。
-
-## 验证方法
 
 1. **编译检查**：
    ```bash

@@ -28,6 +28,7 @@ struct RefreshResult {
     model: String,
     kind: Option<ProviderKind>,
     ready: bool,
+    retry_config: xgent_agent::bridge::RetryConfig,
 }
 
 /// 异步刷新结果的接收端（每帧 drain）。
@@ -135,6 +136,7 @@ fn drain_pending_refresh(
         provider_info.model = r.model;
         provider_info.kind = r.kind;
         provider_info.ready = r.ready;
+        bridge.update_retry_config(r.retry_config);
     }
 
     // 2. 处理 daemon 广播的配置变更（多开对端修改等）
@@ -159,6 +161,7 @@ fn drain_pending_refresh(
                         model: String::new(),
                         kind: None,
                         ready: false,
+                        retry_config: xgent_agent::bridge::RetryConfig::default(),
                     })
                     .await;
             } else {
@@ -232,6 +235,7 @@ async fn spawn_refresh(
             model,
             kind: Some(pc.kind),
             ready,
+            retry_config: xgent_agent::bridge::RetryConfig::from(&pc),
         })
         .await;
 }

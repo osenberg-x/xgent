@@ -243,7 +243,13 @@ mod tests {
         };
         let p_default = ToolPolicyConfig::default();
         assert_eq!(
-            resolve_policy("editor.open_file", ToolTier::UiOnly, &json!({}), &tool, &p_default),
+            resolve_policy(
+                "editor.open_file",
+                ToolTier::UiOnly,
+                &json!({}),
+                &tool,
+                &p_default
+            ),
             SecurityPolicy::Approved,
             "UiOnly 默认应为 Approved"
         );

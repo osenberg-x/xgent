@@ -184,20 +184,30 @@ pub fn handle_editor_keys(
             save_writer.write(EditorSaveRequested { entity });
             if editor.dirty {
                 editor.dirty = false;
-                dirty_writer.write(EditorDirtyChanged { entity, dirty: false });
+                dirty_writer.write(EditorDirtyChanged {
+                    entity,
+                    dirty: false,
+                });
             }
             continue;
         }
         // Cmd+Z / Cmd+Shift+Z：undo / redo（恢复 rope + 清 cache 触发重解析）
         let shift = keys.any_pressed([K::ShiftLeft, K::ShiftRight]);
         if keys.just_pressed(K::KeyZ) {
-            let snap = if shift { editor.undo.redo() } else { editor.undo.undo() };
+            let snap = if shift {
+                editor.undo.redo()
+            } else {
+                editor.undo.undo()
+            };
             if let Some(snap) = snap {
                 editor.rope = Rope::from_str(&snap.text);
                 cache.0 = 0; // 触发下帧重解析
                 if !editor.dirty {
                     editor.dirty = true;
-                    dirty_writer.write(EditorDirtyChanged { entity, dirty: true });
+                    dirty_writer.write(EditorDirtyChanged {
+                        entity,
+                        dirty: true,
+                    });
                 }
             }
             continue;
@@ -221,7 +231,11 @@ pub fn handle_editor_keys(
 /// `HighlightCache` 未命中时重算 spans（基于 `rope` 当前内容）。
 /// MVP 全量解析，大文件增量解析留待后续（设计文档 5.3 节）。
 pub fn update_syntax_highlight(
-    mut q: Query<(&mut TextEditor, &mut HighlightCache, Option<&bevy::text::EditableText>)>,
+    mut q: Query<(
+        &mut TextEditor,
+        &mut HighlightCache,
+        Option<&bevy::text::EditableText>,
+    )>,
 ) {
     for (mut editor, mut cache, editable) in q.iter_mut() {
         // 文本源：有 EditableText 从它同步；无则用 rope 当前内容
@@ -293,7 +307,10 @@ mod tests {
         // rope 行数正确（单行）
         assert_eq!(editor.rope.len_lines(), 1);
         // spans 非空（tree-sitter 解析成功）
-        assert!(!editor.spans.is_empty(), "spans 应非空，tree-sitter 应解析成功");
+        assert!(
+            !editor.spans.is_empty(),
+            "spans 应非空，tree-sitter 应解析成功"
+        );
         // spans 覆盖全文
         let covered: usize = editor.spans.iter().map(|s| s.end - s.start).sum();
         assert_eq!(covered, code.len(), "spans 应覆盖全文");

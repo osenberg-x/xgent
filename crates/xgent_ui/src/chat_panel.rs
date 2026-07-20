@@ -110,11 +110,7 @@ fn spawn_chat_panel(
     scroll_area.node.padding = UiRect::all(px(space::SM));
     scroll_area.node.row_gap = px(space::SM);
     let message_list = commands
-        .spawn((
-            scroll_area,
-            StickToBottom::default(),
-            MessageListMarker,
-        ))
+        .spawn((scroll_area, StickToBottom::default(), MessageListMarker))
         .add_child(current_text)
         .id();
 
@@ -328,7 +324,6 @@ pub fn forward_input_submission(
         }
     }
 }
-
 
 /// 根据 Conversation 状态更新输入框边框颜色（忙时变色）。
 fn update_input_border(

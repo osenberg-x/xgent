@@ -56,7 +56,10 @@ mod tests {
 
     #[test]
     fn buffer_status_fields() {
-        let b = BufferStatus { open: true, dirty: false };
+        let b = BufferStatus {
+            open: true,
+            dirty: false,
+        };
         assert!(b.open);
         assert!(!b.dirty);
     }
@@ -67,7 +70,9 @@ mod tests {
         assert_eq!(q, EditorQuery::Cursor);
         let q = EditorQuery::Selection;
         assert_eq!(q, EditorQuery::Selection);
-        let q = EditorQuery::File { path: PathBuf::from("src/main.rs") };
+        let q = EditorQuery::File {
+            path: PathBuf::from("src/main.rs"),
+        };
         assert_eq!(q.path(), std::path::Path::new("src/main.rs"));
     }
 

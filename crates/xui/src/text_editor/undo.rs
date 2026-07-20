@@ -111,7 +111,9 @@ mod tests {
     use super::*;
 
     fn snap(s: &str) -> TextSnapshot {
-        TextSnapshot { text: s.to_string() }
+        TextSnapshot {
+            text: s.to_string(),
+        }
     }
 
     #[test]

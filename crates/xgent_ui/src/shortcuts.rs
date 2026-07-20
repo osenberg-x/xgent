@@ -11,10 +11,10 @@ use xui::command_palette::CommandPaletteState;
 use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
-use crate::i18n::tr;
-use crate::layout::FilePanelCollapsed;
 use crate::editor::EditorView;
 use crate::editor::tabs::CycleTabRequest;
+use crate::i18n::tr;
+use crate::layout::FilePanelCollapsed;
 
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
@@ -83,13 +83,21 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
     );
     // Cmd/Ctrl+W：关闭当前标签
     let _ = reg.register(
-        Hotkey::new("editor.close_tab", KeyCode::KeyW, tr(&loc, "hotkey-editor-close-tab"))
-            .with_primary(),
+        Hotkey::new(
+            "editor.close_tab",
+            KeyCode::KeyW,
+            tr(&loc, "hotkey-editor-close-tab"),
+        )
+        .with_primary(),
     );
     // Cmd/Ctrl+Tab：循环切换标签
     let _ = reg.register(
-        Hotkey::new("editor.cycle_tab", KeyCode::Tab, tr(&loc, "hotkey-editor-cycle-tab"))
-            .with_primary(),
+        Hotkey::new(
+            "editor.cycle_tab",
+            KeyCode::Tab,
+            tr(&loc, "hotkey-editor-cycle-tab"),
+        )
+        .with_primary(),
     );
 }
 

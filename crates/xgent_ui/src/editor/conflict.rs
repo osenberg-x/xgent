@@ -70,12 +70,12 @@ pub fn handle_file_changed(
 ) {
     for ev in reader.read() {
         // 在 tabs 中按路径定位 buffer 实体（不借用第二个 Query）
-        let Some(entity) = tabs
-            .tabs
-            .iter()
-            .copied()
-            .find(|&e| q_buffers.get(e).ok().is_some_and(|b| b.path() == ev.path.as_path()))
-        else {
+        let Some(entity) = tabs.tabs.iter().copied().find(|&e| {
+            q_buffers
+                .get(e)
+                .ok()
+                .is_some_and(|b| b.path() == ev.path.as_path())
+        }) else {
             continue; // 未打开，忽略
         };
         let Ok(mut buf) = q_buffers.get_mut(entity) else {
@@ -150,32 +150,41 @@ fn spawn_conflict_dialog(commands: &mut Commands, buffer: Entity, path: &std::pa
                     column_gap: Val::Px(12.0),
                     ..default()
                 },))
-                .with_children(|btns| {
-                    btns.spawn((
-                        Button,
-                        Node { padding: UiRect::all(Val::Px(8.0)), ..default() },
-                        BackgroundColor(accent),
-                        Text::new("丢弃本地"),
-                        TextColor(Color::WHITE),
-                        ConflictDiscardMarker,
-                    ));
-                    btns.spawn((
-                        Button,
-                        Node { padding: UiRect::all(Val::Px(8.0)), ..default() },
-                        BackgroundColor(accent),
-                        Text::new("保留本地"),
-                        TextColor(Color::WHITE),
-                        ConflictKeepLocalMarker,
-                    ));
-                    btns.spawn((
-                        Button,
-                        Node { padding: UiRect::all(Val::Px(8.0)), ..default() },
-                        BackgroundColor(accent),
-                        Text::new("对比合并"),
-                        TextColor(Color::WHITE),
-                        ConflictDiffMarker,
-                    ));
-                });
+                    .with_children(|btns| {
+                        btns.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(accent),
+                            Text::new("丢弃本地"),
+                            TextColor(Color::WHITE),
+                            ConflictDiscardMarker,
+                        ));
+                        btns.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(accent),
+                            Text::new("保留本地"),
+                            TextColor(Color::WHITE),
+                            ConflictKeepLocalMarker,
+                        ));
+                        btns.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(accent),
+                            Text::new("对比合并"),
+                            TextColor(Color::WHITE),
+                            ConflictDiffMarker,
+                        ));
+                    });
             });
         });
 }
@@ -195,13 +204,22 @@ pub fn handle_conflict_decision(
     };
     let decision = None
         .or_else(|| {
-            q_discard.iter().any(|i| *i == Interaction::Pressed).then_some(ConflictDecision::Discard)
+            q_discard
+                .iter()
+                .any(|i| *i == Interaction::Pressed)
+                .then_some(ConflictDecision::Discard)
         })
         .or_else(|| {
-            q_keep.iter().any(|i| *i == Interaction::Pressed).then_some(ConflictDecision::KeepLocal)
+            q_keep
+                .iter()
+                .any(|i| *i == Interaction::Pressed)
+                .then_some(ConflictDecision::KeepLocal)
         })
         .or_else(|| {
-            q_diff.iter().any(|i| *i == Interaction::Pressed).then_some(ConflictDecision::Diff)
+            q_diff
+                .iter()
+                .any(|i| *i == Interaction::Pressed)
+                .then_some(ConflictDecision::Diff)
         });
     let Some(decision) = decision else {
         return;

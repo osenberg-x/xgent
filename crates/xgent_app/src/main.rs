@@ -94,19 +94,25 @@ fn main() {
     let executor = Arc::new(ToolExecutor::with_defaults());
     let context = Arc::new(OnDemandContextProvider::new(project_root.clone()))
         as Arc<dyn xgent_context::ContextProvider>;
+    // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model 与重试配置）
+    let global_config = GlobalConfigStore::load().unwrap_or_default();
     // 加载项目配置（bridge 需 tool_policy）
     let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
-    let bridge = AgentBridge::new(AgentBridgeConfig {
-        provider,
-        executor,
-        context,
-        project_root: project_root.clone(),
-        tool_policy: project_config.tool_policy.clone(),
-    });
 
-    // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model）
-    let global_config = GlobalConfigStore::load().unwrap_or_default();
-
+    // 派生重试配置：命令行 provider > 项目配置 > 全局配置的 default provider
+    let provider_id_for_retry = args
+        .provider
+        .clone()
+        .or(project_config.provider_override.clone())
+        .or_else(|| {
+            let id = global_config.default_provider.clone();
+            if id.is_empty() { None } else { Some(id) }
+        });
+    let retry_config = provider_id_for_retry
+        .as_deref()
+        .and_then(|pid| global_config.providers.get(pid))
+        .map(xgent_agent::bridge::RetryConfig::from)
+        .unwrap_or_default();
     // 派生当前 provider/model：命令行 > 项目配置 > 全局配置
     let provider_id = args
         .provider
@@ -121,6 +127,22 @@ fn main() {
         if m.is_empty() { None } else { Some(m) }
     });
     let (provider_id, model) = derive_provider_model(provider_id, model);
+    // Compaction provider：复用 agent 的 ProviderClient，与对话同 provider/model。
+    // context_window 用默认 128k（后续可从 ModelInfo 派生，见 D-04）。
+    let compactor: Arc<dyn xgent_agent::CompactionProvider> = Arc::new(
+        xgent_agent::LlmCompactor::new(provider.clone(), provider_id.clone(), model.clone()),
+    );
+    let bridge = AgentBridge::new(AgentBridgeConfig {
+        provider,
+        executor,
+        context,
+        project_root: project_root.clone(),
+        tool_policy: project_config.tool_policy.clone(),
+        retry_config: Arc::new(parking_lot::RwLock::new(retry_config)),
+        compaction: Some(compactor),
+        context_window: 128_000,
+        compaction_settings: xgent_agent::CompactionSettings::default(),
+    });
 
     // 通知订阅端（fs/config 桥接用）
     let notif_rx = ipc.subscribe();

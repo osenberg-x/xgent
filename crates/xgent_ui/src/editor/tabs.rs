@@ -29,7 +29,11 @@ pub struct EditorTabs {
 
 impl EditorTabs {
     /// 查找指定路径已打开的 buffer 实体。
-    pub fn find_by_path(&self, path: &std::path::Path, buffers: &Query<&EditorBuffer>) -> Option<Entity> {
+    pub fn find_by_path(
+        &self,
+        path: &std::path::Path,
+        buffers: &Query<&EditorBuffer>,
+    ) -> Option<Entity> {
         for &e in &self.tabs {
             if let Ok(buf) = buffers.get(e) {
                 if buf.path() == path {
@@ -226,7 +230,9 @@ pub fn handle_open_file_requests(
         if let Some(entity) = tabs.find_by_path(&req.path, &q_buffers) {
             tabs.open(entity);
             if let Some(line) = req.line {
-                commands.entity(entity).insert(crate::editor::buffer::PendingGoTo { line });
+                commands
+                    .entity(entity)
+                    .insert(crate::editor::buffer::PendingGoTo { line });
             }
         } else {
             // spawn 新 buffer：滚动容器（契约由 `xui::ScrollArea` 通用提供）+
@@ -239,7 +245,10 @@ pub fn handle_open_file_requests(
                     crate::editor::buffer::EditorBuffer::from_disk(req.path.clone(), String::new()),
                     xui::TextEditor::default(),
                     xui::HighlightCache::default(),
-                    crate::editor::buffer::PendingRead { path: req.path.clone(), line: req.line },
+                    crate::editor::buffer::PendingRead {
+                        path: req.path.clone(),
+                        line: req.line,
+                    },
                 ))
                 .with_children(|p| {
                     // 虚拟化占位节点：高度 = 行数 × 行高（撑出滚动范围）

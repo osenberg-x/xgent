@@ -4,11 +4,11 @@
 
 Agent 可调用的工具体系：
 
-1. **工具抽象 trait `Tool`**：统一工具接口（id、schema、安全策略、异步执行）。
+1. **工具抽象 trait `Tool`**：统一工具接口（id、schema、tier/approval_for、并发声明、异步可中断执行），对齐 ADR-0007。
 2. **内置工具**：ReadFile、WriteFile、SearchFiles、RunCommand（MVP）；Git 系列留 P1。
-3. **安全策略分级**：Approved（只读，自动执行）/ NeedsConfirmation（写入/执行，需确认）/ Denied。
-4. **执行器**：根据工具调用与安全策略执行；高危工具经确认流程。
-5. **确认流程**：NeedsConfirmation 工具产生 ConfirmRequest，经 ECS 事件触发 UI 弹窗，用户决策后执行或拒绝。
+3. **安全策略分级**：`Approved`（自动执行）/ `NeedsConfirmation`（需确认，MVP 默认）/ `Denied`，由 `resolve_policy` 综合 `tier` + `approval_for` + 配置推导。
+4. **执行器**：根据工具调用与安全策略执行；传 `CancellationToken` 支持中断；高危工具经确认流程；`Shared` 工具可并行、`Exclusive` 串行。
+5. **确认流程**：`NeedsConfirmation` 工具产生 `ConfirmRequest`，经 `ConfirmCallback` trait 回调（agent 桥接 ECS 事件触发 UI 弹窗），用户决策后执行或拒绝。
 
 ## 前置依赖
 
@@ -50,6 +50,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+tokio-util = { workspace = true }   # CancellationToken（ADR-0007）
 ```
 
 说明：MVP 不依赖 Bevy——工具是纯异步逻辑。Bevy 集成（事件、Resource）放 xgent_agent，它把 Tool 调用桥接到 ECS。这样工具可在 daemon 侧未来复用（上移胖后台时）。
@@ -94,10 +95,63 @@ pub enum SecurityPolicy {
 pub trait Tool: Send + Sync {
     fn id(&self) -> &str;
     fn schema(&self) -> ToolSchema;
-    fn policy(&self) -> SecurityPolicy;
-    async fn execute(&self, input: Value, ctx: &ToolCtx) -> ToolResult;
+
+    /// 工具分层（静态默认）。
+    fn tier(&self) -> ToolTier;
+
+    /// 按输入动态决议分层（默认返回 `tier()`）。
+    /// 工具可 override 以对特定危险输入返回更高 tier（如 run_command
+    /// 检测 `rm -rf` 始终返回 Exec）。`resolve_policy` 用此结果推导策略。
+    fn approval_for(&self, _input: &Value) -> ToolTier { self.tier() }
+
+    /// 并发声明（默认 `Shared`）。
+    fn concurrency(&self) -> Concurrency { Concurrency::Shared }
+
+    /// 对输入生成人类可读摘要，用于确认弹窗展示。
+    fn summarize(&self, input: &Value) -> String;
+
+    /// 异步执行工具。
+    /// - `signal`：中断信号，cancel 后工具应尽快返回 `ToolError::Aborted`。
+    /// - `on_update`：流式更新回调（MVP 传 `None`）。
+    /// - 逻辑失败返回 `Ok(ToolResult { is_error: true, .. })`；
+    ///   中断/超时等异常返回 `Err(ToolError::...)`。
+    async fn execute(
+        &self,
+        input: Value,
+        ctx: &ToolCtx,
+        signal: tokio_util::sync::CancellationToken,
+        on_update: Option<&ToolUpdateCallback>,
+    ) -> Result<ToolResult, ToolError>;
 }
 ```
+
+伴随的新类型（见 ADR-0007 clean cutover）：
+
+```rust
+/// 工具并发声明。Shared=只读可并行，Exclusive=写/执行须串行。
+pub enum Concurrency { Shared, Exclusive }
+
+/// 工具分层（供 resolve_policy 推导）。MVP 阶段 Read/Write/Exec 全映射
+/// NeedsConfirmation；P1 编辑器引入 UiOnly，默认 Approved（不走确认）。
+pub enum ToolTier { Read, Write, Exec, UiOnly }
+
+/// 工具执行错误。Aborted 透传给 agent loop 走 abort 路径；
+/// Failed/Timeout 视为异常失败（MVP 下也回灌 LLM）。
+/// 逻辑失败（如文件不存在）不抛 ToolError，返回 Ok(ToolResult{is_error:true})。
+pub enum ToolError { Failed(String), Aborted, Timeout(u64) }
+
+/// 流式更新回调（长时工具如 run_command 的 stdout 增量）。MVP 传 None。
+pub type ToolUpdateCallback = Box<dyn Fn(ToolResult) + Send + Sync>;
+
+/// 工具执行结果。`is_error` 取代旧 `success`（语义反转，对齐 omp）。
+pub struct ToolResult {
+    pub output: String,            // 给 LLM 的文本结果
+    pub is_error: bool,           // 逻辑失败为 true（不抛 ToolError）
+    pub side_effect: Option<SideEffect>,
+}
+```
+
+> 注：旧版 `fn policy() -> SecurityPolicy`、`ToolResult.success`、`execute` 不带 signal/on_update 的签名已按 ADR-0007 clean cutover 删除，不留兼容别名。
 
 ### 2. security.rs — 安全策略判定
 
@@ -167,50 +221,94 @@ pub enum ConfirmDecision {
     AllowAll,    // 此类工具本次会话全允许（便利特性，可选）
     Deny,        // 拒绝
 }
+
+> 确认回调 `ConfirmCallback` trait（`confirm(&self, ConfirmRequest) -> oneshot::Receiver<ConfirmDecision>`）定义在 `executor.rs`，由 agent 桥接层实现：ECS 发事件触发 UI 弹窗，UI 决策后经 oneshot 回传。executor 用 5 分钟超时包裹 `confirm.confirm()` 防止无限挂起。
 ```
 
 ### 4. executor.rs — 执行器
 
 ```rust
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::oneshot;
-use crate::tool::{Tool, ToolCtx, ToolResult, SecurityPolicy};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
+use crate::tool::{Tool, ToolCtx, ToolResult, ToolError, SecurityPolicy};
 use crate::security::resolve_policy;
 use crate::confirm::{ConfirmRequest, ConfirmDecision};
+use crate::executor::ConfirmCallback;  // trait 定义在本模块，见下方
+// 实际代码中 ConfirmCallback 定义在 executor.rs 内（pub trait），由 agent 桥接实现
 
 pub struct ToolExecutor {
     tools: HashMap<String, Arc<dyn Tool>>,
+    /// 会话级 AllowAll 命中集合（用户选 AllowAll 后该 tool_id 不再确认）
+    allowed_all: Mutex<HashSet<String>>,
 }
 
 impl ToolExecutor {
     pub fn new() -> Self { /* 注册内置工具 */ }
 
-    /// 执行工具调用
-    /// - 返回 ToolResult（含 side_effect 用于多客户端同步通知）
-    /// - 需确认时，通过 confirm_fn 回调获取用户决策
+    /// 执行工具调用。
+    ///
+    /// 流程：
+    /// 1. 解析最终策略（配置 denied → approved → tool.approval_for → MVP 默认）；
+    /// 2. `Denied` → `Ok(ToolResult{is_error:true})`（逻辑失败回灌 LLM）；
+    /// 3. `Approved` 或会话级 AllowAll 命中 → 直接执行；
+    /// 4. `NeedsConfirmation` → 经 `confirm` 获取决策，Allow/AllowAll 后执行；
+    ///    `Deny` → 同 Denied 逻辑。确认有 5 分钟超时。
+    ///
+    /// `ToolError::Aborted` 透传给调用方（agent loop 走 abort 路径）。
+    /// 工具返回 `Ok(ToolResult{is_error:true})` 时 executor 仍返回 `Ok`
+    /// （非异常失败，错误文本回灌 LLM）。
     pub async fn execute(
         &self,
         tool_id: &str,
         input: serde_json::Value,
         ctx: &ToolCtx,
-        confirm_fn: &dyn Fn(ConfirmRequest) -> oneshot::Receiver<ConfirmDecision>,
-    ) -> ToolResult {
+        signal: CancellationToken,
+        confirm: &dyn ConfirmCallback,
+    ) -> Result<ToolResult, ToolError> {
         let tool = match self.tools.get(tool_id) {
             Some(t) => t,
-            None => return ToolResult { output: format!("unknown tool: {tool_id}"), success: false, side_effect: None },
+            None => return Ok(ToolResult {
+                output: format!("未知工具: {tool_id}"), is_error: true, side_effect: None,
+            }),
         };
-        let policy = resolve_policy(tool_id, tool.policy(), &ctx.tool_policy);
+        // resolve_policy 传 tool.tier()（动态 approval_for 在其内部调用）
+        let policy = resolve_policy(tool_id, tool.tier(), &input, tool.as_ref(), &ctx.tool_policy);
         match policy {
-            SecurityPolicy::Denied => ToolResult { output: "denied by policy".into(), success: false, side_effect: None },
-            SecurityPolicy::Approved => tool.execute(input, ctx).await,
+            SecurityPolicy::Denied => Ok(ToolResult {
+                output: "工具被策略拒绝".into(), is_error: true, side_effect: None,
+            }),
+            SecurityPolicy::Approved => tool.execute(input, ctx, signal, None).await,
             SecurityPolicy::NeedsConfirmation => {
-                let req = ConfirmRequest { tool_id: tool_id.into(), input: input.clone(), summary: tool.summarize(&input) };
-                let rx = confirm_fn(req);
-                match rx.await {
-                    Ok(ConfirmDecision::Allow | ConfirmDecision::AllowAll) => tool.execute(input, ctx).await,
-                    Ok(ConfirmDecision::Deny) => ToolResult { output: "denied by user".into(), success: false, side_effect: None },
-                    Err(_) => ToolResult { output: "confirmation cancelled".into(), success: false, side_effect: None },
+                if self.allowed_all.lock().await.contains(tool_id) {
+                    return tool.execute(input, ctx, signal, None).await;
+                }
+                let req = ConfirmRequest {
+                    tool_id: tool_id.to_string(),
+                    input: input.clone(),
+                    summary: tool.summarize(&input),
+                };
+                let rx = tokio::time::timeout(
+                    std::time::Duration::from_secs(300), confirm.confirm(req),
+                ).await;
+                match rx {
+                    Ok(rx) => match rx.await {
+                        Ok(ConfirmDecision::Allow) => tool.execute(input, ctx, signal, None).await,
+                        Ok(ConfirmDecision::AllowAll) => {
+                            self.allowed_all.lock().await.insert(tool_id.to_string());
+                            tool.execute(input, ctx, signal, None).await
+                        }
+                        Ok(ConfirmDecision::Deny) => Ok(ToolResult {
+                            output: "用户拒绝".into(), is_error: true, side_effect: None,
+                        }),
+                        Err(_) => Ok(ToolResult {
+                            output: "确认被取消".into(), is_error: true, side_effect: None,
+                        }),
+                    },
+                    Err(_) => Ok(ToolResult {
+                        output: "确认请求超时".into(), is_error: true, side_effect: None,
+                    }),
                 }
             }
         }
@@ -221,53 +319,49 @@ impl ToolExecutor {
 ### 5. builtins/ — 内置工具
 
 ```rust
-// 各内置工具的 policy() 返回“建议默认值”，均设为 NeedsConfirmation
-// （安全模型：默认需确认，用户可在配置中提升只读工具为 Approved）
+// 各内置工具按 ADR-0007 实现 tier()/concurrency()/approval_for()，
+// 安全策略由 resolve_policy 综合得出，工具自身不再持有 SecurityPolicy。
+// MVP 默认 Read/Write/Exec 全映射 NeedsConfirmation（含只读工具）。
 
-// read_file.rs
+// read_file.rs —— tier=Read, concurrency=Shared
 pub struct ReadFile;
 #[async_trait]
 impl Tool for ReadFile {
     fn id(&self) -> &str { "read_file" }
-    fn schema(&self) -> ToolSchema { /* path: string */ }
-    fn policy(&self) -> SecurityPolicy { SecurityPolicy::NeedsConfirmation }
-    async fn execute(&self, input: Value, ctx: &ToolCtx) -> ToolResult {
+    fn schema(&self) -> ToolSchema { /* { path: string } */ }
+    fn tier(&self) -> ToolTier { ToolTier::Read }
+    fn concurrency(&self) -> Concurrency { Concurrency::Shared }
+    fn summarize(&self, input: &Value) -> String { /* "读取 {path}" */ }
+    async fn execute(
+        &self, input: Value, ctx: &ToolCtx,
+        signal: CancellationToken, _on_update: Option<&ToolUpdateCallback>,
+    ) -> Result<ToolResult, ToolError> {
         let path = input["path"].as_str().unwrap();
         let full = ctx.project_root.join(path);
-        match tokio::fs::read_to_string(&full).await {
-            Ok(content) => ToolResult { output: content, success: true, side_effect: None },
-            Err(e) => ToolResult { output: e.to_string(), success: false, side_effect: None },
+        // select! 监听 signal：cancel 时返回 ToolError::Aborted
+        tokio::select! {
+            _ = signal.cancelled() => return Err(ToolError::Aborted),
+            r = tokio::fs::read_to_string(&full) => match r {
+                Ok(content) => Ok(ToolResult { output: content, is_error: false, side_effect: None }),
+                Err(e) => Ok(ToolResult { output: e.to_string(), is_error: true, side_effect: None }),
+            }
         }
     }
 }
 
-// write_file.rs
-pub struct WriteFile;
-impl Tool for WriteFile {
-    fn policy(&self) -> SecurityPolicy { SecurityPolicy::NeedsConfirmation }
-    async fn execute(...) -> ToolResult {
-        // 写文件，返回 side_effect: SideEffect::FileWritten(path)
-    }
-}
+// write_file.rs —— tier=Write, concurrency=Exclusive
+//   execute 写文件，返回 side_effect: SideEffect::FileWritten(path)
 
-// search_files.rs
-pub struct SearchFiles;
-impl Tool for SearchFiles {
-    fn policy(&self) -> SecurityPolicy { SecurityPolicy::NeedsConfirmation }
-    async fn execute(...) -> ToolResult {
-        // 用 ripgrep（子进程调用 rg）或内置 grep，返回匹配行
-    }
-}
+// search_files.rs —— tier=Read, concurrency=Shared
+//   execute 传 signal + on_update（进度推送匹配行增量）
 
-// run_command.rs
-pub struct RunCommand;
-impl Tool for RunCommand {
-    fn policy(&self) -> SecurityPolicy { SecurityPolicy::NeedsConfirmation }
-    async fn execute(...) -> ToolResult {
-        // tokio::process::Command，捕获 stdout/stderr，返回 side_effect: CommandRun
-    }
-}
+// run_command.rs —— tier=Exec, concurrency=Exclusive
+//   approval_for 检测 rm -rf / sudo / mkfs 等危险模式始终返回 Exec；
+//   signal 经 tokio::select! 传子进程，cancel 时 kill child 返回 ToolError::Aborted；
+//   on_update 推送 stdout 增量。
 ```
+
+> 内置工具的 `approval_for` 默认实现返回 `tier()`；仅 `run_command` override 以对危险命令收紧 tier。
 
 ### 6. lib.rs — 注册
 

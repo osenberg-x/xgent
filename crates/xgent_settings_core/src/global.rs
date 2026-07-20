@@ -43,9 +43,28 @@ pub struct ProviderConfig {
     /// 请求超时秒数
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
-    /// 最大重试次数
+    /// 最大重试次数。
+    ///
+    /// `None` 表示无限重试（直到成功或被中断）；`Some(n)` 表示最多重试 n 次。
+    /// 仅对可重试错误（`Network`/`StreamParse`）生效，见 agent 侧重试逻辑。
     #[serde(default = "default_max_retries")]
-    pub max_retries: u32,
+    pub max_retries: Option<u32>,
+    /// 重试模式（固定间隔 / 指数退避）
+    #[serde(default = "default_retry_mode")]
+    pub retry_mode: RetryMode,
+    /// 重试初始间隔毫秒。
+    ///
+    /// 固定模式：每次重试前等待该值；指数模式：作为退避基准值。
+    #[serde(default = "default_retry_initial_delay_ms")]
+    pub retry_initial_delay_ms: u64,
+    /// 重试最大间隔毫秒（指数退避上限，固定模式忽略）。
+    #[serde(default = "default_retry_max_delay_ms")]
+    pub retry_max_delay_ms: u64,
+    /// 指数退避乘数（固定模式忽略）。
+    ///
+    /// 每次重试间隔 = min(initial * backoff_factor^(n-1), max_delay)。
+    #[serde(default = "default_retry_backoff_factor")]
+    pub retry_backoff_factor: f64,
 }
 
 impl Default for ProviderConfig {
@@ -57,6 +76,10 @@ impl Default for ProviderConfig {
             model_overrides: HashMap::new(),
             timeout_secs: default_timeout_secs(),
             max_retries: default_max_retries(),
+            retry_mode: default_retry_mode(),
+            retry_initial_delay_ms: default_retry_initial_delay_ms(),
+            retry_max_delay_ms: default_retry_max_delay_ms(),
+            retry_backoff_factor: default_retry_backoff_factor(),
         }
     }
 }
@@ -65,8 +88,38 @@ fn default_timeout_secs() -> u64 {
     60
 }
 
-fn default_max_retries() -> u32 {
-    2
+fn default_max_retries() -> Option<u32> {
+    Some(2)
+}
+
+/// 重试模式。
+///
+/// - `Fixed`：每次重试前等待固定间隔（`retry_initial_delay_ms`）。
+/// - `Exponential`：指数退避，间隔 = min(initial * factor^(n-1), max_delay)。
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryMode {
+    /// 固定间隔
+    #[default]
+    Fixed,
+    /// 指数退避
+    Exponential,
+}
+
+fn default_retry_mode() -> RetryMode {
+    RetryMode::Fixed
+}
+
+fn default_retry_initial_delay_ms() -> u64 {
+    500
+}
+
+fn default_retry_max_delay_ms() -> u64 {
+    30_000
+}
+
+fn default_retry_backoff_factor() -> f64 {
+    2.0
 }
 
 /// provider 类型。
@@ -134,7 +187,43 @@ mod tests {
         let p = ProviderConfig::default();
         assert_eq!(p.kind, ProviderKind::OpenAiCompat);
         assert_eq!(p.timeout_secs, 60);
-        assert_eq!(p.max_retries, 2);
+        assert_eq!(p.max_retries, Some(2));
+        assert_eq!(p.retry_mode, RetryMode::Fixed);
+        assert_eq!(p.retry_initial_delay_ms, 500);
+        assert_eq!(p.retry_max_delay_ms, 30_000);
+        assert_eq!(p.retry_backoff_factor, 2.0);
+    }
+
+    #[test]
+    fn provider_config_retries_serde() {
+        // 省略字段 → default Some(2)
+        let j = r#"{"kind":"open_ai_compat"}"#;
+        let p: ProviderConfig = serde_json::from_str(j).unwrap();
+        assert_eq!(p.max_retries, Some(2));
+        // 显式 null → None（无限重试）
+        let j = r#"{"kind":"open_ai_compat","max_retries":null}"#;
+        let p: ProviderConfig = serde_json::from_str(j).unwrap();
+        assert_eq!(p.max_retries, None);
+        // 数字 → Some(n)
+        let j = r#"{"kind":"open_ai_compat","max_retries":5}"#;
+        let p: ProviderConfig = serde_json::from_str(j).unwrap();
+        assert_eq!(p.max_retries, Some(5));
+        // None 往返保持 None
+        let p = ProviderConfig {
+            max_retries: None,
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let p2: ProviderConfig = serde_json::from_str(&s).unwrap();
+        assert_eq!(p2.max_retries, None);
+    }
+
+    #[test]
+    fn retry_mode_serde_snake_case() {
+        let j = serde_json::to_string(&RetryMode::Exponential).unwrap();
+        assert_eq!(j, r#""exponential""#);
+        let m: RetryMode = serde_json::from_str(r#""fixed""#).unwrap();
+        assert_eq!(m, RetryMode::Fixed);
     }
 
     #[test]

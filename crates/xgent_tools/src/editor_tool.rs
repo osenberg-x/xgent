@@ -312,7 +312,13 @@ mod tests {
     fn parse_goto_without_col() {
         let input = json!({"action": "goto", "line": 10});
         let (req, summary) = EditorTool::parse_input(&input).unwrap();
-        assert_eq!(req, EditorCommandRequest::GoTo { line: 10, col: None });
+        assert_eq!(
+            req,
+            EditorCommandRequest::GoTo {
+                line: 10,
+                col: None
+            }
+        );
         assert_eq!(summary, "跳转到行 10");
     }
 

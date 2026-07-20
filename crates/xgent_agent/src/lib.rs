@@ -11,13 +11,18 @@ pub mod events;
 pub mod format;
 pub mod provider_state;
 pub mod session_store;
+pub mod tokenizer;
 
 #[cfg(test)]
 mod bridge_tests;
 
 pub use agent_loop::agent_poll_system;
 pub use bridge::{AgentBridge, AgentBridgeConfig, AgentCommand, AgentEvent, ProviderClient};
-pub use compaction::{CompactionError, CompactionProvider, CompactionResult};
+pub use compaction::{
+    CompactionError, CompactionProvider, CompactionResult, CompactionSettings, LlmCompactor,
+    apply_compaction, compaction_context_tokens, effective_reserve_tokens, find_cut_point,
+    resolve_threshold_tokens, should_compact,
+};
 pub use conversation::{Conversation, ConversationStatus};
 pub use events::*;
 pub use format::build_request;
@@ -43,8 +48,10 @@ impl Plugin for XgentAgentPlugin {
             .add_message::<ConfirmDecisionMessage>()
             .add_message::<DoneMessage>()
             .add_message::<ErrorMessage>()
+            .add_message::<RetryMessage>()
             .add_message::<SteeringMessage>()
             .add_message::<FollowUpMessage>()
+            .add_message::<CompactedMessage>()
             .init_resource::<Conversation>()
             .init_resource::<ProviderInfo>()
             .init_resource::<ContextState>()

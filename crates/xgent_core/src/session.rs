@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::chat::AgentMessage;
 
 /// JSONL 单行 entry（`#[serde(tag = "type")]` 内部标签）。
-///
-/// MVP 只有 3 种变体；Compaction 等留 P1。
+/// - `Header` / `Message` / `ModelChange`：MVP 基础类型。
+/// - `Compaction`：对话压缩记录（见 `xgent_agent::compaction`），压缩发生时
+///   追加一条，摘要文本与保留消息范围记录于此，便于恢复时重建上下文。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEntry {
@@ -19,6 +20,8 @@ pub enum SessionEntry {
     Message(SessionMessage),
     /// 模型切换记录。
     ModelChange(ModelChangeEntry),
+    /// 对话压缩记录（compaction 发生时 append）。
+    Compaction(CompactionEntry),
 }
 
 /// 会话 Header：会话开始时写入一次。
@@ -62,6 +65,26 @@ pub struct ModelChangeEntry {
     pub timestamp: u64,
     /// 切换后的模型名
     pub model: String,
+}
+
+/// 对话压缩记录 entry。
+///
+/// compaction 发生时追加一条：记录被压缩消息段的摘要文本、保留的最近
+/// 消息起始 id、压缩前 token 数。恢复会话时据此重建「摘要 + 最近消息」上下文。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompactionEntry {
+    /// 本条记录 id
+    pub id: String,
+    /// 父 entry id
+    pub parent_id: String,
+    /// 时间戳（ms epoch）
+    pub timestamp: u64,
+    /// 被压缩消息段的摘要文本
+    pub summary: String,
+    /// 压缩后保留的第一条消息 id（即 `firstKeptEntryId`）
+    pub first_kept_id: String,
+    /// 压缩前对话 token 估算（触发依据，供审计）
+    pub tokens_before: u32,
 }
 
 #[cfg(test)]

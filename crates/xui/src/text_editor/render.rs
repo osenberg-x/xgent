@@ -17,8 +17,8 @@
 
 use bevy::prelude::*;
 
-use crate::text_editor::{TextEditor, HighlightCache};
 use crate::text_editor::highlight::{HighlightSpan, SpanKind};
+use crate::text_editor::{HighlightCache, TextEditor};
 
 /// 行号列标记（含 `Text` 组件的实体）。
 #[derive(Component, Default)]
@@ -83,10 +83,7 @@ pub fn sync_highlight_layer(
                 }
                 let segment = full[s.start..end].to_string();
                 let color = crate::text_editor::highlight::span_color_for(s.kind);
-                p.spawn((
-                    TextSpan::new(segment),
-                    TextColor(color),
-                ));
+                p.spawn((TextSpan::new(segment), TextColor(color)));
             }
         });
     }
@@ -116,7 +113,15 @@ impl Default for EditorTheme {
 ///
 /// 只在文本变化（`HighlightCache` 变）时重建。
 pub fn update_line_numbers(
-    q: Query<(&TextEditor, &HighlightCache, &TextEditorChildren, &bevy::text::EditableText), Changed<HighlightCache>>,
+    q: Query<
+        (
+            &TextEditor,
+            &HighlightCache,
+            &TextEditorChildren,
+            &bevy::text::EditableText,
+        ),
+        Changed<HighlightCache>,
+    >,
     mut q_num: Query<&mut Text, With<LineNumbersMarker>>,
 ) {
     for (_editor, _cache, children, editable) in q.iter() {
@@ -128,7 +133,10 @@ pub fn update_line_numbers(
         };
         let text = editable.value().to_string();
         let line_count = text.lines().count().max(1);
-        let nums = (1..=line_count).map(|i| format!("{i:>4}")).collect::<Vec<_>>().join("\n");
+        let nums = (1..=line_count)
+            .map(|i| format!("{i:>4}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         *num_text = Text::new(nums);
     }
 }
@@ -161,7 +169,7 @@ pub fn update_cursor_bar(
 
 #[cfg(test)]
 mod tests {
-    use crate::text_editor::highlight::{span_color_for, SpanKind};
+    use crate::text_editor::highlight::{SpanKind, span_color_for};
 
     #[test]
     fn span_color_plain_is_white() {

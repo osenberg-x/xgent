@@ -117,7 +117,10 @@ mod tests {
         let mut s = EditorStateSnapshot::default();
         s.buffers.push((
             PathBuf::from("/x"),
-            BufferStatus { open: true, dirty: true },
+            BufferStatus {
+                open: true,
+                dirty: true,
+            },
         ));
         let st = s.buffer_status(Path::new("/x")).unwrap();
         assert!(st.open);

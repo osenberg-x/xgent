@@ -11,8 +11,8 @@
 //!
 //! grammar 随二进制编译入（`tree-sitter-rust`），不做按需下载（D-06 已决策）。
 
-use bevy::prelude::*;
 use crate::text_editor::{Language, Rope};
+use bevy::prelude::*;
 
 /// 高亮 span 的语义类别（映射到颜色，由渲染层决定具体配色）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,7 +199,11 @@ fn normalize_spans(mut spans: Vec<HighlightSpan>, text_len: usize) -> Vec<Highli
             {
                 last.end = end;
             } else {
-                out.push(HighlightSpan { start, end, kind: s.kind });
+                out.push(HighlightSpan {
+                    start,
+                    end,
+                    kind: s.kind,
+                });
             }
             cursor = end;
         }
@@ -391,7 +395,10 @@ mod tests {
         // 断言不重叠且覆盖 [0, len)
         let mut prev_end = 0;
         for s in &spans {
-            assert!(s.start >= prev_end, "span 重叠: {s:?} (prev_end={prev_end})");
+            assert!(
+                s.start >= prev_end,
+                "span 重叠: {s:?} (prev_end={prev_end})"
+            );
             assert_eq!(s.start, prev_end, "span 未连续覆盖: gap or overlap");
             prev_end = s.end;
         }
@@ -403,7 +410,10 @@ mod tests {
         // 两个相邻 Keyword（如 "pub fn"）应合并
         let code = "pub fn";
         let spans = highlight(code, Language::Rust);
-        let keywords: Vec<_> = spans.iter().filter(|s| s.kind == SpanKind::Keyword).collect();
+        let keywords: Vec<_> = spans
+            .iter()
+            .filter(|s| s.kind == SpanKind::Keyword)
+            .collect();
         // "pub" 和 "fn" 中间有空格（Plain），故不合并
         // 这里仅断言不重叠覆盖
         let mut prev_end = 0;
@@ -419,13 +429,27 @@ mod tests {
     #[test]
     fn normalize_fills_gaps_with_plain() {
         let spans = vec![
-            HighlightSpan { start: 5, end: 8, kind: SpanKind::Keyword },
-            HighlightSpan { start: 10, end: 12, kind: SpanKind::Number },
+            HighlightSpan {
+                start: 5,
+                end: 8,
+                kind: SpanKind::Keyword,
+            },
+            HighlightSpan {
+                start: 10,
+                end: 12,
+                kind: SpanKind::Number,
+            },
         ];
         let out = normalize_spans(spans, 12);
         // 应有 Plain 填充 [0,5) 和 [8,10)
-        assert!(out.iter().any(|s| s.kind == SpanKind::Plain && s.start == 0 && s.end == 5));
-        assert!(out.iter().any(|s| s.kind == SpanKind::Plain && s.start == 8 && s.end == 10));
+        assert!(
+            out.iter()
+                .any(|s| s.kind == SpanKind::Plain && s.start == 0 && s.end == 5)
+        );
+        assert!(
+            out.iter()
+                .any(|s| s.kind == SpanKind::Plain && s.start == 8 && s.end == 10)
+        );
         // 覆盖末尾
         assert_eq!(out.last().unwrap().end, 12);
     }

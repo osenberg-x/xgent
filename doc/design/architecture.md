@@ -286,7 +286,7 @@ trait LlmProvider {
 }
 ```
 
-- `ChatEvent`：Delta(text) / ToolCall(...) / Done(usage) / Error。
+- `ChatEvent`（细粒度，见 ADR-0006）：`Start{model}` → `TextStart/TextDelta/TextEnd` → `ThinkingStart/Delta/End`（MVP 不发射，预留 Anthropic）→ `ToolCallStart/Delta/End`（按 index 聚合）→ `Done{reason: StopReason, usage}` / `Error{kind, message}`。`StopReason`：Stop/ToolUse/Length/Aborted/Error。
 - 适配器：
   - `OpenAiCompatProvider`：OpenAI compatible 接口（OpenAI、DeepSeek、Ollama 兼容模式等）。
   - `ResponseApiProvider`：Response API 风格接口。
@@ -301,8 +301,15 @@ trait LlmProvider {
 trait Tool {
     fn id(&self) -> &str;
     fn schema(&self) -> ToolSchema;          // 给 LLM 的 JSON schema
-    fn policy(&self) -> SecurityPolicy;       // Approved / NeedsConfirmation / Denied
-    async fn execute(&self, input: Value, ctx: &ToolCtx) -> ToolResult;
+    fn tier(&self) -> ToolTier;               // Read/Write/Exec/UiOnly（静态分层）
+    fn approval_for(&self, input: &Value) -> ToolTier { self.tier() }  // 动态收紧 tier
+    fn concurrency(&self) -> Concurrency { Concurrency::Shared }  // Shared/Exclusive
+    fn summarize(&self, input: &Value) -> String;
+    async fn execute(
+        &self, input: Value, ctx: &ToolCtx,
+        signal: CancellationToken,           // 中断信号，cancel 返回 ToolError::Aborted
+        on_update: Option<&ToolUpdateCallback>,
+    ) -> Result<ToolResult, ToolError>;     // 逻辑失败用 Ok(ToolResult{is_error:true})
 }
 ```
 

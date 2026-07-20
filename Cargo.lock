@@ -7315,6 +7315,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bevy",
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",
@@ -7338,6 +7339,7 @@ dependencies = [
  "bevy",
  "clap",
  "icu_provider",
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",
@@ -7436,6 +7438,7 @@ name = "xgent_settings_core"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",

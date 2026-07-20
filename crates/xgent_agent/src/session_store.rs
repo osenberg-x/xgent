@@ -4,8 +4,9 @@
 //! - `append` 同步追加一行（`writeln` 即持久化，flush 落盘）；
 //! - `load_all` 读取全部 entry（MVP 定义但不调用，恢复留 P1）。
 //!
-//! MVP：每个会话对应一个文件，文件路径由调用方（bridge）按
-//! `<project_root>/.xgent/sessions/<session_id>.jsonl` 约定构造。
+//! 会话文件存全局用户目录 `<agent_dir>/sessions/<session_id>.jsonl`
+//!（见 [`xgent_settings_core::paths::session_file_path`]），跨项目共享，
+//! 对齐 pi 的 `~/.pi/agent/sessions/` 布局。
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
@@ -75,15 +76,11 @@ impl SessionStore {
         &self.path
     }
 }
-
-/// 计算项目会话 JSONL 文件路径：`<project_root>/.xgent/sessions/<session_id>.jsonl`。
+/// 计算会话 JSONL 文件路径：`<agent_dir>/sessions/<session_id>.jsonl`。
 ///
-/// 与 [`xgent_settings_core::paths::project_config_dir`] 对齐（同在 `.xgent/` 下）。
-pub fn session_file_path(project_root: &Path, session_id: &str) -> PathBuf {
-    project_root
-        .join(".xgent")
-        .join("sessions")
-        .join(format!("{session_id}.jsonl"))
+/// 转发到 [`xgent_settings_core::paths::session_file_path`]（全局用户目录）。
+pub fn session_file_path(session_id: &str) -> PathBuf {
+    xgent_settings_core::paths::session_file_path(session_id)
 }
 
 /// 当前时间戳（ms epoch）。持久化 entry 时间戳用。
@@ -203,8 +200,10 @@ mod tests {
 
     #[test]
     fn session_file_path_layout() {
-        let p = session_file_path(Path::new("/proj"), "abc");
-        assert_eq!(p, Path::new("/proj/.xgent/sessions/abc.jsonl"));
+        // 路径在全局 agent_dir/sessions/ 下
+        let p = session_file_path("abc");
+        assert!(p.ends_with("abc.jsonl"));
+        assert!(p.starts_with(xgent_settings_core::paths::sessions_dir()));
     }
 
     #[test]

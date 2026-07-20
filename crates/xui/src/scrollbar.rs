@@ -61,8 +61,7 @@ impl Plugin for ScrollbarPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             PostUpdate,
-            (spawn_scrollbar_nodes, update_scrollbar_thumb)
-                .after(bevy::ui::UiSystems::PostLayout),
+            (spawn_scrollbar_nodes, update_scrollbar_thumb).after(bevy::ui::UiSystems::PostLayout),
         );
     }
 }
@@ -113,15 +112,7 @@ fn spawn_scrollbar_nodes(
 /// 为本帧最新值。`ScrollPosition` 与 `ComputedNode` 物理量需乘 `inverse_scale_factor`
 /// 转逻辑像素。
 fn update_scrollbar_thumb(
-    q: Query<
-        (
-            &Scrollbar,
-            &ScrollPosition,
-            &ComputedNode,
-            &Children,
-        ),
-        With<ScrollbarTrack>,
-    >,
+    q: Query<(&Scrollbar, &ScrollPosition, &ComputedNode, &Children), With<ScrollbarTrack>>,
     q_track: Query<&Children, With<ScrollbarTrack>>,
     mut q_thumb: Query<&mut Node, With<ScrollbarThumb>>,
 ) {
@@ -199,7 +190,6 @@ struct ThumbGeometry {
     top: Val,
     height: Val,
 }
-
 
 #[cfg(test)]
 mod tests {

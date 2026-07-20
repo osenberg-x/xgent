@@ -66,9 +66,36 @@ pub struct ConfirmDecisionMessage {
 #[derive(Message)]
 pub struct DoneMessage;
 
+/// 即将重试（agent → UI）。
+///
+/// agent loop 因可重试错误触发自动重试前发射。
+/// UI 据此清空当前半截助手文本并展示"重试中(第 N 次)"。
+#[derive(Message)]
+pub struct RetryMessage {
+    /// 即将进行的重试序号（1-based）
+    pub attempt: u32,
+    /// 是否为无限重试模式
+    pub infinite: bool,
+    /// 上次失败的错误类型
+    pub kind: xgent_core::chat::ErrorKind,
+    /// 上次失败的错误消息
+    pub last_error: String,
+}
+
 /// 对话出错（agent → UI）。
 #[derive(Message)]
 pub struct ErrorMessage {
     pub kind: xgent_core::chat::ErrorKind,
     pub message: String,
+}
+
+/// 对话已压缩（agent → UI）。
+///
+/// compaction 触发后发射。UI 据此提示用户「前序对话已摘要」。
+#[derive(Message)]
+pub struct CompactedMessage {
+    /// 压缩前 token 估算
+    pub tokens_before: u32,
+    /// 压缩后保留消息 token 估算
+    pub tokens_after: u32,
 }

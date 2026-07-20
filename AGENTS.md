@@ -19,6 +19,7 @@
 - `doc/design/architecture.md` — 架构设计（进程模型、分层、crate 划分、数据流、抽象接口、待决策点 D-xx）
 - `doc/notes/` — 调研与评估报告（检索方案、守护进程胖瘦、i18n、bevy_ui 模式评估）
 - `doc/plans/` — MVP 分步实现计划（step1~step12，按依赖顺序）
+- `doc/dev-tutorial.md` — 开发指南（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点；**功能变化时必须同步**）
 
 ---
 
@@ -183,14 +184,14 @@ xgent_app → 组装所有 UI 侧 crate
 5. **不提前引入 3D/TUI/Web/宠物**：MVP 仅 2D GUI。
 6. **产出文档放 doc/**：生成的设计/计划类文档放 `doc/` 对应分类目录（见第 2 节），不放项目根目录。
 7. **遗留清理**：根目录 `src/main.rs` 是遗留 Hello world，按计划应删除（xgent_app 接管入口）。
+8. **同步开发指南**：后续实现新功能或功能有变化，都需要更新 `doc/dev-tutorial.md`（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点）。新增/变更功能、crate、ADR、trait 时必须同步该文档对应章节，避免文档与代码脱节。
 
 ---
 
 ## 7. 当前实现状态
+项目处于 MVP + F-11 编辑器（P1）已落地阶段。12 个 crate 全部实现，`cargo check --workspace` 通过，约 19k 行 Rust。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。
 
-项目处于设计完成、编码未开始阶段。crate 均未实现，设计文档已就绪。
-
-实现顺序见 `doc/plans/README.md`（step1~step12）。开始编码从 step1 xgent_core 起步。
+实现顺序见 `doc/plans/README.md`（step1~step12，已全部完成）+ `doc/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `doc/design/requirements.md` §4.2 的 P1/P2 项推进。
 
 ---
 

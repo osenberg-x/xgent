@@ -37,7 +37,9 @@ impl Default for EditorIoRuntime {
 impl EditorIoRuntime {
     /// 注入 handle。
     pub fn new(handle: tokio::runtime::Handle) -> Self {
-        Self { handle: Some(handle) }
+        Self {
+            handle: Some(handle),
+        }
     }
 }
 
@@ -252,9 +254,13 @@ pub struct FileReadPending {
 /// 清空 `HighlightCache` 触发下帧 tree-sitter 重解析（基于 rope）。
 pub fn apply_file_read_results(
     mut reader: MessageReader<FileReadResult>,
-    mut q: Query<
-        (Entity, &mut EditorBuffer, &mut TextEditor, &mut xui::HighlightCache, &FileReadPending),
-    >,
+    mut q: Query<(
+        Entity,
+        &mut EditorBuffer,
+        &mut TextEditor,
+        &mut xui::HighlightCache,
+        &FileReadPending,
+    )>,
     mut commands: Commands,
 ) {
     for result in reader.read() {

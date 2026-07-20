@@ -21,9 +21,9 @@
 //! 参考：helix-tui `Paragraph` widget + `WordWrapper`——单层文本流式布局，
 //! 软换行由布局引擎处理，行高由 `LineHeight` 精确控制，无逐行独立容器。
 
-use crate::text_editor::TextEditor;
 use crate::text_editor::HighlightCache;
-use crate::text_editor::highlight::{span_color_for, spans_for_line, HighlightSpan};
+use crate::text_editor::TextEditor;
+use crate::text_editor::highlight::{HighlightSpan, span_color_for, spans_for_line};
 use crate::text_editor::render::EditorTheme;
 use bevy::prelude::*;
 use bevy::text::LineHeight;
@@ -73,12 +73,7 @@ pub fn visible_row_range(
 /// 4. 始终更新 Text 节点的 `top` 偏移 = `-(start × line_height)`（让可见行对齐视口）
 pub fn update_virtual_lines(
     mut q: Query<
-        (
-            &mut TextEditor,
-            &ScrollPosition,
-            &ComputedNode,
-            &Children,
-        ),
+        (&mut TextEditor, &ScrollPosition, &ComputedNode, &Children),
         With<HighlightCache>,
     >,
     mut q_content: Query<&mut Node, (With<VirtualContentMarker>, Without<VirtualTextMarker>)>,
@@ -164,7 +159,10 @@ pub fn update_virtual_lines(
                         },
                         LineHeight::Px(line_height),
                         TextColor(theme.text),
-                        VirtualTextMarker { start_row: 0, end_row: 0 },
+                        VirtualTextMarker {
+                            start_row: 0,
+                            end_row: 0,
+                        },
                     ))
                     .id();
                 commands.entity(content_entity).add_child(e);
@@ -213,9 +211,10 @@ pub fn update_virtual_lines(
                 }
             }
             // 更新 marker（通过插入覆盖，bevy 0.19 无直接 ComponentMut 单字段改）
-            commands
-                .entity(text_entity)
-                .insert(VirtualTextMarker { start_row: start, end_row: end });
+            commands.entity(text_entity).insert(VirtualTextMarker {
+                start_row: start,
+                end_row: end,
+            });
             // spawn 新 TextSpan 子节点（可见行拼接 + 高亮 span 切分）
             rebuild_visible_spans(
                 &mut commands,
@@ -250,7 +249,10 @@ fn rebuild_visible_spans(
     // 逐行收集 (片段, 颜色)，行间插入换行
     let mut segments: Vec<(String, Color)> = Vec::new();
     for row in start..end {
-        let line_text = rope.get_line(row).map(|s| s.to_string()).unwrap_or_default();
+        let line_text = rope
+            .get_line(row)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         let line_spans = spans_for_line(global_spans, &line_text, row, rope);
         if line_spans.is_empty() {
             // 空行：放一个空串占位 + 换行（让 parley 产生空行行盒）
@@ -276,10 +278,9 @@ fn rebuild_visible_spans(
             if !buf.is_empty() {
                 let c = cur_color;
                 let s = std::mem::take(&mut buf);
-                commands.entity(text_entity).with_child((
-                    TextSpan::new(s),
-                    TextColor(c),
-                ));
+                commands
+                    .entity(text_entity)
+                    .with_child((TextSpan::new(s), TextColor(c)));
             }
             cur_color = color;
             cur_color_set = true;

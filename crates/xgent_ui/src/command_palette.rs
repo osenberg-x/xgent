@@ -52,6 +52,7 @@ impl Plugin for CommandPalettePlugin {
                     handle_palette_keyboard,
                     sync_input_to_query,
                     rebuild_list,
+                    handle_palette_click,
                     handle_palette_triggers,
                 )
                     .chain()
@@ -85,7 +86,6 @@ pub fn register_xgent_commands(mut registry: ResMut<CommandRegistry>, loc: Res<L
     });
 }
 
-/// 根据 CommandPaletteState.open 切换面板的 spawn/despawn。
 fn toggle_palette_visibility(
     state: Res<CommandPaletteState>,
     theme: Res<Theme>,
@@ -215,61 +215,111 @@ fn sync_input_to_query(
     }
 }
 
-/// 每帧根据 filtered 列表重建命令项。
+/// 仅在 `filtered` 内容变化时重建命令项 entity；`selected` 变化只更新视觉。
+///
+/// 关键：不能每帧无条件 despawn+重建，否则 `Interaction::Pressed` 来不及被
+/// `handle_palette_click` 观察到就被新 entity 覆盖（新 entity 的 Interaction 为 None）。
+/// 用 `Local` 缓存上次 filtered，内容相同时保持 entity 稳定。
 fn rebuild_list(
     state: Res<CommandPaletteState>,
     registry: Res<CommandRegistry>,
     theme: Res<Theme>,
     q_list: Query<Entity, With<PaletteListMarker>>,
-    q_items: Query<Entity, With<PaletteItemMarker>>,
+    q_items_entity: Query<Entity, With<PaletteItemMarker>>,
+    mut q_items_visual: Query<
+        (&PaletteItemMarker, &mut BackgroundColor, &mut TextColor),
+        With<Button>,
+    >,
     mut commands: Commands,
+    mut last_filtered: Local<Vec<usize>>,
 ) {
     let Ok(list) = q_list.single() else {
+        // overlay 未渲染（面板关闭）：清空缓存，下次打开时强制重建 item，
+        // 避免 last_filtered 仍记旧内容导致 rebuild_list 跳过重建（面板空白）。
+        last_filtered.clear();
         return;
     };
-    // 清除旧项
-    for item in q_items.iter() {
-        commands.entity(item).despawn();
-    }
-    let font = theme.font_size;
-    // 重建
-    commands.entity(list).with_children(|p| {
-        for &idx in state.filtered.iter().take(20) {
-            let Some(cmd) = registry.commands.get(idx) else {
-                continue;
-            };
-            let is_selected = idx
-                == state
-                    .filtered
-                    .get(state.selected)
-                    .copied()
-                    .unwrap_or(usize::MAX);
-            let bg = if is_selected {
-                BackgroundColor(Color::srgba(0.36, 0.62, 0.92, 0.3))
-            } else {
-                BackgroundColor::default()
-            };
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::horizontal(px(space::SM)),
-                    ..default()
-                },
-                bg,
-                Text::new(cmd.label.clone()),
-                TextFont {
-                    font_size: FontSize::Px(font),
-                    ..default()
-                },
-                TextColor(if is_selected {
-                    theme.text
-                } else {
-                    theme.text_dim
-                }),
-                PaletteItemMarker { index: idx },
-            ));
+
+    // 仅当 filtered 内容变化时才重建 entity，保持 Interaction 组件稳定。
+    // 若每帧无条件 despawn+重建，鼠标按下那帧的 Interaction::Pressed 会被
+    // 新 entity（Interaction::None）覆盖，handle_palette_click 永远观察不到 Pressed。
+    if *last_filtered != state.filtered {
+        for entity in q_items_entity.iter() {
+            commands.entity(entity).despawn();
         }
-    });
+        last_filtered.clone_from(&state.filtered);
+        let font = theme.font_size;
+        commands.entity(list).with_children(|p| {
+            for &idx in state.filtered.iter().take(20) {
+                let Some(cmd) = registry.commands.get(idx) else {
+                    continue;
+                };
+                p.spawn((
+                    // 用 Button（自带 Interaction）使鼠标点击可被检测，
+                    // 对齐 top_bar/file_panel 的点击处理模式。
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        padding: UiRect::horizontal(px(space::SM)),
+                        ..default()
+                    },
+                    Interaction::default(),
+                    BackgroundColor::default(),
+                    Text::new(cmd.label.clone()),
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                    PaletteItemMarker { index: idx },
+                ));
+            }
+        });
+    }
+
+    // 选中态视觉更新（不重建 entity，避免破坏 Interaction 状态）
+    let selected_idx = state
+        .filtered
+        .get(state.selected)
+        .copied()
+        .unwrap_or(usize::MAX);
+    for (marker, mut bg, mut color) in q_items_visual.iter_mut() {
+        let is_selected = marker.index == selected_idx;
+        bg.0 = if is_selected {
+            Color::srgba(0.36, 0.62, 0.92, 0.3)
+        } else {
+            Color::NONE
+        };
+        color.0 = if is_selected {
+            theme.text
+        } else {
+            theme.text_dim
+        };
+    }
+}
+
+/// 处理命令项鼠标点击：Pressed 时定位 filtered 中的位置、设 selected、触发命令。
+///
+/// 与键盘 Enter 走同一条 `trigger_selected` 路径，保持行为一致。
+fn handle_palette_click(
+    q_items: Query<(&Interaction, &PaletteItemMarker), Changed<Interaction>>,
+    mut state: ResMut<CommandPaletteState>,
+    registry: Res<CommandRegistry>,
+    mut writer: MessageWriter<PaletteTriggered>,
+) {
+    if !state.open {
+        return;
+    }
+    for (interaction, marker) in q_items.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 把命令在 registry 中的索引转成 filtered 列表里的位置
+        if let Some(pos) = state.filtered.iter().position(|&i| i == marker.index) {
+            state.selected = pos;
+            trigger_selected(&state, &registry, &mut writer);
+        }
+    }
 }
 
 /// 订阅 PaletteTriggered，据命令 id 执行业务。

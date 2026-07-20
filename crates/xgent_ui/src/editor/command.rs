@@ -130,7 +130,10 @@ mod tests {
 
     #[test]
     fn from_request_goto() {
-        let req = R::GoTo { line: 5, col: Some(3) };
+        let req = R::GoTo {
+            line: 5,
+            col: Some(3),
+        };
         let cmd = EditorCommand::from_request(&req);
         match cmd {
             EditorCommand::GoTo { line, col } => {
@@ -143,7 +146,9 @@ mod tests {
 
     #[test]
     fn from_request_close_tab() {
-        let req = R::CloseTab { path: PathBuf::from("/y") };
+        let req = R::CloseTab {
+            path: PathBuf::from("/y"),
+        };
         let cmd = EditorCommand::from_request(&req);
         match cmd {
             EditorCommand::CloseTab { path } => assert_eq!(path, PathBuf::from("/y")),

@@ -140,6 +140,10 @@ fn read_provider_field(pc: &ProviderConfig, field: &str) -> Value {
         "model_overrides" => json!(pc.model_overrides),
         "timeout_secs" => json!(pc.timeout_secs),
         "max_retries" => json!(pc.max_retries),
+        "retry_mode" => json!(pc.retry_mode),
+        "retry_initial_delay_ms" => json!(pc.retry_initial_delay_ms),
+        "retry_max_delay_ms" => json!(pc.retry_max_delay_ms),
+        "retry_backoff_factor" => json!(pc.retry_backoff_factor),
         _ => Value::Null,
     }
 }
@@ -165,10 +169,33 @@ fn write_provider_field(pc: &mut ProviderConfig, field: &str, value: &Value) -> 
                 .ok_or_else(|| XgentError::Config(format!("timeout_secs 期望数字: {value}")))?;
         }
         "max_retries" => {
-            pc.max_retries = value
-                .as_u64()
-                .ok_or_else(|| XgentError::Config(format!("max_retries 期望数字: {value}")))?
-                as u32;
+            // null → None（无限重试）；数字 → Some(n)
+            pc.max_retries = if value.is_null() {
+                None
+            } else {
+                Some(value.as_u64().ok_or_else(|| {
+                    XgentError::Config(format!("max_retries 期望数字或 null: {value}"))
+                })? as u32)
+            };
+        }
+        "retry_mode" => {
+            pc.retry_mode = serde_json::from_value(value.clone())
+                .map_err(|e| XgentError::Config(format!("retry_mode 反序列化失败: {e}")))?;
+        }
+        "retry_initial_delay_ms" => {
+            pc.retry_initial_delay_ms = value.as_u64().ok_or_else(|| {
+                XgentError::Config(format!("retry_initial_delay_ms 期望数字: {value}"))
+            })?;
+        }
+        "retry_max_delay_ms" => {
+            pc.retry_max_delay_ms = value.as_u64().ok_or_else(|| {
+                XgentError::Config(format!("retry_max_delay_ms 期望数字: {value}"))
+            })?;
+        }
+        "retry_backoff_factor" => {
+            pc.retry_backoff_factor = value.as_f64().ok_or_else(|| {
+                XgentError::Config(format!("retry_backoff_factor 期望数字: {value}"))
+            })?;
         }
         _ => {
             return Err(XgentError::Config(format!("未知 provider 字段: {field}")));
@@ -299,5 +326,34 @@ mod tests {
         let got = c.read("providers.deepseek");
         assert_eq!(got["api_base"], json!("https://api.deepseek.com/v1"));
         assert_eq!(got["api_key"], json!("sk-deep"));
+    }
+
+    #[test]
+    fn write_provider_retry_fields() {
+        let mut c = ConfigCoordinator::with_config(empty_config());
+        c.write("providers.myai.api_base", json!("https://x.example.com"))
+            .unwrap();
+        // max_retries: 数字 → Some(n)
+        c.write("providers.myai.max_retries", json!(5)).unwrap();
+        assert_eq!(c.read("providers.myai.max_retries"), json!(5));
+        // max_retries: null → None（无限重试）
+        c.write("providers.myai.max_retries", json!(null)).unwrap();
+        assert_eq!(c.read("providers.myai.max_retries"), json!(null));
+        // retry_mode
+        c.write("providers.myai.retry_mode", json!("exponential"))
+            .unwrap();
+        assert_eq!(c.read("providers.myai.retry_mode"), json!("exponential"));
+        // retry_initial_delay_ms
+        c.write("providers.myai.retry_initial_delay_ms", json!(1000))
+            .unwrap();
+        assert_eq!(c.read("providers.myai.retry_initial_delay_ms"), json!(1000));
+        // retry_max_delay_ms
+        c.write("providers.myai.retry_max_delay_ms", json!(60000))
+            .unwrap();
+        assert_eq!(c.read("providers.myai.retry_max_delay_ms"), json!(60000));
+        // retry_backoff_factor
+        c.write("providers.myai.retry_backoff_factor", json!(1.5))
+            .unwrap();
+        assert_eq!(c.read("providers.myai.retry_backoff_factor"), json!(1.5));
     }
 }

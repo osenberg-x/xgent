@@ -39,7 +39,10 @@ pub enum BufferState {
 impl BufferState {
     /// 是否脏（有未保存修改）。
     pub fn is_dirty(self) -> bool {
-        matches!(self, BufferState::Dirty | BufferState::ConflictDetected | BufferState::LocalPreferred)
+        matches!(
+            self,
+            BufferState::Dirty | BufferState::ConflictDetected | BufferState::LocalPreferred
+        )
     }
 }
 

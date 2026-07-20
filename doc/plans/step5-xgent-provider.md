@@ -138,11 +138,17 @@ impl LlmProvider for OpenAiCompatProvider {
     async fn chat(&self, req: ChatRequest) -> Result<(StreamId, ChatStream), ProviderError> {
         // POST {api_base}/chat/completions，stream=true
         // body: model + messages + tools(optional) + stream
-        // 解析 SSE：每个 data: 行是 JSON delta
-        //   choices[0].delta.content -> ChatEvent::Delta
-        //   choices[0].delta.tool_calls -> ChatEvent::ToolCall
-        //   finish_reason=="stop" -> ChatEvent::Done(usage)
-        // 用 mpsc::channel，spawn task 把 SSE event 转成 ChatEvent 发送
+        //   messages 经 message_to_json 按 role 展开（见 ADR-0005/0006）：
+        //     System/User → {role, content: 文本拼接}
+        //     Assistant → {role, content} + tool_calls 顶层字段（从 ContentBlock::ToolCall 提取）
+        //     Tool → {role:tool, content, tool_call_id}（修复旧版缺 tool_call_id 的协议 bug）
+        // SSE 解析（run_stream_with_timeout）：
+        //   流首 emit ChatEvent::Start{model}
+        //   choices[0].delta.content → TextStart(首块) + TextDelta + (无后续时 TextEnd)
+        //   choices[0].delta.tool_calls → 按 index 聚合，发 ToolCallStart/Delta/End
+        //   finish_reason → map_stop_reason 映射 Stop/ToolUse/Length
+        //   首事件 first_timeout / 后续每事件 idle_timeout，超时发 ChatEvent::Error{Network}
+        // 经 mpsc::channel，spawn task 把 SSE event 转成 ChatEvent 发送
     }
 
     async fn health_check(&self) -> Result<(), ProviderError> {
@@ -201,10 +207,12 @@ pub fn build_provider(cfg: &ProviderConfig) -> Box<dyn LlmProvider> {
 1. **不依赖 Bevy**：provider 是纯异步 trait，daemon 侧持有实例池，UI 侧经 IPC 调用。
 2. **连接复用**：每个 provider 实例持有一个 `reqwest::Client`（自带连接池），避免每次请求新建连接。
 3. **SSE 流式**：用 `eventsource-stream` 把 reqwest 的 `bytes_stream()` 转 SSE 事件，再 parse JSON delta，经 `mpsc::channel` 转成 `ChatEvent`。
-4. **工具调用解析**：OpenAI 的 `tool_calls` 字段在 delta 里分块到达，需按 `tool_call.index` 聚合，完整后发 `ChatEvent::ToolCall`。MVP 可先支持文本 delta，工具调用在 step7（xgent_tools）后完善。
+  4. **细粒度事件 + 工具调用聚合**（见 ADR-0006）：SSE delta 发射 `TextStart/TextDelta/TextEnd`、`ToolCallStart/ToolCallDelta/ToolCallEnd`；OpenAI 的 `tool_calls` 分块按 `index` 聚合，首块发 `ToolCallStart`、增量发 `ToolCallDelta(partial_json)`、完整后发 `ToolCallEnd(args)`。流首发 `Start{model}`，结束发 `Done{reason,usage}`，`finish_reason` 经 `map_stop_reason` 映射为 `StopReason`（stop→Stop, tool_calls→ToolUse, length→Length）。
 5. **错误分层**：`ProviderError` 区分网络/API/流解析/配置，便于上层重试与提示。
 6. **占位策略**：ResponseApi/Anthropic/Custom 先占位返回未实现，trait 与构造框架就位，后续迭代补实现，不阻塞 MVP（MVP 主用 OpenAiCompat，可对接 OpenAI/Ollama）。
-7. **StreamId**：本地直调用不到，但 trait 返回它使 daemon 侧 IPC 路由自然；本地测试可忽略。
+7. **Stream 超时**：`run_stream_with_timeout` 双层超时——首事件 `first_timeout`（默认值见常量）防慢响应挂死，后续每事件 `idle_timeout` 防流卡死；超时发 `ChatEvent::Error{kind: Network, message}`。见 `tests::run_stream_*_timeout`。
+8. **协议正确性**：`message_to_json` 按 role 展开为 OpenAI 协议形态——assistant 的 `ContentBlock::ToolCall` 提到顶层 `tool_calls` 字段，tool role 必带 `tool_call_id`。修复旧版缺 `tool_call_id` 被 OpenAI 400 拒绝的协议级 bug（见 ADR-0005）。
+9. **StreamId**：本地直调用不到，但 trait 返回它使 daemon 侧 IPC 路由自然；本地测试可忽略。
 
 ## 验证方法
 

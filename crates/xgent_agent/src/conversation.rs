@@ -68,7 +68,7 @@ impl Conversation {
         if self.session_store.is_some() {
             return;
         }
-        let path = crate::session_store::session_file_path(project_root, &self.id.to_string());
+        let path = crate::session_store::session_file_path(&self.id.to_string());
         match crate::session_store::SessionStore::open(path) {
             Ok(mut store) => {
                 let header =
@@ -123,6 +123,35 @@ impl Conversation {
             });
         if let Err(e) = store.append(&entry) {
             eprintln!("[session] 写入 Message 失败: {e}");
+        }
+    }
+
+    /// 持久化 compaction 记录（append 一条 `CompactionEntry`，不重写历史）。
+    ///
+    /// JSONL 是 append-only：被压缩的历史消息 entry 保留在文件中，
+    /// 恢复会话时读到 `CompactionEntry` 即知前文已被摘要为 `summary`，
+    /// 上下文重建为「summary + CompactionEntry 之后的 kept 消息」。
+    pub fn persist_compaction(
+        &mut self,
+        summary: &str,
+        first_kept_id: &str,
+        tokens_before: u32,
+    ) {
+        let Some(store) = self.session_store.as_mut() else {
+            return;
+        };
+        let entry = xgent_core::session::SessionEntry::Compaction(
+            xgent_core::session::CompactionEntry {
+                id: format!("{}-compaction-{}", self.id, crate::session_store::now_ms()),
+                parent_id: String::new(),
+                timestamp: crate::session_store::now_ms(),
+                summary: summary.to_string(),
+                first_kept_id: first_kept_id.to_string(),
+                tokens_before,
+            },
+        );
+        if let Err(e) = store.append(&entry) {
+            eprintln!("[session] 写入 Compaction 失败: {e}");
         }
     }
 

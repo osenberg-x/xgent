@@ -22,25 +22,25 @@ pub mod tabs;
 
 use bevy::prelude::*;
 
+use crate::editor::buffer::EditorBuffer;
 use crate::layout::ChatPanelMarker;
 use crate::theme::Theme;
-use crate::editor::buffer::EditorBuffer;
 
 /// 便捷：f32 → Val::Px
 fn px(v: f32) -> Val {
     Val::Px(v)
 }
 use crate::editor::command::EditorCommand;
-use crate::editor::conflict::{handle_conflict_decision, handle_file_changed, FileChangedEvent};
-use crate::editor::state::{update_editor_state_snapshot, EditorStateSnapshot};
+use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
-    handle_file_read_requests, handle_file_write_requests, process_pending_reads,
-    apply_file_read_results, BufferSavedEvent, EditorIoRuntime,
-    FileReadRequest, FileReadResult, FileWriteRequest, FileWriteResult,
+    BufferSavedEvent, EditorIoRuntime, FileReadRequest, FileReadResult, FileWriteRequest,
+    FileWriteResult, apply_file_read_results, handle_file_read_requests,
+    handle_file_write_requests, process_pending_reads,
 };
+use crate::editor::state::{EditorStateSnapshot, update_editor_state_snapshot};
 use crate::editor::tabs::{
-    handle_cycle_tab_requests, handle_open_file_requests, handle_close_tab_requests,
-    CycleTabRequest, CloseTabRequest, EditorTabs, OpenFileRequest,
+    CloseTabRequest, CycleTabRequest, EditorTabs, OpenFileRequest, handle_close_tab_requests,
+    handle_cycle_tab_requests, handle_open_file_requests,
 };
 
 /// 编辑器视图状态（对话/编辑器/文件预览切换）。
@@ -76,7 +76,10 @@ impl Plugin for EditorPlugin {
             .init_resource::<EditorView>()
             .init_resource::<EditorIoRuntime>()
             .init_resource::<EditorStateSnapshot>()
-            .add_systems(Startup, spawn_editor_view.after(crate::layout::spawn_layout))
+            .add_systems(
+                Startup,
+                spawn_editor_view.after(crate::layout::spawn_layout),
+            )
             .add_systems(
                 Update,
                 (
@@ -208,7 +211,9 @@ pub fn handle_editor_save_requests(
         });
         // 标记 saved（实际写入结果由 FileWriteResult 处理，此处乐观更新）
         buf.mark_saved(&content);
-        saved_writer.write(BufferSavedEvent { path: buf.path.clone() });
+        saved_writer.write(BufferSavedEvent {
+            path: buf.path.clone(),
+        });
     }
 }
 /// 按当前 `EditorView` 切换编辑器视图显隐。

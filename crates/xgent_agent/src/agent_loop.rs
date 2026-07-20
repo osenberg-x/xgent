@@ -20,16 +20,21 @@ pub fn agent_poll_system(
     mut confirm: MessageWriter<ConfirmRequestMessage>,
     mut done: MessageWriter<DoneMessage>,
     mut error: MessageWriter<ErrorMessage>,
-    mut user_input: MessageReader<UserInputMessage>,
-    mut abort: MessageReader<AbortMessage>,
-    mut decision: MessageReader<ConfirmDecisionMessage>,
-    mut steering: MessageReader<SteeringMessage>,
-    mut followup: MessageReader<FollowUpMessage>,
+    mut retry: MessageWriter<RetryMessage>,
+    mut compacted: MessageWriter<CompactedMessage>,
+    // ParamSet 合并所有 MessageReader，突破 SystemParam 数量上限
+    mut readers: ParamSet<(
+        MessageReader<UserInputMessage>,
+        MessageReader<AbortMessage>,
+        MessageReader<ConfirmDecisionMessage>,
+        MessageReader<SteeringMessage>,
+        MessageReader<FollowUpMessage>,
+    )>,
     provider: Res<crate::provider_state::ProviderInfo>,
     context: Res<crate::provider_state::ContextState>,
 ) {
     // 1. 处理用户输入
-    for ev in user_input.read() {
+    for ev in readers.p0().read() {
         if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
             // 忙碌时忽略（UI 应已禁用输入）
             continue;
@@ -62,20 +67,22 @@ pub fn agent_poll_system(
     }
 
     // 2. 处理中断
-    for _ in abort.read() {
+    for _ in readers.p1().read() {
         let _ = bridge.cmd_tx.try_send(AgentCommand::Abort);
         conv.status = ConversationStatus::Aborting;
     }
 
     // 2b. 处理 steering：用户在 agent 执行中插话（注入到当前对话，MVP 不中断工具）
-    for ev in steering.read() {
+    for ev in readers.p3().read() {
+        // 注入 conv.messages（UI 展示 + 持久化）；bridge 侧另注入 req.messages（LLM 上下文）
+        conv.push_user(&ev.text);
         let _ = bridge.cmd_tx.try_send(AgentCommand::Steering {
             text: ev.text.clone(),
         });
     }
 
     // 2c. 处理 follow-up：agent 停止后注入后续消息
-    for ev in followup.read() {
+    for ev in readers.p4().read() {
         if conv.status != ConversationStatus::Idle {
             // 仅 Idle 时接受 follow-up（非 Idle 用 steering）
             continue;
@@ -95,7 +102,7 @@ pub fn agent_poll_system(
     }
 
     // 3. 处理确认决策：经 SharedConfirm 回填给等待的 async task
-    for ev in decision.read() {
+    for ev in readers.p2().read() {
         let handle = bridge.runtime.handle().clone();
         let shared = bridge.shared_confirm.clone();
         let d = ev.decision;
@@ -124,6 +131,8 @@ pub fn agent_poll_system(
                     &mut confirm,
                     &mut done,
                     &mut error,
+                    &mut retry,
+                    &mut compacted,
                 );
             }
             Err(mpsc::error::TryRecvError::Empty) => break,
@@ -137,7 +146,6 @@ pub fn agent_poll_system(
 }
 
 /// 处理单个 AgentEvent，更新状态并发 Bevy Message。
-#[allow(clippy::too_many_arguments)]
 fn handle_agent_event(
     ev: AgentEvent,
     conv: &mut Conversation,
@@ -147,6 +155,8 @@ fn handle_agent_event(
     confirm: &mut MessageWriter<ConfirmRequestMessage>,
     done: &mut MessageWriter<DoneMessage>,
     error: &mut MessageWriter<ErrorMessage>,
+    retry: &mut MessageWriter<RetryMessage>,
+    compacted: &mut MessageWriter<CompactedMessage>,
 ) {
     match ev {
         AgentEvent::Delta(text) => {
@@ -180,9 +190,41 @@ fn handle_agent_event(
             conv.status = ConversationStatus::Idle;
             done.write(DoneMessage);
         }
+        AgentEvent::RetryAttempt {
+            attempt,
+            infinite,
+            kind,
+            last_error,
+        } => {
+            // 清空半截助手文本（重试后重新流式输出，避免拼接）
+            conv.current_assistant_text.clear();
+            // 状态保持 Streaming（重试中），不切到 Error
+            conv.status = ConversationStatus::Streaming;
+            retry.write(RetryMessage {
+                attempt,
+                infinite,
+                kind,
+                last_error,
+            });
+        }
         AgentEvent::Error { kind, message } => {
             conv.status = ConversationStatus::Error;
             error.write(ErrorMessage { kind, message });
+        }
+        AgentEvent::Compacted {
+            tokens_before,
+            tokens_after,
+        } => {
+            // 持久化 compaction 记录（不重写历史，append CompactionEntry）
+            conv.persist_compaction(
+                &format!("[compacted: {tokens_before}→{tokens_after} tokens]"),
+                "kept",
+                tokens_before,
+            );
+            compacted.write(CompactedMessage {
+                tokens_before,
+                tokens_after,
+            });
         }
     }
 }
