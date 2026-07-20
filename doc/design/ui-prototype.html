@@ -173,6 +173,35 @@
   .fv-head{display:flex; align-items:center; gap:8px; padding:6px 16px; color:var(--text_dim); font-size:12px; border-bottom:1px solid var(--border); background:var(--bar); flex-shrink:0}
   .fv-head .fv-path{color:var(--text)}
   .fv-body{flex:1; overflow:auto; padding:8px 0}
+  /* ===== 右侧分屏：终端视图（嵌入式终端面板） ===== */
+  #termview{flex:1; display:none; flex-direction:column; background:#0d1117; min-height:0}
+  #termview.show{display:flex}
+  .tv-head{display:flex; align-items:center; gap:var(--sm); padding:6px var(--md); background:var(--bar); border-bottom:1px solid var(--border); flex-shrink:0; font-size:12px; color:var(--text_dim)}
+  .tv-head .tv-title{color:var(--text); display:flex; align-items:center; gap:6px}
+  .tv-tabs{display:flex; gap:2px; margin-left:var(--sm)}
+  .tv-tab{padding:3px 10px; border-radius:3px; cursor:pointer; font-size:12px; color:var(--text_dim); background:transparent; border:1px solid transparent}
+  .tv-tab.active{color:var(--text); background:var(--panel); border-color:var(--border)}
+  .tv-tab .dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--st_ok); margin-right:5px; vertical-align:middle}
+  .tv-tab.busy .dot{background:var(--st_running); animation:pulse 1.4s infinite}
+  .tv-spacer{flex:1}
+  .tv-body{flex:1; overflow-y:auto; overflow-x:hidden; padding:8px 12px; font-family:"JetBrains Mono",Consolas,monospace; font-size:12.5px; line-height:1.5; color:#c9d1d9; white-space:pre-wrap; word-break:break-all}
+  .tv-cmd{color:var(--accent)}
+  .tv-cmd .prompt{color:var(--st_ok); margin-right:6px}
+  .tv-out{color:#9ba3b0}
+  .tv-err{color:var(--st_fail)}
+  .tv-ok{color:var(--st_ok)}
+  .tv-inputline{display:flex; align-items:center; padding:4px 0; color:var(--text)}
+  .tv-inputline .prompt{color:var(--st_ok); margin-right:6px; flex-shrink:0}
+  .tv-inputline .typed{color:var(--text); flex:1; white-space:pre}
+  .tv-inputline .cursor{background:var(--accent); width:8px; height:14px; vertical-align:text-bottom}
+  .tv-statusbar{display:flex; align-items:center; gap:var(--md); padding:4px var(--md); background:var(--bar); border-top:1px solid var(--border); font-size:11px; color:var(--text_dim); flex-shrink:0}
+  .tv-statusbar .sep{color:var(--border)}
+  .tv-statusbar .shell{color:var(--text)}
+  .tv-statusbar .running{color:var(--st_running)}
+  .tv-actions{display:flex; gap:var(--xs)}
+  .tv-action{padding:2px 8px; border-radius:3px; background:var(--panel); border:1px solid var(--border); color:var(--text_dim); cursor:pointer; font-size:11px}
+  .tv-action:hover{border-color:var(--accent); color:var(--text)}
+  .tv-action.danger:hover{border-color:var(--st_fail); color:var(--st_fail)}
 </style>
 </head>
 <body>
@@ -184,6 +213,7 @@
     <span class="tb-item tb-provider">📦 openai / gpt-4o-mini <span class="caret">▾</span></span>
     <span class="tb-spacer"></span>
     <button class="btn" onclick="newSession()">＋ 新建会话</button>
+    <span class="icon-btn" title="终端 (Ctrl+`)" onclick="toggleSideView('terminal')">🖥</span>
     <span class="icon-btn" title="设置 (Ctrl+,)" onclick="openPalette('settings')">⚙</span>
   </div>
 
@@ -301,7 +331,8 @@
                 <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 发送</span>
                 <span><kbd>Esc</kbd> 中断</span>
                 <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> 命令</span>
-                <span><kbd>Ctrl</kbd>+<kbd>\</kbd> 切换分屏</span>
+                <span><kbd>Ctrl</kbd>+<kbd>\</kbd> 编辑器</span>
+                <span><kbd>Ctrl</kbd>+<kbd>`</kbd> 终端</span>
               </div>
               <span id="tokenhint">就绪</span>
             </div>
@@ -352,6 +383,62 @@ members = [
     <span class="tk-str">"crates/xgent_app"</span>,
 ]
 <span class="tk-com"># ...省略</span></pre>
+          </div>
+        </div>
+        <!-- 终端视图（嵌入式终端面板，由顶栏 🖥 或 Ctrl+` 唤起） -->
+        <div id="termview">
+          <div class="tv-head">
+            <span class="tv-title">🖥 终端</span>
+            <span class="tv-tabs">
+              <span class="tv-tab active busy" onclick="switchTermTab(this)"><span class="dot"></span>cargo build</span>
+              <span class="tv-tab" onclick="switchTermTab(this)"><span class="dot"></span>xgent-app</span>
+              <span class="tv-tab" onclick="addTermTab()">＋</span>
+            </span>
+            <span class="tv-spacer"></span>
+            <span class="icon-btn" title="新建终端" onclick="addTermTab()">＋</span>
+            <span class="icon-btn" title="清屏" onclick="clearTerm()">⎚</span>
+            <span class="icon-btn" title="关闭分屏 (Ctrl+\)" onclick="closeSideView()">✕</span>
+          </div>
+          <div class="tv-body" id="tvbody">
+<span class="tv-out">~/ws/bevy_ws/xgent on main</span>
+<span class="tv-cmd"><span class="prompt">❯</span>cargo build --release 2&gt;&amp;1</span>
+<span class="tv-out">   Compiling xgent_core v0.1.0</span>
+<span class="tv-out">   Compiling xui_i18n v0.1.0</span>
+<span class="tv-out">   Compiling xgent_settings_core v0.1.0</span>
+<span class="tv-out">   Compiling xgent_provider v0.1.0</span>
+<span class="tv-out">   Compiling xgent_daemon v0.1.0</span>
+<span class="tv-out">   Compiling xgent_tools v0.1.0</span>
+<span class="tv-out">   Compiling xgent_context v0.1.0</span>
+<span class="tv-out">   Compiling xgent_agent v0.1.0</span>
+<span class="tv-out">   Compiling xui v0.1.0</span>
+<span class="tv-out">   Compiling xgent_ui v0.1.0</span>
+<span class="tv-out">   Compiling xgent_app v0.1.0</span>
+<span class="tv-out">    Finished release [optimized] target(s) in 47.21s</span>
+<span class="tv-ok">✓ build 成功</span>
+<span class="tv-cmd"><span class="prompt">❯</span>cargo run -p xgent_app</span>
+<span class="tv-out">2026-07-20T10:42:13  INFO xgent_app: 拉起 daemon…</span>
+<span class="tv-out">2026-07-20T10:42:14  INFO xgent_daemon: provider pool 就绪 (openai)</span>
+<span class="tv-out">2026-07-20T10:42:14  INFO xgent_app: UI 进程启动，连接 daemon.sock</span>
+<span class="tv-out">2026-07-20T10:42:15  INFO bevy_render: backend = Metal</span>
+<span class="tv-out">2026-07-20T10:42:15  INFO xgent_ui: 窗口已创建 (1280×800)</span>
+<span class="tv-out">2026-07-20T10:42:16  INFO xgent_agent: 会话 #a3f9c1 已恢复（3 轮）</span>
+<span class="tv-out">2026-07-20T10:42:17  INFO xgent_app: 就绪</span>
+<span class="tv-inputline"><span class="prompt">❯</span><span class="typed">cargo test -p xgent_agent</span><span class="cursor"></span></span>
+          </div>
+          <div class="tv-statusbar">
+            <span><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--st_running);vertical-align:middle;margin-right:5px"></span><span class="running">cargo test 运行中</span></span>
+            <span class="sep">·</span>
+            <span>shell: <span class="shell">zsh</span></span>
+            <span class="sep">·</span>
+            <span>cwd: ~/ws/bevy_ws/xgent</span>
+            <span class="sep">·</span>
+            <span>exit: 0</span>
+            <span class="tv-spacer"></span>
+            <span class="tv-actions">
+              <span class="tv-action" onclick="termInterrupt(this)" title="Ctrl+C">⏹ 中断</span>
+              <span class="tv-action" onclick="termSend('')" title="Enter">↵ 发送</span>
+              <span class="tv-action danger" onclick="termKill()">⨯ 终止</span>
+            </span>
           </div>
         </div>
       </div>
@@ -487,6 +574,8 @@ function openSideView(name){
   side.classList.add('show');            // 展开分屏，#chatview 与 #sideview 各占 1fr（=一半）
   const editor=document.getElementById('editorview');
   const file=document.getElementById('fileview');
+  const term=document.getElementById('termview');
+  term.classList.remove('show');         // 打开编辑器/预览时让出终端
   if(isCodeFile(name)){
     editor.style.display='flex';
     file.style.display='none';
@@ -501,6 +590,93 @@ function openSideView(name){
 }
 function closeSideView(){
   document.getElementById('sideview').classList.remove('show');
+}
+// 统一分屏切换：kind 决定 SideView 内显示哪种视图
+//   'editor'  → 编辑器/文件预览（按上次状态，默认编辑器）
+//   'terminal'→ 终端
+// 已展开且 kind 相同 → 收起；否则展开并切到该视图
+let sideViewKind='editor';
+function toggleSideView(kind){
+  const side=document.getElementById('sideview');
+  const term=document.getElementById('termview');
+  const editor=document.getElementById('editorview');
+  const file=document.getElementById('fileview');
+  const isShown=side.classList.contains('show');
+  if(isShown && sideViewKind===kind){
+    side.classList.remove('show');           // 再按一次 → 收起
+    return;
+  }
+  side.classList.add('show');
+  sideViewKind=kind;
+  if(kind==='terminal'){
+    editor.style.display='none'; file.style.display='none';
+    term.classList.add('show');
+    scrollTermBottom();
+  } else {
+    term.classList.remove('show');
+    if(editor.style.display==='none' && file.style.display!=='flex') editor.style.display='flex';
+  }
+}
+function switchTermTab(el){
+  if(el.textContent.includes('＋')){ addTermTab(); return; }
+  document.querySelectorAll('.tv-tab').forEach(t=>{ if(!t.textContent.includes('＋')) t.classList.remove('active'); });
+  el.classList.add('active');
+  // 真实场景：切换会话对应的 PTY 输出流
+}
+let termSeq=1;
+function addTermTab(){
+  const tabs=document.querySelector('.tv-tabs');
+  const plus=[...tabs.children].find(t=>t.textContent.includes('＋'));
+  const tab=document.createElement('span');
+  tab.className='tv-tab active';
+  tab.innerHTML=`<span class="dot"></span>shell #${++termSeq}`;
+  tab.onclick=()=>switchTermTab(tab);
+  document.querySelectorAll('.tv-tab').forEach(t=>{ if(!t.textContent.includes('＋')) t.classList.remove('active'); });
+  tabs.insertBefore(tab, plus);
+}
+function clearTerm(){
+  const body=document.getElementById('tvbody');
+  body.innerHTML=`<span class="tv-out">~ 已清屏</span>\n`;
+}
+function scrollTermBottom(){
+  const body=document.getElementById('tvbody');
+  body.scrollTop=body.scrollHeight;
+}
+// 状态栏动作（原型示意：真实实现对接 PTY 控制信号）
+function termInterrupt(btn){
+  appendTermLine('tv-err', '^C');
+  setTermRunning(false, '已中断');
+}
+function termSend(_s){
+  const body=document.getElementById('tvbody');
+  // 把当前输入行固化为一行历史，再起新输入行
+  const cur=body.querySelector('.tv-inputline:last-child');
+  if(cur) cur.classList.remove('tv-inputline'), cur.outerHTML=cur.outerHTML.replace('tv-inputline','tv-cmd');
+  appendTermLine('tv-out', '');
+  appendInputLine();
+  scrollTermBottom();
+}
+function termKill(){ setTermRunning(false, '已终止'); appendTermLine('tv-err', '[process terminated]'); }
+function appendTermLine(cls, text){
+  const body=document.getElementById('tvbody');
+  const ln=document.createElement('span');
+  ln.className=cls;
+  ln.textContent=text;
+  body.appendChild(ln);
+  body.appendChild(document.createTextNode('\n'));
+  scrollTermBottom();
+}
+function appendInputLine(){
+  const body=document.getElementById('tvbody');
+  const ln=document.createElement('span');
+  ln.className='tv-inputline';
+  ln.innerHTML='<span class="prompt">❯</span><span class="typed"></span><span class="cursor"></span>';
+  body.appendChild(ln);
+}
+function setTermRunning(running, label){
+  const sb=document.querySelector('.tv-statusbar .running');
+  if(sb){ sb.textContent=label; sb.style.color=running?'var(--st_running)':'var(--text_dim)'; }
+  document.querySelectorAll('.tv-tab.active .dot').forEach(d=>{ d.parentElement.classList.toggle('busy', running); });
 }
 // 编辑器 tab 操作
 function switchTab(el){
@@ -575,6 +751,7 @@ const commands=[
   {i:'📦',l:'openai',h:'切换到 OpenAI'},
   {i:'📦',l:'ollama',h:'切换到 Ollama'},
   {i:'🔳',l:'toggle split',h:'切换对话/编辑器分屏'},
+  {i:'🖥',l:'toggle terminal',h:'切换终端面板 (Ctrl+`)'},
 ];
 function openPalette(filter){
   const p=document.getElementById('cmdpalette');
@@ -591,7 +768,8 @@ function filterCmd(q){
   list.innerHTML=items.map((c,i)=>`<div class="cp-item${i===0?' sel':''}" onclick="runCmd('${c.l}')"><span class="c-icon">${c.i}</span><span class="c-label">${c.l}</span><span class="c-hint">${c.h}</span></div>`).join('');
 }
 function runCmd(l){
-  if(l==='toggle split'){ document.getElementById('sideview').classList.toggle('show'); }
+  if(l==='toggle split'){ toggleSideView('editor'); }
+  if(l==='toggle terminal'){ toggleSideView('terminal'); }
   document.getElementById('cmdpalette').style.display='none';
 }
 
@@ -644,8 +822,10 @@ document.addEventListener('keydown', e=>{
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); }
   if((e.ctrlKey||e.metaKey) && e.key===','){ e.preventDefault(); openPalette('settings'); }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='b'){ e.preventDefault(); togglePanel(); }
-  // Ctrl+\ 切换分屏
-  if((e.ctrlKey||e.metaKey) && e.key==='\\'){ e.preventDefault(); document.getElementById('sideview').classList.toggle('show'); }
+  // Ctrl+\ 切换编辑器分屏（与终端分屏互斥复用 SideView）
+  if((e.ctrlKey||e.metaKey) && e.key==='\\'){ e.preventDefault(); toggleSideView('editor'); }
+  // Ctrl+` 切换终端面板
+  if((e.ctrlKey||e.metaKey) && e.key==='`'){ e.preventDefault(); toggleSideView('terminal'); }
   if(e.key==='Escape'){
     if(document.getElementById('overlay').style.display!=='none'){ hideConfirm(); return; }
     if(document.getElementById('cmdpalette').style.display!=='none'){ document.getElementById('cmdpalette').style.display='none'; return; }
