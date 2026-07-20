@@ -224,6 +224,7 @@ pub fn handle_open_file_requests(
     q_buffers: Query<&crate::editor::buffer::EditorBuffer>,
     q_area: Query<Entity, With<crate::editor::EditorAreaMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
+    mut content: ResMut<crate::editor::SideViewContent>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -272,20 +273,30 @@ pub fn handle_open_file_requests(
             }
             tabs.open(buffer_entity);
         }
-        // 切换到编辑器视图
+        // 切换到编辑器视图 + 分屏内容为编辑器
         *view = crate::editor::EditorView::Editor;
+        *content = crate::editor::SideViewContent::Editor;
     }
 }
 
 /// 处理关闭标签请求：despawn buffer 实体，更新 tabs。
+///
+/// 关闭最后一个标签时自动收起右侧分屏（切回对话视图）。
 pub fn handle_close_tab_requests(
     mut reader: MessageReader<CloseTabRequest>,
     mut tabs: ResMut<EditorTabs>,
+    mut view: ResMut<crate::editor::EditorView>,
+    mut content: ResMut<crate::editor::SideViewContent>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
         if let Some((entity, _)) = tabs.close(req.entity) {
             commands.entity(entity).despawn();
+            // 无剩余标签 → 收起分屏 + 清空内容
+            if tabs.is_empty() {
+                *view = crate::editor::EditorView::Chat;
+                *content = crate::editor::SideViewContent::None;
+            }
         }
     }
 }

@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>XGent UI — 高保真原型</title>
+<style>
+  /* ===== 设计 token（严格对齐 ui-design.md §9） ===== */
+  :root{
+    --bg: rgb(25,28,33);
+    --panel: rgb(33,36,43);
+    --bar: rgb(20,23,28);
+    --border: rgb(64,66,77);
+    --text: #FFFFFF;
+    --text_dim: rgb(158,163,174);
+    --accent: rgb(92,158,235);
+    --bubble_user: rgb(51,92,143);
+    --bubble_assistant: rgb(46,49,56);
+    /* 间距 */
+    --xs:4px; --sm:8px; --md:12px; --lg:16px; --xl:24px;
+    /* 状态色（§4.2） */
+    --st_pending:#e0b341; --st_running:#7aa2f7; --st_ok:#50c878;
+    --st_fail:#e05656; --st_deny:#888;
+    /* 语法高亮（tree-sitter 风格） */
+    --kw:#c678dd; --fn:#61afef; --str:#98c379; --num:#d19a66; --ty:#e5c07b; --com:#5c6370; --punc:#abb2bf;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif; font-size:14px; color:var(--text); background:var(--bg); overflow:hidden}
+  code,pre,.mono{font-family:"JetBrains Mono","Fira Code","Cascadia Code",Consolas,"Courier New",monospace}
+
+  /* ===== 总布局（§2.1） ===== */
+  #app{display:grid; grid-template-rows:40px 1fr 24px; height:100vh}
+  #topbar{display:flex; align-items:center; gap:var(--md); padding:0 var(--lg); background:var(--bar); border-bottom:1px solid var(--border)}
+  #main{display:grid; grid-template-columns:240px 1fr; min-height:0}
+  #statusbar{display:flex; align-items:center; gap:var(--md); padding:0 var(--lg); background:var(--bar); border-top:1px solid var(--border); color:var(--text_dim)}
+
+  /* ===== 顶栏（§6） ===== */
+  .tb-item{display:flex; align-items:center; gap:var(--xs); padding:4px 10px; border-radius:4px; cursor:pointer; color:var(--text_dim)}
+  .tb-item:hover{background:var(--panel); color:var(--text)}
+  .tb-item .caret{font-size:10px; opacity:.6}
+  .tb-brand{color:var(--text); font-weight:600; padding-right:var(--sm)}
+  .tb-provider{background:var(--panel); border:1px solid var(--border); color:var(--text)}
+  .tb-spacer{flex:1}
+  .btn{padding:4px 12px; border-radius:4px; background:var(--panel); border:1px solid var(--border); color:var(--text); cursor:pointer; font-size:13px}
+  .btn:hover{border-color:var(--accent)}
+  .btn-primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .icon-btn{width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; cursor:pointer; color:var(--text_dim)}
+  .icon-btn:hover{background:var(--panel); color:var(--text)}
+
+  /* ===== 文件面板（§5） ===== */
+  #filepanel{background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0}
+  .fp-head{padding:8px var(--md); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text_dim); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center}
+  .fp-tree{flex:1; overflow:auto; padding:var(--xs) 0; font-size:13px}
+  .node{display:flex; align-items:center; gap:var(--xs); padding:3px var(--md); cursor:pointer; white-space:nowrap; line-height:1.5}
+  .node:hover{background:rgba(92,158,235,.12)}
+  .node.sel{background:rgba(92,158,235,.22); color:var(--text)}
+  .node .indent{display:inline-block; width:16px}
+  .node .arrow{width:10px; display:inline-block; color:var(--text_dim); font-size:9px}
+  .node .ficon{width:14px; opacity:.85}
+  .node .name{overflow:hidden; text-overflow:ellipsis}
+  .node.loading{color:var(--text_dim); font-style:italic; padding-left:calc(var(--md) + 26px)}
+
+  /* ===== 中间区：左对话 + 右分屏（§2.1 P1） ===== */
+  /* #center 为横向 flex；#chatview 始终占 1fr，#sideview 默认隐藏，
+     打开时 .show 占 1fr，二者各占一半并排显示 */
+  #center{display:flex; flex-direction:row; min-width:0; min-height:0; background:var(--bg)}
+  #chatview{flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; background:var(--bg)}
+  #sideview{flex:1; display:none; flex-direction:column; min-width:0; min-height:0; border-left:1px solid var(--border); background:var(--bg)}
+  #sideview.show{display:flex}
+
+  /* 视图标签条（仅对话标签 + 会话信息） */
+  .viewtabs{display:flex; align-items:center; height:32px; background:var(--bar); border-bottom:1px solid var(--border); padding:0 var(--lg); gap:2px; flex-shrink:0}
+  .viewtab{padding:4px 14px; border-radius:4px 4px 0 0; color:var(--text_dim); cursor:default; font-size:13px; border-bottom:2px solid transparent}
+  .viewtab.active{color:var(--text); border-bottom-color:var(--accent); background:var(--bg)}
+
+  /* ===== 对话主区 ===== */
+  #chat{flex:1; overflow-y:auto; padding:var(--lg) var(--xl); display:flex; flex-direction:column; gap:var(--lg)}
+  .msg{display:flex; max-width:100%}
+  .msg.user{justify-content:flex-end}
+  .msg.assistant{justify-content:flex-start}
+  .bubble{max-width:78%; padding:10px 14px; border-radius:6px; line-height:1.55; word-wrap:break-word; overflow-wrap:break-word}
+  .bubble.user{background:var(--bubble_user); color:#fff}
+  .bubble.assistant{background:var(--bubble_assistant); color:var(--text)}
+  .bubble .role{font-size:11px; color:var(--text_dim); margin-bottom:4px; display:flex; align-items:center; gap:6px}
+  .bubble.user .role{color:rgba(255,255,255,.7)}
+  .bubble .avatar{width:18px; height:18px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:10px}
+  .bubble.assistant .avatar{background:linear-gradient(135deg,#5c9eeb,#7a5ceb)}
+
+  /* 代码块 */
+  pre.code{background:#11141a; border:1px solid var(--border); border-radius:4px; padding:10px 12px; margin:8px 0 4px; overflow-x:auto; font-size:12.5px; line-height:1.55}
+  .tk-kw{color:var(--kw)} .tk-fn{color:var(--fn)} .tk-str{color:var(--str)} .tk-num{color:var(--num)} .tk-ty{color:var(--ty)} .tk-com{color:var(--com); font-style:italic} .tk-pn{color:var(--punc)}
+  .code-head{display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text_dim); margin-bottom:-4px; margin-top:6px}
+  .code-lang{background:var(--panel); padding:1px 8px; border-radius:3px; border:1px solid var(--border)}
+
+  /* 光标动画（§3.4） */
+  .cursor{display:inline-block; width:8px; height:15px; background:var(--accent); vertical-align:text-bottom; animation:blink 1s steps(2) infinite; margin-left:1px}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ===== 工具调用卡片（§4） ===== */
+  .toolcard{align-self:flex-start; width:78%; background:var(--panel); border:1px solid var(--border); border-radius:4px; margin-left:0; overflow:hidden}
+  .tc-head{display:flex; align-items:center; gap:var(--sm); padding:8px 12px; background:var(--bar); cursor:pointer; font-size:13px}
+  .tc-head:hover{background:#262a32}
+  .tc-icon{font-size:14px}
+  .tc-name{color:var(--text); font-weight:500}
+  .tc-arg{color:var(--text_dim); font-family:"JetBrains Mono",Consolas,monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1}
+  .tc-status{display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text_dim)}
+  .tc-status .dot{width:8px; height:8px; border-radius:50%}
+  .tc-body{padding:8px 12px; border-top:1px solid var(--border); font-size:12.5px; color:var(--text_dim); display:none}
+  .toolcard.expanded .tc-body{display:block}
+  .tc-result{white-space:pre; font-family:"JetBrains Mono",Consolas,monospace; background:#11141a; padding:8px 10px; border-radius:3px; overflow-x:auto; color:var(--text)}
+  .tc-fold{color:var(--text_dim); padding:6px 12px; font-size:12px; border-top:1px solid var(--border); cursor:pointer}
+  .tc-fold:hover{color:var(--text)}
+
+  /* ===== 输入框（§3.3） ===== */
+  #inputbar{border-top:1px solid var(--border); padding:var(--md) var(--xl); background:var(--bg); flex-shrink:0}
+  .input-wrap{background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:10px 12px; min-height:60px; max-height:200px; transition:border-color .15s}
+  .input-wrap:focus-within{border-color:var(--accent)}
+  .input-wrap.busy{border-color:var(--st_fail); animation:flash .4s}
+  @keyframes flash{50%{border-color:var(--st_fail)}}
+  .input-area{width:100%; background:transparent; border:none; outline:none; color:var(--text); resize:none; font-family:inherit; font-size:14px; line-height:1.5; min-height:40px}
+  .input-meta{display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:11px; color:var(--text_dim)}
+  .hint{display:flex; gap:var(--lg); align-items:center}
+  kbd{background:var(--bar); border:1px solid var(--border); border-radius:3px; padding:0 5px; font-family:"JetBrains Mono",Consolas,monospace; font-size:10px}
+
+  /* ===== 确认弹窗（§4.3） ===== */
+  #overlay{position:absolute; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:50}
+  .modal{width:560px; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 40px rgba(0,0,0,.5); overflow:hidden}
+  .modal-head{padding:12px 16px; border-bottom:1px solid var(--border); font-size:15px; font-weight:600; display:flex; justify-content:space-between; align-items:center}
+  .modal-body{padding:14px 16px; font-size:13px; color:var(--text_dim)}
+  .modal-body .path{color:var(--text); font-family:"JetBrains Mono",Consolas,monospace; background:var(--bar); padding:2px 6px; border-radius:3px; margin:6px 0}
+  .diff{background:#11141a; border:1px solid var(--border); border-radius:4px; padding:8px 0; margin-top:8px; font-family:"JetBrains Mono",Consolas,monospace; font-size:12px; overflow-x:auto; max-height:220px; overflow-y:auto}
+  .diff .line{padding:0 12px; line-height:1.6; white-space:pre}
+  .diff .add{background:rgba(80,200,120,.14); color:#7fd1a0}
+  .diff .del{background:rgba(224,86,86,.14); color:#e58080}
+  .diff .ctx{color:var(--text_dim)}
+  .modal-foot{padding:10px 16px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:var(--sm); background:var(--bar)}
+  .btn-danger{background:var(--st_fail); border-color:var(--st_fail); color:#fff}
+
+  /* ===== 命令面板（§8） ===== */
+  #cmdpalette{position:absolute; top:80px; left:50%; transform:translateX(-50%); width:520px; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 40px rgba(0,0,0,.6); z-index:60; overflow:hidden}
+  .cp-input{width:100%; background:transparent; border:none; outline:none; color:var(--text); padding:12px 16px; font-size:14px; border-bottom:1px solid var(--border)}
+  .cp-list{max-height:320px; overflow-y:auto; padding:4px}
+  .cp-item{display:flex; align-items:center; gap:var(--sm); padding:8px 12px; border-radius:4px; cursor:pointer; font-size:13px}
+  .cp-item .c-icon{width:18px; opacity:.85}
+  .cp-item .c-label{flex:1}
+  .cp-item .c-hint{color:var(--text_dim); font-size:12px}
+  .cp-item.sel{background:rgba(92,158,235,.18)}
+
+  /* 滚动条 */
+  ::-webkit-scrollbar{width:10px; height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#3a3f4a; border-radius:5px; border:2px solid var(--bg)}
+  ::-webkit-scrollbar-thumb:hover{background:#4a505c}
+
+  /* 状态点 */
+  .status-dot{width:7px; height:7px; border-radius:50%; background:var(--st_ok); display:inline-block; margin-right:6px}
+  .status-dot.busy{background:var(--st_running); animation:pulse 1.4s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+
+  /* ===== 右侧分屏：编辑器视图 §5.9 ===== */
+  #editorview{flex:1; display:flex; flex-direction:column; background:var(--bg); min-height:0}
+  .ed-tabs{display:flex; align-items:center; height:32px; background:var(--bar); border-bottom:1px solid var(--border); overflow-x:auto; flex-shrink:0}
+  .ed-tab{display:flex; align-items:center; gap:6px; padding:0 12px; border-right:1px solid var(--border); cursor:pointer; font-size:12.5px; color:var(--text_dim); background:var(--panel); height:100%; white-space:nowrap}
+  .ed-tab.active{color:var(--text); background:var(--bg); border-top:2px solid var(--accent)}
+  .ed-tab .dirty{color:var(--st_pending)}
+  .ed-tab .close{opacity:.5; font-size:14px; padding:0 2px}
+  .ed-tab .close:hover{opacity:1; color:var(--text)}
+  .ed-body{flex:1; display:flex; overflow:hidden}
+  .gutter{background:var(--bar); color:var(--text_dim); padding:8px 10px; text-align:right; font-family:"JetBrains Mono",Consolas,monospace; font-size:12.5px; line-height:1.55; user-select:none; border-right:1px solid var(--border); flex-shrink:0}
+  .ed-content{flex:1; overflow:auto; padding:8px 12px; font-family:"JetBrains Mono",Consolas,monospace; font-size:12.5px; line-height:1.55; white-space:pre}
+
+  /* ===== 右侧分屏：文件预览视图 ===== */
+  #fileview{flex:1; display:none; flex-direction:column; padding:0; overflow:auto; background:var(--bg); min-height:0}
+  .fv-head{display:flex; align-items:center; gap:8px; padding:6px 16px; color:var(--text_dim); font-size:12px; border-bottom:1px solid var(--border); background:var(--bar); flex-shrink:0}
+  .fv-head .fv-path{color:var(--text)}
+  .fv-body{flex:1; overflow:auto; padding:8px 0}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== 顶栏 §6 ===== -->
+  <div id="topbar">
+    <span class="tb-item tb-brand">xgent <span class="caret">▾</span></span>
+    <span class="tb-item tb-provider">📦 openai / gpt-4o-mini <span class="caret">▾</span></span>
+    <span class="tb-spacer"></span>
+    <button class="btn" onclick="newSession()">＋ 新建会话</button>
+    <span class="icon-btn" title="设置 (Ctrl+,)" onclick="openPalette('settings')">⚙</span>
+  </div>
+
+  <!-- ===== 主体 ===== -->
+  <div id="main">
+    <!-- 文件面板 §5 -->
+    <div id="filepanel">
+      <div class="fp-head"><span>资源管理器</span><span class="icon-btn" title="折叠 (Ctrl+B)" onclick="togglePanel()">◀</span></div>
+      <div class="fp-tree" id="tree"></div>
+    </div>
+
+    <!-- 中间区：左对话 + 右分屏 -->
+    <div id="center">
+      <!-- 左侧对话视图（默认占满；右侧分屏打开时二者各占一半） -->
+      <div id="chatview">
+        <div class="viewtabs">
+          <div class="viewtab active">💬 对话</div>
+          <span style="flex:1"></span>
+          <span style="font-size:11px; color:var(--text_dim)">会话 #a3f9c1 · 3 轮 · ↑ 2.4k tokens</span>
+        </div>
+
+        <div id="chat">
+          <!-- 用户消息 -->
+          <div class="msg user"><div class="bubble user">
+            <div class="role"><span class="avatar" style="background:#3a5a8c">你</span>用户</div>
+            XGent 的 agent loop 是怎么处理流式期间的 steering 中断的？我看代码里有 race abort 逻辑，帮我理一下机制。
+          </div></div>
+
+          <!-- 助手消息 + 工具调用 + 流式 -->
+          <div class="msg assistant"><div class="bubble assistant">
+            <div class="role"><span class="avatar">✦</span>XGent</div>
+            我先读一下 agent loop 的实现，确认 steering race 的具体逻辑。
+            <div class="code-head"><span>📖 src/bridge.rs</span><span class="code-lang">rust</span></div>
+          </div></div>
+
+          <!-- 工具调用卡片：ReadFile（完成态） -->
+          <div class="toolcard expanded">
+            <div class="tc-head" onclick="this.parentElement.classList.toggle('expanded')">
+              <span class="tc-icon">🔧</span>
+              <span class="tc-name">ReadFile</span>
+              <span class="tc-arg">path: crates/xgent_agent/src/bridge.rs</span>
+              <span class="tc-status"><span class="dot" style="background:var(--st_ok)"></span>✓ 完成 · 142 行</span>
+            </div>
+            <div class="tc-body">
+              <div class="tc-result"><span class="tk-com">// 外层：follow-up 驱动；停止边界先 try_recv steering</span>
+<span class="tk-kw">while</span> <span class="tk-fn">run_agent_loop</span>(req, ctx, cancel, steering_rx.<span class="tk-fn">clone</span>()).<span class="tk-fn">await</span>? {
+    <span class="tk-com">// 停止边界重新轮询，防 steer 丢失</span>
+    <span class="tk-kw">if let</span> <span class="tk-fn">Ok</span>(steer) = steering_rx.<span class="tk-fn">try_recv</span>() {
+        req.messages.<span class="tk-fn">push</span>(steer.into_message());
+        <span class="tk-kw">continue</span>;
+    }
+    <span class="tk-kw">break</span>;
+}</div>
+            </div>
+            <div class="tc-fold" onclick="this.parentElement.classList.toggle('expanded')">▾ 结果：142 行 · 点击折叠</div>
+          </div>
+
+          <!-- 助手继续流式 -->
+          <div class="msg assistant"><div class="bubble assistant">
+            <div class="role"><span class="avatar">✦</span>XGent</div>
+            理清了。XGent 的 steering 机制分两层：
+
+            <div class="code-head"><span>📖 steering race 机制</span><span class="code-lang">rust</span></div>
+<pre class="code"><span class="tk-com">// 内层 stream_llm_response：流式期即时中断</span>
+<span class="tk-kw">loop</span> {
+    <span class="tk-fn">tokio::select!</span> {
+        chunk = stream.<span class="tk-fn">next</span>() => { <span class="tk-com">// 正常累加 TextDelta</span> }
+        steer = steering_rx.<span class="tk-fn">recv</span>() => {
+            <span class="tk-com">// race 到 steering → 即时 cancel 当前流</span>
+            cancel.<span class="tk-fn">cancel</span>();
+            <span class="tk-kw">return</span> <span class="tk-fn">StreamOutcome</span> {
+                pending_steering: <span class="tk-fn">Some</span>(steer), ..
+            };
+        }
+    }
+}
+<span class="tk-com">// → run_agent_loop 收到 pending_steering，注入 req.messages 后重新流式</span>
+<span class="tk-com">// → ECS 侧同步 conv.push_user，UI 展示 + 持久化</span></pre>
+
+            核心是两点：
+
+            <div class="code-head"><span>📖 停止边界补偿</span><span class="code-lang">rust</span></div>
+<pre class="code"><span class="tk-com">// 外层循环停止边界重新轮询</span>
+<span class="tk-kw">if let</span> <span class="tk-fn">Ok</span>(steer) = steering_rx.<span class="tk-fn">try_recv</span>() {
+    req.messages.<span class="tk-fn">push</span>(steer.<span class="tk-fn">into_message</span>());
+    <span class="tk-kw">continue</span>; <span class="tk-com">// 不 break，重新进入内层</span>
+}</pre>
+
+            **机制要点**：
+
+            1. **流式期即时中断** — `stream_llm_response` 用 `tokio::select!` 同时监听 SSE chunk 与 steering channel，steering 到达立即 cancel 当前流、返回 `pending_steering`，由 `run_agent_loop` 注入 `req.messages` 后重新流式。
+            2. **停止边界补偿轮询** — 外层循环在每个 yield 点（内层返回时）用 `try_recv` 重新检查 steering，防止 steer 在 agent 准备停止时丢失。
+            3. **ECS 同步** — steering 期间 UI 侧 `conv.push_user` 把用户的补充输入展示出来并持久化，对齐 omp `streamAssistantResponse` 的 abort race 语义。
+
+            这设计对齐了 omp 的 `streamAssistantResponse`：<span style="color:var(--accent)">流式不阻塞 steering</span>，steering 即时打断流而非排队等待完成。<span class="cursor"></span>
+          </div></div>
+
+          <!-- 工具调用卡片：WriteFile（待确认态，触发确认弹窗） -->
+          <div class="toolcard">
+            <div class="tc-head" onclick="showConfirm()">
+              <span class="tc-icon">🔧</span>
+              <span class="tc-name">WriteFile</span>
+              <span class="tc-arg">path: doc/notes/steering-analysis.md</span>
+              <span class="tc-status"><span class="dot" style="background:var(--st_pending)"></span>⏸ 待确认</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入框 §3.3 -->
+        <div id="inputbar">
+          <div class="input-wrap" id="inputwrap">
+            <textarea class="input-area" id="input" placeholder="问点什么…（Ctrl+Enter 发送，Esc 中断）" onkeydown="onInputKey(event)" oninput="autoGrow(this)"></textarea>
+            <div class="input-meta">
+              <div class="hint">
+                <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 发送</span>
+                <span><kbd>Esc</kbd> 中断</span>
+                <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> 命令</span>
+                <span><kbd>Ctrl</kbd>+<kbd>\</kbd> 切换分屏</span>
+              </div>
+              <span id="tokenhint">就绪</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧分屏容器：默认隐藏，点击文件节点自动展开，与对话并排占一半 -->
+      <div id="sideview">
+        <!-- 编辑器视图（代码文件在此打开） -->
+        <div id="editorview">
+          <div class="ed-tabs">
+            <div class="ed-tab active" onclick="switchTab(this)">bridge.rs <span class="dirty">●</span><span class="close" onclick="closeTab(event,this)">×</span></div>
+            <div class="ed-tab" onclick="switchTab(this)">events.rs<span class="close" onclick="closeTab(event,this)">×</span></div>
+            <div class="ed-tab" onclick="switchTab(this)">session_store.rs<span class="close" onclick="closeTab(event,this)">×</span></div>
+            <span style="flex:1"></span>
+            <span class="icon-btn" title="关闭分屏 (Ctrl+\)" onclick="closeSideView()">✕</span>
+          </div>
+          <div class="ed-body">
+            <div class="gutter" id="gutter"></div>
+            <div class="ed-content" id="edcontent"></div>
+          </div>
+        </div>
+
+        <!-- 文件预览视图（非代码文件在此打开） -->
+        <div id="fileview">
+          <div class="fv-head">
+            <span>📄 <span class="fv-path" id="fvpath">Cargo.toml</span> · <span id="fvmeta">480 字节 · 只读预览</span></span>
+            <span style="flex:1"></span>
+            <span class="icon-btn" title="关闭分屏 (Ctrl+\)" onclick="closeSideView()">✕</span>
+          </div>
+          <div class="fv-body">
+            <pre class="code" id="fvcontent" style="margin:0 16px; border:none; border-radius:0"><span class="tk-com"># Cargo.toml — workspace 根</span>
+[<span class="tk-ty">workspace</span>]
+resolver = <span class="tk-str">"2"</span>
+members = [
+    <span class="tk-str">"crates/xgent_core"</span>,
+    <span class="tk-str">"crates/xui_i18n"</span>,
+    <span class="tk-str">"crates/xgent_settings_core"</span>,
+    <span class="tk-str">"crates/xgent_settings"</span>,
+    <span class="tk-str">"crates/xgent_provider"</span>,
+    <span class="tk-str">"crates/xgent_daemon"</span>,
+    <span class="tk-str">"crates/xgent_tools"</span>,
+    <span class="tk-str">"crates/xgent_context"</span>,
+    <span class="tk-str">"crates/xgent_agent"</span>,
+    <span class="tk-str">"crates/xui"</span>,
+    <span class="tk-str">"crates/xgent_ui"</span>,
+    <span class="tk-str">"crates/xgent_app"</span>,
+]
+<span class="tk-com"># ...省略</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 状态栏 §7 ===== -->
+  <div id="statusbar">
+    <span><span class="status-dot"></span>openai / gpt-4o-mini</span>
+    <span>·</span>
+    <span id="convstatus">就绪</span>
+    <span>·</span>
+    <span>↑ 2.4k tokens · $0.003</span>
+    <span style="flex:1"></span>
+    <span style="color:var(--text_dim)">UTF-8 · LF · Rust</span>
+  </div>
+</div>
+
+<!-- ===== 确认弹窗 §4.3 ===== -->
+<div id="overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-head"><span>确认执行</span><span class="icon-btn" onclick="hideConfirm()">×</span></div>
+    <div class="modal-body">
+      <strong>WriteFile</strong> 将写入文件：
+      <div class="path">doc/notes/steering-analysis.md</div>
+      <div style="margin-top:6px">diff 预览：</div>
+      <div class="diff">
+        <div class="line add">+ # XGent Steering 机制分析</div>
+        <div class="line add">+</div>
+        <div class="line add">+ ## 流式期即时中断</div>
+        <div class="line ctx">  agent loop 在 stream_llm_response 中用 select!</div>
+        <div class="line ctx">  同时监听 SSE chunk 与 steering channel。</div>
+        <div class="line del">- steering 到达后排队等待当前流完成。</div>
+        <div class="line add">+ steering 到达立即 cancel 当前流、返回 pending_steering。</div>
+        <div class="line ctx">  由 run_agent_loop 注入 req.messages 后重新流式。</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="hideConfirm()">拒绝 <span style="opacity:.6">Esc</span></button>
+      <button class="btn btn-primary" onclick="hideConfirm()">允许执行 <span style="opacity:.6">Enter</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 命令面板 §8 ===== -->
+<div id="cmdpalette" style="display:none">
+  <input class="cp-input" id="cpinput" placeholder="输入命令或文件名…" oninput="filterCmd(this.value)">
+  <div class="cp-list" id="cplist"></div>
+</div>
+
+<script>
+// ===== 文件树数据（§5，懒加载示意） =====
+const tree = [
+  {n:'crates', t:'dir', open:true, children:[
+    {n:'xgent_agent', t:'dir', open:true, children:[
+      {n:'src', t:'dir', open:true, children:[
+        {n:'bridge.rs', t:'file', sel:true},
+        {n:'compaction.rs', t:'file'},
+        {n:'conversation.rs', t:'file'},
+        {n:'session_store.rs', t:'file'},
+        {n:'events.rs', t:'file'},
+      ]},
+      {n:'Cargo.toml', t:'file'},
+    ]},
+    {n:'xui', t:'dir', children:[
+      {n:'src', t:'dir', children:[
+        {n:'text_editor', t:'dir', children:[]},
+        {n:'command_palette.rs', t:'file'},
+        {n:'virtual_list.rs', t:'file'},
+        {n:'hotkeys.rs', t:'file'},
+      ]},
+    ]},
+    {n:'xgent_core', t:'dir', children:[]},
+    {n:'xgent_ui', t:'dir', children:[]},
+  ]},
+  {n:'doc', t:'dir', open:true, children:[
+    {n:'design', t:'dir', open:true, children:[
+      {n:'architecture.md', t:'file'},
+      {n:'requirements.md', t:'file'},
+      {n:'ui-design.md', t:'file'},
+      {n:'editor-design.md', t:'file'},
+    ]},
+    {n:'decisions', t:'dir', children:[]},
+    {n:'plans', t:'dir', children:[]},
+    {n:'notes', t:'dir', children:[]},
+  ]},
+  {n:'Cargo.toml', t:'file'},
+  {n:'Cargo.lock', t:'file'},
+  {n:'AGENTS.md', t:'file'},
+];
+
+function renderTree(nodes, depth=0){
+  let html='';
+  for(const node of nodes){
+    const indent = '<span class="indent"></span>'.repeat(depth);
+    const arrow = node.t==='dir' ? (node.open?'<span class="arrow">▾</span>':'<span class="arrow">▸</span>') : '<span class="arrow"></span>';
+    const icon = node.t==='dir' ? (node.open?'📂':'📁') : '📄';
+    const sel = node.sel ? ' sel':'';
+    const children = node.open && node.children ? renderTree(node.children, depth+1) : '';
+    html += `<div class="node${sel}" onclick="nodeClick(event,this)" data-t="${node.t}" data-name="${node.n}" data-open="${node.open?1:0}">
+      ${indent}${arrow}<span class="ficon">${icon}</span><span class="name">${node.n}</span></div>${children}`;
+    if(node.t==='dir' && !node.children && node.open===undefined){
+      html += '<div class="node loading">⋯ 加载中</div>';
+    }
+  }
+  return html;
+}
+
+function nodeClick(e, el){
+  e.stopPropagation();
+  // 目录：展开/折叠
+  if(el.dataset.t==='dir'){
+    el.classList.toggle('sel');
+    const isOpen = el.dataset.open==='1';
+    el.querySelector('.arrow').textContent = isOpen ? '▸' : '▾';
+    el.querySelector('.ficon').textContent = isOpen ? '📁' : '📂';
+    el.dataset.open = isOpen ? '0' : '1';
+    return;
+  }
+  // 文件：高亮 + 在右侧分屏打开
+  document.querySelectorAll('.node.sel').forEach(n=>n.classList.remove('sel'));
+  el.classList.add('sel');
+  openSideView(el.dataset.name);
+}
+
+// ===== 分屏控制：点击文件后右侧自动展开，与对话并排占一半 =====
+// kind: 'editor'（代码文件）/ 'preview'（其他文件）
+function isCodeFile(name){
+  return /\.(rs|toml|md|ts|js|go|py|java|c|cpp|h|hpp|css|html|json|ya?ml|sh)$/i.test(name);
+}
+function openSideView(name){
+  const side=document.getElementById('sideview');
+  side.classList.add('show');            // 展开分屏，#chatview 与 #sideview 各占 1fr（=一半）
+  const editor=document.getElementById('editorview');
+  const file=document.getElementById('fileview');
+  if(isCodeFile(name)){
+    editor.style.display='flex';
+    file.style.display='none';
+    // 若无活跃 tab，把当前文件作为新 tab 加入
+    if(!switchToTab(name)) addEditorTab(name);
+  } else {
+    editor.style.display='none';
+    file.style.display='flex';
+    document.getElementById('fvpath').textContent=name;
+    document.getElementById('fvmeta').textContent='只读预览';
+  }
+}
+function closeSideView(){
+  document.getElementById('sideview').classList.remove('show');
+}
+// 编辑器 tab 操作
+function switchTab(el){
+  document.querySelectorAll('.ed-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderEditor(); // 真实场景据 tab 文件名重渲染
+}
+function switchToTab(name){
+  const tab=[...document.querySelectorAll('.ed-tab')].find(t=>t.querySelector('.name')?.textContent===name);
+  if(tab){ document.querySelectorAll('.ed-tab').forEach(t=>t.classList.remove('active')); tab.classList.add('active'); return true; }
+  return false;
+}
+function addEditorTab(name){
+  const tabs=document.querySelector('.ed-tabs');
+  const close=document.querySelector('.ed-tabs .icon-btn');
+  const tab=document.createElement('div');
+  tab.className='ed-tab active';
+  tab.onclick=()=>switchTab(tab);
+  tab.innerHTML=`<span class="name">${name}</span><span class="close">×</span>`;
+  tab.querySelector('.close').onclick=(e)=>closeTab(e,tab);
+  document.querySelectorAll('.ed-tab').forEach(t=>t.classList.remove('active'));
+  tabs.insertBefore(tab, close);
+  renderEditor();
+}
+function closeTab(e, el){
+  e.stopPropagation();
+  const tabs=[...document.querySelectorAll('.ed-tab')];
+  const idx=tabs.indexOf(el);
+  el.remove();
+  if(tabs.length-1===0){ closeSideView(); return; }   // 关掉最后一个 tab → 收起分屏
+  if(el.classList.contains('active')){
+    const next=tabs[idx]||tabs[idx-1];
+    if(next){ next.classList.add('active'); renderEditor(); }
+  }
+}
+
+// ===== 输入框 §3.3 =====
+function autoGrow(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,200)+'px'; }
+function onInputKey(e){
+  if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); send(); }
+  if(e.key==='Escape'){ e.preventDefault(); abortConv(); }
+}
+function send(){
+  const v=document.getElementById('input').value.trim();
+  if(!v){ document.getElementById('inputwrap').classList.add('busy'); setTimeout(()=>document.getElementById('inputwrap').classList.remove('busy'),400); return; }
+  const chat=document.getElementById('chat');
+  chat.insertAdjacentHTML('beforeend', `<div class="msg user"><div class="bubble user"><div class="role"><span class="avatar" style="background:#3a5a8c">你</span>用户</div>${v.replace(/</g,'&lt;')}</div></div>`);
+  document.getElementById('input').value=''; autoGrow(document.getElementById('input'));
+  setStatus('thinking');
+}
+function abortConv(){ setStatus('idle'); }
+
+// ===== 状态机 §10.1 =====
+function setStatus(s){
+  const m={idle:['就绪','idle'],thinking:['思考中…','busy'],streaming:['生成中…','busy'],
+           tool:['执行工具…','busy'],confirm:['等待确认','busy'],error:['出错','idle']};
+  const [txt,cls]=m[s]||m.idle;
+  document.getElementById('convstatus').textContent=txt;
+  document.getElementById('tokenhint').textContent=s==='idle'?'就绪':txt;
+  document.querySelector('.status-dot').className='status-dot'+(cls==='busy'?' busy':'');
+}
+
+// ===== 确认弹窗 =====
+function showConfirm(){ document.getElementById('overlay').style.display='flex'; setStatus('confirm'); }
+function hideConfirm(){ document.getElementById('overlay').style.display='none'; setStatus('idle'); }
+
+// ===== 命令面板 §8 =====
+const commands=[
+  {i:'📁',l:'new session',h:'新建会话'},
+  {i:'🌐',l:'switch to English',h:'切换语言'},
+  {i:'⚙',l:'open settings',h:'打开设置'},
+  {i:'📦',l:'openai',h:'切换到 OpenAI'},
+  {i:'📦',l:'ollama',h:'切换到 Ollama'},
+  {i:'🔳',l:'toggle split',h:'切换对话/编辑器分屏'},
+];
+function openPalette(filter){
+  const p=document.getElementById('cmdpalette');
+  p.style.display='block';
+  const input=document.getElementById('cpinput');
+  input.value=filter==='settings'?'settings':'';
+  filterCmd(input.value);
+  input.focus();
+}
+function filterCmd(q){
+  const list=document.getElementById('cplist');
+  const ql=q.toLowerCase();
+  const items=commands.filter(c=>c.l.toLowerCase().includes(ql)||c.h.includes(q));
+  list.innerHTML=items.map((c,i)=>`<div class="cp-item${i===0?' sel':''}" onclick="runCmd('${c.l}')"><span class="c-icon">${c.i}</span><span class="c-label">${c.l}</span><span class="c-hint">${c.h}</span></div>`).join('');
+}
+function runCmd(l){
+  if(l==='toggle split'){ document.getElementById('sideview').classList.toggle('show'); }
+  document.getElementById('cmdpalette').style.display='none';
+}
+
+// ===== 顶栏动作 =====
+function newSession(){ if(confirm('新建会话？当前对话将清空。')) location.reload(); }
+function togglePanel(){ const p=document.getElementById('filepanel'); p.style.display=p.style.display==='none'?'flex':'none'; }
+
+// ===== 编辑器内容 §5.9 =====
+function renderEditor(){
+  const lines=[
+    '<span class="tk-com">// crates/xgent_agent/src/bridge.rs</span>',
+    '<span class="tk-kw">use</span> <span class="tk-ty">tokio</span>::<span class="tk-fn">sync</span>::<span class="tk-fn">mpsc</span>;',
+    '',
+    '<span class="tk-com">/// 外层：follow-up 驱动；停止边界先 try_recv steering</span>',
+    '<span class="tk-kw">pub async fn</span> <span class="tk-fn">run_agent_loop</span><span class="tk-pn">(</span>',
+    '    req: <span class="tk-fn">ChatRequest</span><span class="tk-pn">,</span>',
+    '    cancel: <span class="tk-fn">CancellationToken</span><span class="tk-pn">,</span>',
+    '    steering_rx: <span class="tk-fn">mpsc::Receiver</span><span class="tk-pn">&lt;</span><span class="tk-fn">Steering</span><span class="tk-pn">&gt;,</span>',
+    '<span class="tk-pn">) -&gt; </span><span class="tk-fn">Result</span><span class="tk-pn">&lt;</span><span class="tk-ty">bool</span><span class="tk-pn">&gt; {</span>',
+    '    <span class="tk-kw">loop</span> <span class="tk-pn">{</span>',
+    '        <span class="tk-kw">let</span> outcome = <span class="tk-fn">stream_with_retry</span><span class="tk-pn">(</span>...',
+    '            cancel.<span class="tk-fn">clone</span><span class="tk-pn">(),</span> steering_rx.<span class="tk-fn">clone</span><span class="tk-pn">()).await?;</span>',
+    '        <span class="tk-kw">if</span> outcome.tool_calls.<span class="tk-fn">is_empty</span><span class="tk-pn">() {</span>',
+    '            <span class="tk-com">// 停止边界补偿轮询</span>',
+    '            <span class="tk-kw">if let</span> <span class="tk-fn">Ok</span><span class="tk-pn">(</span>steer<span class="tk-pn">) =</span> steering_rx.<span class="tk-fn">try_recv</span><span class="tk-pn">() {</span>',
+    '                req.messages.<span class="tk-fn">push</span><span class="tk-pn">(</span>steer.<span class="tk-fn">into_message</span><span class="tk-pn">());</span>',
+    '                <span class="tk-kw">continue</span><span class="tk-pn">;</span>',
+    '            <span class="tk-pn">}</span>',
+    '            <span class="tk-kw">break</span><span class="tk-pn">;</span>',
+    '        <span class="tk-pn">}</span>',
+    '        <span class="tk-com">// 内层：tool-call 循环</span>',
+    '        <span class="tk-kw">for</span> tc <span class="tk-kw">in</span> outcome.tool_calls <span class="tk-pn">{</span> ... <span class="tk-pn">}</span>',
+    '    <span class="tk-pn">}</span>',
+    '    <span class="tk-fn">Ok</span><span class="tk-pn">(</span><span class="tk-kw">true</span><span class="tk-pn">)</span>',
+    '<span class="tk-pn">}</span>',
+  ];
+  document.getElementById('gutter').innerHTML = lines.map((_,i)=>i+1).join('<br>');
+  document.getElementById('edcontent').innerHTML = lines.join('\n');
+}
+
+// ===== 初始化 =====
+document.getElementById('tree').innerHTML = renderTree(tree);
+renderEditor();
+// 默认打开分屏，展示「对话 | 编辑器」并排布局
+openSideView('bridge.rs');
+
+// 全局快捷键
+document.addEventListener('keydown', e=>{
+  if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); }
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); }
+  if((e.ctrlKey||e.metaKey) && e.key===','){ e.preventDefault(); openPalette('settings'); }
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='b'){ e.preventDefault(); togglePanel(); }
+  // Ctrl+\ 切换分屏
+  if((e.ctrlKey||e.metaKey) && e.key==='\\'){ e.preventDefault(); document.getElementById('sideview').classList.toggle('show'); }
+  if(e.key==='Escape'){
+    if(document.getElementById('overlay').style.display!=='none'){ hideConfirm(); return; }
+    if(document.getElementById('cmdpalette').style.display!=='none'){ document.getElementById('cmdpalette').style.display='none'; return; }
+    abortConv();
+  }
+});
+</script>
+</body>
+</html>

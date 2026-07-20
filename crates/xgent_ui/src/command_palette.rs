@@ -265,7 +265,7 @@ fn rebuild_list(
                     },
                     Interaction::default(),
                     BackgroundColor::default(),
-                    Text::new(cmd.label.clone()),
+                    Text::new(format!("{} {}", kind_icon(cmd.kind), cmd.label.clone())),
                     TextFont {
                         font_size: FontSize::Px(font),
                         ..default()
@@ -340,5 +340,13 @@ pub(crate) fn handle_palette_triggers(
             _ => {}
         }
         state.close();
+    }
+}
+/// 据 `CommandKind` 返回 emoji 图标。
+fn kind_icon(kind: xui::command_palette::CommandKind) -> &'static str {
+    use xui::command_palette::CommandKind;
+    match kind {
+        CommandKind::File => "📁",
+        CommandKind::Action => "⚙",
     }
 }

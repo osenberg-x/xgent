@@ -99,6 +99,15 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
         )
         .with_primary(),
     );
+    // Cmd/Ctrl+\：切换右侧分屏（对话/编辑器分屏）
+    let _ = reg.register(
+        Hotkey::new(
+            "sideview.toggle",
+            KeyCode::Backslash,
+            tr(&loc, "hotkey-toggle-sideview"),
+        )
+        .with_primary(),
+    );
 }
 
 /// 订阅 HotkeyTriggered，据 id 执行业务。
@@ -107,6 +116,7 @@ pub(crate) fn handle_hotkey_triggers(
     mut palette: ResMut<CommandPaletteState>,
     mut abort_writer: MessageWriter<AbortMessage>,
     mut file_panel: ResMut<FilePanelCollapsed>,
+    mut side_view: ResMut<crate::layout::SideViewCollapsed>,
     mut view: ResMut<EditorView>,
     mut cycle_writer: MessageWriter<CycleTabRequest>,
 ) {
@@ -124,6 +134,9 @@ pub(crate) fn handle_hotkey_triggers(
             "settings.open" => palette.open(),
             "filepanel.toggle" => {
                 file_panel.0 = !file_panel.0;
+            }
+            "sideview.toggle" => {
+                side_view.0 = !side_view.0;
             }
             "input.focus" => {}
             "editor.view" => {

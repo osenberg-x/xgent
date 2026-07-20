@@ -29,6 +29,10 @@ pub struct FilePanelMarker;
 #[derive(Component, Default)]
 pub struct ChatPanelMarker;
 
+/// 右侧分屏容器（编辑器/文件预览，默认隐藏，点击文件后展开，与对话主区并排占一半）。
+#[derive(Component, Default)]
+pub struct SideViewMarker;
+
 /// 状态栏容器。
 #[derive(Component, Default)]
 pub struct StatusBarMarker;
@@ -37,6 +41,14 @@ pub struct StatusBarMarker;
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FilePanelCollapsed(pub bool);
 
+/// 右侧分屏折叠状态。
+///
+/// `true`（默认）= 分屏收起（`display:none`），对话主区独占；
+/// `false` = 分屏展开，与对话主区各占一半并排显示。
+/// 由点击文件节点（代码文件→编辑器、非代码文件→预览）或 `Ctrl+\` 切换。
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SideViewCollapsed(pub bool);
+
 /// 布局插件。
 pub struct LayoutPlugin;
 
@@ -44,10 +56,15 @@ impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Theme>()
             .init_resource::<FilePanelCollapsed>()
+            .init_resource::<SideViewCollapsed>()
             .add_systems(Startup, spawn_layout)
             .add_systems(
                 Update,
-                toggle_file_panel_width.after(crate::shortcuts::handle_hotkey_triggers),
+                (
+                    toggle_file_panel_width,
+                    toggle_side_view_visibility,
+                )
+                    .after(crate::shortcuts::handle_hotkey_triggers),
             );
     }
 }
@@ -149,6 +166,24 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>) {
                         BorderColor::all(theme.border),
                         ChatPanelMarker,
                     ));
+                    // 右侧分屏容器（默认隐藏；展开时与对话主区各占一半）
+                    // 编辑器视图 / 文件预览 由 editor 模块 spawn 挂入此容器。
+                    main.spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            border: UiRect::left(px(1.0)),
+                            min_width: Val::ZERO,
+                            min_height: Val::ZERO,
+                            overflow: Overflow::clip(),
+                            display: Display::None,
+                            ..default()
+                        },
+                        BackgroundColor(theme.bg),
+                        BorderColor::all(theme.border),
+                        SideViewMarker,
+                    ));
                 });
 
             // 状态栏
@@ -184,6 +219,26 @@ fn toggle_file_panel_width(
         Val::Px(0.0)
     } else {
         px(size::FILE_PANEL_W)
+    };
+}
+/// 右侧分屏折叠状态变化时切换显隐。
+///
+/// `SideViewCollapsed=true` → `Display::None`（对话主区独占）；
+/// `false` → `Display::Flex`（与对话主区各占一半并排）。
+fn toggle_side_view_visibility(
+    collapsed: Res<SideViewCollapsed>,
+    mut q: Query<&mut Node, With<SideViewMarker>>,
+) {
+    if !collapsed.is_changed() {
+        return;
+    }
+    let Ok(mut node) = q.single_mut() else {
+        return;
+    };
+    node.display = if collapsed.0 {
+        Display::None
+    } else {
+        Display::Flex
     };
 }
 

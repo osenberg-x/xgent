@@ -227,7 +227,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 ### 5.9 编辑器（F-11）边界
 
 - **中等能力**：多行 + 行号 + undo/redo + 查找替换 + tree-sitter 语法高亮（仅 Rust grammar，随二进制编译入，不做按需下载——D-06 已决策）。
-- **不含**：LSP、split view、诊断、跳转。完整能力边界留后续。
+- **不含**：LSP、编辑器内部 split view（同一编辑器内多窗格）、诊断、跳转。完整能力边界留后续。（对话/编辑器分屏见 §5.11）
 - `xui::TextEditor` 是通用裸件（纯依赖 bevy + xui_i18n + tree-sitter），多标签/文件 IO/冲突协调在业务层 `xgent_ui::editor`。
 - 外部文件变更冲突：未脏静默重载 / 脏弹窗三选（丢弃本地 / 保留本地 / 对比合并）。
 
@@ -236,6 +236,25 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - MVP 用方案 A（OnDemand：目录树 + ripgrep + 按需读文件）。
 - 编辑器上线只触发到 C（向量 RAG）；D（LSP/AST）延后到 LSP 真正接入；E（混合检索）跟随 D。
 - 新增检索实现时实现 `ContextProvider` trait，`build_context_provider` 据配置切换，调用方无感。
+
+### 5.11 对话/编辑器分屏（右侧 SideView）
+
+- **布局**：`MainAreaMarker`（横向 row）下三子节点——`FilePanelMarker`（固定宽）+ `ChatPanelMarker`（flex:1）+ `SideViewMarker`（flex:1，默认 `display:none`）。分屏展开时 `ChatPanelMarker` 与 `SideViewMarker` 各占一半并排。
+- **分屏内容**：编辑器视图（`EditorViewMarker`，代码文件）与文件预览（`FilePreviewMarker`，非代码文件）二者互斥挂于 `SideViewMarker` 下，由 `handle_file_click` 据文件类型切换显隐。
+- **展开/收起**：`SideViewCollapsed` Resource 驱动 `toggle_side_view_visibility` 系统切换 `SideViewMarker` 的 `display`。展开触发：点击文件节点（代码/非代码均展开）；收起触发：编辑器返回按钮、关闭最后一个 tab、`Ctrl+\`（`sideview.toggle`）。
+- **快捷键**：`Ctrl+\` = `sideview.toggle`（切换分屏）。
+- **设计图**：`doc/design/ui-prototype.html` §2.1 P1。
+
+### 5.12 UI 原型对齐（A-C 已落地，D-H 待实现）
+
+对照 `doc/design/ui-prototype.html` 原型图的差距分阶段实现，详见 `doc/design/ui-gap-plan.md`：
+
+- **A-主题（已落地）**：`Theme` 加状态色 5 色 + 语法高亮色 7 色（`theme.rs`）；`FILE_PANEL_W` 改 240。
+- **B-文件树（已落地）**：`file_panel.rs` 加 `fp-head` 标题头 + 折叠按钮；`spawn_entry` 重写为箭头/图标/名称分离的 row；选中/悬停态（`FileSelectedMarker` + `update_file_entry_style`）；`handle_dir_click` 用 `ParamSet` 避免双 `&mut Text` query 冲突（B0001）。
+- **C-对话视觉（已落地）**：`chat_panel.rs` 加 `viewtabs`（对话标签 + 会话信息）+ 消息气泡 role 行（头像 + 角色名）+ `input-meta` 快捷键提示栏 + 流式光标（`update_streaming_cursor`，会话信息末尾闪烁 `▋`）。
+- **D-H（待实现）**：D 助手 markdown/代码块/语法高亮、E 状态栏分段+状态点、F 顶栏品牌+下拉、G 分屏预览头+高亮、H 确认弹窗 diff。详见 `doc/design/ui-gap-plan.md`。
+
+
 
 ---
 

@@ -37,7 +37,7 @@ impl Plugin for TopBarPlugin {
     }
 }
 
-/// 启动时在顶栏内 spawn provider/model 标签 + 按钮。
+/// 启动时在顶栏内 spawn：品牌 xgent ▾ + provider ▾ + spacer + 新建会话 btn + ⚙ icon-btn。
 fn spawn_top_bar(
     mut commands: Commands,
     q_bar: Query<Entity, With<TopBarMarker>>,
@@ -48,56 +48,73 @@ fn spawn_top_bar(
         return;
     };
     let font = theme.font_size;
+    let font_size = FontSize::Px(font);
     commands.entity(bar).with_children(|p| {
-        // 右侧弹性间距
-        p.spawn(Node {
-            flex_grow: 1.0,
-            ..default()
-        });
-
-        // provider/model 标签
+        // 品牌：xgent ▾（白色加粗 + caret）
         p.spawn((
             Node {
-                padding: UiRect::horizontal(px(space::SM)),
+                padding: UiRect::all(px(space::XS)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(space::XS),
                 ..default()
             },
-            Text::new(String::new()),
+            Text::new("xgent ▾"),
             TextFont {
-                font_size: FontSize::Px(font),
+                font_size,
                 ..default()
             },
-            TextColor(theme.text_dim),
+            TextColor(theme.text),
+        ));
+        // provider/model：📦 {label} ▾（panel 底 + 边框）
+        p.spawn((
+            Node {
+                padding: UiRect::all(px(space::XS)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(space::XS),
+                border: UiRect::all(px(1.0)),
+                border_radius: BorderRadius::all(px(4.0)),
+                ..default()
+            },
+            BackgroundColor(theme.panel),
+            BorderColor::all(theme.border),
+            Text::new(String::new()),
+            TextFont { font_size, ..default() },
+            TextColor(theme.text),
             ProviderLabelMarker,
         ));
-
-        // 新建会话按钮
+        // spacer
+        p.spawn(Node { flex_grow: 1.0, ..default() });
+        // ＋新建会话按钮（btn 样式：panel 底 + 边框）
         p.spawn((
             Button,
             Node {
-                padding: UiRect::horizontal(px(space::SM)),
+                padding: UiRect::horizontal(px(space::MD)),
+                border: UiRect::all(px(1.0)),
+                border_radius: BorderRadius::all(px(4.0)),
                 ..default()
             },
-            Text::new(tr(&loc, "topbar-new-session")),
-            TextFont {
-                font_size: FontSize::Px(font),
-                ..default()
-            },
-            TextColor(theme.text_dim),
+            BackgroundColor(theme.panel),
+            BorderColor::all(theme.border),
+            Text::new(format!("＋ {}", tr(&loc, "topbar-new-session"))),
+            TextFont { font_size, ..default() },
+            TextColor(theme.text),
             NewSessionButtonMarker,
         ));
-
-        // 设置按钮
+        // ⚙ 设置 icon-btn（28px 方形，hover panel 底）
         p.spawn((
             Button,
             Node {
-                padding: UiRect::horizontal(px(space::SM)),
+                width: px(28.0),
+                height: px(28.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4.0)),
                 ..default()
             },
-            Text::new(tr(&loc, "topbar-settings")),
-            TextFont {
-                font_size: FontSize::Px(font),
-                ..default()
-            },
+            Text::new("⚙"),
+            TextFont { font_size, ..default() },
             TextColor(theme.text_dim),
             SettingsButtonMarker,
         ));
@@ -119,7 +136,7 @@ fn update_provider_label(
     text.0 = if info.id.is_empty() {
         String::new()
     } else {
-        format!("{} / {}", info.id, info.model)
+        format!("📦 {} / {} ▾", info.id, info.model)
     };
 }
 

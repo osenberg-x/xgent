@@ -38,8 +38,9 @@ pub struct Scrollbar {
 impl Default for Scrollbar {
     fn default() -> Self {
         Self {
-            thumb_color: Color::srgb(0.45, 0.45, 0.48),
-            track_color: Color::srgb(0.15, 0.15, 0.17),
+            // 对齐 ui-prototype.html 滚动条：thumb #3a3f4a、track 透明
+            thumb_color: Color::srgb(0.23, 0.25, 0.29),
+            track_color: Color::NONE,
             width: 10.0,
             min_thumb_height: 24.0,
         }
