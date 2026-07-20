@@ -22,6 +22,7 @@ pub fn agent_poll_system(
     mut error: MessageWriter<ErrorMessage>,
     mut retry: MessageWriter<RetryMessage>,
     mut compacted: MessageWriter<CompactedMessage>,
+    mut session_cleared: MessageWriter<SessionClearedMessage>,
     // ParamSet 合并所有 MessageReader，突破 SystemParam 数量上限
     mut readers: ParamSet<(
         MessageReader<UserInputMessage>,
@@ -29,6 +30,7 @@ pub fn agent_poll_system(
         MessageReader<ConfirmDecisionMessage>,
         MessageReader<SteeringMessage>,
         MessageReader<FollowUpMessage>,
+        MessageReader<NewSessionMessage>,
     )>,
     provider: Res<crate::provider_state::ProviderInfo>,
     context: Res<crate::provider_state::ContextState>,
@@ -56,12 +58,15 @@ pub fn agent_poll_system(
         conv.push_user(&ev.text);
         conv.status = ConversationStatus::Thinking;
         // 构造请求（上下文已在 context Resource 中预检索）
+        // 注：tool_schemas 必须注入，否则 LLM 无法发起工具调用（修复关键 bug）。
+        // 上下文检索由 bridge 异步侧在 StartLoop 时调 context.retrieve 完成，
+        // 此处用空 ContextResult 占位，bridge 会用真实结果覆盖首条 system 消息。
         let req = build_request(
             &conv.messages,
             &context.result,
             &provider.id,
             &provider.model,
-            None, // tools schema 后续注入
+            Some(bridge.tool_schemas.as_ref().clone()),
         );
         let _ = bridge.cmd_tx.try_send(AgentCommand::StartLoop { req });
     }
@@ -88,17 +93,23 @@ pub fn agent_poll_system(
             continue;
         }
         conv.push_user(&ev.text);
-        conv.status = ConversationStatus::Thinking;
-        let req = build_request(
-            &conv.messages,
-            &context.result,
-            &provider.id,
-            &provider.model,
-            None,
-        );
+        // FollowUp 只传 text：bridge 内部 run_agent_loop 会把 text 追加到
+        // 当前 req.messages。不在此重建 req（bridge 的 req 是 StartLoop 时的快照，
+        // 重建会丢失对话中已积累的 tool_call/tool_result 消息）。
+        // conv.messages 已 push，下次 StartLoop 时会用完整历史重建。
         let _ = bridge.cmd_tx.try_send(AgentCommand::FollowUp {
             text: ev.text.clone(),
         });
+    }
+
+    // 2d. 处理新建会话：仅 Idle/Error 接受（忙碌时忽略，避免丢失进行中的对话）
+    for _ in readers.p5().read() {
+        if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
+            continue;
+        }
+        conv.reset();
+        // 通知 UI 清空消息列表
+        session_cleared.write(SessionClearedMessage);
     }
 
     // 3. 处理确认决策：经 SharedConfirm 回填给等待的 async task
@@ -138,7 +149,10 @@ pub fn agent_poll_system(
             Err(mpsc::error::TryRecvError::Empty) => break,
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 // 异步任务退出，视为完成
-                done.write(DoneMessage);
+                done.write(DoneMessage {
+                    usage: None,
+                    model: None,
+                });
                 break;
             }
         }
@@ -164,16 +178,27 @@ fn handle_agent_event(
             conv.current_assistant_text.push_str(&text);
             delta.write(DeltaMessage { text });
         }
-        AgentEvent::ToolCall { tool_id, input } => {
+        AgentEvent::ToolCall {
+            call_id,
+            tool_id,
+            input,
+        } => {
+            // 记录 assistant tool_call 到 conv.messages，与后续 tool result 配对
+            // （修复多轮工具调用后 conv 缺 tool_call 导致 LLM 请求被拒的 bug）
+            conv.push_tool_call(&call_id, &tool_id, &input);
             conv.status = ConversationStatus::ToolRunning;
             tool_call.write(ToolCallMessage { tool_id, input });
         }
         AgentEvent::ToolResult {
+            call_id,
             tool_id,
             output,
             is_error,
             ..
         } => {
+            // 记录 tool result，与 push_tool_call 的 call_id 配对
+            // （OpenAI 要求 tool result 的 tool_call_id 与前述 tool_call 的 id 一致）
+            conv.push_tool_result(&call_id, &tool_id, &output, is_error);
             tool_result.write(ToolResultMessage {
                 tool_id,
                 output,
@@ -184,11 +209,32 @@ fn handle_agent_event(
             conv.status = ConversationStatus::Confirming;
             confirm.write(ConfirmRequestMessage(req));
         }
-        AgentEvent::Done => {
-            conv.finalize_assistant();
+        AgentEvent::SteeringInterrupted { partial_text } => {
+            // 流式被 steering 中断：把半截文本固化为被中断的 assistant 消息，
+            // 清空 current_assistant_text，避免与新一轮流式拼接。
+            // 复用 DoneMessage 让 UI 把半截文本固化为历史气泡并清空当前节点
+            // （usage 为 None，token 统计无害）。
+            if !partial_text.is_empty() {
+                conv.current_assistant_text = partial_text;
+                conv.finalize_assistant(None, None);
+                conv.persist_last_assistant();
+            } else {
+                conv.current_assistant_text.clear();
+            }
+            // status 保持 Streaming/Thinking 语义：对话未结束，steering 后继续流式
+            conv.status = ConversationStatus::Thinking;
+            done.write(DoneMessage {
+                usage: None,
+                model: None,
+            });
+        }
+        AgentEvent::Done { usage, model } => {
+            // 先固化助手消息（写入 usage/model），再清空 current_assistant_text，
+            // 然后发 DoneMessage 供 UI 用真实 usage 累加 token（修复读取空文本的 bug）。
+            conv.finalize_assistant(usage.clone(), model.clone());
             conv.persist_last_assistant();
             conv.status = ConversationStatus::Idle;
-            done.write(DoneMessage);
+            done.write(DoneMessage { usage, model });
         }
         AgentEvent::RetryAttempt {
             attempt,
@@ -208,6 +254,8 @@ fn handle_agent_event(
             });
         }
         AgentEvent::Error { kind, message } => {
+            // 错误不进 conv.messages（不发给 LLM），但持久化为独立 entry 供审计
+            conv.persist_error(kind, &message);
             conv.status = ConversationStatus::Error;
             error.write(ErrorMessage { kind, message });
         }

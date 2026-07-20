@@ -39,11 +39,7 @@ impl Plugin for StatusBarPlugin {
             .add_systems(Startup, spawn_status_bar)
             .add_systems(
                 Update,
-                (
-                    update_status_segments,
-                    update_status_dot,
-                    track_token_usage,
-                ),
+                (update_status_segments, update_status_dot, track_token_usage),
             );
     }
 }
@@ -76,42 +72,63 @@ fn spawn_status_bar(
         // provider/model 文本
         p.spawn((
             Text::new(String::new()),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(dim),
             ProviderTextMarker,
         ));
         // 分隔 ·
         p.spawn((
             Text::new("·"),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(dim),
         ));
         // 会话状态文本
         p.spawn((
             Text::new(String::new()),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(dim),
             ConvStatusMarker,
         ));
         // 分隔 ·
         p.spawn((
             Text::new("·"),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(dim),
         ));
         // token 文本
         p.spawn((
             Text::new(String::new()),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(dim),
             TokenTextMarker,
         ));
         // spacer
-        p.spawn((Node { flex_grow: 1.0, ..default() },));
+        p.spawn((Node {
+            flex_grow: 1.0,
+            ..default()
+        },));
         // 编码/语言段（右侧）
         p.spawn((
             Text::new("UTF-8 · LF · Rust"),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(dim),
         ));
     });
@@ -196,17 +213,17 @@ fn update_status_dot(
     }
 }
 
-/// 收到 DoneMessage 时递增 token 估算。
-fn track_token_usage(
-    mut reader: MessageReader<DoneMessage>,
-    conv: Res<Conversation>,
-    mut tokens: ResMut<TokenUsage>,
-) {
+/// 收到 DoneMessage 时累加真实 token 用量。
+///
+/// 之前读 `conv.current_assistant_text` 字符估算——但 `handle_agent_event`
+/// 在发 DoneMessage **之前** 已 `finalize_assistant` 把文本 take 走，
+/// 导致读到空字符串、token 永远为 0。改为直接用 DoneMessage 携带的
+/// provider usage（prompt + completion）。
+fn track_token_usage(mut reader: MessageReader<DoneMessage>, mut tokens: ResMut<TokenUsage>) {
     for ev in reader.read() {
-        // 粗略估算：当前助手文本字符数 / 4
-        let chars = conv.current_assistant_text.chars().count() as u64;
-        tokens.total += chars / 4;
-        let _ = ev;
+        if let Some(u) = &ev.usage {
+            tokens.total += u.prompt as u64 + u.completion as u64;
+        }
     }
 }
 

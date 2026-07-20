@@ -110,20 +110,32 @@ fn spawn_tool_card(
                     // 工具图标
                     header.spawn((
                         Text::new("🔧"),
-                        TextFont { font_size: FontSize::Px(font), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
                         TextColor(theme.text),
                     ));
                     // 工具名
                     header.spawn((
                         Text::new(ev.tool_id.clone()),
-                        TextFont { font_size: FontSize::Px(font), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
                         TextColor(theme.text),
                     ));
                     // 参数摘要
                     header.spawn((
-                        Node { flex_grow: 1.0, ..default() },
+                        Node {
+                            flex_grow: 1.0,
+                            ..default()
+                        },
                         Text::new(summary),
-                        TextFont { font_size: FontSize::Px(font), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
                         TextColor(theme.text_dim),
                     ));
                     // 状态点（dot，初始 running 色）
@@ -140,7 +152,10 @@ fn spawn_tool_card(
                     // 状态标签（初始"执行中"）
                     header.spawn((
                         Text::new(tr(&loc, "tool-running")),
-                        TextFont { font_size: FontSize::Px(font), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
                         TextColor(theme.text_dim),
                         ToolStatusLabelMarker,
                     ));
@@ -155,7 +170,10 @@ fn spawn_tool_card(
                     },
                     ScrollPosition::default(),
                     Text::new(String::new()),
-                    TextFont { font_size: FontSize::Px(font - 2.0), ..default() },
+                    TextFont {
+                        font_size: FontSize::Px(font - 2.0),
+                        ..default()
+                    },
                     TextColor(theme.text_dim),
                     ToolResultTextMarker,
                 ));
@@ -171,7 +189,10 @@ fn spawn_tool_card(
                     BackgroundColor(theme.bar),
                     BorderColor::all(theme.border),
                     Text::new(String::new()),
-                    TextFont { font_size: FontSize::Px(font), ..default() },
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
                     TextColor(theme.text_dim),
                     ToolFoldMarker,
                 ));

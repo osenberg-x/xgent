@@ -92,7 +92,7 @@ impl Plugin for FilePanelPlugin {
                     handle_file_panel_toggle,
                     handle_file_preview_close,
                     update_file_entry_style,
-                )
+                ),
             );
     }
 }
@@ -221,7 +221,10 @@ fn spawn_file_preview(
                     FilePreviewPathMarker,
                 ));
                 // spacer
-                head.spawn((Node { flex_grow: 1.0, ..default() },));
+                head.spawn((Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },));
                 // ✕ 关闭按钮
                 head.spawn((
                     Button,
@@ -335,24 +338,39 @@ fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Th
                 .with_children(|row| {
                     // 箭头（▸ 折叠 / ▾ 展开）
                     row.spawn((
-                        Node { width: px(10.0), ..default() },
+                        Node {
+                            width: px(10.0),
+                            ..default()
+                        },
                         Text::new("▸"),
-                        TextFont { font_size, ..default() },
+                        TextFont {
+                            font_size,
+                            ..default()
+                        },
                         TextColor(theme.text_dim),
                         DirArrowMarker,
                     ));
                     // 图标（📁 折叠 / 📂 展开）
                     row.spawn((
-                        Node { width: px(14.0), ..default() },
+                        Node {
+                            width: px(14.0),
+                            ..default()
+                        },
                         Text::new("📁"),
-                        TextFont { font_size, ..default() },
+                        TextFont {
+                            font_size,
+                            ..default()
+                        },
                         TextColor(theme.text),
                         DirIconMarker,
                     ));
                     // 名称
                     row.spawn((
                         Text::new(entry.name.clone()),
-                        TextFont { font_size, ..default() },
+                        TextFont {
+                            font_size,
+                            ..default()
+                        },
                         TextColor(theme.text),
                     ));
                 });
@@ -368,42 +386,58 @@ fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Th
                 ));
             });
     } else {
-        parent.spawn((
-            Button,
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(space::XS),
-                padding: UiRect::vertical(px(2.0)),
-                ..default()
-            },
-            FileEntry {
-                path: entry.path.clone(),
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .with_children(|row| {
-            // 图标占位（对齐目录行的箭头宽度）
-            row.spawn((
-                Node { width: px(10.0), ..default() },
-                Text::new(""),
-                TextFont { font_size, ..default() },
-            ));
-            // 文件图标
-            row.spawn((
-                Node { width: px(14.0), ..default() },
-                Text::new("📄"),
-                TextFont { font_size, ..default() },
-                TextColor(theme.text),
-            ));
-            // 名称
-            row.spawn((
-                Text::new(entry.name.clone()),
-                TextFont { font_size, ..default() },
-                TextColor(theme.text),
-            ));
-        });
+        parent
+            .spawn((
+                Button,
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(space::XS),
+                    padding: UiRect::vertical(px(2.0)),
+                    ..default()
+                },
+                FileEntry {
+                    path: entry.path.clone(),
+                },
+                BackgroundColor(Color::NONE),
+            ))
+            .with_children(|row| {
+                // 图标占位（对齐目录行的箭头宽度）
+                row.spawn((
+                    Node {
+                        width: px(10.0),
+                        ..default()
+                    },
+                    Text::new(""),
+                    TextFont {
+                        font_size,
+                        ..default()
+                    },
+                ));
+                // 文件图标
+                row.spawn((
+                    Node {
+                        width: px(14.0),
+                        ..default()
+                    },
+                    Text::new("📄"),
+                    TextFont {
+                        font_size,
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                ));
+                // 名称
+                row.spawn((
+                    Text::new(entry.name.clone()),
+                    TextFont {
+                        font_size,
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                ));
+            });
     }
 }
 /// 根据项目根路径构建文件树（每次重建）。

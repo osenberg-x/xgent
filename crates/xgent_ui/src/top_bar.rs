@@ -80,12 +80,18 @@ fn spawn_top_bar(
             BackgroundColor(theme.panel),
             BorderColor::all(theme.border),
             Text::new(String::new()),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(theme.text),
             ProviderLabelMarker,
         ));
         // spacer
-        p.spawn(Node { flex_grow: 1.0, ..default() });
+        p.spawn(Node {
+            flex_grow: 1.0,
+            ..default()
+        });
         // ＋新建会话按钮（btn 样式：panel 底 + 边框）
         p.spawn((
             Button,
@@ -98,7 +104,10 @@ fn spawn_top_bar(
             BackgroundColor(theme.panel),
             BorderColor::all(theme.border),
             Text::new(format!("＋ {}", tr(&loc, "topbar-new-session"))),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(theme.text),
             NewSessionButtonMarker,
         ));
@@ -114,7 +123,10 @@ fn spawn_top_bar(
                 ..default()
             },
             Text::new("⚙"),
-            TextFont { font_size, ..default() },
+            TextFont {
+                font_size,
+                ..default()
+            },
             TextColor(theme.text_dim),
             SettingsButtonMarker,
         ));

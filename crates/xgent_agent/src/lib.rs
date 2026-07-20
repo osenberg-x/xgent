@@ -52,6 +52,8 @@ impl Plugin for XgentAgentPlugin {
             .add_message::<SteeringMessage>()
             .add_message::<FollowUpMessage>()
             .add_message::<CompactedMessage>()
+            .add_message::<NewSessionMessage>()
+            .add_message::<SessionClearedMessage>()
             .init_resource::<Conversation>()
             .init_resource::<ProviderInfo>()
             .init_resource::<ContextState>()

@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::ScrollPosition;
 
+use xgent_agent::NewSessionMessage;
 use xgent_settings::Localizer;
 use xui::command_palette::{
     CommandKind, CommandPaletteState, CommandRegistry, PaletteCommand, PaletteTriggered,
@@ -328,12 +329,16 @@ pub(crate) fn handle_palette_triggers(
     mut state: ResMut<CommandPaletteState>,
     mut loc: ResMut<Localizer>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
+    mut new_session: MessageWriter<NewSessionMessage>,
 ) {
     for ev in reader.read() {
         match ev.command_id.as_str() {
             "lang.switch.en" => loc.switch("en-US"),
             "lang.switch.zh" => loc.switch("zh-CN"),
-            "session.new" => { /* TODO: 重置会话 */ }
+            "session.new" => {
+                // 新建会话：发 NewSessionMessage，agent_poll_system 处理 reset
+                new_session.write(NewSessionMessage);
+            }
             "settings.open" => {
                 settings_state.open = true;
             }

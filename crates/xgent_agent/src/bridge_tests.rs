@@ -683,9 +683,7 @@ impl crate::compaction::CompactionProvider for MockCompactor {
 }
 
 /// 构造带 compaction 的测试 App（小 context_window 触发压缩）。
-fn test_app_with_compaction(
-    provider: Arc<dyn crate::bridge::ProviderClient>,
-) -> App {
+fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) -> App {
     let mut app = App::new();
     let context = Arc::new(MockContext);
     let project_root = std::mem::ManuallyDrop::new(tempfile::tempdir().expect("tempdir"))
@@ -745,10 +743,7 @@ struct CompactedCollected {
     last_after: u32,
 }
 
-fn collect_compacted(
-    mut c: MessageReader<CompactedMessage>,
-    mut out: ResMut<CompactedCollected>,
-) {
+fn collect_compacted(mut c: MessageReader<CompactedMessage>, mut out: ResMut<CompactedCollected>) {
     for m in c.read() {
         out.count += 1;
         out.last_before = m.tokens_before;
@@ -760,16 +755,22 @@ fn collect_compacted(
 fn compaction_triggers_when_over_threshold() {
     // 用量 prompt=9999（远超窗口 10 的 80% 阈值=8）→ 必触发
     let provider = Arc::new(MockProvider::new(vec![
-        ChatEvent::TextDelta { text: "hello".into() },
+        ChatEvent::TextDelta {
+            text: "hello".into(),
+        },
         ChatEvent::Done {
             reason: xgent_core::chat::StopReason::Stop,
-            usage: TokenUsage { prompt: 9999, completion: 1 },
+            usage: TokenUsage {
+                prompt: 9999,
+                completion: 1,
+            },
         },
     ]));
     let mut app = test_app_with_compaction(provider as Arc<dyn crate::bridge::ProviderClient>);
     app.insert_resource(CompactedCollected::default())
         .add_systems(Update, collect_compacted);
-    app.world_mut().write_message(UserInputMessage { text: "hi".into() });
+    app.world_mut()
+        .write_message(UserInputMessage { text: "hi".into() });
     for _ in 0..50 {
         app.update();
     }
@@ -797,7 +798,11 @@ impl ProviderClient for StreamingSteerMockProvider {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
                 // 发首个 delta
-                let _ = tx.send(ChatEvent::TextDelta { text: "partial".into() }).await;
+                let _ = tx
+                    .send(ChatEvent::TextDelta {
+                        text: "partial".into(),
+                    })
+                    .await;
                 // 轮询等待 steering 信号（最多 2 秒）
                 for _ in 0..200 {
                     {
@@ -809,10 +814,15 @@ impl ProviderClient for StreamingSteerMockProvider {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
                 // 发 Done（无论是否中断，流都会被 steering 中断）
-                let _ = tx.send(ChatEvent::Done {
-                    reason: xgent_core::chat::StopReason::Stop,
-                    usage: TokenUsage { prompt: 5, completion: 1 },
-                }).await;
+                let _ = tx
+                    .send(ChatEvent::Done {
+                        reason: xgent_core::chat::StopReason::Stop,
+                        usage: TokenUsage {
+                            prompt: 5,
+                            completion: 1,
+                        },
+                    })
+                    .await;
             });
         });
         Ok((StreamId(1), rx))
@@ -830,14 +840,18 @@ fn steering_interrupts_streaming_and_continues() {
         Arc::new(ToolExecutor::with_defaults()),
         ToolPolicyConfig::default(),
         crate::bridge::RetryConfig::default(),
-    ).0;
-    app.world_mut().write_message(UserInputMessage { text: "hi".into() });
+    )
+    .0;
+    app.world_mut()
+        .write_message(UserInputMessage { text: "hi".into() });
     // 跑几帧让流式开始
     for _ in 0..5 {
         app.update();
     }
     // 发 steering：应即时中断当前流
-    app.world_mut().write_message(SteeringMessage { text: "wait stop".into() });
+    app.world_mut().write_message(SteeringMessage {
+        text: "wait stop".into(),
+    });
     *steer_seen.lock() = true;
     // 继续跑帧让对话完成
     for _ in 0..80 {

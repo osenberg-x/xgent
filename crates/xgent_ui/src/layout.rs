@@ -60,10 +60,7 @@ impl Plugin for LayoutPlugin {
             .add_systems(Startup, spawn_layout)
             .add_systems(
                 Update,
-                (
-                    toggle_file_panel_width,
-                    toggle_side_view_visibility,
-                )
+                (toggle_file_panel_width, toggle_side_view_visibility)
                     .after(crate::shortcuts::handle_hotkey_triggers),
             );
     }

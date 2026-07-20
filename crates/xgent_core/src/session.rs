@@ -11,6 +11,8 @@ use crate::chat::AgentMessage;
 /// - `Header` / `Message` / `ModelChange`：MVP 基础类型。
 /// - `Compaction`：对话压缩记录（见 `xgent_agent::compaction`），压缩发生时
 ///   追加一条，摘要文本与保留消息范围记录于此，便于恢复时重建上下文。
+/// - `Error`：对话出错时追加一条，记录错误类型与消息，便于恢复时看到失败点
+///   （错误本身不进 `conv.messages` 历史，但持久化为独立 entry 供审计）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEntry {
@@ -22,6 +24,8 @@ pub enum SessionEntry {
     ModelChange(ModelChangeEntry),
     /// 对话压缩记录（compaction 发生时 append）。
     Compaction(CompactionEntry),
+    /// 对话错误记录（出错时 append，不进消息历史）。
+    Error(ErrorEntry),
 }
 
 /// 会话 Header：会话开始时写入一次。
@@ -85,6 +89,25 @@ pub struct CompactionEntry {
     pub first_kept_id: String,
     /// 压缩前对话 token 估算（触发依据，供审计）
     pub tokens_before: u32,
+}
+
+/// 对话错误记录 entry。
+///
+/// 出错时追加一条：记录错误类型（`ErrorKind`）与消息文本。
+/// 错误不进 `conv.messages`（不发给 LLM），但持久化为独立 entry，
+/// 便于恢复会话时看到失败点。对齐 omp 的 error entry 持久化。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ErrorEntry {
+    /// 本条记录 id
+    pub id: String,
+    /// 父 entry id
+    pub parent_id: String,
+    /// 时间戳（ms epoch）
+    pub timestamp: u64,
+    /// 错误分类（按用户可采取的行动划分，见 [`crate::chat::ErrorKind`]）
+    pub kind: crate::chat::ErrorKind,
+    /// 错误消息文本
+    pub message: String,
 }
 
 #[cfg(test)]

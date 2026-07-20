@@ -18,6 +18,14 @@ pub struct UserInputMessage {
 #[derive(Message)]
 pub struct AbortMessage;
 
+/// 新建会话（UI → agent）：清空当前会话，开始新会话。
+///
+/// 重置 Conversation（新 SessionId、清空 messages、新 session_store），
+/// 并发 `SessionClearedMessage` 让 UI 清空消息列表。
+/// 仅 Idle/Error 状态接受（忙碌时忽略，避免丢失进行中的对话）。
+#[derive(Message)]
+pub struct NewSessionMessage;
+
 /// Steering 消息：用户在 agent 执行中插话（UI → agent，注入到当前对话）。
 #[derive(Message)]
 pub struct SteeringMessage {
@@ -63,8 +71,16 @@ pub struct ConfirmDecisionMessage {
 }
 
 /// 对话完成（agent → UI）。
+///
+/// `usage` 与 `model` 来自 provider 的流式 Done 事件，供 UI 累加真实 token
+/// 用量（修复之前读空 `current_assistant_text` 导致 token 永远为 0 的 bug）。
 #[derive(Message)]
-pub struct DoneMessage;
+pub struct DoneMessage {
+    /// 本次 stream 的 token 用量（来自 provider）
+    pub usage: Option<xgent_core::chat::TokenUsage>,
+    /// 生成该回复的模型名
+    pub model: Option<String>,
+}
 
 /// 即将重试（agent → UI）。
 ///
@@ -99,3 +115,7 @@ pub struct CompactedMessage {
     /// 压缩后保留消息 token 估算
     pub tokens_after: u32,
 }
+
+/// 会话已清空（agent → UI）：新建会话后通知 UI 清空消息列表。
+#[derive(Message)]
+pub struct SessionClearedMessage;

@@ -52,10 +52,7 @@ pub enum CompactionError {
     Failed(String),
     /// provider 调用失败。
     #[error("provider 错误: {kind:?} - {message}")]
-    Provider {
-        kind: ErrorKind,
-        message: String,
-    },
+    Provider { kind: ErrorKind, message: String },
     /// 摘要为空（provider 未返回有效文本）。
     #[error("摘要生成返回空文本")]
     EmptySummary,
@@ -94,12 +91,17 @@ pub fn effective_reserve_tokens(context_window: u32, settings: &CompactionSettin
 ///
 /// 优先用百分比（默认 80%），确保阈值严格小于窗口（`min(window - 1, ...)`）。
 pub fn resolve_threshold_tokens(context_window: u32, settings: &CompactionSettings) -> u32 {
-    let pct = settings.threshold_percent.unwrap_or(DEFAULT_THRESHOLD_PERCENT);
+    let pct = settings
+        .threshold_percent
+        .unwrap_or(DEFAULT_THRESHOLD_PERCENT);
     let clamped = pct.min(99).max(1) as u32;
     // 阈值 = window * pct/100，但不超过 window - reserve
     let by_percent = context_window * clamped / 100;
-    let by_reserve = context_window.saturating_sub(effective_reserve_tokens(context_window, settings));
-    by_percent.min(by_reserve).min(context_window.saturating_sub(1))
+    let by_reserve =
+        context_window.saturating_sub(effective_reserve_tokens(context_window, settings));
+    by_percent
+        .min(by_reserve)
+        .min(context_window.saturating_sub(1))
 }
 
 /// 判断是否需要压缩。
@@ -459,7 +461,10 @@ mod tests {
         let cut = find_cut_point(&msgs, 5);
         // cut 不应为 0（需要压缩），且应落在 user 边界
         assert!(cut > 0);
-        assert!(matches!(&msgs[cut], AgentMessage::User(_) | AgentMessage::Assistant(_)));
+        assert!(matches!(
+            &msgs[cut],
+            AgentMessage::User(_) | AgentMessage::Assistant(_)
+        ));
     }
 
     #[test]
@@ -503,12 +508,10 @@ mod tests {
         assert_eq!(out.len(), 2);
         // 首条应为 summary user 消息
         match &out[0] {
-            AgentMessage::User(u) => {
-                match &u.content[0] {
-                    ContentBlock::Text { text } => assert!(text.contains("已完成 X")),
-                    _ => panic!("expected text block"),
-                }
-            }
+            AgentMessage::User(u) => match &u.content[0] {
+                ContentBlock::Text { text } => assert!(text.contains("已完成 X")),
+                _ => panic!("expected text block"),
+            },
             _ => panic!("expected user message"),
         }
     }

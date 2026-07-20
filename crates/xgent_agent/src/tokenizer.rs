@@ -46,9 +46,7 @@ fn estimate_block(block: &ContentBlock) -> u32 {
         ContentBlock::Text { text } => estimate_text(text),
         ContentBlock::ToolCall { args, .. } => {
             // args JSON 序列化后按字节估算
-            let bytes = serde_json::to_string(args)
-                .map(|s| s.len())
-                .unwrap_or(0);
+            let bytes = serde_json::to_string(args).map(|s| s.len()).unwrap_or(0);
             (bytes as u32) / 4
         }
         ContentBlock::ToolResult { content, .. } => estimate_text(content),

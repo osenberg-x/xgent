@@ -152,6 +152,10 @@ pub struct AgentBridge {
     pub project_root: std::path::PathBuf,
     /// 重试配置（与 task 共享同一 Arc，运行时可刷新）
     pub retry_config: Arc<parking_lot::RwLock<RetryConfig>>,
+    /// 已注册工具的 schema 列表（启动时从 ToolExecutor 一次性提取，
+    /// 运行期工具集合不变；ECS 侧构造 ChatRequest 时注入为 `tools` 字段，
+    /// 修复工具 schema 从未注入导致 LLM 无法发起工具调用的 bug）。
+    pub tool_schemas: Arc<Vec<xgent_core::chat::ToolSchema>>,
 }
 
 /// 命令（ECS → 异步任务）。
@@ -174,11 +178,16 @@ pub enum AgentEvent {
     Delta(String),
     /// 工具调用开始
     ToolCall {
+        /// provider 返回的工具调用 id（用于配对 tool result，对齐 OpenAI 协议）
+        call_id: String,
+        /// 工具名（UI 展示与执行查找用）
         tool_id: String,
         input: serde_json::Value,
     },
     /// 工具执行完成
     ToolResult {
+        /// 对应的 provider tool_call id（与 ToolCall 的 call_id 配对）
+        call_id: String,
         tool_id: String,
         output: String,
         /// 是否为逻辑失败（语义反转：true 表示失败）
@@ -187,8 +196,22 @@ pub enum AgentEvent {
     },
     /// 需要用户确认
     ConfirmRequest(ConfirmRequest),
-    /// 对话完成
-    Done,
+    /// 对话完成（assistant turn 结束）。
+    ///
+    /// `usage` 携带本次 stream 的 token 用量（来自 provider），
+    /// 供 ECS 写入 AssistantMessage.usage 并更新 UI token 统计。
+    /// `model` 携带生成该回复的模型名（供持久化）。
+    Done {
+        usage: Option<xgent_core::chat::TokenUsage>,
+        model: Option<String>,
+    },
+    /// 流式期间被 steering 中断：半截 assistant 文本需固化为被中断消息。
+    ///
+    /// `partial_text` 是中断前已流的 assistant 文本（可能为空）。
+    /// ECS 据此把半截文本 finalize 为一条 assistant 消息（标记被中断），
+    /// 清空 `current_assistant_text`，然后 UI 会显示新一轮流式。
+    /// 避免半截文本与新回复拼接在一起（修复 steering 中断后文本混乱 bug）。
+    SteeringInterrupted { partial_text: String },
     /// 对话出错
     Error {
         kind: xgent_core::chat::ErrorKind,
@@ -252,6 +275,9 @@ impl AgentBridge {
     /// 构造桥接并 spawn 异步 agent loop task。
     pub fn new(cfg: AgentBridgeConfig) -> Self {
         let project_root = cfg.project_root.clone();
+        // 启动时一次性提取工具 schema（运行期工具集合不变），
+        // 供 ECS 侧构造 ChatRequest 时注入为 tools 字段。
+        let tool_schemas = Arc::new(cfg.executor.schemas());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -273,6 +299,7 @@ impl AgentBridge {
             shared_confirm: shared_confirm.clone(),
             project_root,
             retry_config,
+            tool_schemas,
         }
     }
 
@@ -300,7 +327,20 @@ async fn agent_loop_task(
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            AgentCommand::StartLoop { req } => {
+            AgentCommand::StartLoop { mut req } => {
+                // 上下文检索：ECS 系统同步无法 await，故在此异步侧检索并刷新
+                // req 的首条 system 消息（修复上下文从未注入的 bug）。
+                // 用最近一条 user 消息作为 query；检索失败不阻塞对话（用空结果）。
+                if let Some(user_text) = crate::format::last_user_text(&req.messages) {
+                    let query = xgent_context::provider::ContextQuery {
+                        user_message: user_text,
+                        current_file: None,
+                        hints: Vec::new(),
+                        max_tokens: 8_000,
+                    };
+                    let result = cfg.context.retrieve(&query).await;
+                    crate::format::refresh_system_message(&mut req, &result);
+                }
                 run_agent_loop(
                     &cfg.provider,
                     &cfg.executor,
@@ -320,7 +360,12 @@ async fn agent_loop_task(
             AgentCommand::Abort => {
                 // 中断当前对话：cancel token 触发 stream/工具中断
                 cancel_token.cancel();
-                let _ = event_tx.send(AgentEvent::Done).await;
+                let _ = event_tx
+                    .send(AgentEvent::Done {
+                        usage: None,
+                        model: None,
+                    })
+                    .await;
             }
             AgentCommand::ConfirmDecision(d) => {
                 // 决策由 ECS 经 SharedConfirm 回填给等待的 task，此处无需处理
@@ -333,17 +378,18 @@ async fn agent_loop_task(
 }
 
 /// 流式调用结果。
-///
 /// 承载 tool_calls、usage（compaction 触发依据）、stop_reason，
 /// 以及 steering 中断标记（流式期间用户插话，stream 被中断，
 /// `pending_steering` 为待注入的 steering 文本）。
 struct StreamOutcome {
     tool_calls: Vec<(String, String, serde_json::Value)>,
     usage: Option<xgent_core::chat::TokenUsage>,
-    #[allow(dead_code)]
     stop_reason: xgent_core::chat::StopReason,
     /// 流式期间被 steering 中断时，待注入的 steering 文本（非空表示中断发生）。
     pending_steering: Option<String>,
+    /// steering 中断前已流的 assistant 文本（供 ECS 固化为被中断消息）。
+    /// 非 None 且 `pending_steering` 非空时有意义。
+    partial_text: Option<String>,
 }
 
 /// 驱动 agent 对话循环（双层）。
@@ -374,6 +420,9 @@ async fn run_agent_loop(
     let retry_cfg = retry_config.read().clone();
     loop {
         let mut has_tool_calls = true;
+        // 本轮最后一次 stream 的 usage 与 model，供 Done 事件携带
+        let mut last_usage: Option<xgent_core::chat::TokenUsage> = None;
+        let mut last_model: Option<String> = None;
 
         // 内层循环：tool-call + steering
         while has_tool_calls {
@@ -387,7 +436,12 @@ async fn run_agent_loop(
                     }
                     AgentCommand::Abort => {
                         cancel_token.cancel();
-                        let _ = event_tx.send(AgentEvent::Done).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Done {
+                                usage: None,
+                                model: None,
+                            })
+                            .await;
                         return;
                     }
                     AgentCommand::FollowUp { .. } | AgentCommand::StartLoop { .. } => {
@@ -414,10 +468,20 @@ async fn run_agent_loop(
                 }
             };
 
-            // 流式期间被 steering 中断：注入 steering 文本，本轮重新调用 LLM
+            // 流式期间被 steering 中断：发 SteeringInterrupted 让 ECS 固化半截文本，
+            // 注入 steering 文本到 req.messages，本轮重新调用 LLM。
+            // 这样 UI 不会把半截文本与新回复拼接（修复 steering 中断后文本混乱 bug）。
             if let Some(steer_text) = &outcome.pending_steering {
-                req.messages
-                    .push(xgent_core::chat::ChatMessage::text(Role::User, steer_text.clone()));
+                let partial = outcome.partial_text.clone().unwrap_or_default();
+                let _ = event_tx
+                    .send(AgentEvent::SteeringInterrupted {
+                        partial_text: partial,
+                    })
+                    .await;
+                req.messages.push(xgent_core::chat::ChatMessage::text(
+                    Role::User,
+                    steer_text.clone(),
+                ));
                 // 中断后不执行 tool_calls（可能不完整），直接 continue 重新流式
                 continue;
             }
@@ -440,12 +504,49 @@ async fn run_agent_loop(
             }
 
             if outcome.tool_calls.is_empty() {
+                // LLM 停止、无工具调用：本轮结束，记下 usage/model 供 Done 事件
+                last_usage = outcome.usage.clone();
+                last_model = Some(req.model.clone());
                 has_tool_calls = false;
+            } else if outcome.stop_reason == xgent_core::chat::StopReason::Length {
+                // max_tokens 截断：tool_calls 可能参数不完整，不执行，
+                // 为每个补占位 skipped result（对齐 omp createAbortedToolResult），
+                // 让 LLM 在下一轮重新生成完整 tool_call。
+                for (call_id, name, _args) in &outcome.tool_calls {
+                    let _ = event_tx
+                        .send(AgentEvent::ToolResult {
+                            call_id: call_id.clone(),
+                            tool_id: name.clone(),
+                            output: "工具调用因 max_tokens 截断而未执行，请重新发起完整调用。"
+                                .into(),
+                            is_error: true,
+                            side_effect: None,
+                        })
+                        .await;
+                    req.messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: vec![ContentBlock::ToolCall {
+                            id: call_id.clone(),
+                            name: name.clone(),
+                            args: serde_json::Value::Null,
+                        }],
+                    });
+                    req.messages.push(ChatMessage {
+                        role: Role::Tool,
+                        content: vec![ContentBlock::ToolResult {
+                            tool_call_id: call_id.clone(),
+                            content: "工具调用因 max_tokens 截断而未执行".into(),
+                            is_error: true,
+                        }],
+                    });
+                }
+                has_tool_calls = true;
             } else {
                 // 执行工具调用，结果回灌为 ChatMessage 追加到 req.messages
                 for (call_id, name, args) in outcome.tool_calls {
                     let _ = event_tx
                         .send(AgentEvent::ToolCall {
+                            call_id: call_id.clone(),
                             tool_id: name.clone(),
                             input: args.clone(),
                         })
@@ -464,19 +565,26 @@ async fn run_agent_loop(
                             // 中断：透传为 ToolResult 逻辑失败 + 结束本轮
                             let _ = event_tx
                                 .send(AgentEvent::ToolResult {
+                                    call_id: call_id.clone(),
                                     tool_id: name.clone(),
                                     output: "工具执行被中断".into(),
                                     is_error: true,
                                     side_effect: None,
                                 })
                                 .await;
-                            let _ = event_tx.send(AgentEvent::Done).await;
+                            let _ = event_tx
+                                .send(AgentEvent::Done {
+                                    usage: None,
+                                    model: None,
+                                })
+                                .await;
                             return;
                         }
                         Err(e) => (format!("工具异常: {e}"), true, None),
                     };
                     let _ = event_tx
                         .send(AgentEvent::ToolResult {
+                            call_id: call_id.clone(),
                             tool_id: name.clone(),
                             output: output.clone(),
                             is_error,
@@ -507,8 +615,14 @@ async fn run_agent_loop(
             }
         }
 
-        // 内层结束（无 tool_calls）→ 发 Done
-        let _ = event_tx.send(AgentEvent::Done).await;
+        // 内层结束（无 tool_calls）→ 发 Done，携带本次 stream 的 usage 与 model
+        // 供 ECS 写入 AssistantMessage.usage 并更新 UI token 统计（修复 usage 丢失 bug）。
+        let _ = event_tx
+            .send(AgentEvent::Done {
+                usage: last_usage,
+                model: last_model,
+            })
+            .await;
 
         // 停止边界：先 try_recv steering（防止 steer 在 yield 点丢失，对齐 omp）
         let mut late_steer: Option<String> = None;
@@ -680,12 +794,18 @@ async fn stream_with_retry(
                     _ = tokio::time::sleep(delay) => {}
                     _ = cancel_token.cancelled() => {
                         // 中断重试：发 Done 后返回空（对齐 abort 语义）
-                        let _ = event_tx.send(AgentEvent::Done).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Done {
+                                usage: None,
+                                model: None,
+                            })
+                            .await;
                         return Ok(StreamOutcome {
                             tool_calls: Vec::new(),
                             usage: None,
                             stop_reason: xgent_core::chat::StopReason::Aborted,
                             pending_steering: None,
+                            partial_text: None,
                         });
                     }
                 }
@@ -717,6 +837,8 @@ async fn stream_llm_response(
     let mut pending_tool_calls: std::collections::HashMap<u32, (String, String)> =
         std::collections::HashMap::new();
     let mut collected: Vec<(String, String, serde_json::Value)> = Vec::new();
+    // 累积已流式 assistant 文本，供 steering 中断时返回（ECS 固化为被中断消息）
+    let mut partial_text = String::new();
     let mut usage: Option<xgent_core::chat::TokenUsage> = None;
     let mut stop_reason = xgent_core::chat::StopReason::Stop;
 
@@ -725,6 +847,7 @@ async fn stream_llm_response(
             ev = stream.recv() => {
                 match ev {
                     Some(ChatEvent::TextDelta { text }) => {
+                        partial_text.push_str(&text);
                         let _ = event_tx.send(AgentEvent::Delta(text)).await;
                     }
                     Some(ChatEvent::ToolCallStart { index, id, name }) => {
@@ -743,6 +866,7 @@ async fn stream_llm_response(
                             usage,
                             stop_reason,
                             pending_steering: None,
+                            partial_text: None,
                         });
                     }
                     Some(ChatEvent::Error { kind, message }) => {
@@ -754,17 +878,24 @@ async fn stream_llm_response(
                         usage,
                         stop_reason,
                         pending_steering: None,
+                        partial_text: None,
                     }),
                 }
             }
             _ = cancel_token.cancelled() => {
                 // abort：发 Done 后返回空（停止循环）
-                let _ = event_tx.send(AgentEvent::Done).await;
+                let _ = event_tx
+                    .send(AgentEvent::Done {
+                        usage: None,
+                        model: None,
+                    })
+                    .await;
                 return Ok(StreamOutcome {
                     tool_calls: Vec::new(),
                     usage: None,
                     stop_reason: xgent_core::chat::StopReason::Aborted,
                     pending_steering: None,
+                    partial_text: None,
                 });
             }
             cmd = steering_rx.recv() => {
@@ -777,16 +908,23 @@ async fn stream_llm_response(
                             usage: None,
                             stop_reason: xgent_core::chat::StopReason::Aborted,
                             pending_steering: Some(text),
+                            partial_text: Some(partial_text.clone()),
                         });
                     }
                     Some(AgentCommand::Abort) => {
                         cancel_token.cancel();
-                        let _ = event_tx.send(AgentEvent::Done).await;
+                        let _ = event_tx
+                            .send(AgentEvent::Done {
+                                usage: None,
+                                model: None,
+                            })
+                            .await;
                         return Ok(StreamOutcome {
                             tool_calls: Vec::new(),
                             usage: None,
                             stop_reason: xgent_core::chat::StopReason::Aborted,
                             pending_steering: None,
+                            partial_text: None,
                         });
                     }
                     _ => {} // 其他命令在流式期间到达：忽略，继续流

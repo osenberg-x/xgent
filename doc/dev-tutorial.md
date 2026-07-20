@@ -18,10 +18,10 @@
 |:---|:---|:---|:---|:---|
 | F-01 | 多轮对话 | ✅ | `xgent_agent/src/bridge.rs`（双层 `run_agent_loop`：外层 follow-up、内层 tool-call+steering；`stream_with_retry` 自动重试可重试错误；流式期 steering 即时中断 race abort、停止边界重新轮询防丢失）+ `compaction.rs`（token 估算 + should_compact 触发 + find_cut_point 切点 + LlmCompactor 摘要） | `plans/step9`、`plans/optimization-from-omp.md` O4/O9 |
 | F-02 | 流式输出 | ✅ | `xgent_provider/src/openai_compat.rs`（SSE → ChatEvent 细粒度事件）→ `xgent_ui/src/chat_panel.rs` | `plans/step5`、ADR-0006 |
-| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs` | `plans/step7`、ADR-0007 |
+| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md` |
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
-| F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`（445 行实现）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`notes/context-retrieval-research.md` |
-| F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only）+ `conversation.rs` | `plans/step9`、ADR-0008 |
+| F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`（445 行实现）；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md` |
+| F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only）+ `conversation.rs`；**错误持久化为 `SessionEntry::Error`**（2026-07-20 新增）；**新建会话功能**（`NewSessionMessage`/`SessionClearedMessage` + 命令面板 `session.new`，2026-07-20 新增） | `plans/step9`、ADR-0008、`conversation-flow-fixes-2026-07-20.md` |
 | F-07 | Provider 切换 | ✅ | `xgent_provider/src/openai_compat.rs`（完整实现）；`response_api.rs`/`anthropic.rs`/`custom.rs` 仅 trait 占位；`xgent_ui/src/settings_panel.rs` | `plans/step5` |
 | F-08 | 命令面板 | ✅ | `xui/src/command_palette.rs`（通用组件）+ `xgent_ui/src/command_palette.rs`（业务命令注册） | `plans/step10`/`step11`、`design/ui-design.md` §8 |
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
@@ -120,22 +120,37 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 ```
 用户输入
  → xgent_ui::chat_panel 发 UserInputMessage
- → xgent_agent::agent_loop 构造 ChatRequest（经 build_request + convert_to_llm）
- → AgentBridge.cmd_tx 发 StartLoop
- → run_agent_loop（tokio task）调 ProviderClient（IPC → daemon → LLM）
+ → xgent_agent::agent_loop 构造 ChatRequest（build_request：convert_to_llm + 注入 system + tool_schemas）
+ → AgentBridge.cmd_tx 发 StartLoop { req }
+ → agent_loop_task（tokio task）接到 StartLoop：调 context.retrieve 用最近 user 消息检索，
+   refresh_system_message 覆盖 req 首条 system（注入项目目录树 + 相关文件片段）
+ → run_agent_loop（双层循环）调 ProviderClient（IPC → daemon → LLM）
  → SSE chunk → ChatEvent::TextDelta 等 → event_tx → ECS → chat_panel 流式渲染
- → 若有 ToolCall → ToolExecutor（含确认）→ ToolResult 回灌 → 继续内层循环
+ → 若有 ToolCall → conv.push_tool_call 记录到历史 → ToolExecutor（含确认）→ ToolResult 回灌
+   → conv.push_tool_result 记录到历史（与 tool_call 配对，符合 OpenAI 协议）→ 继续内层循环
  → 若 usage.prompt 超 should_compact 阈值 → maybe_compact 调 LlmCompactor 摘要 → req.messages 重建为 summary+kept → 发 Compacted 事件
- → Done{Stop} → 退出内层；SessionStore append Message entry
+ → Done{usage, model} → finalize_assistant 写入 usage/model → 退出内层；SessionStore append Message entry
+ → UI 据 DoneMessage.usage 累加真实 token（prompt + completion）
 ```
+
+**关键修复（2026-07-20，见 `doc/conversation-flow-fixes-2026-07-20.md`）**：
+- tool_schemas 从 AgentBridge.tool_schemas 注入（启动时从 ToolExecutor 一次性提取），
+  修复 LLM 无法发起工具调用的致命 bug。
+- 上下文检索在 bridge 异步侧 StartLoop 时执行（ECS 系统同步无法 await retrieve），
+  修复项目结构从未注入的 bug。
+- tool_call/tool_result 都带 call_id，conv.messages 记录完整配对，修复多轮工具调用后
+  OpenAI 协议配对断裂的 bug。
+- AgentEvent::Done 携带 usage/model，AssistantMessage.usage 不再为 None，UI token 统计
+  用真实 prompt+completion 累加。
 
 ### 4.3 agent loop 双层循环（ADR-0007 / optimization O4）
 
 - 外层：follow-up 驱动；停止边界先 `try_recv` steering（防止 steer 在 yield 点丢失，对齐 omp `runLoopBody`）。
 - 内层：tool-call + steering——LLM → tool → continue，直到 `tool_calls.is_empty()`。
 - Abort：`CancellationToken::cancel()`，`stream_llm_response` 与 `executor.execute` 都 `tokio::select!` 监听。
-- Steering：**流式期即时中断**当前流（`stream_llm_response` 的 `select!` race steering_rx，对齐 omp `streamAssistantResponse` 的 abort race），返回 `pending_steering`，由 `run_agent_loop` 注入 `req.messages` 后重新流式；ECS 侧同步 `conv.push_user`（UI 展示 + 持久化）。停止边界也重新轮询，避免 steer 在 agent 准备停止时丢失。
-- Compaction（optimization O9）：每次 stream 拿到 `usage` 后，`maybe_compact` 用 `should_compact(max(provider_prompt, 本地估算), window, settings)` 判断；触发则 `LlmCompactor.compact` 生成摘要，`apply_compaction` 重建 `req.messages`（summary 前置 + kept），发 `AgentEvent::Compacted`。本地估算用 `tokenizer::estimate_messages_tokens`（启发式，防 provider 报告被压缩扩展 deflate 后漏触发，对齐 omp `compactionContextTokens`）。
+- Steering：**流式期即时中断**当前流（`stream_llm_response` 的 `select!` race steering_rx，对齐 omp `streamAssistantResponse` 的 abort race），返回 `pending_steering` + `partial_text`，由 `run_agent_loop` 发 `SteeringInterrupted` 事件——ECS 把半截文本 `finalize_assistant` 为被中断的 assistant 消息并清空当前节点（避免与新回复拼接），注入 steering 文本到 `req.messages` 后重新流式。停止边界也重新轮询，避免 steer 丢失。
+- Length 截断：`stop_reason == Length` 时不执行 tool_calls（参数可能不完整），为每个补占位 skipped result（对齐 omp `createAbortedToolResult`），回灌 assistant tool_call + tool result 到 req.messages 维持配对，让 LLM 重新生成完整调用。
+- Compaction（optimization O9）：每次 stream 拿到 `usage` 后，`maybe_compact` 用 `should_compact(max(provider_prompt, 本地估算), window, settings)` 判断；触发则 `LlmCompactor.compact` 生成摘要，`apply_compaction` 重建 `req.messages`（summary 前置 + kept），发 `AgentEvent::Compacted`。
 
 ### 4.4 自动重试（F-01）
 

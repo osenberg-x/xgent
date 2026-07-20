@@ -1,6 +1,7 @@
 //! 会话状态 Resource。
 
 use bevy::prelude::*;
+use serde_json;
 use xgent_core::chat::{
     AgentMessage, AssistantMessage, ContentBlock, NotificationMessage, ToolResultMessage,
     UserMessage,
@@ -36,6 +37,20 @@ impl Default for Conversation {
 }
 
 impl Conversation {
+    /// 重置会话：生成新 SessionId、清空消息与累加文本、重置状态。
+    ///
+    /// `session_store` 置 None（下次首次对话时 `ensure_session_store` 重新打开）。
+    /// 用于「新建会话」功能。
+    pub fn reset(&mut self) {
+        // 用当前时间戳作为新 SessionId（保证全局唯一，对齐 pi 的 snowflake 思路简化版）
+        let ts = crate::session_store::now_ms();
+        self.id = SessionId(ts);
+        self.messages.clear();
+        self.current_assistant_text.clear();
+        self.status = ConversationStatus::Idle;
+        self.session_store = None;
+    }
+
     /// 追加用户消息。
     pub fn push_user(&mut self, text: &str) {
         self.messages.push(AgentMessage::User(UserMessage {
@@ -47,15 +62,22 @@ impl Conversation {
     }
 
     /// 把累加的助手回复固化进历史。
-    pub fn finalize_assistant(&mut self) {
+    ///
+    /// `usage` 与 `model` 来自 provider 的流式 Done 事件（经 `AgentEvent::Done` 传递），
+    /// 写入 AssistantMessage 供持久化与 UI token 统计（修复 usage 永远为 None 的 bug）。
+    pub fn finalize_assistant(
+        &mut self,
+        usage: Option<xgent_core::chat::TokenUsage>,
+        model: Option<String>,
+    ) {
         if !self.current_assistant_text.is_empty() {
             let text = std::mem::take(&mut self.current_assistant_text);
             self.messages
                 .push(AgentMessage::Assistant(AssistantMessage {
                     content: vec![ContentBlock::Text { text }],
-                    model: None,
-                    usage: None,
-                    timestamp: 0,
+                    model,
+                    usage,
+                    timestamp: crate::session_store::now_ms(),
                 }));
         }
     }
@@ -131,28 +153,63 @@ impl Conversation {
     /// JSONL 是 append-only：被压缩的历史消息 entry 保留在文件中，
     /// 恢复会话时读到 `CompactionEntry` 即知前文已被摘要为 `summary`，
     /// 上下文重建为「summary + CompactionEntry 之后的 kept 消息」。
-    pub fn persist_compaction(
-        &mut self,
-        summary: &str,
-        first_kept_id: &str,
-        tokens_before: u32,
-    ) {
+    pub fn persist_compaction(&mut self, summary: &str, first_kept_id: &str, tokens_before: u32) {
         let Some(store) = self.session_store.as_mut() else {
             return;
         };
-        let entry = xgent_core::session::SessionEntry::Compaction(
-            xgent_core::session::CompactionEntry {
+        let entry =
+            xgent_core::session::SessionEntry::Compaction(xgent_core::session::CompactionEntry {
                 id: format!("{}-compaction-{}", self.id, crate::session_store::now_ms()),
                 parent_id: String::new(),
                 timestamp: crate::session_store::now_ms(),
                 summary: summary.to_string(),
                 first_kept_id: first_kept_id.to_string(),
                 tokens_before,
-            },
-        );
+            });
         if let Err(e) = store.append(&entry) {
             eprintln!("[session] 写入 Compaction 失败: {e}");
         }
+    }
+
+    /// 持久化错误记录（append 一条 `ErrorEntry`，不进消息历史）。
+    ///
+    /// 错误本身不进 `conv.messages`（不发给 LLM），但持久化为独立 entry，
+    /// 便于恢复会话时看到失败点（修复错误未持久化的 bug）。
+    pub fn persist_error(&mut self, kind: xgent_core::chat::ErrorKind, message: &str) {
+        let Some(store) = self.session_store.as_mut() else {
+            return;
+        };
+        let entry = xgent_core::session::SessionEntry::Error(xgent_core::session::ErrorEntry {
+            id: format!("{}-error-{}", self.id, crate::session_store::now_ms()),
+            parent_id: String::new(),
+            timestamp: crate::session_store::now_ms(),
+            kind,
+            message: message.to_string(),
+        });
+        if let Err(e) = store.append(&entry) {
+            eprintln!("[session] 写入 Error 失败: {e}");
+        }
+    }
+
+    /// 追加 assistant 的 tool_call 消息（工具开始执行时调用）。
+    ///
+    /// 与 [`push_tool_result`] 配对：assistant 发起 tool_call → tool 返回结果。
+    /// 两者都进 `conv.messages`，下次 StartLoop 时 `convert_to_llm` 生成
+    /// 符合 OpenAI 协议的消息序列（tool_call 后跟 tool result，配对完整）。
+    /// 修复之前 conv.messages 缺 tool_call 导致 tool result 孤儿、
+    /// 多轮工具调用后 LLM 请求被 OpenAI 拒绝的 bug。
+    pub fn push_tool_call(&mut self, call_id: &str, tool_name: &str, args: &serde_json::Value) {
+        self.messages
+            .push(AgentMessage::Assistant(AssistantMessage {
+                content: vec![ContentBlock::ToolCall {
+                    id: call_id.to_string(),
+                    name: tool_name.to_string(),
+                    args: args.clone(),
+                }],
+                model: None,
+                usage: None,
+                timestamp: crate::session_store::now_ms(),
+            }));
     }
 
     /// 追加工具结果消息（工具执行完成后调用）。

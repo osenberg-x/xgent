@@ -38,7 +38,7 @@ use crate::editor::io::{
 };
 use crate::editor::state::{EditorStateSnapshot, update_editor_state_snapshot};
 use crate::editor::tabs::{
-    CloseTabRequest, CycleTabRequest, EditorTabs, EditorTabBarMarker, EditorTabMarker,
+    CloseTabRequest, CycleTabRequest, EditorTabBarMarker, EditorTabMarker, EditorTabs,
     OpenFileRequest, handle_close_tab_requests, handle_cycle_tab_requests,
     handle_open_file_requests,
 };
@@ -449,7 +449,10 @@ pub fn rebuild_editor_tabs(
 /// 处理 tab 项点击：切换激活 tab；处理关闭×点击：发 CloseTabRequest。
 pub fn handle_editor_tab_click(
     q_tabs: Query<(&EditorTabMarker, &Interaction), Changed<Interaction>>,
-    q_close: Query<(&EditorTabMarker, &Interaction, &ChildOf), (With<EditorTabCloseMarker>, Changed<Interaction>)>,
+    q_close: Query<
+        (&EditorTabMarker, &Interaction, &ChildOf),
+        (With<EditorTabCloseMarker>, Changed<Interaction>),
+    >,
     mut tabs: ResMut<EditorTabs>,
     mut close_writer: MessageWriter<CloseTabRequest>,
 ) {
