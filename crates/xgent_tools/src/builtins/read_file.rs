@@ -57,33 +57,17 @@ impl Tool for ReadFile {
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
         let Some(path) = input["path"].as_str() else {
-            return Ok(ToolResult {
-                output: "缺少参数 path".into(),
-                is_error: true,
-                side_effect: None,
-            });
+            return Ok(ToolResult { output: "缺少参数 path".into(), is_error: true, denied: false, side_effect: None });
         };
         let full = match resolve_in_project(&ctx.project_root, path) {
             Ok(p) => p,
             Err(e) => {
-                return Ok(ToolResult {
-                    output: e,
-                    is_error: true,
-                    side_effect: None,
-                });
+                return Ok(ToolResult { output: e, is_error: true, denied: false, side_effect: None });
             }
         };
         match tokio::fs::read_to_string(&full).await {
-            Ok(content) => Ok(ToolResult {
-                output: content,
-                is_error: false,
-                side_effect: None,
-            }),
-            Err(e) => Ok(ToolResult {
-                output: format!("读取失败 {}: {e}", full.display()),
-                is_error: true,
-                side_effect: None,
-            }),
+            Ok(content) => Ok(ToolResult { output: content, is_error: false, denied: false, side_effect: None }),
+            Err(e) => Ok(ToolResult { output: format!("读取失败 {}: {e}", full.display()), is_error: true, denied: false, side_effect: None }),
         }
     }
 }

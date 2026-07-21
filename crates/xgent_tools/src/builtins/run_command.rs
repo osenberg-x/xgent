@@ -81,11 +81,7 @@ impl Tool for RunCommand {
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
         let Some(command) = input["command"].as_str() else {
-            return Ok(ToolResult {
-                output: "缺少参数 command".into(),
-                is_error: true,
-                side_effect: None,
-            });
+            return Ok(ToolResult { output: "缺少参数 command".into(), is_error: true, denied: false, side_effect: None });
         };
 
         // 用 shell -c 执行，便于支持管道等
@@ -110,11 +106,7 @@ impl Tool for RunCommand {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                return Ok(ToolResult {
-                    output: format!("启动命令失败: {e}"),
-                    is_error: true,
-                    side_effect: None,
-                });
+                return Ok(ToolResult { output: format!("启动命令失败: {e}"), is_error: true, denied: false, side_effect: None });
             }
         };
         // kill_on_drop 保证 task 取消时子进程被清理；显式 kill 仍用于返回正确错误
@@ -151,6 +143,7 @@ impl Tool for RunCommand {
                     return Ok(ToolResult {
                         output: format!("等待命令失败: {e}"),
                         is_error: true,
+                        denied: false,
                         side_effect: None,
                     });
                 }
@@ -191,6 +184,7 @@ impl Tool for RunCommand {
         Ok(ToolResult {
             output: text,
             is_error,
+            denied: false,
             side_effect: Some(SideEffect::CommandRun(command.to_string())),
         })
     }

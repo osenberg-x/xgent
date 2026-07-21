@@ -192,6 +192,8 @@ pub enum AgentEvent {
         output: String,
         /// 是否为逻辑失败（语义反转：true 表示失败）
         is_error: bool,
+        /// 是否被策略/用户拒绝（UI 显示「已拒绝」态）
+        denied: bool,
         side_effect: Option<SideEffect>,
     },
     /// 需要用户确认
@@ -520,6 +522,7 @@ async fn run_agent_loop(
                             output: "工具调用因 max_tokens 截断而未执行，请重新发起完整调用。"
                                 .into(),
                             is_error: true,
+                            denied: false,
                             side_effect: None,
                         })
                         .await;
@@ -559,8 +562,8 @@ async fn run_agent_loop(
                     let result = executor
                         .execute(&name, args, ctx, cancel_token.clone(), &cb)
                         .await;
-                    let (output, is_error, side_effect) = match result {
-                        Ok(r) => (r.output, r.is_error, r.side_effect),
+                    let (output, is_error, denied, side_effect) = match result {
+                        Ok(r) => (r.output, r.is_error, r.denied, r.side_effect),
                         Err(xgent_tools::ToolError::Aborted) => {
                             // 中断：透传为 ToolResult 逻辑失败 + 结束本轮
                             let _ = event_tx
@@ -569,6 +572,7 @@ async fn run_agent_loop(
                                     tool_id: name.clone(),
                                     output: "工具执行被中断".into(),
                                     is_error: true,
+                                    denied: false,
                                     side_effect: None,
                                 })
                                 .await;
@@ -580,7 +584,7 @@ async fn run_agent_loop(
                                 .await;
                             return;
                         }
-                        Err(e) => (format!("工具异常: {e}"), true, None),
+                        Err(e) => (format!("工具异常: {e}"), true, false, None),
                     };
                     let _ = event_tx
                         .send(AgentEvent::ToolResult {
@@ -588,6 +592,7 @@ async fn run_agent_loop(
                             tool_id: name.clone(),
                             output: output.clone(),
                             is_error,
+                            denied,
                             side_effect,
                         })
                         .await;

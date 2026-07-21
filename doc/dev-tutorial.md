@@ -260,15 +260,18 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - **快捷键**：`Ctrl+\` = `sideview.toggle`（切换分屏）。
 - **设计图**：`doc/design/ui-prototype.html` §2.1 P1。
 
-### 5.12 UI 原型对齐（A-C 已落地，D-H 待实现）
+### 5.12 UI 原型对齐（A-H 已落地，D 待实现）
 
 对照 `doc/design/ui-prototype.html` 原型图的差距分阶段实现，详见 `doc/design/ui-gap-plan.md`：
-
 - **A-主题（已落地）**：`Theme` 加状态色 5 色 + 语法高亮色 7 色（`theme.rs`）；`FILE_PANEL_W` 改 240。
 - **B-文件树（已落地）**：`file_panel.rs` 加 `fp-head` 标题头 + 折叠按钮；`spawn_entry` 重写为箭头/图标/名称分离的 row；选中/悬停态（`FileSelectedMarker` + `update_file_entry_style`）；`handle_dir_click` 用 `ParamSet` 避免双 `&mut Text` query 冲突（B0001）。
-- **C-对话视觉（已落地）**：`chat_panel.rs` 加 `viewtabs`（对话标签 + 会话信息）+ 消息气泡 role 行（头像 + 角色名）+ `input-meta` 快捷键提示栏 + 流式光标（`update_streaming_cursor`，会话信息末尾闪烁 `▋`）。
-- **D-H（待实现）**：D 助手 markdown/代码块/语法高亮、E 状态栏分段+状态点、F 顶栏品牌+下拉、G 分屏预览头+高亮、H 确认弹窗 diff。详见 `doc/design/ui-gap-plan.md`。
-
+- **C-对话视觉（已落地）**：`chat_panel.rs` 加 `viewtabs`（对话标签 + 会话信息）+ 消息气泡 role 行（头像 + 角色名）+ `input-meta` 快捷键提示栏。
+- **E-状态栏分段（已落地）**：`status_bar.rs` 改 row 容器（`StatusDotMarker` + provider + 状态 + token + 编码），状态点忙时脉冲。
+- **F-顶栏品牌+caret（已落地）**：`top_bar.rs` 品牌 + provider Button（点击打开设置面板）+ 新建会话 + ⚙。
+- **G-预览头+高亮（已落地）**：`file_panel.rs` `spawn_file_preview` 加 `fv-head`（路径 + `FilePreviewMetaMarker` 字节数 + ✕）+ `fv-body`；`.rs` 文件用 `xui::highlight` 高亮。
+- **H-确认弹窗 diff（已落地）**：`confirm_dialog.rs` 重写为 modal（head/body/foot + 行级 diff）；`ConfirmRequest` 加 `old_content`/`new_content`，`Tool::preview_diff` 提供 diff 数据。
+- **本轮修补（已落地，2026-07-20）**：流式光标迁到助手气泡正文末尾；工具卡片 pending/deny 态（`ToolCardMarker.tool_call_id` + `update_tool_pending` + `ToolResult.denied`）；`update_token_hint` 系统含 Aborting 态。
+- **D-markdown/代码块（待实现）**：助手消息纯文本，原型含代码块+高亮。详见 `ui-gap-plan.md`。
 
 
 ---

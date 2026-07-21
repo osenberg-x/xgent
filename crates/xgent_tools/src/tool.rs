@@ -28,12 +28,17 @@ pub struct ToolCtx {
 /// `is_error` 取代旧 `success`（语义反转，对齐 omp 的 isError）：
 /// 逻辑失败（如文件不存在）用 `is_error: true` 表达，不抛 `ToolError`。
 /// `ToolError::Aborted` 仅用于中断等需 agent loop 走 abort 路径的异常。
+///
+/// `denied` 标记工具被安全策略或用户拒绝（区别于执行失败）：
+/// UI 据此显示「已拒绝」态（⊘ 灰色）而非「失败」态（✗ 红色）。
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     /// 给 LLM 的文本结果
     pub output: String,
     /// 是否为逻辑失败（语义反转：true 表示失败）
     pub is_error: bool,
+    /// 是否被策略/用户拒绝（UI 区分「已拒绝」与「失败」）
+    pub denied: bool,
     /// 副作用通知（用于多客户端文件状态同步）
     pub side_effect: Option<SideEffect>,
 }
@@ -155,6 +160,19 @@ pub trait Tool: Send + Sync {
 
     /// 对输入生成人类可读摘要，用于确认弹窗展示。
     fn summarize(&self, input: &Value) -> String;
+
+    /// 为确认弹窗提供 diff 数据（旧/新内容），默认返回 None。
+    ///
+    /// 写文件类工具 override 此方法：读旧文件内容，配合输入中的新内容，
+    /// 返回 `(old, new)` 供 UI 渲染增删行 diff。非写工具返回 None，
+    /// UI 退化为展示 `summary` 文本。
+    async fn preview_diff(
+        &self,
+        _input: &Value,
+        _ctx: &ToolCtx,
+    ) -> Option<(String, String)> {
+        None
+    }
 
     /// 异步执行工具。
     ///

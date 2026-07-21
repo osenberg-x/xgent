@@ -96,7 +96,7 @@
   @keyframes blink{50%{opacity:0}}
 
   /* ===== 工具调用卡片（§4） ===== */
-  .toolcard{align-self:flex-start; width:78%; background:var(--panel); border:1px solid var(--border); border-radius:4px; margin-left:0; overflow:hidden}
+  .toolcard{align-self:flex-start; max-width:78%; background:var(--panel); border:1px solid var(--border); border-radius:4px; margin-left:0; overflow:hidden}
   .tc-head{display:flex; align-items:center; gap:var(--sm); padding:8px 12px; background:var(--bar); cursor:pointer; font-size:13px}
   .tc-head:hover{background:#262a32}
   .tc-icon{font-size:14px}
@@ -136,7 +136,7 @@
   .btn-danger{background:var(--st_fail); border-color:var(--st_fail); color:#fff}
 
   /* ===== 命令面板（§8） ===== */
-  #cmdpalette{position:absolute; top:80px; left:50%; transform:translateX(-50%); width:520px; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 40px rgba(0,0,0,.6); z-index:60; overflow:hidden}
+#cmdpalette{position:absolute; top:80px; left:50%; transform:translateX(-50%); width:500px; background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 40px rgba(0,0,0,.6); z-index:60; overflow:hidden}
   .cp-input{width:100%; background:transparent; border:none; outline:none; color:var(--text); padding:12px 16px; font-size:14px; border-bottom:1px solid var(--border)}
   .cp-list{max-height:320px; overflow-y:auto; padding:4px}
   .cp-item{display:flex; align-items:center; gap:var(--sm); padding:8px 12px; border-radius:4px; cursor:pointer; font-size:13px}
@@ -230,7 +230,9 @@
       <!-- 左侧对话视图（默认占满；右侧分屏打开时二者各占一半） -->
       <div id="chatview">
         <div class="viewtabs">
-          <div class="viewtab active">💬 对话</div>
+          <div class="viewtab active" onclick="switchView('chat',this)">💬 对话</div>
+          <div class="viewtab" onclick="switchView('editor',this)">📝 编辑器</div>
+          <div class="viewtab" onclick="switchView('preview',this)">👁 文件预览</div>
           <span style="flex:1"></span>
           <span style="font-size:11px; color:var(--text_dim)">会话 #a3f9c1 · 3 轮 · ↑ 2.4k tokens</span>
         </div>
@@ -311,9 +313,9 @@
             这设计对齐了 omp 的 `streamAssistantResponse`：<span style="color:var(--accent)">流式不阻塞 steering</span>，steering 即时打断流而非排队等待完成。<span class="cursor"></span>
           </div></div>
 
-          <!-- 工具调用卡片：WriteFile（待确认态，触发确认弹窗） -->
+          <!-- 工具调用卡片：WriteFile（待确认态，⏸ 黄色。确认弹窗由 agent 在 NeedsConfirmation 时自动触发，非卡片点击触发） -->
           <div class="toolcard">
-            <div class="tc-head" onclick="showConfirm()">
+            <div class="tc-head" onclick="this.parentElement.classList.toggle('expanded')">
               <span class="tc-icon">🔧</span>
               <span class="tc-name">WriteFile</span>
               <span class="tc-arg">path: doc/notes/steering-analysis.md</span>
@@ -449,9 +451,9 @@ members = [
   <div id="statusbar">
     <span><span class="status-dot"></span>openai / gpt-4o-mini</span>
     <span>·</span>
-    <span id="convstatus">就绪</span>
+    <span>↑ 2.4k tokens · $0.003 <span style="color:var(--text_dim); font-size:10px">(P1 F-12)</span></span>
     <span>·</span>
-    <span>↑ 2.4k tokens · $0.003</span>
+    <span id="convstatus">就绪</span>
     <span style="flex:1"></span>
     <span style="color:var(--text_dim)">UTF-8 · LF · Rust</span>
   </div>
@@ -585,7 +587,8 @@ function openSideView(name){
     editor.style.display='none';
     file.style.display='flex';
     document.getElementById('fvpath').textContent=name;
-    document.getElementById('fvmeta').textContent='只读预览';
+    // 真实场景：读取文件字节数，显示「{字节数} 字节 · 只读预览」
+    document.getElementById('fvmeta').textContent='480 字节 · 只读预览';
   }
 }
 function closeSideView(){
@@ -695,7 +698,8 @@ function addEditorTab(name){
   const tab=document.createElement('div');
   tab.className='ed-tab active';
   tab.onclick=()=>switchTab(tab);
-  tab.innerHTML=`<span class="name">${name}</span><span class="close">×</span>`;
+  // dirty 标记（●）默认隐藏，buffer 脏时 JS 加 .dirty-visible 或移除 hidden
+  tab.innerHTML=`<span class="name">${name}</span><span class="dirty" style="display:none">●</span><span class="close">×</span>`;
   tab.querySelector('.close').onclick=(e)=>closeTab(e,tab);
   document.querySelectorAll('.ed-tab').forEach(t=>t.classList.remove('active'));
   tabs.insertBefore(tab, close);
@@ -727,12 +731,13 @@ function send(){
   document.getElementById('input').value=''; autoGrow(document.getElementById('input'));
   setStatus('thinking');
 }
-function abortConv(){ setStatus('idle'); }
+function abortConv(){ setStatus('aborting'); setTimeout(()=>setStatus('idle'), 600); }
 
 // ===== 状态机 §10.1 =====
 function setStatus(s){
   const m={idle:['就绪','idle'],thinking:['思考中…','busy'],streaming:['生成中…','busy'],
-           tool:['执行工具…','busy'],confirm:['等待确认','busy'],error:['出错','idle']};
+           tool:['执行工具…','busy'],confirm:['等待确认','busy'],
+           aborting:['中断中…','busy'],error:['出错','idle']};
   const [txt,cls]=m[s]||m.idle;
   document.getElementById('convstatus').textContent=txt;
   document.getElementById('tokenhint').textContent=s==='idle'?'就绪':txt;
@@ -818,8 +823,9 @@ openSideView('bridge.rs');
 
 // 全局快捷键
 document.addEventListener('keydown', e=>{
-  if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); }
-  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); }
+  // Ctrl+Shift+P：动作模式；Ctrl+P：文件模式（二者互斥，Shift 区分）
+  if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); return; }
+  if((e.ctrlKey||e.metaKey) && !e.shiftKey && e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette('file'); return; }
   if((e.ctrlKey||e.metaKey) && e.key===','){ e.preventDefault(); openPalette('settings'); }
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='b'){ e.preventDefault(); togglePanel(); }
   // Ctrl+\ 切换编辑器分屏（与终端分屏互斥复用 SideView）

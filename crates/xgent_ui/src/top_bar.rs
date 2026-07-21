@@ -22,6 +22,9 @@ pub struct NewSessionButtonMarker;
 /// 设置按钮标记。
 #[derive(Component, Default)]
 pub struct SettingsButtonMarker;
+/// 顶栏 provider 标签按钮标记（点击打开设置面板切换 provider）。
+#[derive(Component, Default)]
+pub struct ProviderButtonMarker;
 
 /// 顶栏插件。
 pub struct TopBarPlugin;
@@ -66,8 +69,9 @@ fn spawn_top_bar(
             },
             TextColor(theme.text),
         ));
-        // provider/model：📦 {label} ▾（panel 底 + 边框）
+        // provider/model：📦 {label} ▾（panel 底 + 边框，点击打开设置面板）
         p.spawn((
+            Button,
             Node {
                 padding: UiRect::all(px(space::XS)),
                 flex_direction: FlexDirection::Row,
@@ -86,6 +90,7 @@ fn spawn_top_bar(
             },
             TextColor(theme.text),
             ProviderLabelMarker,
+            ProviderButtonMarker,
         ));
         // spacer
         p.spawn(Node {
@@ -156,6 +161,7 @@ fn update_provider_label(
 fn handle_top_bar_buttons(
     q_new: Query<&Interaction, (With<NewSessionButtonMarker>, Changed<Interaction>)>,
     q_settings: Query<&Interaction, (With<SettingsButtonMarker>, Changed<Interaction>)>,
+    q_provider: Query<&Interaction, (With<ProviderButtonMarker>, Changed<Interaction>)>,
     mut palette: ResMut<CommandPaletteState>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
 ) {
@@ -167,6 +173,12 @@ fn handle_top_bar_buttons(
     for i in q_settings.iter() {
         if *i == Interaction::Pressed {
             settings_state.open = !settings_state.open;
+        }
+    }
+    // provider 标签点击 → 打开设置面板（MVP provider 切换经设置面板）
+    for i in q_provider.iter() {
+        if *i == Interaction::Pressed {
+            settings_state.open = true;
         }
     }
 }

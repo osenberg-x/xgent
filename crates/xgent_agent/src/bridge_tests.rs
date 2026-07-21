@@ -226,11 +226,7 @@ impl Tool for EchoTool {
         _signal: tokio_util::sync::CancellationToken,
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
-        Ok(ToolResult {
-            output: input.to_string(),
-            is_error: false,
-            side_effect: None,
-        })
+        Ok(ToolResult { output: input.to_string(), is_error: false, denied: false, side_effect: None })
     }
 }
 

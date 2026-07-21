@@ -80,6 +80,7 @@ impl Plugin for ChatPanelPlugin {
                     update_streaming_cursor,
                     update_conversation_info,
                     clear_on_new_session,
+                    update_token_hint,
                 )
                     .after(xgent_agent::agent_loop::agent_poll_system),
             );
@@ -414,6 +415,10 @@ fn accumulate_delta(
         return;
     };
     for ev in reader.read() {
+        // 剥离流式光标（▋）再追加新 delta，避免光标被推到中间
+        if text.0.ends_with('▋') {
+            text.0.pop();
+        }
         text.0.push_str(&ev.text);
     }
 }
@@ -437,7 +442,8 @@ fn finalize_on_done(
     let Ok(text) = q.get(current) else {
         return;
     };
-    let content = text.0.clone();
+    // 剥离流式光标（▋）—— 光标挂在 CurrentAssistantText 末尾，固化历史副本时去掉
+    let content = text.0.trim_end_matches('▋').to_string();
     if content.is_empty() {
         return;
     }
@@ -609,14 +615,16 @@ fn update_input_border(
         border.set_all(theme.border);
     }
 }
-/// 流式光标：会话进行中（Thinking/Streaming/ToolRunning）时，在会话信息文本末尾
-/// 闪烁 `▋` 字符表示正在生成；空闲时移除光标。
+/// 流式光标：会话进行中（Thinking/Streaming/ToolRunning）时，在当前助手
+/// 消息文本末尾闪烁 `▋` 字符表示正在生成；空闲时移除光标。
 ///
+/// 对齐 ui-prototype.html `.cursor` —— 光标位于正在生成的助手气泡正文末尾，
+/// 而非会话元信息。
 /// 闪烁频率 1Hz（500ms 显 / 500ms 隐），用 `Time` 累计秒数取奇偶判定。
 fn update_streaming_cursor(
     conv: Res<Conversation>,
     time: Res<Time>,
-    mut q: Query<&mut Text, With<ConversationInfoMarker>>,
+    mut q: Query<&mut Text, With<CurrentAssistantText>>,
 ) {
     let Ok(mut text) = q.single_mut() else {
         return;
@@ -641,8 +649,8 @@ fn update_streaming_cursor(
 }
 /// 更新会话信息文本：`会话 #{id} · {N} 轮 · ↑{tokens} tokens`。
 ///
-/// 流式光标（▋）由 `update_streaming_cursor` 在末尾 toggle，本系统只设基础文本，
-/// 保留末尾已有的 ▋（若存在）避免与光标系统竞争。
+/// 流式光标（▋）现挂在 `CurrentAssistantText` 末尾（见 `update_streaming_cursor`），
+/// 本系统只设会话信息基础文本，不再与光标竞争。
 fn update_conversation_info(
     conv: Res<Conversation>,
     tokens: Res<TokenUsage>,
@@ -651,8 +659,6 @@ fn update_conversation_info(
     let Ok(mut text) = q.single_mut() else {
         return;
     };
-    // 保留末尾流式光标（若存在）
-    let cursor = if text.0.ends_with('▋') { "▋" } else { "" };
     let turns = conv
         .messages
         .iter()
@@ -666,8 +672,7 @@ fn update_conversation_info(
     } else {
         String::new()
     };
-    let base = format!("会话 #{} · {} 轮{}", conv.id, turns, token_part);
-    let new_text = format!("{base}{cursor}");
+    let new_text = format!("会话 #{} · {} 轮{}", conv.id, turns, token_part);
     if text.0 != new_text {
         text.0 = new_text;
     }
@@ -692,5 +697,30 @@ fn clear_on_new_session(
     // 清空当前助手文本节点
     if let Some(cur) = entities.current_text {
         commands.entity(cur).insert(Text::new(String::new()));
+    }
+}
+
+/// 更新输入框右侧 tokenhint 文本：据会话状态显示就绪/思考中/生成中/中断中…等。
+///
+/// 对齐 ui-prototype.html `setStatus` 的 tokenhint 映射（行 562）。
+fn update_token_hint(
+    conv: Res<Conversation>,
+    loc: Res<xgent_settings::Localizer>,
+    mut q: Query<&mut Text, With<TokenHintMarker>>,
+) {
+    let Ok(mut text) = q.single_mut() else {
+        return;
+    };
+    let label = match conv.status {
+        ConversationStatus::Idle => crate::i18n::tr(&loc, "status-ready"),
+        ConversationStatus::Thinking => crate::i18n::tr(&loc, "status-thinking"),
+        ConversationStatus::Streaming => crate::i18n::tr(&loc, "status-streaming"),
+        ConversationStatus::ToolRunning => crate::i18n::tr(&loc, "status-tool-running"),
+        ConversationStatus::Confirming => crate::i18n::tr(&loc, "status-confirming"),
+        ConversationStatus::Aborting => crate::i18n::tr(&loc, "status-aborting"),
+        ConversationStatus::Error => crate::i18n::tr(&loc, "status-error"),
+    };
+    if text.0 != label {
+        text.0 = label;
     }
 }

@@ -25,6 +25,9 @@ pub struct FilePreviewMarker;
 #[derive(Component, Default)]
 pub struct FilePreviewPathMarker;
 
+/// 文件预览头元信息文本标记（字节数 · 只读预览）。
+#[derive(Component, Default)]
+pub struct FilePreviewMetaMarker;
 /// 文件预览 ✕ 关闭按钮标记（收起分屏）。
 #[derive(Component, Default)]
 pub struct FilePreviewCloseMarker;
@@ -219,6 +222,16 @@ fn spawn_file_preview(
                     },
                     TextColor(theme.text_dim),
                     FilePreviewPathMarker,
+                ));
+// · 元信息（字节数 · 只读预览）
+                head.spawn((
+                    Text::new(String::new()),
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                    FilePreviewMetaMarker,
                 ));
                 // spacer
                 head.spawn((Node {
@@ -481,6 +494,7 @@ fn handle_file_click(
     q_files: Query<(Entity, &FileEntry, &Interaction), Changed<Interaction>>,
     q_preview: Query<Entity, With<FilePreviewMarker>>,
     mut q_path: Query<&mut Text, With<FilePreviewPathMarker>>,
+    mut q_meta: Query<&mut Text, With<FilePreviewMetaMarker>>,
     q_body: Query<Entity, With<FilePreviewBodyMarker>>,
     q_selected: Query<Entity, With<FileSelectedMarker>>,
     mut side_collapsed: ResMut<crate::layout::SideViewCollapsed>,
@@ -525,29 +539,55 @@ fn handle_file_click(
         if let Ok(mut path_text) = q_path.single_mut() {
             path_text.0 = format!("📄 {}", name);
         }
-        // 填充 fv-body 内容
+        // 读取文件内容（字节 + 文本）
+        let (bytes_len, text) = match std::fs::read(&file.path) {
+            Ok(b) => {
+                let len = b.len();
+                let text = String::from_utf8_lossy(&b).to_string();
+                (len, text)
+            }
+            Err(e) => (0, format!("读取失败: {e}")),
+        };
+        // 更新 fv-head 元信息：字节数 · 只读预览
+        if let Ok(mut meta_text) = q_meta.single_mut() {
+            meta_text.0 = format!("· {} 字节 · 只读预览", bytes_len);
+        }
+        // 填充 fv-body 内容（Rust 语法高亮，其余纯文本）
         if let Ok(body) = q_body.single() {
-            let text = match std::fs::read_to_string(&file.path) {
-                Ok(c) => c,
-                Err(e) => format!("读取失败: {e}"),
-            };
             let truncated: String = text.lines().take(1000).collect::<Vec<_>>().join("\n");
             commands.entity(body).despawn_children();
             commands.entity(body).with_children(|p| {
-                p.spawn((
-                    Node { ..default() },
-                    Text::new(truncated),
-                    TextFont {
-                        font_size: FontSize::Px(font - 2.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                ));
+                let mono = FontSize::Px(font - 2.0);
+                if let Some(lang) = preview_language(&file.path) {
+                    // Rust：tree-sitter 高亮，按 span spawn Text 节点
+                    let spans = xui::highlight(&truncated, lang);
+                    for span in spans {
+                        let end = span.end.min(truncated.len());
+                        if end <= span.start {
+                            continue;
+                        }
+                        let slice = &truncated[span.start..end];
+                        let color = xui::span_color_for(span.kind);
+                        p.spawn((
+                            Node { ..default() },
+                            Text::new(slice.to_string()),
+                            TextFont { font_size: mono, ..default() },
+                            TextColor(color),
+                        ));
+                    }
+                } else {
+                    // 非 Rust：纯文本
+                    p.spawn((
+                        Node { ..default() },
+                        Text::new(truncated),
+                        TextFont { font_size: mono, ..default() },
+                        TextColor(theme.text_dim),
+                    ));
+                }
             });
         }
     }
 }
-
 /// 判断是否为代码文件（按扩展名）。
 fn is_code_file(path: &std::path::Path) -> bool {
     matches!(
@@ -568,6 +608,16 @@ fn is_code_file(path: &std::path::Path) -> bool {
                 | "yaml"
         )
     )
+}
+
+/// 预览用的语法高亮语言：MVP 仅 Rust（tree-sitter grammar 随二进制，D-06）。
+/// 非 Rust 文件返回 None，调用方渲染纯文本。
+fn preview_language(path: &std::path::Path) -> Option<xui::Language> {
+    if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+        Some(xui::Language::Rust)
+    } else {
+        None
+    }
 }
 
 /// 处理目录条目点击：展开/折叠切换，在子项容器 spawn/despawn 子条目。

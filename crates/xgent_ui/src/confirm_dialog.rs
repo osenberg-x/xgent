@@ -1,6 +1,7 @@
-//! 确认弹窗：订阅 [`ConfirmRequestMessage`]，弹窗展示工具调用，用户决策发 [`ConfirmDecisionMessage`]。
+//! 确认弹窗：订阅 [`ConfirmRequestMessage`]，弹窗展示工具调用与 diff，用户决策发 [`ConfirmDecisionMessage`]。
 //!
-//! MVP 用一个 overlay 节点 + 允许/拒绝两个按钮。决策经 [`ConfirmDecisionMessage`] 回 agent。
+//! 对齐 ui-prototype.html §4.3 modal 结构：head（确认执行 + ✕）/ body（工具名 + 路径 + diff 区增删色）
+//! / foot（拒绝 + 允许按钮）。有 diff（old/new 均有）时展示增删行，否则展示 summary 文本。
 
 use bevy::prelude::*;
 use xgent_agent::{ConfirmDecisionMessage, ConfirmRequestMessage};
@@ -14,10 +15,6 @@ use crate::theme::{Theme, space};
 #[derive(Component, Default)]
 pub struct ConfirmDialogMarker;
 
-/// 确认弹窗文本节点标记。
-#[derive(Component, Default)]
-pub struct ConfirmDialogTextLabel;
-
 /// 确认弹窗插件。
 pub struct ConfirmDialogPlugin;
 
@@ -30,6 +27,64 @@ impl Plugin for ConfirmDialogPlugin {
     }
 }
 
+/// 便捷：f32 → Val::Px
+fn px(v: f32) -> Val {
+    Val::Px(v)
+}
+
+/// diff 行的类型（增/删/上下文）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DiffKind {
+    Add,
+    Del,
+    Context,
+}
+
+/// 一行 diff（kind + 文本）。
+struct DiffLine {
+    kind: DiffKind,
+    text: String,
+}
+
+/// 简单行级 diff：求公共前缀与后缀，中间旧行标 Del、新行标 Add。
+///
+/// 无需外部依赖，MVP 足够。复杂 diff（跨行移动）留待 P1。
+fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    // 公共前缀
+    let mut prefix = 0;
+    while prefix < old_lines.len() && prefix < new_lines.len() && old_lines[prefix] == new_lines[prefix]
+    {
+        prefix += 1;
+    }
+    // 公共后缀
+    let mut suffix = 0;
+    while suffix < old_lines.len() - prefix
+        && suffix < new_lines.len() - prefix
+        && old_lines[old_lines.len() - 1 - suffix] == new_lines[new_lines.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let mut out = Vec::new();
+    // 前缀上下文
+    for i in 0..prefix {
+        out.push(DiffLine { kind: DiffKind::Context, text: old_lines[i].into() });
+    }
+    // 中间：先删后增
+    for i in prefix..old_lines.len() - suffix {
+        out.push(DiffLine { kind: DiffKind::Del, text: old_lines[i].into() });
+    }
+    for i in prefix..new_lines.len() - suffix {
+        out.push(DiffLine { kind: DiffKind::Add, text: new_lines[i].into() });
+    }
+    // 后缀上下文
+    for i in old_lines.len() - suffix..old_lines.len() {
+        out.push(DiffLine { kind: DiffKind::Context, text: old_lines[i].into() });
+    }
+    out
+}
+
 /// 收到 ConfirmRequestMessage 时弹出确认窗口。
 fn show_on_request(
     mut commands: Commands,
@@ -37,32 +92,19 @@ fn show_on_request(
     theme: Res<Theme>,
     loc: Res<Localizer>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
-    q_label: Query<Entity, With<ConfirmDialogTextLabel>>,
 ) {
-    let req = match reader.read().next() {
-        Some(ev) => ev,
-        None => return,
-    };
-    // 若已存在弹窗则更新文本，否则新建
-    let text = if req.0.summary.is_empty() {
-        crate::i18n::tr_with(
-            &loc,
-            "confirm-write-file",
-            &[("path", req.0.tool_id.clone())],
-        )
-    } else {
-        req.0.summary.clone()
-    };
-
-    if let Ok(existing) = q_dialog.single() {
-        if let Ok(label) = q_label.single() {
-            commands.entity(label).insert(Text::new(text));
-        }
-        let _ = existing;
+    let Some(req) = reader.read().next() else {
         return;
+    };
+    let req = &req.0;
+    // 已存在弹窗则先移除（MVP 同时只有一个确认请求，重建即可）
+    if let Ok(existing) = q_dialog.single() {
+        commands.entity(existing).despawn();
     }
-
     let font = theme.font_size;
+    let mono = font - 1.5;
+    let path = req.input["path"].as_str().unwrap_or(&req.tool_id);
+
     commands
         .spawn((
             Node {
@@ -73,72 +115,190 @@ fn show_on_request(
                 height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                // z_index: ZIndex::Arbitrary(50),  // 用 GlobalZIndex 组件替代
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            GlobalZIndex(50),
             ConfirmDialogMarker,
         ))
-        .with_children(|p| {
-            p.spawn((
-                Node {
-                    padding: UiRect::all(px(space::LG)),
-                    border: UiRect::all(px(1.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(space::MD),
-                    min_width: px(320.0),
-                    ..default()
-                },
-                BackgroundColor(theme.panel),
-                BorderColor::all(theme.border),
-            ))
-            .with_children(|card| {
-                card.spawn((
-                    Text::new(text),
-                    TextFont {
-                        font_size: FontSize::Px(font),
+        .with_children(|overlay| {
+            // modal 容器
+            overlay
+                .spawn((
+                    Node {
+                        width: px(560.0),
+                        max_height: Val::Percent(80.0),
+                        flex_direction: FlexDirection::Column,
+                        border: UiRect::all(px(1.0)),
+                        border_radius: BorderRadius::all(px(8.0)),
                         ..default()
                     },
-                    TextColor(theme.text),
-                    ConfirmDialogTextLabel,
-                ));
-                card.spawn((Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(space::MD),
-                    ..default()
-                },))
-                    .with_children(|btns| {
-                        btns.spawn((
-                            Button,
+                    BackgroundColor(theme.panel),
+                    BorderColor::all(theme.border),
+                ))
+                .with_children(|modal| {
+                    // modal-head：确认执行 + ✕
+                    modal
+                        .spawn((
                             Node {
-                                padding: UiRect::all(px(space::SM)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.accent),
-                            Text::new(tr(&loc, "confirm-allow")),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(theme.text),
-                            ConfirmAllowMarker,
-                        ));
-                        btns.spawn((
-                            Button,
-                            Node {
-                                padding: UiRect::all(px(space::SM)),
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Row,
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::all(px(space::MD)),
+                                border: UiRect::bottom(px(1.0)),
                                 ..default()
                             },
                             BackgroundColor(theme.bar),
-                            Text::new(tr(&loc, "confirm-deny")),
-                            TextFont {
-                                font_size: FontSize::Px(font),
+                            BorderColor::all(theme.border),
+                        ))
+                        .with_children(|head| {
+                            head.spawn((
+                                Text::new(tr(&loc, "confirm-title")),
+                                TextFont { font_size: FontSize::Px(font + 1.0), ..default() },
+                                TextColor(theme.text),
+                            ));
+                            head.spawn((
+                                Button,
+                                Node {
+                                    width: px(24.0),
+                                    height: px(24.0),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                },
+                                Text::new("×"),
+                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextColor(theme.text_dim),
+                                ConfirmDenyMarker,
+                            ));
+                        });
+                    // modal-body：工具名 + 路径 + diff
+                    modal
+                        .spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                padding: UiRect::all(px(space::LG)),
+                                row_gap: px(space::SM),
                                 ..default()
                             },
-                            TextColor(theme.text),
-                            ConfirmDenyMarker,
-                        ));
-                    });
-            });
+                        ))
+                        .with_children(|body| {
+                            // 工具名 + 描述
+                            body.spawn((
+                                Text::new(format!(
+                                    "{} {} {}",
+                                    req.tool_id,
+                                    tr(&loc, "confirm-will-write"),
+                                    path
+                                )),
+                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextColor(theme.text_dim),
+                            ));
+                            // diff 区（若有 old/new）
+                            if let (Some(old), Some(new)) = (&req.old_content, &req.new_content) {
+                                body.spawn((
+                                    Text::new(tr(&loc, "confirm-diff-label")),
+                                    TextFont { font_size: FontSize::Px(font - 2.0), ..default() },
+                                    TextColor(theme.text_dim),
+                                ));
+                                let lines = line_diff(old, new);
+                                body.spawn((
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        max_height: px(220.0),
+                                        flex_direction: FlexDirection::Column,
+                                        overflow: Overflow::clip_y(),
+                                        padding: UiRect::vertical(px(space::SM)),
+                                        border: UiRect::all(px(1.0)),
+                                        border_radius: BorderRadius::all(px(4.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.07, 0.08, 0.10, 1.0)),
+                                    BorderColor::all(theme.border),
+                                    ScrollPosition::default(),
+                                ))
+                                .with_children(|diff| {
+                                    for line in &lines {
+                                        let (prefix, color) = match line.kind {
+                                            DiffKind::Add => ("+ ", theme.st_ok),
+                                            DiffKind::Del => ("- ", theme.st_fail),
+                                            DiffKind::Context => ("  ", theme.text_dim),
+                                        };
+                                        diff.spawn((
+                                            Node {
+                                                width: Val::Percent(100.0),
+                                                padding: UiRect::horizontal(px(space::MD)),
+                                                ..default()
+                                            },
+                                            Text::new(format!("{prefix}{}", line.text)),
+                                            TextFont {
+                                                font_size: FontSize::Px(mono),
+                                                ..default()
+                                            },
+                                            TextColor(color),
+                                        ));
+                                    }
+                                });
+                            } else {
+                                // 无 diff：展示 summary
+                                body.spawn((
+                                    Text::new(req.summary.clone()),
+                                    TextFont { font_size: FontSize::Px(font), ..default() },
+                                    TextColor(theme.text),
+                                ));
+                            }
+                        });
+                    // modal-foot：拒绝 + 允许按钮
+                    modal
+                        .spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Row,
+                                justify_content: JustifyContent::FlexEnd,
+                                column_gap: px(space::SM),
+                                padding: UiRect::all(px(space::MD)),
+                                border: UiRect::top(px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(theme.bar),
+                            BorderColor::all(theme.border),
+                        ))
+                        .with_children(|foot| {
+                            foot.spawn((
+                                Button,
+                                Node {
+                                    padding: UiRect::all(px(space::SM)),
+                                    border: UiRect::all(px(1.0)),
+                                    border_radius: BorderRadius::all(px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(theme.st_fail),
+                                BorderColor::all(theme.st_fail),
+                                Text::new(format!("{} (Esc)", tr(&loc, "confirm-deny"))),
+                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextColor(Color::WHITE),
+                                ConfirmDenyMarker,
+                            ));
+                            foot.spawn((
+                                Button,
+                                Node {
+                                    padding: UiRect::all(px(space::SM)),
+                                    border: UiRect::all(px(1.0)),
+                                    border_radius: BorderRadius::all(px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(theme.accent),
+                                BorderColor::all(theme.accent),
+                                Text::new(format!("{} (Enter)", tr(&loc, "confirm-allow"))),
+                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextColor(Color::WHITE),
+                                ConfirmAllowMarker,
+                            ));
+                        });
+                });
         });
 }
 
@@ -148,7 +308,7 @@ pub struct ConfirmAllowMarker;
 #[derive(Component, Default)]
 pub struct ConfirmDenyMarker;
 
-/// 用户点决策按钮时发 ConfirmDecisionMessage 并关闭弹窗。
+/// 用户点决策按钮（或 head ✕）时发 ConfirmDecisionMessage 并关闭弹窗。
 fn hide_on_decision(
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
     q_allow: Query<&Interaction, (With<ConfirmAllowMarker>, Changed<Interaction>)>,

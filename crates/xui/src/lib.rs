@@ -32,6 +32,7 @@ pub use text_editor::{
     EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope, TextEditor,
     TextEditorPlugin, TextEditorUpdateSet,
 };
+pub use text_editor::highlight::{highlight, span_color_for, HighlightSpan, SpanKind};
 pub use virtual_list::{VirtualItemBuilder, VirtualList, VirtualListPlugin};
 
 /// `xui` 插件：注册所有子组件插件与快捷键注册表。

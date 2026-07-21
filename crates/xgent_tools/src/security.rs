@@ -92,11 +92,7 @@ mod tests {
             _signal: tokio_util::sync::CancellationToken,
             _on_update: Option<&crate::tool::ToolUpdateCallback>,
         ) -> Result<ToolResult, ToolError> {
-            Ok(ToolResult {
-                output: "ok".into(),
-                is_error: false,
-                side_effect: None,
-            })
+            Ok(ToolResult { output: "ok".into(), is_error: false, denied: false, side_effect: None })
         }
     }
 

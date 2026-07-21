@@ -82,11 +82,7 @@ impl ToolExecutor {
         let tool = match self.tools.get(tool_id) {
             Some(t) => t,
             None => {
-                return Ok(ToolResult {
-                    output: format!("未知工具: {tool_id}"),
-                    is_error: true,
-                    side_effect: None,
-                });
+                return Ok(ToolResult { output: format!("未知工具: {tool_id}"), is_error: true, denied: false, side_effect: None });
             }
         };
         let policy = resolve_policy(
@@ -100,6 +96,7 @@ impl ToolExecutor {
             SecurityPolicy::Denied => Ok(ToolResult {
                 output: "工具被策略拒绝".into(),
                 is_error: true,
+                denied: true,
                 side_effect: None,
             }),
             SecurityPolicy::Approved => tool.execute(input, ctx, signal, None).await,
@@ -108,10 +105,16 @@ impl ToolExecutor {
                 if self.allowed_all.lock().await.contains(tool_id) {
                     return tool.execute(input, ctx, signal, None).await;
                 }
+                let (old_content, new_content) = match tool.preview_diff(&input, ctx).await {
+                    Some((old, new)) => (Some(old), Some(new)),
+                    None => (None, None),
+                };
                 let req = ConfirmRequest {
                     tool_id: tool_id.to_string(),
                     input: input.clone(),
                     summary: tool.summarize(&input),
+                    old_content,
+                    new_content,
                 };
                 let rx = match tokio::time::timeout(
                     std::time::Duration::from_secs(300),
@@ -121,11 +124,7 @@ impl ToolExecutor {
                 {
                     Ok(rx) => rx,
                     Err(_) => {
-                        return Ok(ToolResult {
-                            output: "确认请求超时".into(),
-                            is_error: true,
-                            side_effect: None,
-                        });
+                        return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None });
                     }
                 };
                 match rx.await {
@@ -137,13 +136,10 @@ impl ToolExecutor {
                     Ok(ConfirmDecision::Deny) => Ok(ToolResult {
                         output: "用户拒绝".into(),
                         is_error: true,
+                        denied: true,
                         side_effect: None,
                     }),
-                    Err(_) => Ok(ToolResult {
-                        output: "确认被取消".into(),
-                        is_error: true,
-                        side_effect: None,
-                    }),
+                    Err(_) => Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
                 }
             }
         }
@@ -410,6 +406,7 @@ mod tests {
                     Ok(ToolResult {
                         output: "done".into(),
                         is_error: false,
+                        denied: false,
                         side_effect: None,
                     })
                 }

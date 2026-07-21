@@ -47,6 +47,8 @@ pub struct DeltaMessage {
 /// 工具调用开始（agent → UI，展示工具执行中）。
 #[derive(Message)]
 pub struct ToolCallMessage {
+    /// LLM 返回的 tool_call_id（唯一，用于关联结果与确认请求）
+    pub tool_call_id: String,
     pub tool_id: String,
     pub input: serde_json::Value,
 }
@@ -54,11 +56,16 @@ pub struct ToolCallMessage {
 /// 工具执行完成（agent → UI）。
 #[derive(Message)]
 pub struct ToolResultMessage {
+    /// 对应 ToolCallMessage.tool_call_id
+    pub tool_call_id: String,
     pub tool_id: String,
     pub output: String,
     /// 是否为逻辑失败（语义反转：true 表示失败）
     pub is_error: bool,
+    /// 是否被策略/用户拒绝（UI 显示「已拒绝」态）
+    pub denied: bool,
 }
+
 
 /// 需要用户确认（agent → UI，触发弹窗）。
 #[derive(Message)]

@@ -187,22 +187,29 @@ fn handle_agent_event(
             // （修复多轮工具调用后 conv 缺 tool_call 导致 LLM 请求被拒的 bug）
             conv.push_tool_call(&call_id, &tool_id, &input);
             conv.status = ConversationStatus::ToolRunning;
-            tool_call.write(ToolCallMessage { tool_id, input });
+            tool_call.write(ToolCallMessage {
+                tool_call_id: call_id,
+                tool_id,
+                input,
+            });
         }
         AgentEvent::ToolResult {
             call_id,
             tool_id,
             output,
             is_error,
+            denied,
             ..
         } => {
             // 记录 tool result，与 push_tool_call 的 call_id 配对
             // （OpenAI 要求 tool result 的 tool_call_id 与前述 tool_call 的 id 一致）
             conv.push_tool_result(&call_id, &tool_id, &output, is_error);
             tool_result.write(ToolResultMessage {
+                tool_call_id: call_id,
                 tool_id,
                 output,
                 is_error,
+                denied,
             });
         }
         AgentEvent::ConfirmRequest(req) => {

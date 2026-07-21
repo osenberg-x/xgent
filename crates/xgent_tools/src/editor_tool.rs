@@ -232,24 +232,12 @@ impl Tool for EditorTool {
         let (req, summary) = match Self::parse_input(&input) {
             Ok(v) => v,
             Err(e) => {
-                return Ok(ToolResult {
-                    output: e,
-                    is_error: true,
-                    side_effect: None,
-                });
+                return Ok(ToolResult { output: e, is_error: true, denied: false, side_effect: None });
             }
         };
         match self.sink.emit(req.clone()) {
-            Ok(()) => Ok(ToolResult {
-                output: format!("已请求：{summary}"),
-                is_error: false,
-                side_effect: None,
-            }),
-            Err(e) => Ok(ToolResult {
-                output: format!("编辑器不可达：{e}（{summary}）"),
-                is_error: true,
-                side_effect: None,
-            }),
+            Ok(()) => Ok(ToolResult { output: format!("已请求：{summary}"), is_error: false, denied: false, side_effect: None }),
+            Err(e) => Ok(ToolResult { output: format!("编辑器不可达：{e}（{summary}）"), is_error: true, denied: false, side_effect: None }),
         }
     }
 }

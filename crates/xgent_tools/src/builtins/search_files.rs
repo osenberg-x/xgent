@@ -66,21 +66,13 @@ impl Tool for SearchFiles {
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
         let Some(pattern) = input["pattern"].as_str() else {
-            return Ok(ToolResult {
-                output: "缺少参数 pattern".into(),
-                is_error: true,
-                side_effect: None,
-            });
+            return Ok(ToolResult { output: "缺少参数 pattern".into(), is_error: true, denied: false, side_effect: None });
         };
         let start_rel = input["path"].as_str().unwrap_or(".");
         let start = match resolve_in_project(&ctx.project_root, start_rel) {
             Ok(p) => p,
             Err(e) => {
-                return Ok(ToolResult {
-                    output: e,
-                    is_error: true,
-                    side_effect: None,
-                });
+                return Ok(ToolResult { output: e, is_error: true, denied: false, side_effect: None });
             }
         };
 
@@ -103,6 +95,7 @@ impl Tool for SearchFiles {
         Ok(ToolResult {
             output,
             is_error: false,
+            denied: false,
             side_effect: None,
         })
     }
