@@ -13,6 +13,7 @@ pub mod editor;
 pub mod file_panel;
 pub mod i18n;
 pub mod layout;
+pub mod resize;
 pub mod settings_panel;
 pub mod shortcuts;
 pub mod status_bar;
@@ -41,6 +42,7 @@ impl Plugin for XgentUiPlugin {
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
             editor::EditorPlugin,
+            resize::ResizePlugin,
             shortcuts::ShortcutsPlugin,
         ));
     }

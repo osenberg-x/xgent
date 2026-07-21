@@ -62,7 +62,7 @@ fn spawn_top_bar(
                 column_gap: px(space::XS),
                 ..default()
             },
-            Text::new("xgent ▾"),
+            Text::new("xgent v"),
             TextFont {
                 font_size,
                 ..default()
@@ -108,7 +108,7 @@ fn spawn_top_bar(
             },
             BackgroundColor(theme.panel),
             BorderColor::all(theme.border),
-            Text::new(format!("＋ {}", tr(&loc, "topbar-new-session"))),
+            Text::new(format!("+ {}", tr(&loc, "topbar-new-session"))),
             TextFont {
                 font_size,
                 ..default()
@@ -127,7 +127,7 @@ fn spawn_top_bar(
                 border_radius: BorderRadius::all(px(4.0)),
                 ..default()
             },
-            Text::new("⚙"),
+            Text::new("="),
             TextFont {
                 font_size,
                 ..default()
@@ -153,7 +153,7 @@ fn update_provider_label(
     text.0 = if info.id.is_empty() {
         String::new()
     } else {
-        format!("📦 {} / {} ▾", info.id, info.model)
+        format!("[ {} / {} ] v", info.id, info.model)
     };
 }
 

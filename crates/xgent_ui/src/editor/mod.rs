@@ -185,7 +185,7 @@ fn spawn_editor_view(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new("✕"),
+                    Text::new("x"),
                     TextFont {
                         font_size: FontSize::Px(font),
                         ..default()
@@ -406,7 +406,7 @@ pub fn rebuild_editor_tabs(
                 // 脏标记●
                 if dirty {
                     tab.spawn((
-                        Text::new("●"),
+                        Text::new("*"),
                         TextFont {
                             font_size: FontSize::Px(font),
                             ..default()
@@ -433,7 +433,7 @@ pub fn rebuild_editor_tabs(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    Text::new("×"),
+                    Text::new("x"),
                     TextFont {
                         font_size: FontSize::Px(font + 1.0),
                         ..default()

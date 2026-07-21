@@ -130,7 +130,7 @@ fn spawn_chat_panel(
                     ..default()
                 },
                 BorderColor::all(theme.accent),
-                Text::new(format!("💬 {}", crate::i18n::tr(&loc, "chat-tab-label"))),
+                Text::new(crate::i18n::tr(&loc, "chat-tab-label").to_string()),
                 TextFont {
                     font_size,
                     ..default()

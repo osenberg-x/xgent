@@ -187,9 +187,163 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 **所有子系统只通过 ECS Events（即时观察者）与 Messages（缓冲消息）通信，禁止直接方法调用。**
 
-- 违反此约束会让 Plugin 无法独立测试、无法 headless 录制/回放。
-- 新增 agent/UI 交互时，优先在 `xgent_agent/src/events.rs` 定义 Message，UI 侧用 EventReader/EventWriter。
-- 异步逻辑（provider/tools/context）经 tokio task → mpsc channel → ECS 系统每帧非阻塞 `try_recv`。
+- 这条约束只约束 **跨 Plugin 边界** 的调用（即"子系统之间"）。Plugin 内部——同一 crate 内的系统之间、同一系统内的函数调用——按普通 Rust 代码处理，不强制走 Message。
+- 违反约束会让 Plugin 无法独立测试、无法 headless 录制/回放。
+- 新增跨 agent/UI 交互时，在 `xgent_agent/src/events.rs` 定义 Message，UI 侧用 `MessageReader`/`MessageWriter`。
+- 异步逻辑（provider/tools/context）经 tokio task → mpsc channel → ECS 系统每帧非阻塞 `try_recv`（见 `bridge.rs::agent_loop_task`）。
+
+### 5.1.1 何时用 Message / Resource / 直接调用（判据总纲）
+
+约束本身是"跨 Plugin 边界禁止直接方法调用"，但落地时要区分三种交互语义：**动作信号**、**状态投影**、**同步查询**。三者各有合适载体，错配是常见的架构债来源。下表是总纲判据，后三节给出每一类的详细规则与现有正例。
+
+| 交互语义 | 特征 | 载体 | 现有正例 |
+|:---|:---|:---|:---|
+| 动作信号（action） | "发生了 X"或"请做 X"，有时序、有方向、可能并发多条、可能多消费者 | **Message**（默认）或 **Event**（即时 observer） | `UserInputMessage`、`DeltaMessage`、`SteeringMessage`、`EditorCommand`、`PaletteTriggered`、`HotkeyTriggered` |
+| 状态投影（state） | "当前是 X"，可随时读、可被多系统读、读的是某时刻快照 | **Resource** | `Conversation`、`EditorTabs`、`TokenUsage`、`PanelWidths`、`GlobalConfigRes` |
+| 同步查询（query） | "我要拿 Y"，请求-响应、有返回值、调用方等结果 | **直接 trait 调用** | `ContextProvider::retrieve`、`EditorState` trait、`Tool::execute` |
+
+**一句话判据**：问自己"这条交互有没有返回值"——
+- 调用方需要拿结果才能继续 → 直接 trait 调用（同步查询）；异步侧用 channel 双向化。
+- 调用方不需要结果，只要"通知发生了" → Message。
+- 多个系统都要读"当前状态" → Resource；状态变更要广播 → 改 Resource + 发一个通知 Message。
+
+> 注：Bevy 0.19 中 `Event` 与 `Message` 是**两个并存的 trait**，语义不同：
+> - `Message`（`#[derive(Message)]` + `add_message::<T>()` + `MessageReader`/`MessageWriter`）：缓冲队列，双缓冲（`Messages<M>`），配 `message_update_system` 每帧 `update` 切缓冲。读一次 per update 不丢，两次 update 后保证丢。每个 `MessageReader` 独立 cursor，多 reader 各读全量（广播语义）。
+> - `Event`（`#[derive(Event)]` + `Observer` + `On<E>` + `world.trigger(E)`）：即时观察者，trigger 即同步派发给所有 observer，无缓冲、无队列。
+>
+> **本项目代码统一用 Message**（`crates/` 下无 `add_event`/`EventReader`/`EventWriter`）——这是项目选择，不是 Bevy 强制。`doc/plans/step9/step10/step12` 与 `editor-design.md` 残留 `#[derive(Event)]` 是历史文档遗留，实现时改用了 Message，以代码为准。
+>
+> **何时该用 Event 而非 Message**（Bevy 语义层面）：纯即时通知、无需跨帧、无需多消费者排队、希望同步触发 observer 处理——如"provider 状态变更"这类"发生即响应"。本项目目前未用 Event（所有通知都走 Message 也工作），但新增"强即时性"通知时可考虑 Event，不要因本文档统称 Message 而排斥它。判据：**需要跨帧/缓冲/多消费者排队 → Message；需要即时同步触发 observer → Event**。
+
+#### 5.1.1.1 动作信号 → Message（默认）或 Event（即时）
+
+**判据**：满足以下任一即为动作信号。
+
+- 有方向（A 发、B 收，或广播给多个订阅者）。
+- 有时序语义（"先 abort 再 done" 或 "steering 在流式期即时中断"），顺序必须保证。
+- 可能并发多条（流式 delta、多个 tool_call），需要缓冲队列。
+- 接收方可能多个（UI 渲染 + 状态栏 + 持久化都要听 Done）。
+- 调用方不需要同步等结果（"发完即走"）。
+
+**Message vs Event 选择**（见上方注释的 Bevy 0.19 源码语义）：
+- **默认 Message**：跨帧、需缓冲、多消费者各读全量。本项目所有动作信号都是 Message。
+- **改用 Event 的判据**：信号严格单帧内被 observer 消费、且无需跨帧保留、希望 trigger 即同步派发。典型场景：provider 状态变更、配置热重载完成、预算告警——这些"发生即响应"的通知若用 Message 也能工作（本项目即如此），但 Event 的即时性更贴合语义。
+- **必须用 Message 的场景**：流式 delta（跨帧累积）、用户输入、abort/steering（不能丢、可能跨帧）——这些用 Event 会丢消息。
+
+**Message 用法要点**（Bevy 0.19）：
+- 派生 `#[derive(Message)]`，插件 `build` 里 `app.add_message::<T>()` 注册（自动配 `message_update_system`）。
+- 写：`MessageWriter<T>::write(payload)`；读：`MessageReader<T>::read()` 迭代（循环消费，单帧内可能多条）。
+- 跨帧保留：`Messages<M>` 双缓冲，读一次 per update 不丢，两次 update 后保证丢。`AbortMessage`、`SteeringMessage` 这类必须抵达的信号靠此保证（前提是消费系统至少每帧 read 一次）。
+- 多消费者：每个 `MessageReader` 独立 cursor，各读全量（广播语义）。
+- 命名约定：`XxxMessage` 表双向、`XxxRequest`/`XxxResult` 表请求-响应配对——后者通常意味着该用 trait 调用（见 §5.1.1.3 反例）。
+
+**Event 用法要点**（本项目暂未用，备查）：
+- 派生 `#[derive(Event)]`，`world.trigger(E)` 或 `commands.trigger(E)` 派发。
+- 订阅：`world.add_observer(|trigger: On<E>| { ... })`，observer 同步执行。
+- 无缓冲、无队列、无 cursor——trigger 即派发，派发完即结束。若 observer 当帧未注册则错过。
+- `EntityEvent` + `#[entity_event]` 可做实体级 observer（如 `RemovedComponents`）。
+
+**现状正例**（`crates/xgent_agent/src/events.rs`，16 种 Message）：
+
+| Message | 方向 | 为何用 Message |
+|:---|:---|:---|
+| `UserInputMessage` | UI → agent | 调用方不等结果；agent 异步消费；需缓冲 |
+| `DeltaMessage` | agent → UI | 流式多 chunk、需累积、UI 帧消费 |
+| `SteeringMessage` | UI → agent | 时序关键（流式期 race abort）；不能丢 |
+| `AbortMessage` | UI → agent | 必须抵达（一帧内若 agent 系统未跑，Message 留到下帧） |
+| `DoneMessage` | agent → UI | 多消费者（chat_panel 收尾 + status_bar 累 token + 持久化） |
+| `ConfirmDecisionMessage` | UI → agent | 异步确认握手，`SharedConfirm` 经 oneshot 回填 |
+
+**反例（禁止）**：UI 系统直接 `agent_bridge.start_loop(req)` —— 跨 Plugin 边界直接调用，破坏可测性（`bridge_tests.rs` 的"灌消息即测试"模式失效）。
+
+#### 5.1.1.2 状态投影 → 用 Resource
+
+**判据**：满足以下任一即为状态，应放 Resource。
+
+- 多个系统可能随时读"当前值"（不关心谁改的，只看当前快照）。
+- 改变后会触发多处 UI 刷新（数据驱动）。
+- 持续存在、非一次性（不是"发生了一次"，而是"当前是某值"）。
+- 单一权威写入点（避免多系统并发写）。
+
+**规则**：
+- **写入点收敛**：每个 Resource 应有唯一"所有者系统"负责写，其他系统只读。`Conversation` 由 `agent_loop` 独占写；`PanelWidths` 由 `handle_resize_drag` 独占写，`apply_panel_widths` 只读。违反则触发 Bevy 的 B0001 或需 `ParamSet`/`.after()` 排序。
+- **状态变更通知用 Message**：若其他系统需要"当 X 改变时反应"，改 Resource 后再发一个通知 Message（如配置刷新后 `config_bridge` 发 `CONFIG_CHANGED`）。不要让消费方轮询 Resource 判断是否变了（低效且易漏帧）。
+- **异步产物的 Resource 化**：tokio task 回 ECS 的结果是"状态增量"，既可以是 Message（流式 delta）也可以是 Resource（持有 channel receiver 让 ECS 每帧 drain）。**高频流式用 Message**（`DeltaMessage`，每帧一条以上）；**低频控制流用"持有 receiver 的 Resource"**（`PendingRefresh`、`NotifPump`、`EditorIoRuntime` —— 它们持有 `mpsc::Receiver`，ECS 系统 `try_recv` drain）。
+
+**现状正例**：
+
+| Resource | 性质 | 所有者系统 |
+|:---|:---|:---|
+| `Conversation` | 对话状态（消息历史、当前助手文本、状态机） | `agent_loop` 独占写 |
+| `ProviderInfo` / `ContextState` | provider 就绪与上下文状态 | `config_bridge` / `agent_loop` |
+| `TokenUsage` | 累计 token | `status_bar` 写、`chat_panel` 订阅 `DoneMessage` 累加 |
+| `EditorTabs` / `EditorView` / `SideViewContent` | 编辑器标签与视图状态 | 编辑器各自系统 |
+| `PanelWidths` / `ActiveResize` | 面板宽度与拖拽态 | `handle_resize_drag` 写 / `apply_panel_widths` 读 |
+| `EditorStateSnapshot` | 编辑器状态只读快照 | `ContextProvider` 查询（见 §5.1.1.3） |
+| `AgentBridge` / `PendingRefresh` / `NotifPump` / `EditorIoRuntime` | 持有 tokio channel 端的桥接 Resource | 各自 ECS 系统每帧 drain |
+| `GlobalConfigRes` / `ProjectConfigRes` / `Localizer` | 配置与 i18n | `xgent_app` 启动注入 / `config_bridge` 刷新 |
+
+**反例（禁止）**：把"当前对话是否进行中"做成 `IsConversationActiveMessage` —— 这是状态不是动作，UI 应读 `Conversation.status` Resource。
+
+#### 5.1.1.3 同步查询 → 用直接 trait 调用
+
+**判据**：满足以下任一即为同步查询，允许（且应）直接 trait 调用，不强制 Message 化。
+
+- 调用方需要返回值才能继续（请求-响应语义）。
+- 查询的是"当前状态"而非"触发动作"。
+- 在异步上下文（tokio task）内执行，不在 Bevy 主线程同步路径。
+- 查询方与被查询方跨 crate，直接调用会成环——此时用 **trait 反转依赖**（§5.2）。
+
+**规则**：
+- **trait 定义放底层 crate**（`xgent_core` 或 `xui_i18n`），实现放上层，查询方经 trait 调用。这是"允许直接调用"与"分层不破"的平衡点。
+- **查询结果不写回 Resource 就别发 Message**：`ContextProvider::retrieve` 返回 `ContextResult`，调用方（bridge 异步侧）用它构造 `ChatRequest`，这是纯函数式调用，无需事件化。
+- **跨进程查询走 IPC**（JSON-RPC request/response，见 `methods.rs`），不强行经 ECS Message——ECS Message 是进程内语义，跨进程本身就有 RPC 协议，硬塞 Message 会加一层无意义翻译。
+- **EditorState 模式**：编辑器状态供 context 查询（`@cursor`/`@selection`），定义为 `xgent_core::EditorState` trait，`xgent_ui` 实现，`xgent_context` 经 trait 调用。`editor-design.md` §3.2 的 `EditorStatePolled` Resource 注释"只读视图，不事件化"即此模式。
+
+**现状正例**：
+
+| trait | 定义层 | 实现层 | 调用方 | 为何不事件化 |
+|:---|:---|:---|:---|:---|
+| `ContextProvider::retrieve` | `xgent_context` | `OnDemandContextProvider` | `agent_loop_task`（tokio 侧） | 请求-响应、有返回值、在 async 上下文 |
+| `EditorState`（`@cursor` 查询） | `xgent_core` | `xgent_ui::editor` | `xgent_context::at_syntax` | 跨 crate 查询状态，trait 反转避免成环 |
+| `LlmProvider::chat` | `xgent_provider` | `OpenAiCompatProvider` | `ProviderClient`（IPC 适配） | 异步流式，返回 channel 而非 Message |
+| `Tool::execute` | `xgent_tools` | 4 builtins + `EditorTool` | `agent_loop_task`（经 `ToolExecutor`） | 请求-响应、有 `ToolResult` 返回 |
+| `StringSource::get` | `xui_i18n` | `xgent_settings::Localizer` | `xui::i18n_bridge` | 纯查询、trait 反转 |
+
+**反例（禁止）**：为 `ContextProvider::retrieve` 定义 `ContextQueryMessage` + `ContextResultMessage` 双向 Message + 状态机协调 —— 纯属把 RPC 拍扁成消息，丢失了"返回值"这个最强契约，且 ECS 同步系统无法 `await` retrieve（这正是 2026-07-20 修复把 context 检索挪到 bridge 异步侧的原因）。
+
+#### 5.1.1.4 异步侧的特殊处理
+
+约束的真正复杂度在"异步↔同步"边界。规则：
+
+- **tokio task ↔ ECS 必经 channel**：`AgentCommand`（ECS → tokio）、`AgentEvent`（tokio → ECS）双向 mpsc（`bridge.rs`）。**ECS 主线程永不 `await`**——约束落到这点：任何会 `await` 的调用都必须在 tokio task 内，结果经 channel 回 ECS。
+- **ECS 同步系统内禁止 `await`**：`context.retrieve`、`provider.chat`、`tool.execute` 都是 async，**不能在 ECS 系统直接调**。要么挪到 tokio task（bridge 模式），要么用"持有 receiver 的 Resource"每帧 drain。
+- **确认握手用 oneshot，不用 Mutex**：`SharedConfirm` 持 `oneshot::Sender<ConfirmDecision>`，ECS 写 `ConfirmDecisionMessage` → `agent_loop` 读 → 调 `shared_confirm.set_sender(tx)` 回填 → tokio task 的 `oneshot::Receiver::await` 唤醒。**这是约束下处理"请求-响应跨同步/异步"的标准范式**，不要替换为 `Mutex<ConfirmDecision>` + 轮询。
+- **ECS 同步路径的纯查询允许直接调**：若 trait 方法是同步的（如 `xgent_core::EditorState::cursor`/`active_path`/`selection` 同步返回，见 `state.rs::impl EditorState for EditorStateSnapshot`），ECS 系统可直接 `Res<EditorStateSnapshot>` 读或经 trait 调用，无需 channel。判据是"是否 `async`"，不是"是否跨 crate"。
+
+#### 5.1.1.5 新增交互的决策流程
+
+新增任何跨 Plugin 交互时，按此顺序自问：
+
+1. **调用方需要返回值吗？**
+   - 是 → 同步查询（§5.1.1.3）。看是否跨 crate：是则 trait 定义放下层；否则直接函数调用。
+   - 否 → 进入 2。
+2. **是"当前状态"还是"发生了一次"？**
+   - 状态 → Resource（§5.1.1.2）。问：谁独占写？哪些系统读？状态变更要通知谁（发 Message）？
+   - 事件 → Message（默认）或 Event（§5.1.1.1）。问：需跨帧/缓冲吗（是→Message）？强即时同步触发吗（是→Event）？多消费者吗？有返回值吗（有则不该用 Message/Event）？
+3. **在异步上下文吗？**
+   - ECS 同步 + 需 await → 违规。挪到 tokio task，结果经 channel 回 ECS（§5.1.1.4）。
+   - ECS 同步 + 纯同步 trait → 直接调，无需 channel。
+   - tokio task 内 → 直接调 async trait，结果经 `AgentEvent` channel 回 ECS。
+4. **跨进程吗？**
+   - 是 → JSON-RPC（request/response 同步语义、notification 单向语义），不强行经 ECS Message。跨进程通知回 ECS 后可转 Message（`FileChanged` → `FileChangedEvent` 桥接）。
+
+**反模式速查**：
+- ❌ 把状态做成 Message（`IsXxxActiveMessage`）—— 应 Resource。
+- ❌ 把查询做成双向 Message + 状态机 —— 应直接 trait 调用。
+- ❌ ECS 系统内 `await` async trait —— 挪 tokio task。
+- ❌ 用 `Mutex<T>` + 轮询做异步握手 —— 用 `oneshot` channel。
+- ❌ 跨 Plugin 边界直接方法调用（如 UI 调 `agent.start_loop`）—— 走 Message。
 
 ### 5.2 反转依赖模式（避免成环）
 
@@ -254,13 +408,22 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 ### 5.11 对话/编辑器分屏（右侧 SideView）
 
-- **布局**：`MainAreaMarker`（横向 row）下三子节点——`FilePanelMarker`（固定宽）+ `ChatPanelMarker`（flex:1）+ `SideViewMarker`（flex:1，默认 `display:none`）。分屏展开时 `ChatPanelMarker` 与 `SideViewMarker` 各占一半并排。
+- **布局**：`MainAreaMarker`（横向 row）下五子节点——`FilePanelMarker`（显式宽，由 `PanelWidths` 驱动）+ 左手柄 + `ChatPanelMarker`（flex:1 填充剩余）+ 右手柄 + `SideViewMarker`（显式宽，默认 `display:none`）。手柄由 `resize::handle_bundle` spawn。
 - **分屏内容**：编辑器视图（`EditorViewMarker`，代码文件）与文件预览（`FilePreviewMarker`，非代码文件）二者互斥挂于 `SideViewMarker` 下，由 `handle_file_click` 据文件类型切换显隐。
-- **展开/收起**：`SideViewCollapsed` Resource 驱动 `toggle_side_view_visibility` 系统切换 `SideViewMarker` 的 `display`。展开触发：点击文件节点（代码/非代码均展开）；收起触发：编辑器返回按钮、关闭最后一个 tab、`Ctrl+\`（`sideview.toggle`）。
+- **展开/收起**：`SideViewCollapsed` Resource 驱动 `toggle_panel_visibility`（合并系统，避免跨系统 B0001）切换 `SideViewMarker` + 右手柄的 `display`。展开触发：点击文件节点（代码/非代码均展开）；收起触发：编辑器返回按钮、关闭最后一个 tab、`Ctrl+\`（`sideview.toggle`）。
 - **快捷键**：`Ctrl+\` = `sideview.toggle`（切换分屏）。
 - **设计图**：`doc/design/ui-prototype.html` §2.1 P1。
 
-### 5.12 UI 原型对齐（A-H 已落地，D 待实现）
+### 5.12 面板拖拽调整大小（resize）
+
+- **模块**：`xgent_ui/src/resize.rs`（`ResizePlugin`）。两条竖向手柄插在主区行布局的面板之间，鼠标拖拽改变相邻面板宽度。
+- **数据驱动**：`PanelWidths` Resource（`file_panel`/`side_view` 显式像素宽度），`ActiveResize` Resource（当前激活边界）。`apply_panel_widths` 据资源写面板宽度（折叠态下文件面板置 0）；`handle_resize_drag` 处理拖拽逻辑。
+- **拖拽状态机**：手柄 `Interaction::Pressed` + `ButtonInput<MouseButton>::pressed(Left)` 触发启动 → 持续期间据 `AccumulatedMouseMotion.delta.x` 增量更新宽度 → 鼠标释放清除。不引入 `bevy_picking`（默认未启用，会拉重依赖），用 `Interaction` + `ButtonInput` 手搓状态机。
+- **钳制**：据 `MainAreaMarker` 的 `ComputedNode.size` × `inverse_scale_factor`（物理→逻辑像素）得主区宽，按 `FILE_PANEL_MIN`(160)/`SIDE_VIEW_MIN`(200)/`CHAT_MIN`(240) 钳制，保证对话主区总有最小空间。
+- **视觉**：手柄默认透明（`Color::NONE`），hover/拖拽时变色高亮（`HANDLE_ACTIVE_COLOR`）。右手柄初始 `display:none`（分屏默认收起）。
+- **B0001 规避**：`toggle_panel_visibility` 与 `apply_panel_widths` 都写 `&mut Node` 于面板，用 `.after()` 排序；同系统内 `q_file`/`q_side`/`q_handles` 加交叉 `Without` 过滤器证明不相交（`With<A>` 不隐含 `Without<B>`）。
+
+### 5.13 UI 原型对齐（A-H 已落地，D 待实现）
 
 对照 `doc/design/ui-prototype.html` 原型图的差距分阶段实现，详见 `doc/design/ui-gap-plan.md`：
 - **A-主题（已落地）**：`Theme` 加状态色 5 色 + 语法高亮色 7 色（`theme.rs`）；`FILE_PANEL_W` 改 240。

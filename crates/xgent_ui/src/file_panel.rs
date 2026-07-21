@@ -148,7 +148,7 @@ fn spawn_file_panel(
                     border_radius: BorderRadius::all(px(4.0)),
                     ..default()
                 },
-                Text::new("◀"),
+                Text::new("<"),
                 TextFont {
                     font_size: FontSize::Px(font),
                     ..default()
@@ -249,7 +249,7 @@ fn spawn_file_preview(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new("✕"),
+                    Text::new("x"),
                     TextFont {
                         font_size: FontSize::Px(font),
                         ..default()
@@ -355,7 +355,7 @@ fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Th
                             width: px(10.0),
                             ..default()
                         },
-                        Text::new("▸"),
+                        Text::new(">"),
                         TextFont {
                             font_size,
                             ..default()
@@ -369,7 +369,7 @@ fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Th
                             width: px(14.0),
                             ..default()
                         },
-                        Text::new("📁"),
+                        Text::new("+"),
                         TextFont {
                             font_size,
                             ..default()
@@ -434,7 +434,7 @@ fn spawn_entry(parent: &mut ChildSpawnerCommands, entry: &DirContent, theme: &Th
                         width: px(14.0),
                         ..default()
                     },
-                    Text::new("📄"),
+                    Text::new("-"),
                     TextFont {
                         font_size,
                         ..default()
@@ -493,8 +493,12 @@ fn rebuild_file_tree(
 fn handle_file_click(
     q_files: Query<(Entity, &FileEntry, &Interaction), Changed<Interaction>>,
     q_preview: Query<Entity, With<FilePreviewMarker>>,
-    mut q_path: Query<&mut Text, With<FilePreviewPathMarker>>,
-    mut q_meta: Query<&mut Text, With<FilePreviewMetaMarker>>,
+    // q_path/q_meta 都 &mut Text，With<Marker> 之间 Bevy 无法证明不相交
+    // （With 不隐含 Without），同系统内会触发 B0001，故用 ParamSet 串行化。
+    mut q_texts: ParamSet<(
+        Query<&mut Text, With<FilePreviewPathMarker>>,
+        Query<&mut Text, With<FilePreviewMetaMarker>>,
+    )>,
     q_body: Query<Entity, With<FilePreviewBodyMarker>>,
     q_selected: Query<Entity, With<FileSelectedMarker>>,
     mut side_collapsed: ResMut<crate::layout::SideViewCollapsed>,
@@ -536,8 +540,8 @@ fn handle_file_click(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         // 更新 fv-head 路径文本
-        if let Ok(mut path_text) = q_path.single_mut() {
-            path_text.0 = format!("📄 {}", name);
+        if let Ok(mut path_text) = q_texts.p0().single_mut() {
+            path_text.0 = format!("- {}", name);
         }
         // 读取文件内容（字节 + 文本）
         let (bytes_len, text) = match std::fs::read(&file.path) {
@@ -549,7 +553,7 @@ fn handle_file_click(
             Err(e) => (0, format!("读取失败: {e}")),
         };
         // 更新 fv-head 元信息：字节数 · 只读预览
-        if let Ok(mut meta_text) = q_meta.single_mut() {
+        if let Ok(mut meta_text) = q_texts.p1().single_mut() {
             meta_text.0 = format!("· {} 字节 · 只读预览", bytes_len);
         }
         // 填充 fv-body 内容（Rust 语法高亮，其余纯文本）
@@ -678,12 +682,12 @@ fn handle_dir_click(
             dir.expanded = false;
             if let Some(e) = arrow_entity {
                 if let Ok(mut t) = q_text.p0().get_mut(e) {
-                    *t = Text::new("▸");
+                    *t = Text::new(">");
                 }
             }
             if let Some(e) = icon_entity {
                 if let Ok(mut t) = q_text.p1().get_mut(e) {
-                    *t = Text::new("📁");
+                    *t = Text::new("+");
                 }
             }
             commands.entity(child_container).despawn_children();
@@ -692,12 +696,12 @@ fn handle_dir_click(
             dir.expanded = true;
             if let Some(e) = arrow_entity {
                 if let Ok(mut t) = q_text.p0().get_mut(e) {
-                    *t = Text::new("▾");
+                    *t = Text::new("v");
                 }
             }
             if let Some(e) = icon_entity {
                 if let Ok(mut t) = q_text.p1().get_mut(e) {
-                    *t = Text::new("📂");
+                    *t = Text::new("-");
                 }
             }
             let entries = list_dir(&dir.path);

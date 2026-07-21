@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 use bevy::ui::ScrollPosition;
 
-use xgent_agent::{ConfirmRequestMessage, ToolCallMessage, ToolResultMessage};
+use xgent_agent::{ToolCallMessage, ToolResultMessage};
 use xgent_settings::Localizer;
 
 use crate::chat_panel::MessageListMarker;
@@ -17,9 +17,7 @@ use crate::theme::{Theme, space};
 /// 工具调用卡片标记。
 #[derive(Component, Default)]
 pub struct ToolCardMarker {
-    /// LLM 返回的 tool_call_id（唯一，用于匹配 result/confirm）
-    pub tool_call_id: String,
-    /// 工具 id（展示用）
+    /// 工具 id（用于匹配 result）
     pub tool_id: String,
     /// 是否展开结果详情
     pub expanded: bool,
@@ -52,12 +50,10 @@ impl Plugin for ToolPanelPlugin {
             Update,
             (
                 spawn_tool_card,
-                update_tool_pending,
                 update_tool_result,
                 handle_tool_card_click,
                 apply_tool_card_visibility,
             )
-                .chain()
                 .after(xgent_agent::agent_loop::agent_poll_system),
         );
     }
@@ -88,8 +84,9 @@ fn spawn_tool_card(
                     row_gap: px(space::XS),
                     ..default()
                 },
+                BackgroundColor(theme.panel),
+                BorderColor::all(theme.border),
                 ToolCardMarker {
-                    tool_call_id: ev.tool_call_id.clone(),
                     tool_id: ev.tool_id.clone(),
                     expanded: false,
                 },
@@ -112,7 +109,7 @@ fn spawn_tool_card(
                 .with_children(|header| {
                     // 工具图标
                     header.spawn((
-                        Text::new("🔧"),
+                        Text::new("»"),
                         TextFont {
                             font_size: FontSize::Px(font),
                             ..default()
@@ -207,10 +204,7 @@ fn spawn_tool_card(
 /// 订阅 ToolResultMessage，更新对应卡片：状态点/标签/结果/fold 行。
 ///
 /// 结果到达时设 `expanded=true`（默认展开，不 toggle），显示结果区，
-/// 填充 fold 行「▾ 结果：N 行」，状态点变 ok/fail/deny 色。
-///
-/// 三态：`denied` → 已拒绝（⊘ 灰色，不展开结果）；`is_error` → 失败（✗ 红色）；
-/// 否则 → 完成（✓ 绿色）。对齐 ui-design.md §4.2。
+/// 填充 fold 行「▾ 结果：N 行」，状态点变 ok/fail 色。
 fn update_tool_result(
     mut reader: MessageReader<ToolResultMessage>,
     mut q_cards: Query<(&mut ToolCardMarker, &Children), With<ToolCardMarker>>,
@@ -224,37 +218,29 @@ fn update_tool_result(
 ) {
     for ev in reader.read() {
         for (mut card, children) in q_cards.iter_mut() {
-            if card.tool_call_id != ev.tool_call_id {
+            if card.tool_id != ev.tool_id {
                 continue;
             }
-            // 三态判定：denied 优先于 is_error
-            let (status_label, status_color, dot_color) = if ev.denied {
-                (
-                    tr(&loc, "tool-denied"),
-                    theme_st_deny(),
-                    BackgroundColor(theme_st_deny()),
-                )
-            } else if ev.is_error {
-                (
-                    tr(&loc, "tool-failed"),
-                    Color::srgba(0.9, 0.3, 0.3, 1.0),
-                    BackgroundColor(theme_st_fail()),
-                )
+            let is_error = ev.is_error;
+            let status_label = if is_error {
+                tr(&loc, "tool-failed")
             } else {
-                (
-                    tr(&loc, "tool-done"),
-                    Color::srgba(0.3, 0.8, 0.4, 1.0),
-                    BackgroundColor(theme_st_ok()),
-                )
+                tr(&loc, "tool-done")
+            };
+            let status_color = if is_error {
+                Color::srgba(0.9, 0.3, 0.3, 1.0)
+            } else {
+                Color::srgba(0.3, 0.8, 0.4, 1.0)
+            };
+            let dot_color = if is_error {
+                BackgroundColor(theme_st_fail())
+            } else {
+                BackgroundColor(theme_st_ok())
             };
             let line_count = ev.output.lines().count();
-            // denied 态不展开结果区（输出是固定文案，无查看价值）
-            let fold_text = if ev.denied {
-                String::new()
-            } else {
-                format!("▾ 结果：{} 行 · 点击折叠", line_count)
-            };
-            card.expanded = !ev.denied;
+            let fold_text = format!("v 结果：{} 行 · 点击折叠", line_count);
+            // 结果到达 → 默认展开
+            card.expanded = true;
             {
                 let mut q_status = params.p0();
                 for child in children.iter() {
@@ -269,8 +255,7 @@ fn update_tool_result(
                 for child in children.iter() {
                     if let Ok((mut text, mut node)) = q_result.get_mut(child) {
                         text.0 = ev.output.clone();
-                        // denied 态隐藏结果区
-                        node.max_height = if ev.denied { Val::Px(0.0) } else { Val::Px(200.0) };
+                        node.max_height = Val::Px(200.0);
                     }
                 }
             }
@@ -295,50 +280,6 @@ fn update_tool_result(
     }
 }
 
-/// 订阅 ConfirmRequestMessage，把对应卡片切到「待确认」态（⏸ 黄色）。
-///
-/// 事件顺序：ToolCall（spawn 卡片，running）→ ConfirmRequest（切 pending）
-/// → ToolResult（切 done/failed/denied）。对齐 ui-prototype.html §4.2。
-fn update_tool_pending(
-    mut reader: MessageReader<ConfirmRequestMessage>,
-    mut q_cards: Query<(&mut ToolCardMarker, &Children), With<ToolCardMarker>>,
-    mut params: ParamSet<(
-        Query<(&mut Text, &mut TextColor), With<ToolStatusLabelMarker>>,
-        Query<&mut BackgroundColor, With<ToolStatusDotMarker>>,
-    )>,
-    loc: Res<Localizer>,
-) {
-    for ev in reader.read() {
-        for (card, children) in q_cards.iter_mut() {
-            // ConfirmRequest 无 tool_call_id，按 tool_id 匹配最近一张同 tool_id 的卡片
-            if card.tool_id != ev.0.tool_id {
-                continue;
-            }
-            let label = tr(&loc, "tool-pending");
-            let color = theme_st_pending();
-            {
-                let mut q_status = params.p0();
-                for child in children.iter() {
-                    if let Ok((mut text, mut tc)) = q_status.get_mut(child) {
-                        text.0 = label.clone();
-                        tc.0 = color;
-                    }
-                }
-            }
-            {
-                let mut q_dot = params.p1();
-                for child in children.iter() {
-                    if let Ok(mut bg) = q_dot.get_mut(child) {
-                        *bg = BackgroundColor(theme_st_pending());
-                    }
-                }
-            }
-            // pending 匹配首张即可（MVP 工具串行执行，同时只有一张 pending）
-            break;
-        }
-    }
-}
-
 /// 便捷：从全局 Theme 取 fail 色（避免 update_tool_result 加 Theme 参数致 query 冲突）。
 fn theme_st_fail() -> Color {
     Color::srgba(0.88, 0.34, 0.34, 1.0)
@@ -346,14 +287,6 @@ fn theme_st_fail() -> Color {
 /// 便捷：从全局 Theme 取 ok 色。
 fn theme_st_ok() -> Color {
     Color::srgba(0.31, 0.78, 0.47, 1.0)
-}
-/// 便捷：取 deny 色（灰色，对齐 theme.st_deny）。
-fn theme_st_deny() -> Color {
-    Color::srgba(0.53, 0.53, 0.53, 1.0)
-}
-/// 便捷：取 pending 色（黄色，对齐 theme.st_pending）。
-fn theme_st_pending() -> Color {
-    Color::srgba(0.88, 0.70, 0.25, 1.0)
 }
 
 /// 格式化工具调用的参数摘要。
@@ -431,12 +364,12 @@ fn apply_tool_card_visibility(
             if let Ok(mut text) = q_fold.get_mut(child) {
                 if !text.0.is_empty() {
                     // 结果已到达（fold 文本非空），据 expanded 切文案
-                    let expanded_text = text.0.starts_with("▾");
+                    let expanded_text = text.0.starts_with("v");
                     if card.expanded && !expanded_text {
-                        text.0 = text.0.replacen("▸", "▾", 1);
+                        text.0 = text.0.replacen(">", "v", 1);
                         text.0 = text.0.replacen("展开", "折叠", 1);
                     } else if !card.expanded && expanded_text {
-                        text.0 = text.0.replacen("▾", "▸", 1);
+                        text.0 = text.0.replacen("v", ">", 1);
                         text.0 = text.0.replacen("折叠", "展开", 1);
                     }
                 }

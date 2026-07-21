@@ -168,7 +168,7 @@ fn show_on_request(
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 },
-                                Text::new("×"),
+                                Text::new("x"),
                                 TextFont { font_size: FontSize::Px(font), ..default() },
                                 TextColor(theme.text_dim),
                                 ConfirmDenyMarker,

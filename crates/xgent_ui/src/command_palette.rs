@@ -347,11 +347,11 @@ pub(crate) fn handle_palette_triggers(
         state.close();
     }
 }
-/// 据 `CommandKind` 返回 emoji 图标。
+/// 据 `CommandKind` 返回图标（ASCII，避免 emoji 字体回退缺失字形）。
 fn kind_icon(kind: xui::command_palette::CommandKind) -> &'static str {
     use xui::command_palette::CommandKind;
     match kind {
-        CommandKind::File => "📁",
-        CommandKind::Action => "⚙",
+        CommandKind::File => "-",
+        CommandKind::Action => "=",
     }
 }
