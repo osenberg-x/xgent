@@ -17,6 +17,7 @@
 **权威设计文档**（从零设计，不参考旧代码）：
 - `doc/design/requirements.md` — 需求设计（功能 F-xx、非功能 NF-xx、关键约束、分期路线）
 - `doc/design/architecture.md` — 架构设计（进程模型、分层、crate 划分、数据流、抽象接口、待决策点 D-xx）
+- `doc/design/plugin-system-design.md` — 插件系统设计（WASM 组件模型、扩展点契约、加载机制；参考 Zed 插件机制）
 - `doc/notes/` — 调研与评估报告（检索方案、守护进程胖瘦、i18n、bevy_ui 模式评估）
 - `doc/plans/` — MVP 分步实现计划（step1~step12，按依赖顺序）
 - `doc/dev-tutorial.md` — 开发指南（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点；**功能变化时必须同步**）
@@ -189,7 +190,7 @@ xgent_app → 组装所有 UI 侧 crate
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP + F-11 编辑器（P1）已落地阶段。12 个 crate 全部实现，`cargo check --workspace` 通过，约 19k 行 Rust。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。
+项目处于 MVP + F-11 编辑器（P1）已落地阶段。12 个 crate 全部实现，`cargo check --workspace` 通过，约 19k 行 Rust。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。插件系统设计已完成（`doc/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
 实现顺序见 `doc/plans/README.md`（step1~step12，已全部完成）+ `doc/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `doc/design/requirements.md` §4.2 的 P1/P2 项推进。
 

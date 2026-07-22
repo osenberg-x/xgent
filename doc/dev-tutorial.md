@@ -46,6 +46,7 @@
 - **F-14 自定义工具**（P2）：未实现。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化** / **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
+- **插件系统**（架构设计）：参考 Zed 的 WASM 组件模型，设计动态安装/卸载的插件系统。插件经 WIT 接口注册 Agent 工具、命令面板命令、ContextProvider 等扩展点。F-10 Git 集成、F-14 自定义工具等后续功能将以插件形式实现。详见 `doc/design/plugin-system-design.md`。
 - **Compaction**（optimization O9）：`xgent_agent/src/compaction.rs` 已落地——token 估算（`tokenizer.rs` 启发式）+ `should_compact`（reserve=max(15% window, 16384)）+ `find_cut_point`（保留最近 token 段，user/assistant 边界切）+ `LlmCompactor`（调 provider 生成摘要）+ `apply_compaction`（summary 前置 + kept）。`AgentEvent::Compacted` 通知 UI，`SessionEntry::Compaction` 持久化。
 
 ---
