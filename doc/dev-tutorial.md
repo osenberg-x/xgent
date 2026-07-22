@@ -3,8 +3,8 @@
 > 本文档梳理 XGent 截至 2026-07-19 已实现的功能、对应的代码与文档、以及开发注意点。
 > **维护规则**：后续实现新功能或功能有变化，都需要更新这个文档（见 `AGENTS.md` 第 6 节）。
 >
-> 代码现状：12 个 crate 全部实现，`cargo check --workspace` 通过，约 19k 行 Rust。
-> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）已全部落地。
+> 代码现状：12 个 crate 已实现 + `xgent_terminal` 设计中（F-19 终端），`cargo check --workspace` 通过，约 19k 行 Rust。
+> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）已全部落地。F-19 内置终端（P1）grilling 完成，设计中。
 
 ---
 
@@ -41,6 +41,7 @@
 ### 1.3 未实现（P1/P2 留白）
 
 - **F-10 Git 集成**（P1）：未实现。
+- **F-19 内置终端**（P1）：grilling 完成，设计中。PTY 抽象 `xgent_terminal` crate（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty）+ `xgent_ui::terminal` UI 层。详见 `doc/design/terminal-design.md`、ADR-0011/0012、`CONTEXT.md`「终端（F-19，P1）」。
 - **F-12 成本统计**（P1）：未实现（`TokenUsage` 类型已定义，无汇总 UI）。
 - **F-13 MCP 支持**（P1）：仅 trait 预留 `xgent_tools/src/mcp.rs::McpTransport`，无实现。
 - **F-14 自定义工具**（P2）：未实现。
@@ -64,6 +65,7 @@ xgent_provider      ── LlmProvider trait + OpenAiCompat 实现，无 Bevy
 xgent_daemon        ── 独立 bin，纯 tokio：provider 池 + 配置协调 + 文件监听 + 多客户端同步
 xgent_tools         ── Tool trait + 安全策略 + 执行器 + 4 内置工具，无 Bevy
 xgent_context       ── ContextProvider trait + OnDemand 实现，无 Bevy
+xgent_terminal      ── PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte），无 Bevy，UI 侧进程
 xgent_agent         ── agent loop + ECS 桥接 + SessionStore
 xui                 ── 通用 Bevy UI 组件库，纯依赖 bevy + xui_i18n，可独立发布
 xgent_ui            ── XGent 业务 UI（对话/工具/文件/编辑器/设置面板等）
@@ -81,6 +83,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_provider` | `LlmProvider` trait、`OpenAiCompatProvider`（完整）、`ResponseApiProvider`/`AnthropicProvider`/`CustomApiProvider`（占位）、`build_provider(id, cfg)`、`ChatStream` |
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
 | `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`、`ConfirmCallback`、`resolve_policy`、4 内置工具、`EditorTool`（UiOnly）、`McpTransport`（占位） |
+| `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError` |
 | `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（UserInput/Abort/Steering/FollowUp/Delta/ToolCall/ToolResult/ConfirmRequest/Done/Error/Retry/**Compacted** Message） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
@@ -91,7 +94,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 ## 3. 已落地的关键设计决策（ADR）
 
-对应 `doc/decisions/` 下 10 条 ADR，全部已定案并落地：
+对应 `doc/decisions/` 下 12 条 ADR，全部已定案（0011/0012 落地中）：
 
 | ADR | 主题 | 落地点 |
 |:---|:---|:---|
@@ -105,6 +108,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | 0008 | 会话存储 JSONL append-only | `xgent_core/src/session.rs` + `xgent_agent/src/session_store.rs`（`<agent_dir>/sessions/<session_id>.jsonl`，全局，对齐 pi 布局） |
 | 0009 | 编辑器保存绕过 WriteFile + UiOnly tier | `xgent_ui/src/editor/io.rs`（Cmd+S 直接 fs::write）+ `xgent_tools/src/editor_tool.rs`（ToolTier::UiOnly） |
 | 0010 | OQ-08 检索升级路径分段（编辑器→C，D 延后到 LSP） | `xgent_context` 仅 OnDemand 实现，其余 trait 占位 |
+| 0011 | 用户终端 PTY 选 portable-pty | `xgent_terminal`（设计中）：portable-pty + spawn_blocking 桥接 ECS；raw 模式 + echo off；Win powershell/Unix $SHELL |
+| 0012 | 终端独立 crate + TerminalBackend trait | `xgent_terminal`（设计中）：trait + LocalPtyBackend，xgent_ui 仅依赖 trait；对齐 xgent_tools/xgent_context 纯逻辑层模式 |
 
 ---
 

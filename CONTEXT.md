@@ -107,3 +107,27 @@ _Avoid_: 手动保存、save action
 **grammar 分发（D-06）**:
 tree-sitter grammar 的打包与加载策略。P1 编辑器 MVP 阶段**只内置 Rust 一种语言 grammar**（随二进制发布），验证编辑器可行性后再扩展。不做按需下载、不做 lazy load。理由：最小可行、离线可用、避免网络/缓存层复杂度。后续多语言需求出现时再评估扩展策略。
 _Avoid_: grammar 加载、tree-sitter 打包
+
+## 布局
+
+**SideView**:
+右侧可切换视图区（`SideViewMarker`），默认收起（`display:none`）；展开时与对话主区（`ChatPanelMarker`）并排各占一半（均 `flex:1`）。内部承载三种**互斥**子视图：编辑器（`EditorView`）、文件预览（`FileView`）、终端（`TermView`）——同时只显示一个，由 `SideViewKind` 状态切换。点击文件节点按文件类型自动选 editor/fileview 并展开；`Ctrl+\` 切 editor、`Ctrl+`` 切 terminal。已展开且 kind 相同再按一次 → 收起。区别于对话主区——后者始终独占左侧，不受 SideView 展开/收起影响（仅宽度被分走一半）。
+_Avoid_: 右侧面板、split panel、side panel
+
+## 终端（F-19，P1）
+
+**终端（TermView）**:
+用户的嵌入式人机交互终端视图（`SideView` 的三种互斥子视图之一）。用户在此手动敲 shell 命令、查看输出。领域上属"用户主动行为"——与「用户保存」同类，**默认信任、不经 NeedsConfirmation 确认**。PTY 进程归属用户，不经过 agent、不经过工具系统、不经过 `resolve_policy`。多 tab = 多个独立 PTY 会话。
+_Avoid_: 集成终端、terminal panel、agent terminal
+
+**UI 侧行编辑（终端）**:
+终端输入采用 UI 侧行编辑模型：行编辑（光标/Backspace/Delete/Home/End/Ctrl+A/E/U）在 UI 侧完成，**回车发送整行**给 PTY。PTY 设为 raw 模式 + echo off——shell 不回显用户输入，UI 行编辑器是输入的唯一显示源。区别于哑终端（shell readline 主导、UI 只显示 PTY 输出）。控制字符（Ctrl+C / Ctrl+D）不等回车、即时单字节发送。MVP 不做上下历史与 Tab 补全——补全需和 shell readline 协作，与"UI 侧行编辑"语义冲突，留后续。
+_Avoid_: readline、行编辑器、line editor
+
+**终端 vs RunCommand 工具（双路径）**:
+用户终端与 agent 的 `RunCommand` 工具是**两条完全隔离的命令执行路径**。用户终端：用户手动输入，进程归用户，输出在 `TermView`，无确认。`RunCommand` 工具：agent 调用，走 `ToolTier::Exec` / `SecurityPolicy` / NeedsConfirmation，进程归 agent，输出在对话主区的工具调用卡片（`toolcard`，仿 omp 界面）。两者进程互不相干、UI 互不复用。对齐「用户保存」vs `WriteFile` 工具的既有二分原则——"用户主动行为默认信任，agent 行为默认需确认"。
+_Avoid_: 终端工具、命令执行通道
+
+**终端能力边界（MVP）**:
+终端是命令行终端，非全屏 TUI 程序容器。MVP 支持普通 CLI（cargo / git / ripgrep 等，输出 ANSI 彩色 + 滚动历史），**不支持** `vim`/`top`/`htop` 等接管屏幕的全屏 TUI——这类程序用 alternate screen + 光标定位，行模型渲染下会显示混乱。终端输出渲染采用行模型（`Vec<RenderLine>` + 虚拟滚动），非屏幕字符网格。对齐 `CodeEditor` "不含 LSP、不含 split view" 的中等边界风格——明确说"不做什么"比含糊承诺"全功能终端"更诚实。
+_Avoid_: 终端模拟器、terminal emulator

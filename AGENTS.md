@@ -74,7 +74,7 @@ cargo clippy --workspace          # lint
 
 ## 4. crate 划分与依赖
 
-MVP 共 12 个 crate，按依赖关系自底向上实现（顺序见 `doc/plans/README.md`）：
+共 13 个 crate（MVP 12 + F-19 终端引入 `xgent_terminal`），按依赖关系自底向上实现（顺序见 `doc/plans/README.md`）：
 
 | crate | 类型 | 依赖 | 职责 |
 |:---|:---|:---|:---|
@@ -87,8 +87,9 @@ MVP 共 12 个 crate，按依赖关系自底向上实现（顺序见 `doc/plans/
 | xgent_tools | lib | xgent_core, settings_core | Tool trait + 安全策略 + 执行器（不依赖 Bevy） |
 | xgent_context | lib | xgent_core, settings_core | ContextProvider trait + 方案 A 检索（不依赖 Bevy） |
 | xgent_agent | lib | core, provider, tools, context, settings | agent loop + ECS 桥接 |
+| xgent_terminal | lib | xgent_core, settings_core | PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte）（不依赖 Bevy，UI 侧进程） |
 | xui | lib | bevy, xui_i18n | 通用 Bevy UI 组件库（可独立发布，不依赖任何 xgent_*） |
-| xgent_ui | lib | xui, core, settings, agent | XGent 业务 UI（对话/工具/文件面板等） |
+| xgent_ui | lib | xui, core, settings, agent, terminal | XGent 业务 UI（对话/工具/文件面板/终端等） |
 | xgent_app | bin | all UI-side | UI 进程入口：组装插件、daemon 拉起、IPC 客户端、项目打开 |
 
 **依赖关系图**（无环）：
@@ -99,8 +100,8 @@ xgent_core ←──────── 一切共享类型的基础
 xui_i18n ← xui, xgent_settings            （纯 trait，无依赖）
 xgent_settings_core ← xgent_daemon, xgent_provider, xgent_settings
 xgent_provider ← xgent_daemon, xgent_agent
-xgent_tools ← xgent_agent
 xgent_context ← xgent_agent
+xgent_terminal ← xgent_ui
 xgent_settings ← xgent_daemon, xgent_agent, xgent_ui
      ↑
 xgent_agent ← xgent_ui
@@ -190,7 +191,7 @@ xgent_app → 组装所有 UI 侧 crate
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP + F-11 编辑器（P1）已落地阶段。12 个 crate 全部实现，`cargo check --workspace` 通过，约 19k 行 Rust。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。插件系统设计已完成（`doc/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP + F-11 编辑器（P1）已落地、F-19 终端（P1）设计中阶段。13 个 crate（MVP 12 + xgent_terminal 设计中），`cargo check --workspace` 通过，约 19k 行 Rust。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。插件系统设计已完成（`doc/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
 实现顺序见 `doc/plans/README.md`（step1~step12，已全部完成）+ `doc/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `doc/design/requirements.md` §4.2 的 P1/P2 项推进。
 
