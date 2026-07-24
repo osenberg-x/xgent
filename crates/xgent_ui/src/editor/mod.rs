@@ -23,12 +23,7 @@ pub mod tabs;
 use bevy::prelude::*;
 
 use crate::editor::buffer::EditorBuffer;
-use crate::theme::Theme;
-
-/// 便捷：f32 → Val::Px
-fn px(v: f32) -> Val {
-    Val::Px(v)
-}
+use crate::theme::{Theme, px};
 use crate::editor::command::EditorCommand;
 use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
@@ -53,11 +48,15 @@ pub enum EditorView {
     Editor,
 }
 
-/// 右侧分屏内容类型：编辑器视图 / 文件预览 / 无（收起）。
+/// 右侧分屏内容类型：编辑器视图 / 文件预览 / 终端 / 无（收起）。
 ///
-/// 由 [`crate::file_panel::handle_file_click`] 据文件类型设置；
-/// [`apply_editor_view_visibility`] 统一据它切换 `EditorViewMarker` 与
-/// `FilePreviewMarker` 的显隐，避免多系统并发写同一组件（B0001）。
+/// 由 [`crate::file_panel::handle_file_click`]（Editor/Preview）与终端模块
+/// （Terminal，`Ctrl+`` / 顶栏 🖥）设置；[`apply_editor_view_visibility`]
+/// 统一据它切换 `EditorViewMarker` 与 `FilePreviewMarker` 的显隐，避免多系统
+/// 并发写同一组件（B0001）。终端容器（`TerminalViewMarker`）的显隐由终端模块
+/// 自身的 `apply_terminal_view_visibility` 系统[^1]据本 Resource 切换。
+///
+/// [^1]: `crate::terminal::apply_terminal_view_visibility`
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideViewContent {
     /// 无内容（分屏收起或初始）
@@ -67,6 +66,8 @@ pub enum SideViewContent {
     Editor,
     /// 文件预览（非代码文件）
     Preview,
+    /// 终端视图（多 tab PTY）
+    Terminal,
 }
 
 /// 编辑器视图标记节点（编辑器容器，初始隐藏）。

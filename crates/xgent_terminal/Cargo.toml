@@ -1,0 +1,15 @@
+[package]
+name = "xgent_terminal"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+portable-pty = { workspace = true }
+vte = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

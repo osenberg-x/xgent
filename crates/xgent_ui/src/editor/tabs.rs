@@ -12,11 +12,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 
 use crate::editor::buffer::EditorBuffer;
-
-/// 便捷：f32 → Val::Px
-fn px(v: f32) -> Val {
-    Val::Px(v)
-}
+use crate::theme::px;
 
 /// 多标签页管理 Resource。
 #[derive(Resource, Debug, Default)]

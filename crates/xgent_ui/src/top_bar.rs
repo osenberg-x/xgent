@@ -25,6 +25,9 @@ pub struct SettingsButtonMarker;
 /// 顶栏 provider 标签按钮标记（点击打开设置面板切换 provider）。
 #[derive(Component, Default)]
 pub struct ProviderButtonMarker;
+/// 顶栏终端按钮标记（点击唤起终端 SideView）。
+#[derive(Component, Default)]
+pub struct TerminalButtonMarker;
 
 /// 顶栏插件。
 pub struct TopBarPlugin;
@@ -97,6 +100,25 @@ fn spawn_top_bar(
             flex_grow: 1.0,
             ..default()
         });
+        // 🖥 终端按钮（唤起终端 SideView）
+        p.spawn((
+            Button,
+            Node {
+                width: px(28.0),
+                height: px(28.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4.0)),
+                ..default()
+            },
+            Text::new(">_"),
+            TextFont {
+                font_size,
+                ..default()
+            },
+            TextColor(theme.text_dim),
+            TerminalButtonMarker,
+        ));
         // ＋新建会话按钮（btn 样式：panel 底 + 边框）
         p.spawn((
             Button,
@@ -162,8 +184,14 @@ fn handle_top_bar_buttons(
     q_new: Query<&Interaction, (With<NewSessionButtonMarker>, Changed<Interaction>)>,
     q_settings: Query<&Interaction, (With<SettingsButtonMarker>, Changed<Interaction>)>,
     q_provider: Query<&Interaction, (With<ProviderButtonMarker>, Changed<Interaction>)>,
+    q_terminal: Query<&Interaction, (With<TerminalButtonMarker>, Changed<Interaction>)>,
     mut palette: ResMut<CommandPaletteState>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
+    mut content: ResMut<crate::editor::SideViewContent>,
+    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
+    terminal_tabs: Res<crate::terminal::TerminalTabs>,
+    mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
+    project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     for i in q_new.iter() {
         if *i == Interaction::Pressed {
@@ -179,6 +207,25 @@ fn handle_top_bar_buttons(
     for i in q_provider.iter() {
         if *i == Interaction::Pressed {
             settings_state.open = true;
+        }
+    }
+    // 🖥 终端按钮 → 切换终端视图
+    for i in q_terminal.iter() {
+        if *i == Interaction::Pressed {
+            if *content == crate::editor::SideViewContent::Terminal {
+                *content = crate::editor::SideViewContent::None;
+                collapsed.0 = true;
+            } else {
+                *content = crate::editor::SideViewContent::Terminal;
+                // 无 tab 时首次唤起自动 spawn 一个（对齐设计 §3.5）
+                if terminal_tabs.is_empty() {
+                    let cwd = project_root
+                        .as_deref()
+                        .map(|r| r.path.clone())
+                        .unwrap_or_else(std::env::temp_dir);
+                    terminal_spawn.write(crate::terminal::tabs::SpawnTabRequest { cwd });
+                }
+            }
         }
     }
 }

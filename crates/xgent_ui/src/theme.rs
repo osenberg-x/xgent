@@ -110,3 +110,7 @@ pub mod size {
     pub const CHAT_SIDEBAR_W: f32 = 380.0;
     pub const FILE_PANEL_W: f32 = 240.0;
 }
+/// 便捷：f32 → Val::Px（跨模块共享，避免重复定义）。
+pub fn px(v: f32) -> Val {
+    Val::Px(v)
+}

@@ -159,6 +159,7 @@ xgent/                     workspace 根
 │   ├── xgent_provider/        # provider 抽象 + OpenAI compatible / Response API / 自定义 API 适配（不依赖 Bevy）
 │   ├── xgent_tools/           # 工具枚举 + 安全策略 + 执行器（不依赖 Bevy）
 │   ├── xgent_context/         # 项目上下文检索（ContextProvider trait + A 方案实现，不依赖 Bevy）
+│   ├── xgent_terminal/      # (lib) 终端 PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty + vte，不依赖 Bevy）
 │   ├── xgent_agent/           # agent loop + 对话编排 + ECS 桥接
 │   ├── xui/                   # (lib) 通用 Bevy UI 组件库（可独立发布，纯依赖 bevy + xui_i18n）
 │   ├── xgent_ui/              # (lib) XGent 业务 UI：对话/工具/文件面板等（依赖 xui）
@@ -209,6 +210,7 @@ xgent_tools ← xgent_agent
 xgent_context ← xgent_agent
 xgent_settings ← xgent_daemon, xgent_agent, xgent_ui
      ↑
+xgent_terminal ← xgent_ui
 xgent_agent ← xgent_ui
 xgent_pet ← xgent_ui（可选）
      ↑

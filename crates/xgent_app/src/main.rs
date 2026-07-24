@@ -146,6 +146,8 @@ fn main() {
 
     // 通知订阅端（fs/config 桥接用）
     let notif_rx = ipc.subscribe();
+    // 终端复用 agent bridge 的 tokio runtime handle（bridge 在下方 insert_resource 移动）
+    let terminal_rt_handle = bridge.runtime.handle().clone();
 
     // 组装 App
     let mut app = App::new();
@@ -173,7 +175,10 @@ fn main() {
         path: project_root.clone(),
     })
     .insert_resource(Localizer::default())
-    .insert_resource(Strings(Box::new(Localizer::default())))
+    .insert_resource(xgent_ui::terminal::TerminalIoRuntime::new(
+        terminal_rt_handle,
+        xgent_terminal::LocalPtyBackend::new(),
+    ))
     .insert_resource(bridge)
     .insert_resource(IpcClientResource {
         client: ipc.clone(),

@@ -11,6 +11,7 @@ xgent_settings_core = { path = "../xgent_settings_core" }
 xgent_agent = { path = "../xgent_agent" }
 xgent_tools = { path = "../xgent_tools" }
 xgent_context = { path = "../xgent_context" }
+xgent_terminal = { path = "../xgent_terminal" }
 xgent_ui = { path = "../xgent_ui" }
 xui = { path = "../xui" }
 xui_i18n = { path = "../xui_i18n" }

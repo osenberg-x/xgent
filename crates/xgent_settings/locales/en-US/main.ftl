@@ -66,3 +66,15 @@ tool-denied = Denied
 tool-result = Result
 tool-expand = Click to expand
 palette-placeholder = Type a command...
+hotkey-toggle-terminal = Toggle Terminal
+terminal-title = Terminal
+terminal-no-tabs = No terminal
+terminal-status-created = ◐ Starting · { $shell } · { $cwd }
+terminal-status-running = ● Running · { $shell } · { $cwd }
+terminal-status-exited = ○ Exited (code={ $code }) · { $shell }
+terminal-shell-powershell = powershell
+terminal-shell-shell = shell
+terminal-new-tab = +
+terminal-clear = Clear
+terminal-close = x
+terminal-prompt = >

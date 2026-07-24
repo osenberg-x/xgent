@@ -66,3 +66,15 @@ tool-denied = 已拒绝
 tool-result = 结果
 tool-expand = 点击展开
 palette-placeholder = 输入命令...
+hotkey-toggle-terminal = 切换终端
+terminal-title = 终端
+terminal-no-tabs = 无终端
+terminal-status-created = ◐ 启动中 · { $shell } · { $cwd }
+terminal-status-running = ● 运行中 · { $shell } · { $cwd }
+terminal-status-exited = ○ 已退出 (code={ $code }) · { $shell }
+terminal-shell-powershell = powershell
+terminal-shell-shell = shell
+terminal-new-tab = ＋
+terminal-clear = 清屏
+terminal-close = ✕
+terminal-prompt = ❯

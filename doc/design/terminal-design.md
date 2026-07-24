@@ -1,6 +1,6 @@
 # XGent 内置终端设计文档
 
-> 状态：草案 v1 · 待评审
+> 状态：落地 v1（crate + UI 层已实现，`cargo check --workspace` 通过）
 >
 > 范围：F-19 内置终端（P1）。基于 grill 会话决策落地，覆盖 UI 界面、架构边界、数据流、状态机、与编辑器/SideView 的复用关系、安全模型。领域语言见 `CONTEXT.md` "终端（F-19，P1）" 小节。
 >
@@ -325,6 +325,8 @@ pub enum TerminalError {
 - `subscribe`：`spawn_blocking` 起读循环 task，`reader.read_to_end`/循环 `read` 读 PTY master 输出，经 `tx` 发 `TerminalEvent::Output(bytes)`；EOF 时发 `Exited`。
 - `write`/`resize`/`kill`：操作 master 句柄，`kill` 杀 slave 进程组。
 - 同步 API 全包在 `spawn_blocking`，不阻塞 tokio async 上下文。
+>
+> **落地偏离**（MVP）：`portable-pty` 无跨平台 raw 模式 API（Unix termios 可设、Windows ConPTY 自管 echo），`LocalPtyBackend` **未设 raw 模式**——保持 shell cooked 模式，shell 回显用户输入。UI 行编辑器降级为「输入框 + 回车提交整行」，shell 回显产生可见命令行；控制字符 Ctrl+C/D 即时单字节发送。代价是输入框与历史区短暂双显（输入框清空即消失），收益是跨平台一致 + shell 自带历史/补全（设计本列为「不支持」，cooked 模式反而白送）。raw 模式 + echo off 留后续（需 Unix 走 termios、Windows 走 ConPTY input mode 调整，跨平台抽象复杂）。
 
 ### 5.4 Cargo.toml
 

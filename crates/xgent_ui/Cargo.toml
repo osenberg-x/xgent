@@ -8,6 +8,7 @@ bevy = { workspace = true, features = ["ui", "bevy_ui_widgets", "default_font"] 
 xgent_core = { path = "../xgent_core" }
 xgent_settings = { path = "../xgent_settings" }
 xgent_settings_core = { path = "../xgent_settings_core" }
+xgent_terminal = { path = "../xgent_terminal" }
 xgent_agent = { path = "../xgent_agent" }
 xgent_tools = { path = "../xgent_tools" }
 xui = { path = "../xui" }
@@ -15,8 +16,10 @@ parley = { workspace = true }
 xui_i18n = { path = "../xui_i18n" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true }
 
+crossbeam-channel = { workspace = true }
 [dev-dependencies]
 bevy = { workspace = true, features = ["ui", "bevy_ui_widgets", "default_font", "bevy_dev_tools"] }
 tempfile = "3"

@@ -11,11 +11,10 @@ use xui::command_palette::CommandPaletteState;
 use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
-use crate::editor::EditorView;
+use crate::editor::{EditorView, SideViewContent};
 use crate::editor::tabs::CycleTabRequest;
 use crate::i18n::tr;
 use crate::layout::FilePanelCollapsed;
-
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
 
@@ -108,6 +107,15 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
         )
         .with_primary(),
     );
+    // Ctrl+`：切换终端视图（已展开且 Terminal → 收起；否则唤起/新建 tab）
+    let _ = reg.register(
+        Hotkey::new(
+            "terminal.toggle",
+            KeyCode::Backquote,
+            tr(&loc, "hotkey-toggle-terminal"),
+        )
+        .with_primary(),
+    );
 }
 
 /// 订阅 HotkeyTriggered，据 id 执行业务。
@@ -118,17 +126,42 @@ pub(crate) fn handle_hotkey_triggers(
     mut file_panel: ResMut<FilePanelCollapsed>,
     mut side_view: ResMut<crate::layout::SideViewCollapsed>,
     mut view: ResMut<EditorView>,
+    mut content: ResMut<SideViewContent>,
     mut cycle_writer: MessageWriter<CycleTabRequest>,
+    terminal_tabs: Res<crate::terminal::TerminalTabs>,
+    mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
+    project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     for ev in reader.read() {
         match ev.id.as_str() {
             "palette.open" | "palette.open_files" => palette.open(),
             "chat.abort" => {
-                // 编辑器视图激活时，Esc 优先退出编辑器视图而非中断对话
-                if *view == EditorView::Editor {
+                // 终端视图激活时，Esc 退出终端视图（不中断对话）
+                if *content == SideViewContent::Terminal {
+                    *content = SideViewContent::None;
+                    side_view.0 = true;
+                } else if *view == EditorView::Editor {
+                    // 编辑器视图激活时，Esc 优先退出编辑器视图而非中断对话
                     *view = EditorView::Chat;
                 } else {
                     abort_writer.write(AbortMessage);
+                }
+            }
+            "terminal.toggle" => {
+                // 已展开且 Terminal → 收起；否则唤起终端
+                if *content == SideViewContent::Terminal {
+                    *content = SideViewContent::None;
+                    side_view.0 = true;
+                } else {
+                    *content = SideViewContent::Terminal;
+                    // 无 tab 时首次唤起自动 spawn 一个（对齐设计 §3.5）
+                    if terminal_tabs.is_empty() {
+                        let cwd = project_root
+                            .as_deref()
+                            .map(|r| r.path.clone())
+                            .unwrap_or_else(std::env::temp_dir);
+                        terminal_spawn.write(crate::terminal::tabs::SpawnTabRequest { cwd });
+                    }
                 }
             }
             "settings.open" => palette.open(),
