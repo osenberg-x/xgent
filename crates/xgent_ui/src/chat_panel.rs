@@ -266,6 +266,14 @@ fn spawn_chat_panel(
                         },
                         TextColor(theme.text_dim),
                     ));
+                    hint.spawn((
+                        Text::new(crate::i18n::tr(&loc, "hint-terminal")),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(theme.text_dim),
+                    ));
                 });
             // 右侧 tokenhint（状态文本）
             meta.spawn((

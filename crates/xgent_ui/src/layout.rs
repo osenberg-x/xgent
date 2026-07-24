@@ -72,7 +72,6 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>, widths: Re
     // 相机（UI 渲染需要）
     commands.spawn(Camera2d);
 
-    let font = theme.font_size;
     commands
         .spawn((
             Node {
@@ -101,17 +100,7 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>, widths: Re
                     BackgroundColor(theme.bar),
                     BorderColor::all(theme.border),
                     TopBarMarker,
-                ))
-                .with_children(|bar| {
-                    bar.spawn((
-                        Text::new("XGent"),
-                        TextFont {
-                            font_size: px_size(font + 2.0),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
-                });
+                ));
 
             // 主区
             parent
@@ -257,7 +246,3 @@ pub(crate) fn toggle_panel_visibility(
     }
 }
 
-/// 把 f32 转为 [`FontSize`]。
-fn px_size(v: f32) -> FontSize {
-    FontSize::Px(v)
-}

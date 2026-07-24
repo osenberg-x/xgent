@@ -17,6 +17,7 @@ hint-send = Ctrl+Enter Send
 hint-abort = Esc Abort
 hint-palette = Ctrl+Shift+P Palette
 hint-toggle-sideview = Ctrl+\ Split
+hint-terminal = Ctrl+` Terminal
 role-user = User
 role-assistant = XGent
 settings-kind-openai-compat = OpenAI Compatible

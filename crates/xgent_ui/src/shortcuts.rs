@@ -15,6 +15,7 @@ use crate::editor::{EditorView, SideViewContent};
 use crate::editor::tabs::CycleTabRequest;
 use crate::i18n::tr;
 use crate::layout::FilePanelCollapsed;
+use crate::confirm_dialog::ConfirmDialogMarker;
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
 
@@ -130,12 +131,16 @@ pub(crate) fn handle_hotkey_triggers(
     mut cycle_writer: MessageWriter<CycleTabRequest>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
+    q_confirm: Query<(), With<ConfirmDialogMarker>>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     for ev in reader.read() {
         match ev.id.as_str() {
-            "palette.open" | "palette.open_files" => palette.open(),
             "chat.abort" => {
+                // 确认弹窗激活时 Esc 交给 confirm_dialog 处理（拒绝），不中断对话
+                if q_confirm.single().is_ok() {
+                    continue;
+                }
                 // 终端视图激活时，Esc 退出终端视图（不中断对话）
                 if *content == SideViewContent::Terminal {
                     *content = SideViewContent::None;
@@ -164,12 +169,22 @@ pub(crate) fn handle_hotkey_triggers(
                     }
                 }
             }
-            "settings.open" => palette.open(),
+            "settings.open" => {
+                palette.open();
+                palette.query = "settings".into();
+            }
             "filepanel.toggle" => {
                 file_panel.0 = !file_panel.0;
             }
             "sideview.toggle" => {
-                side_view.0 = !side_view.0;
+                // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）
+                if !side_view.0 && *content == SideViewContent::Editor {
+                    *content = SideViewContent::None;
+                    side_view.0 = true;
+                } else {
+                    *content = SideViewContent::Editor;
+                    side_view.0 = false;
+                }
             }
             "input.focus" => {}
             "editor.view" => {

@@ -22,7 +22,8 @@ impl Plugin for ConfirmDialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (show_on_request, hide_on_decision).after(xgent_agent::agent_loop::agent_poll_system),
+            (show_on_request, hide_on_decision, handle_confirm_keyboard)
+                .after(xgent_agent::agent_loop::agent_poll_system),
         );
     }
 }
@@ -331,6 +332,51 @@ fn hide_on_decision(
     for i in q_deny.iter() {
         if *i == Interaction::Pressed {
             close(ConfirmDecision::Deny);
+        }
+    }
+}
+
+/// 弹窗激活时的键盘决策：Esc→拒绝、Enter→允许。
+///
+/// 对齐原型 modal-foot 按钮标注 (Esc)/(Enter)。弹窗 overlay 为全局遮罩
+/// （GlobalZIndex 50），激活时独占键盘。Esc 的 chat.abort 冲突由
+/// [`shortcuts::handle_hotkey_triggers`] 查弹窗存在性跳过解决。
+fn handle_confirm_keyboard(
+    mut reader: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
+    mut commands: Commands,
+    mut writer: MessageWriter<ConfirmDecisionMessage>,
+) {
+    if q_dialog.single().is_err() {
+        return;
+    }
+    for ev in reader.read() {
+        if ev.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        use bevy::input::keyboard::KeyCode as K;
+        match ev.key_code {
+            K::Escape => {
+                writer.write(ConfirmDecisionMessage {
+                    decision: ConfirmDecision::Deny,
+                });
+                // despawn 由 hide_on_decision 负责，但键盘路径无 dialog 查询
+                // 此处也需 despawn——hide_on_decision 只在按钮 Changed 时触发
+                if let Ok(dialog) = q_dialog.single() {
+                    commands.entity(dialog).despawn();
+                }
+                return;
+            }
+            K::Enter => {
+                writer.write(ConfirmDecisionMessage {
+                    decision: ConfirmDecision::Allow,
+                });
+                if let Ok(dialog) = q_dialog.single() {
+                    commands.entity(dialog).despawn();
+                }
+                return;
+            }
+            _ => {}
         }
     }
 }
