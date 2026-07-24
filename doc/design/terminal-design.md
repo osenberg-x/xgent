@@ -325,8 +325,7 @@ pub enum TerminalError {
 - `subscribe`：`spawn_blocking` 起读循环 task，`reader.read_to_end`/循环 `read` 读 PTY master 输出，经 `tx` 发 `TerminalEvent::Output(bytes)`；EOF 时发 `Exited`。
 - `write`/`resize`/`kill`：操作 master 句柄，`kill` 杀 slave 进程组。
 - 同步 API 全包在 `spawn_blocking`，不阻塞 tokio async 上下文。
->
-> **落地偏离**（MVP）：`portable-pty` 无跨平台 raw 模式 API（Unix termios 可设、Windows ConPTY 自管 echo），`LocalPtyBackend` **未设 raw 模式**——保持 shell cooked 模式，shell 回显用户输入。UI 行编辑器降级为「输入框 + 回车提交整行」，shell 回显产生可见命令行；控制字符 Ctrl+C/D 即时单字节发送。代价是输入框与历史区短暂双显（输入框清空即消失），收益是跨平台一致 + shell 自带历史/补全（设计本列为「不支持」，cooked 模式反而白送）。raw 模式 + echo off 留后续（需 Unix 走 termios、Windows 走 ConPTY input mode 调整，跨平台抽象复杂）。
+> **落地偏离**（MVP）：`portable-pty` 无跨平台 raw 模式 API（Unix termios 可设、Windows ConPTY 自管 echo），`LocalPtyBackend` **保持 shell cooked 模式**。UI 侧**透传模式**：按键直接转原始字节发 PTY（字符→UTF-8 字节、Enter→`\n`、Ctrl+C/D→`\x03`/`\x04`、行编辑键→对应 ANSI 转义/控制字节），**不本地镜像字符**——shell 回显是输入唯一显示源，避免「输入框 + shell 回显」双显。收益是跨平台一致 + 获得 shell 原生 readline（历史↑↓/Tab 补全/Ctrl+A/E/U 行编辑，设计本列为「不支持」，cooked 模式反而白送）。代价是放弃 UI 侧行编辑（交由 shell readline 承担）。raw 模式 + echo off 留后续（需 unix 走 termios、windows 走 ConPTY input mode 调整，跨平台抽象复杂）。
 
 ### 5.4 Cargo.toml
 

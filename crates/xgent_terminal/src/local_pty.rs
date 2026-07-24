@@ -110,21 +110,40 @@ impl TerminalBackend for LocalPtyBackend {
             std::thread::spawn(move || {
                 let mut reader = reader;
                 let mut buf = [0u8; 4096];
+                // 跨 read 的残余尾部：DSR 查询 \x1b[6n 可能被拆到两次 read，
+                // 仅在单次 buffer 内 windows(4) 匹配会漏检导致 shell 卡死。
+                // 保留最多 3 字节尾部（序列长 4，残余 ≤3 才能拼上下次头部）。
+                let mut tail: Vec<u8> = Vec::with_capacity(3);
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
-                            // 检测 DSR 光标位置查询（\x1b[6n），回复 \x1b[1;1R
-                            // PowerShell/PSReadLine 启动时发此查询探测终端，
-                            // 不回复则阻塞等待，导致后续输入无响应。
-                            if buf[..n].windows(4).any(|w| w == b"\x1b[6n") {
-                                if let Ok(mut w) = writer_for_read.lock() {
-                                    let _ = w.write_all(b"\x1b[1;1R");
-                                    let _ = w.flush();
-                                }
+                            let chunk = &buf[..n];
+                            // 跨 read 拼接残余 + 新数据扫描 DSR 光标查询（\x1b[6n）。
+                            // 序列可能被拆到两次 read，单 buffer 内 windows(4) 会漏检
+                            // 导致 shell 卡死。保留最多 3 字节尾部拼接下次头部。
+                            // 回复 \x1b[1;1R：PowerShell/PSReadLine 启动时探测终端，
+                            // 不回复则阻塞等待，输入无响应。
+                            let has_dsr = if tail.is_empty() {
+                                chunk.windows(4).any(|w| w == b"\x1b[6n")
+                            } else {
+                                let mut joined = std::mem::take(&mut tail);
+                                joined.extend_from_slice(chunk);
+                                let found = joined.windows(4).any(|w| w == b"\x1b[6n");
+                                tail = joined[joined.len().saturating_sub(3)..].to_vec();
+                                found
+                            };
+                            // tail 为空时保留本次 chunk 尾部（≤3 字节）供下次拼接
+                            if tail.is_empty() {
+                                let start = chunk.len().saturating_sub(3);
+                                tail = chunk[start..].to_vec();
+                            }
+                            if has_dsr && let Ok(mut w) = writer_for_read.lock() {
+                                let _ = w.write_all(b"\x1b[1;1R");
+                                let _ = w.flush();
                             }
                             if output_tx_for_read
-                                .blocking_send(TerminalEvent::Output(buf[..n].to_vec()))
+                                .blocking_send(TerminalEvent::Output(chunk.to_vec()))
                                 .is_err()
                             {
                                 break;

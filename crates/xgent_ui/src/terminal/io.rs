@@ -79,7 +79,7 @@ impl PtyBridgeRx {
     }
 }
 
-/// 终端输入请求（UI → backend）：整行 + `\n` 或单控制字节（Ctrl+C/D）。
+/// 终端输入请求（UI → backend）：原始字节透传（字符/控制字节/转义序列），shell 回显。
 #[derive(Message, Debug, Clone)]
 pub struct TerminalInput {
     /// 对应的 tab 实体。

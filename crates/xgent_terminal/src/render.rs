@@ -153,7 +153,7 @@ impl Perform for Accumulator {
     }
 
     fn execute(&mut self, byte: u8) {
-        // 控制字符：\n=LF（换行）, \r=CR（回车，忽略）, \t=Tab, \x08=BS
+        // 控制字符：\n=LF（换行）, \r=CR（回行首覆盖）, \t=Tab, \x08=BS
         match byte {
             b'\n' => {
                 self.flush_pending();
@@ -161,11 +161,22 @@ impl Perform for Accumulator {
                 self.finished.push(line);
             }
             b'\r' => {
-                // CR：MVP 忽略（不实现光标回行首覆盖语义）
-                self.flush_pending();
+                // CR：回行首，后续输出覆盖本行。清空 current + pending，
+                // 让重绘的提示符/命令覆盖旧内容（行模型近似光标回行首）。
+                self.pending_text.clear();
+                self.current = RenderLine::new();
             }
             b'\t' => {
                 self.pending_text.push_str("    ");
+            }
+            b'\x08' => {
+                // BS：退格。pending 有字符时删末尾；否则退到 current 末 span。
+                // clippy::collapsible_match 误报：此处不能用 guard（pop 成功时
+                // 不应 fallthrough 到 _，而应什么都不做）。
+                #[allow(clippy::collapsible_match)]
+                if self.pending_text.pop().is_none() {
+                    self.current.spans.pop();
+                }
             }
             _ => {
                 // 其他控制字符忽略
@@ -180,13 +191,36 @@ impl Perform for Accumulator {
         _ignored_intermediates: bool,
         byte: char,
     ) {
-        // MVP 只处理 SGR（`m`，无 intermediates）；其他 CSI（光标移动/清屏）忽略
-        if byte != 'm' || !intermediates.is_empty() {
-            // 非清屏类 CSI 简单忽略；清屏（J/K）MVP 不实现（行模型下表现待后续）
+        if !intermediates.is_empty() {
             return;
         }
-        self.flush_pending();
-        apply_sgr(&mut self.style, params);
+        match byte {
+            // SGR（颜色/样式）
+            'm' => {
+                self.flush_pending();
+                apply_sgr(&mut self.style, params);
+            }
+            // EL — Erase in Line（\x1b[K / \x1b[0K / \x1b[2K）
+            // 行模型下统一清空当前行（pending + current），让重绘覆盖。
+            'K' => {
+                self.pending_text.clear();
+                self.current = RenderLine::new();
+            }
+            // ED — Erase in Display（\x1b[J / \x1b[0J / \x1b[2J）
+            // 0/1：清屏到光标/从光标清——行模型近似清当前行。
+            // 2：全屏清——丢弃全部历史 + 当前行（shell `clear` 命令）。
+            'J' => {
+                let mode = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(0);
+                if mode == 2 {
+                    self.finished.clear();
+                }
+                self.pending_text.clear();
+                self.current = RenderLine::new();
+            }
+            // 光标移动（H/A/B/C/D）：行模型下无法精确还原屏幕位置，
+            // 不产生行内容——让 \r + 重绘自然覆盖。忽略即可。
+            _ => {}
+        }
     }
 }
 
@@ -308,5 +342,33 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].spans[0].style.bold);
         assert!(!lines[0].spans[1].style.bold);
+    }
+    #[test]
+    fn carriage_return_overwrites_line() {
+        // cooked shell 用 \r 回行首重绘：旧内容应被覆盖
+        let mut p = TerminalParser::new();
+        let lines = p.feed(b"old\rnew\n");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].plain_text(), "new");
+    }
+
+    #[test]
+    fn erase_in_line_clears_current() {
+        // \x1b[K（EL）清当前行
+        let mut p = TerminalParser::new();
+        let lines = p.feed(b"keep\n\x1b[Kcleared\n");
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].plain_text(), "keep");
+        // \x1b[K 清空了 "cleared" 之前无内容，第二行应为 "cleared"
+        assert_eq!(lines[1].plain_text(), "cleared");
+    }
+
+    #[test]
+    fn erase_display_2_clears_history() {
+        // \x1b[2J（ED 2）全屏清：丢弃全部历史
+        let mut p = TerminalParser::new();
+        let lines = p.feed(b"line1\nline2\n\x1b[2Jafter_clear\n");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].plain_text(), "after_clear");
     }
 }

@@ -71,8 +71,8 @@ pub enum TerminalError {
 /// 实现需保证：spawn 起 PTY 进程 + 读写 task；经 channel 发
 /// [`TerminalEvent`]；kill 杀进程组并释放资源。
 ///
-/// 注：MVP 实现不设 raw 模式 + echo off（见 `terminal-design.md` §5.3
-/// 落地偏离说明）——保持 shell cooked 模式，shell 回显用户输入。
+/// 注：MVP 保持 shell cooked 模式（`portable-pty` 无跨平台 raw 模式 API），
+/// shell 自带 readline 回显。UI 侧透传按键字节，shell 回显为唯一显示源。
 #[async_trait]
 pub trait TerminalBackend: Send + Sync {
     /// spawn 新 PTY 会话，返回其 id。
@@ -85,7 +85,7 @@ pub trait TerminalBackend: Send + Sync {
         req: SpawnRequest,
         output_tx: mpsc::Sender<TerminalEvent>,
     ) -> Result<TerminalId, TerminalError>;
-    /// 写字节到 PTY stdin（整行 + `\n` 或单控制字节如 `\x03`）。
+    /// 写字节到 PTY stdin（透传模式：字符/控制字节/转义序列原样发，shell 回显）。
     async fn write(&self, id: TerminalId, bytes: Vec<u8>) -> Result<(), TerminalError>;
     /// 调整 PTY 窗口大小（响应 SideView/窗口 resize）。
     async fn resize(&self, id: TerminalId, cols: u16, rows: u16) -> Result<(), TerminalError>;

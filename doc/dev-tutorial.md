@@ -108,7 +108,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | 0008 | 会话存储 JSONL append-only | `xgent_core/src/session.rs` + `xgent_agent/src/session_store.rs`（`<agent_dir>/sessions/<session_id>.jsonl`，全局，对齐 pi 布局） |
 | 0009 | 编辑器保存绕过 WriteFile + UiOnly tier | `xgent_ui/src/editor/io.rs`（Cmd+S 直接 fs::write）+ `xgent_tools/src/editor_tool.rs`（ToolTier::UiOnly） |
 | 0010 | OQ-08 检索升级路径分段（编辑器→C，D 延后到 LSP） | `xgent_context` 仅 OnDemand 实现，其余 trait 占位 |
-| 0011 | 用户终端 PTY 选 portable-pty | `xgent_terminal`（`LocalPtyBackend`，portable-pty + spawn_blocking 桥接 ECS）+ `xgent_ui::terminal::io`（crossbeam 桥 tokio→ECS）；Win powershell/Unix $SHELL；MVP 未设 raw 模式（cooked shell 回显，见 terminal-design.md §5.3 偏离说明）。读循环直接 `tokio::mpsc::Sender::blocking_send` 转发输出（不经 std mpsc 中转 + async 桥接 task，避免阻塞 std `recv` 冻结 runtime）；读循环检测 DSR 光标查询 `\x1b[6n` 并回复 `\x1b[1;1R`（PowerShell/PSReadLine 启动时探测终端，不回复则卡死等待，输入无响应）；writer 经 `Arc<Mutex>` 共享给读循环（DSR 回写）与命令循环（用户输入）。 |
+| 0011 | 用户终端 PTY 选 portable-pty | `xgent_terminal`（`LocalPtyBackend`，portable-pty + spawn_blocking 桥接 ECS）+ `xgent_ui::terminal::io`（crossbeam 桥 tokio→ECS）；Win powershell/Unix $SHELL；保持 shell cooked 模式（portable-pty 无跨平台 raw API），UI 侧**透传模式**——按键直接转原始字节发 PTY，shell 回显为唯一显示源（避免双显），获 shell 原生 readline 历史/补全。读循环直接 `tokio::mpsc::Sender::blocking_send` 转发输出（不经 std mpsc 中转 + async 桥接 task，避免阻塞 std `recv` 冻结 runtime）；读循环检测 DSR 光标查询 `\x1b[6n` 并回复 `\x1b[1;1R`（PowerShell/PSReadLine 启动时探测终端，不回复则卡死等待，输入无响应）；writer 经 `Arc<Mutex>` 共享给读循环（DSR 回写）与命令循环（用户输入）。 |
 | 0012 | 终端独立 crate + TerminalBackend trait | `xgent_terminal`（`TerminalBackend` trait + `LocalPtyBackend`）+ `xgent_ui::terminal`（UI 层只依赖 trait，经 `TerminalIoRuntime` 注入实现）；对齐 xgent_tools/xgent_context 纯逻辑层模式 |
 
 ---
