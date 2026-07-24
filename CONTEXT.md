@@ -131,3 +131,34 @@ _Avoid_: 终端工具、命令执行通道
 **终端能力边界（MVP）**:
 终端是命令行终端，非全屏 TUI 程序容器。MVP 支持普通 CLI（cargo / git / ripgrep 等，输出 ANSI 彩色 + 滚动历史），**不支持** `vim`/`top`/`htop` 等接管屏幕的全屏 TUI——这类程序用 alternate screen + 光标定位，行模型渲染下会显示混乱。终端输出渲染采用行模型（`Vec<RenderLine>` + 虚拟滚动），非屏幕字符网格。对齐 `CodeEditor` "不含 LSP、不含 split view" 的中等边界风格——明确说"不做什么"比含糊承诺"全功能终端"更诚实。
 _Avoid_: 终端模拟器、terminal emulator
+
+
+## 插件系统（设计中）
+
+**插件（Plugin）**:
+运行时加载的 WASM 组件（`wasm32-wasip2`），经 WIT 接口向宿主注册扩展点能力（工具/命令/ContextProvider/UI 面板）。隔离在 wasmtime Store 沙箱内，不直接操作 Bevy World，不直接发 ECS Message。区别于内建工具——内建工具随宿主编译、直接 trait 实现；插件经 WIT 桥接。
+_Avoid_: 扩展、extension、add-on
+
+**扩展点**:
+插件可注册的宿主能力类别。MVP 五类：Agent 工具、命令面板命令、ContextProvider、Provider 适配器（MVP 不接）、UI 面板（P2）。每类有对应 WIT 接口 + 宿主适配器（把插件能力桥接为现有 trait）。区别于"插件清单"——清单声明提供哪些扩展点，扩展点是宿主侧的能力类别。
+_Avoid_: 插件能力、plugin point
+
+**WIT 接口**:
+用 WebAssembly Interface Type 定义的宿主↔插件接口契约，`wit-bindgen` 生成 Rust 绑定。分两个方向：`host`（宿主提供给插件，如 `read-file`/`run-command`）与插件 `export` 的接口（如 `tool`/`command`/`context-provider`）。版本化管理（D-P2）。区别于 ECS 通信——WIT 是进程内跨 WASM 边界，ECS 是进程内同步；插件不直接发 ECS Message，经 WIT 调宿主 API 由宿主桥接为 Message。
+_Avoid_: 插件 API、FFI
+
+**PluginHostProxy（反转依赖枢纽）**:
+宿主侧各子系统注册 proxy trait impl 的聚合点，插件经 WIT 调用 → `WasmHost` → proxy → 宿主子系统。使 `xgent_plugin` crate 不依赖任何业务 crate（Tool/CommandRegistry/Provider/Context）。对齐 Zed `ExtensionHostProxy`。MVP 的 proxy trait 按 UI 侧扩展点设计（tool/command/context），未留 daemon 侧 provider proxy 字段（D-P4 待决策）。
+_Avoid_: 宿主代理、host proxy
+
+**插件工具（PluginTool）**:
+插件注册工具的宿主侧适配器，包装为 `xgent_tools::Tool` trait 实现注入 `ToolExecutor`。经 WIT `tool.execute`/`tool.preview-diff` 桥接（async，专用 `LocalSet` task 内 await，经 channel 与 `agent_loop_task` 通信）。`approval_for`/`summarize` 不经 WIT——wasmtime v40 async 全有或全无，同步 trait 签名无法 await async WIT 绑定；回退 `self.tier()`/清单 `description`（见 ADR-0013）。代价：插件无动态 tier、summarize 静态。
+_Avoid_: WASM 工具、plugin tool adapter
+
+**插件 ContextProvider**:
+插件注册的上下文提供者，包装为 `xgent_context::ContextProvider` trait 实现注入 `AgentBridge`。经 WIT `context-provider.retrieve` 桥接（async，tokio task 内 await，对齐 `OnDemandContextProvider::retrieve`）。设计文档 §3/§5.1 的 `ContextHub` 是笔误——代码无此实体，实际经 `build_context_provider` + `ContextStrategy::Plugin` 注入，无聚合器。`ContextQuery`/`ContextResult`/`ContextChunk` 进 WIT 类型定义。`on-file-changed` WIT 定义预留、MVP 宿主不调用（插件全量 retrieve，索引类增量留 P1）。
+_Avoid_: ContextHub、插件上下文、plugin context
+
+**ContextProvider 运行时替换**:
+`AgentBridgeConfig.context`（原 `Arc<dyn ContextProvider>` 构造时固定）改为可运行时替换容器（`Arc<RwLock<Box<dyn ContextProvider>>>`），插件加载/卸载时 swap。对齐工具（`ToolExecutor.register/unregister`）与命令（`CommandRegistry`）的运行时增删能力——context 此前是唯一不支持运行时替换的扩展点。代价：`AgentBridgeConfig` 签名破坏性改动，连锁 `main.rs` + `bridge_tests.rs`。
+_Avoid_: context 热替换、context swap
