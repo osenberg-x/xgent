@@ -15,11 +15,13 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use clap::Parser;
 use xgent_agent::bridge::{AgentBridge, AgentBridgeConfig};
-use xgent_context::OnDemandContextProvider;
+use xgent_context::{ContextHub, OnDemandContextProvider, XgentContextPlugin};
+use xgent_plugin::{PluginHost, PluginHostProxy, WasmHost};
+use xgent_plugin_host::{register_proxy_impls, PluginEventRx, PluginHostPlugin, PluginHostResource};
 use xgent_settings::Localizer;
-use xgent_settings_core::paths::daemon_socket_path;
+use xgent_settings_core::paths::{daemon_socket_path, plugins_dir};
 use xgent_settings_core::store::{GlobalConfigStore, ProjectConfigStore};
-use xgent_tools::ToolExecutor;
+use xgent_tools::{ToolExecutor, ToolExecutorResource};
 use xui::i18n_bridge::Strings;
 
 use crate::daemon::connect_or_spawn_daemon;
@@ -91,9 +93,17 @@ fn main() {
     // 构造 agent bridge 依赖
     let provider =
         Arc::new(IpcProviderClient::new(ipc.clone())) as Arc<dyn xgent_agent::ProviderClient>;
+    // ToolExecutor 作为 Resource（与 AgentBridge 共享同一 Arc）。
+    // 插件系统经 ToolExecutorResource 注册工具到同一实例。
     let executor = Arc::new(ToolExecutor::with_defaults());
-    let context = Arc::new(OnDemandContextProvider::new(project_root.clone()))
-        as Arc<dyn xgent_context::ContextProvider>;
+    // ContextHub 包装内置 OnDemandContextProvider + 动态插件 provider。
+    // 作为 Arc<dyn ContextProvider> 注入 bridge（agent 无感于内置 vs 插件）。
+    let context_hub = Arc::new(ContextHub::default());
+    context_hub.set_builtin(vec![
+        Arc::new(OnDemandContextProvider::new(project_root.clone()))
+            as Arc<dyn xgent_context::ContextProvider>,
+    ]);
+    let context = context_hub.clone() as Arc<dyn xgent_context::ContextProvider>;
     // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model 与重试配置）
     let global_config = GlobalConfigStore::load().unwrap_or_default();
     // 加载项目配置（bridge 需 tool_policy）
@@ -134,7 +144,7 @@ fn main() {
     );
     let bridge = AgentBridge::new(AgentBridgeConfig {
         provider,
-        executor,
+        executor: executor.clone(),
         context,
         project_root: project_root.clone(),
         tool_policy: project_config.tool_policy.clone(),
@@ -148,7 +158,29 @@ fn main() {
     let notif_rx = ipc.subscribe();
     // 终端复用 agent bridge 的 tokio runtime handle（bridge 在下方 insert_resource 移动）
     let terminal_rt_handle = bridge.runtime.handle().clone();
-
+    let plugin_rt_handle = bridge.runtime.handle().clone();
+    // 插件系统组装（照设计文档 §13 Step P4）：
+    // 1. 创建 PluginHostProxy + WasmHost + PluginHost（event_rx 持有，注入 ECS）
+    // 2. PluginHostPlugin build 时注册 proxy impl（发 PluginOp 到 PluginOpQueue）
+    // 3. 业务 Plugin（XgentTools/CommandPalette/XgentContext）已 add，proxy 注册时
+    //    ToolExecutor/CommandRegistry/ContextHub 已就绪
+    // 4. load_builtin_plugins 扫描 assets/plugins/ 预装内建插件
+    let proxy = Arc::new(PluginHostProxy::new());
+    let wasm_host = WasmHost::new(proxy.clone(), project_root.clone());
+    let plugins_root = plugins_dir();
+    let _ = std::fs::create_dir_all(&plugins_root);
+    let assets_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/plugins");
+    let (plugin_host, event_rx) = PluginHost::new(
+        proxy.clone(),
+        wasm_host,
+        plugins_root,
+        if assets_dir.exists() { Some(assets_dir) } else { None },
+        global_config.plugin_settings.clone(),
+    );
+    // 注册 proxy impl（返回 op_rx，包成 PluginOpRx Resource 注入 ECS，
+    let op_rx = register_proxy_impls(&proxy);
+    // 启动插件目录文件监听（生产模式，200ms debounce reload，§8.5）
+    plugin_host.start_file_watcher(plugin_rt_handle.clone());
     // 组装 App
     let mut app = App::new();
     app.add_plugins(
@@ -166,6 +198,8 @@ fn main() {
         xui::XuiPlugin,
         xgent_settings::XgentSettingsPlugin,
         xgent_agent::XgentAgentPlugin,
+        xgent_context::XgentContextPlugin,
+        xgent_plugin_host::PluginHostPlugin,
         xgent_ui::XgentUiPlugin,
         crate::config_bridge::ConfigBridgePlugin,
         crate::fs_event_bridge::FsEventBridgePlugin,
@@ -190,7 +224,20 @@ fn main() {
         ready: false,
         kind: None,
     })
-    .add_systems(Startup, crate::startup::open_project);
+    .insert_resource(ToolExecutorResource(executor.clone()))
+    .insert_resource(PluginHostResource(plugin_host.clone()))
+    .insert_resource(PluginEventRx(parking_lot::Mutex::new(event_rx)))
+    .insert_resource(xgent_plugin_host::PluginOpRx(parking_lot::Mutex::new(op_rx)));
+    // 在 bridge 的 tokio runtime 上 spawn load_builtin_plugins（async，主线程无法 await）
+    {
+        let host = plugin_host.clone();
+        plugin_rt_handle.spawn(async move {
+            if let Err(e) = host.load_builtin_plugins().await {
+                tracing::warn!(error = %e, "加载内建插件失败");
+            }
+        });
+    }
+    app.add_systems(Startup, crate::startup::open_project);
 
     // 清理提示：退出时 daemon 末个客户端退出后自退出
     let socket_path = daemon_socket_path();

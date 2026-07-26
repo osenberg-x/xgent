@@ -31,7 +31,7 @@ pub struct ToolCtx {
 ///
 /// `denied` 标记工具被安全策略或用户拒绝（区别于执行失败）：
 /// UI 据此显示「已拒绝」态（⊘ 灰色）而非「失败」态（✗ 红色）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct ToolResult {
     /// 给 LLM 的文本结果
     pub output: String,
@@ -44,7 +44,7 @@ pub struct ToolResult {
 }
 
 /// 工具副作用。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub enum SideEffect {
     /// 写入了文件（绝对路径）
     FileWritten(PathBuf),

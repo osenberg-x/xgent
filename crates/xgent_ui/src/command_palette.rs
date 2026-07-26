@@ -330,6 +330,7 @@ pub(crate) fn handle_palette_triggers(
     mut loc: ResMut<Localizer>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
     mut new_session: MessageWriter<NewSessionMessage>,
+    mut plugin_command: MessageWriter<xgent_agent::PluginCommandTriggered>,
 ) {
     for ev in reader.read() {
         match ev.command_id.as_str() {
@@ -341,6 +342,12 @@ pub(crate) fn handle_palette_triggers(
             }
             "settings.open" => {
                 settings_state.open = true;
+            }
+            id if id.starts_with("plugin.") => {
+                // 照设计文档 §5.4 + 偏差修正 5：plugin. 前缀路由到 PluginHost。
+                plugin_command.write(xgent_agent::PluginCommandTriggered {
+                    command_id: id.to_string(),
+                });
             }
             _ => {}
         }

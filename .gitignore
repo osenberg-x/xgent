@@ -1,2 +1,8 @@
 /target
 /.xgent
+
+# macOS
+.DS_Store
+
+# 插件构建产物（由 build_plugins.sh 生成，不入库）
+crates/xgent_app/assets/plugins/*/extension.wasm

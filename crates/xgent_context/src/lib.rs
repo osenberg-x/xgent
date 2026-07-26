@@ -4,6 +4,7 @@
 //! 方案 B/C/D/E 为占位，后续迭代实现。agent 侧通过 trait 调用，无感于策略切换。
 
 pub mod hybrid;
+pub mod hub;
 pub mod lsp;
 pub mod on_demand;
 pub mod provider;
@@ -11,6 +12,7 @@ pub mod repo_map;
 pub mod vector;
 
 pub use hybrid::HybridContextProvider;
+pub use hub::ContextHub;
 pub use lsp::LspContextProvider;
 pub use on_demand::OnDemandContextProvider;
 pub use provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult, estimate_tokens};
@@ -35,6 +37,18 @@ pub fn build_context_provider(
     }
 }
 
+/// XGent 上下文插件：初始化 `ContextHub` Resource。
+///
+/// 照设计文档 §5.5。`build()` 内 `init_resource::<ContextHub>()`。
+/// 内置 provider 的注入由 `xgent_app` 在启动时调 `ContextHub::set_builtin`
+/// （因内置 provider 需 project_root，而 Plugin build 时无此信息）。
+pub struct XgentContextPlugin;
+
+impl bevy::prelude::Plugin for XgentContextPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        app.init_resource::<ContextHub>();
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -117,10 +117,13 @@ pub fn handle_close_tab_requests(
         }
         if let Some((entity, _)) = tabs.close(req.tab) {
             commands.entity(entity).despawn();
+            // 关闭后无剩余标签 → 收起分屏（仅在真正关闭一个 tab 时触发，
+            // 不能放在循环外每帧检查，否则 TerminalTabs 默认空时会持续
+            // 把 SideViewContent 重置为 None，覆盖编辑器/预览视图）
+            if tabs.is_empty() {
+                *content = SideViewContent::None;
+            }
         }
-    }
-    if tabs.is_empty() {
-        *content = SideViewContent::None;
     }
 }
 

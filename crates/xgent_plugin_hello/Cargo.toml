@@ -1,0 +1,12 @@
+[package]
+name = "xgent_plugin_hello"
+version = "0.1.0"
+edition = "2024"
+description = "XGent 测试插件：hello 工具，验证插件系统最小链路"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+xgent_plugin_api = { path = "../xgent_plugin_api" }
+serde_json = { workspace = true }

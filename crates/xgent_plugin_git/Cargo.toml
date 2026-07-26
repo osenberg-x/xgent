@@ -1,0 +1,12 @@
+[package]
+name = "xgent_plugin_git"
+version = "0.1.0"
+edition = "2024"
+description = "XGent Git 集成插件：git diff/log/status 工具与命令"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+xgent_plugin_api = { path = "../xgent_plugin_api" }
+serde_json = { workspace = true }

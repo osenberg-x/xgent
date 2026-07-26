@@ -8,6 +8,6 @@ pub mod paths;
 pub mod project;
 pub mod store;
 
-pub use global::{GlobalConfig, Preferences, ProviderConfig, ProviderKind};
+pub use global::{GlobalConfig, PluginConfig, Preferences, ProviderConfig, ProviderKind};
 pub use project::{ContextStrategy, ProjectConfig, ToolPolicyConfig};
 pub use store::{GlobalConfigStore, ProjectConfigStore};

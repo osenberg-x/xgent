@@ -1,0 +1,16 @@
+[package]
+name = "xgent_plugin_api"
+version = "0.1.0"
+edition = "2024"
+description = "XGent 插件作者面向的 API：Extension trait + WIT 绑定 + register_plugin! 宏"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[package.metadata.component]
+target = { path = "wit" }

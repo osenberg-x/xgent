@@ -148,7 +148,6 @@ pub(crate) fn handle_hotkey_triggers(
                 }
             }
             "terminal.toggle" => {
-                // 已展开且 Terminal → 收起；否则唤起终端
                 if *content == SideViewContent::Terminal {
                     *content = SideViewContent::None;
                     side_view.0 = true;

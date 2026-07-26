@@ -36,9 +36,27 @@ impl CommandRegistry {
         self.commands.push(cmd);
     }
 
-    /// 按 id 移除命令。
+    /// 按 id 精确移除（现有）。
     pub fn remove(&mut self, id: &str) {
         self.commands.retain(|c| c.id != id);
+    }
+
+    /// 按前缀移除（插件卸载时批量清理 plugin.<id>. 命令）。
+    ///
+    /// 照设计文档 §5.4。新增——对齐插件卸载需求。
+    pub fn remove_by_prefix(&mut self, prefix: &str) {
+        self.commands.retain(|c| !c.id.starts_with(prefix));
+    }
+
+    /// 注册时拒绝重复 id（防止插件间 / 插件与内建命令冲突）。
+    ///
+    /// 照设计文档 §5.4。新增——`register` 改为返回 `Result` 的变体。
+    pub fn try_register(&mut self, cmd: PaletteCommand) -> Result<(), String> {
+        if self.commands.iter().any(|c| c.id == cmd.id) {
+            return Err(format!("命令 id 冲突: {}", cmd.id));
+        }
+        self.commands.push(cmd);
+        Ok(())
     }
 }
 

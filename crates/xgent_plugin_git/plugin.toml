@@ -1,0 +1,42 @@
+id = "git"
+name = "Git 集成"
+description = "Git diff/log/status 工具与命令"
+version = "0.1.0"
+schema_version = 1
+authors = ["XGent Team"]
+
+[lib]
+kind = "rust"
+
+[[tools]]
+id = "git_diff"
+tier = "read"
+description = "查看 Git 工作区 diff"
+
+[[tools]]
+id = "git_log"
+tier = "read"
+description = "查看 Git 提交历史（最近 20 条）"
+
+[[tools]]
+id = "git_status"
+tier = "read"
+description = "查看 Git 工作区状态"
+
+[[commands]]
+id = "diff"
+label = "Git: 查看 Diff"
+
+[[commands]]
+id = "log"
+label = "Git: 提交历史"
+
+[[commands]]
+id = "status"
+label = "Git: 状态"
+
+[permissions]
+fs-read = ["**"]
+fs-write = []
+network = []
+command = ["git"]

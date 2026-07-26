@@ -78,6 +78,28 @@ pub fn sessions_db_path() -> PathBuf {
     agent_dir().join("sessions.db")
 }
 
+/// 插件目录（`<agent_dir>/plugins/`）。
+///
+/// 照设计文档 §10.1。承载已安装插件、工作目录、索引。
+pub fn plugins_dir() -> PathBuf {
+    agent_dir().join("plugins")
+}
+
+/// 已安装插件目录（`<plugins_dir>/installed/<id>/`）。
+pub fn plugin_installed_dir(id: &str) -> PathBuf {
+    plugins_dir().join("installed").join(id)
+}
+
+/// 插件工作目录（`<plugins_dir>/work/<id>/`，WASI preopen 沙箱）。
+pub fn plugin_work_dir(id: &str) -> PathBuf {
+    plugins_dir().join("work").join(id)
+}
+
+/// 插件索引文件路径（`<plugins_dir>/index.json`）。
+pub fn plugin_index_path() -> PathBuf {
+    plugins_dir().join("index.json")
+}
+
 /// 项目级配置目录（`<project_root>/.xgent/`）。
 pub fn project_config_dir(project_root: &Path) -> PathBuf {
     project_root.join(".xgent")

@@ -13,6 +13,8 @@ tokio-util = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
+tracing = { workspace = true }
+bevy = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

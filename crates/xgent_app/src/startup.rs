@@ -34,3 +34,5 @@ pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
         }
     });
 }
+
+

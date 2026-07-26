@@ -18,7 +18,7 @@ pub mod tool;
 pub use builtins::{ReadFile, RunCommand, SearchFiles, WriteFile};
 pub use confirm::{ConfirmDecision, ConfirmRequest};
 pub use editor_tool::{EditorCommandRequest, EditorCommandSink, EditorTool};
-pub use executor::{ConfirmCallback, ToolExecutor};
+pub use executor::{ConfirmCallback, ToolExecutor, ToolExecutorResource};
 pub use path::resolve_in_project;
 pub use security::resolve_policy;
 pub use tool::{

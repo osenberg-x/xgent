@@ -52,3 +52,15 @@ ropey = "1.6"
 portable-pty = "0.9"
 # ANSI 转义序列解析（终端输出渲染 F-19）
 vte = "0.15"
+# WASM 组件模型运行时（插件系统，见 doc/design/plugin-system-design.md）
+# 偏差修正：用 wasmtime 29（非设计文档 §12.3 的 27），对齐 Zed 实测版本
+wasmtime = { version = "29", features = ["component-model", "async"] }
+# WASI preview2（文件系统/环境沙箱）
+wasmtime-wasi = "29"
+# WIT 绑定生成（guest 侧）
+wit-bindgen = "0.22"
+# WIT 绑定生成（host 侧 wasmtime::component::bindgen! 内部用，无需单独声明）
+# 注：wasip1+adapter fallback 路径未实现（wasip2 主路径已验证通过），
+# wit-component / wasi-preview1-component-adapter-provider 暂不引入。
+# WASM 二进制解析（API 版本 custom section 扫描）
+wasmparser = "0.235"

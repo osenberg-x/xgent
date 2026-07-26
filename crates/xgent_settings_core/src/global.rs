@@ -24,6 +24,30 @@ pub struct GlobalConfig {
     /// 应用偏好
     #[serde(default)]
     pub preferences: Preferences,
+
+    /// 插件级配置：plugin_id → 配置子表（来自 `[plugin.<id>]` 段）。
+    ///
+    /// 照设计文档 §10.4。`host.get-config("<id>.<field>")` 从此取值。
+    #[serde(default)]
+    pub plugin_settings: std::collections::BTreeMap<String, toml::Value>,
+
+    /// 插件全局配置（启用/禁用、自动更新）。照设计文档 §10.2。
+    #[serde(default)]
+    pub plugin: PluginConfig,
+}
+
+/// 插件配置（全局配置的一部分）。照设计文档 §10.2。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginConfig {
+    /// 已安装插件 id → 是否启用
+    #[serde(default)]
+    pub enabled: std::collections::BTreeMap<String, bool>,
+    /// 是否自动更新插件
+    #[serde(default)]
+    pub auto_update: bool,
+    /// 自动安装的内建插件列表
+    #[serde(default)]
+    pub auto_install: Vec<String>,
 }
 
 /// 单个 provider 的配置。

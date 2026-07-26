@@ -1,0 +1,26 @@
+[package]
+name = "xgent_plugin"
+version = "0.1.0"
+edition = "2024"
+description = "XGent 插件宿主核心：PluginHost + WasmHost + PluginHostProxy + 清单解析"
+
+[dependencies]
+xgent_core = { path = "../xgent_core" }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+wasmparser = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+notify = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

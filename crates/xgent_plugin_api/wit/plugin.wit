@@ -1,0 +1,131 @@
+package xgent:plugin;
+
+/// 宿主提供给插件的能力（import 侧）。
+///
+/// 详见 doc/design/plugin-system-design.md §5.2。
+interface host {
+    read-file: func(path: string) -> result<string, string>;
+    write-file: func(path: string, content: string) -> result<_, string>;
+
+    // 日志（写宿主日志，不污染用户终端）
+    log: func(level: log-level, message: string);
+
+    // 读插件配置（key 形如 "git.author_name"）
+    get-config: func(key: string) -> option<string>;
+
+    // 运行命令（受安全模型约束，走确认流程；支持 cancel）
+    run-command: func(cmd: command-req) -> result<command-output, command-error>;
+
+    // HTTP GET 代理（受 permissions.network 约束）。
+    // MVP 未实现——声明占位保证契约完整，后续 P2 补宿主侧 impl。
+    http-get: func(url: string) -> result<string, string>;
+
+    variant log-level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    record command-req {
+        program: string,
+        args: list<string>,
+        cwd: option<string>,
+    }
+
+    record command-output {
+        stdout: string,
+        stderr: string,
+        exit-code: s32,
+    }
+
+    variant command-error {
+        cancelled,
+        permission-denied,
+        spawn-failed(string),
+        io(string),
+    }
+}
+
+/// 插件提供给宿主的工具能力（export 侧）。
+interface tool {
+    register: func() -> list<tool-def>;
+
+    execute: func(
+        tool-id: string,
+        input: string,
+    ) -> result<string, tool-error>;
+
+    variant tool-error {
+        failed(string),
+        aborted,
+    }
+
+    record tool-def {
+        id: string,
+        description: string,
+        schema: string,
+        tier: tool-tier,
+    }
+
+    enum tool-tier {
+        read,
+        write,
+        exec,
+    }
+}
+
+/// 插件提供给宿主的命令能力（export 侧）。
+interface command {
+    register: func() -> list<command-def>;
+    run: func(command-id: string) -> result<string, string>;
+
+    record command-def {
+        id: string,
+        label: string,
+    }
+}
+
+/// 插件提供给宿主的 ContextProvider 能力（export 侧）。
+interface context-provider {
+    register: func() -> list<provider-def>;
+
+    retrieve: func(provider-id: string, query: context-query)
+        -> result<context-result, string>;
+
+    on-file-changed: func(provider-id: string, path: option<string>);
+
+    record provider-def {
+        id: string,
+        description: string,
+    }
+
+    record context-query {
+        user-message: string,
+        current-file: option<string>,
+        hints: list<string>,
+        max-tokens: u32,
+    }
+
+    record context-result {
+        chunks: list<context-chunk>,
+        tree-summary: option<string>,
+        total-tokens: u32,
+    }
+
+    record context-chunk {
+        path: string,
+        content: string,
+        relevance: string,
+        token-estimate: u32,
+    }
+}
+
+world plugin {
+    /// 插件入口：宿主加载后调用，构造插件实例（经 register_plugin! 宏导出）。
+    export init-extension: func();
+    import host;
+    export tool;
+    export command;
+    export context-provider;
+}

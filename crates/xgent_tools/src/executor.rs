@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
+use parking_lot::RwLock;
 
 use crate::confirm::{ConfirmDecision, ConfirmRequest};
 use crate::security::resolve_policy;
@@ -23,8 +24,15 @@ pub trait ConfirmCallback: Send + Sync {
 }
 
 /// 工具执行器。
+///
+/// 照设计文档 §7.2 + 插件系统需求：`tools` 用 `RwLock` 包裹实现 interior
+/// mutability，使 `register`/`remove_by_prefix` 可经 `&self` 调用（插件
+/// 宿主经 `Arc<ToolExecutor>` 共享并动态注册工具）。
+///
+/// 作为 Bevy Resource 插入 World 时用 `ToolExecutorResource(Arc<ToolExecutor>)`
+/// 包装（见下方），与 `AgentBridge` 共享同一 Arc。
 pub struct ToolExecutor {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
     /// 会话级 AllowAll 集合：用户选过 AllowAll 的工具不再确认
     allowed_all: tokio::sync::Mutex<HashSet<String>>,
 }
@@ -35,7 +43,7 @@ impl ToolExecutor {
         let tools: Vec<Arc<dyn Tool>> = crate::default_tools();
         let map = tools.into_iter().map(|t| (t.id().to_string(), t)).collect();
         Self {
-            tools: map,
+            tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
         }
     }
@@ -44,20 +52,36 @@ impl ToolExecutor {
     pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
         let map = tools.into_iter().map(|t| (t.id().to_string(), t)).collect();
         Self {
-            tools: map,
+            tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
         }
     }
 
-    /// 注册工具。
-    pub fn register(&mut self, tool: Arc<dyn Tool>) {
-        self.tools.insert(tool.id().to_string(), tool);
+    pub fn register(&self, tool: Arc<dyn Tool>) {
+        self.tools.write().insert(tool.id().to_string(), tool);
+    }
+
+    /// 按前缀移除（插件卸载时清理 plugin.<id>. 工具）。
+    ///
+    /// 照设计文档 §7.2。`&self`（interior mutability via RwLock），在 ECS 主线程
+    /// system 内调用。`allowed_all` 是 `tokio::sync::Mutex`，主线程同步上下文
+    /// 用 `try_lock()`：失败时记 warn 而非静默跳过。
+    pub fn remove_by_prefix(&self, prefix: &str) {
+        self.tools.write().retain(|k, _| !k.starts_with(prefix));
+        match self.allowed_all.try_lock() {
+            Ok(mut set) => set.retain(|k| !k.starts_with(prefix)),
+            Err(_) => tracing::warn!(
+                prefix,
+                "ToolExecutor::remove_by_prefix: allowed_all 锁竞争，AllowAll 缓存未清理"
+            ),
+        }
     }
 
     /// 列出所有已注册工具的 schema（供 provider 的 tools 参数）。
     pub fn schemas(&self) -> Vec<xgent_core::chat::ToolSchema> {
-        self.tools.values().map(|t| t.schema()).collect()
+        self.tools.read().values().map(|t| t.schema()).collect()
     }
+
 
     /// 执行工具调用。
     ///
@@ -79,7 +103,7 @@ impl ToolExecutor {
         signal: CancellationToken,
         confirm: &dyn ConfirmCallback,
     ) -> Result<ToolResult, ToolError> {
-        let tool = match self.tools.get(tool_id) {
+        let tool = match self.tools.read().get(tool_id).cloned() {
             Some(t) => t,
             None => {
                 return Ok(ToolResult { output: format!("未知工具: {tool_id}"), is_error: true, denied: false, side_effect: None });
@@ -145,6 +169,14 @@ impl ToolExecutor {
         }
     }
 }
+
+/// `ToolExecutor` 的 Bevy Resource 包装（共享 `Arc<ToolExecutor>`）。
+///
+/// 插件系统需把工具注册到 `ToolExecutor`，但 `AgentBridge` 也持 `Arc<ToolExecutor>`。
+/// 经此包装，World 与 bridge 共享同一实例：`xgent_app` 构造 `Arc<ToolExecutor>`，
+/// clone 给 bridge，原 Arc 包入此 Resource 插入 World。
+#[derive(bevy::prelude::Resource, Clone)]
+pub struct ToolExecutorResource(pub Arc<ToolExecutor>);
 
 #[cfg(test)]
 mod tests {

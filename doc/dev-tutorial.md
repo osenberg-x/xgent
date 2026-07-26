@@ -27,6 +27,7 @@
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
 | F-19 | 内置终端（P1） | ✅ | `xgent_terminal/`（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty + vte，不依赖 Bevy）+ `xgent_ui/src/terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）+ `xgent_app` 注入 `TerminalIoRuntime` | `design/terminal-design.md`、ADR-0011/0012 |
+| 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.14 |
 
 ### 1.2 非功能需求
 
@@ -36,18 +37,17 @@
 | NF-02 | 轻量多开 | ✅ | 多进程模型：UI 每项目一个，daemon 全局唯一；`xgent_daemon/src/lifecycle.rs` 随用随启 |
 | NF-03 | 性能 | ✅ | 数据驱动 UI；虚拟列表 `xui/src/virtual_list.rs`；流式 channel 非阻塞 |
 | NF-04 | 可维护性 | ✅ | ECS Events/Messages 通信；daemon 纯 tokio 可 headless |
-| NF-05 | 国际化 | ✅ | `xui_i18n::StringSource` trait；`xgent_settings/src/localizer.rs`（fluent）；资源 `crates/xgent_settings/locales/{zh-CN,en-US}/main.ftl` |
-| NF-06 | 可扩展 | ✅ | TUI/Web/3D/自定义工具/MCP 均有 trait 预留（见 §3） |
+| NF-06 | 可扩展 | ✅ | TUI/Web/3D/MCP 均有 trait 预留；**插件系统**（WASM Component）已落地，支持动态注册工具/命令/ContextProvider（见 §5.14） |
 
 ### 1.3 未实现（P1/P2 留白）
 
-- **F-10 Git 集成**（P1）：未实现。
+- **F-10 Git 集成**（P1）：✅ 已实现（`xgent_plugin_git` 插件，git_diff/git_log/git_status 工具 + 命令，经 `host.run_command("git", ...)`）。
 - **F-12 成本统计**（P1）：未实现（`TokenUsage` 类型已定义，无汇总 UI）。
 - **F-13 MCP 支持**（P1）：仅 trait 预留 `xgent_tools/src/mcp.rs::McpTransport`，无实现。
-- **F-14 自定义工具**（P2）：未实现。
+- **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化** / **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
-- **插件系统**（架构设计）：参考 Zed 的 WASM 组件模型，设计动态安装/卸载的插件系统。插件经 WIT 接口注册 Agent 工具、命令面板命令、ContextProvider 等扩展点。F-10 Git 集成、F-14 自定义工具等后续功能将以插件形式实现。详见 `doc/design/plugin-system-design.md`。
+- **插件系统**（架构设计）：✅ 已落地（WASM Component + wasmtime 29）。3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello` 测试 / `xgent_plugin_git` 参考）。插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider，动态安装卸载。详见 `doc/design/plugin-system-design.md` + 本指南 §5.14。
 - **Compaction**（optimization O9）：`xgent_agent/src/compaction.rs` 已落地——token 估算（`tokenizer.rs` 启发式）+ `should_compact`（reserve=max(15% window, 16384)）+ `find_cut_point`（保留最近 token 段，user/assistant 边界切）+ `LlmCompactor`（调 provider 生成摘要）+ `apply_compaction`（summary 前置 + kept）。`AgentEvent::Compacted` 通知 UI，`SessionEntry::Compaction` 持久化。
 
 ---
@@ -82,13 +82,18 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_settings` | `Localizer`（impl StringSource）、`GlobalConfigRes`/`ProjectConfigRes`、`XgentSettingsPlugin` |
 | `xgent_provider` | `LlmProvider` trait、`OpenAiCompatProvider`（完整）、`ResponseApiProvider`/`AnthropicProvider`/`CustomApiProvider`（占位）、`build_provider(id, cfg)`、`ChatStream` |
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
-| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`、`ConfirmCallback`、`resolve_policy`、4 内置工具、`EditorTool`（UiOnly）、`McpTransport`（占位） |
+| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`（interior-mutable via RwLock + derive Resource，插件动态注册）、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError` |
-| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider` |
-| `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（UserInput/Abort/Steering/FollowUp/Delta/ToolCall/ToolResult/ConfirmRequest/Done/Error/Retry/**Compacted** Message） |
-| `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
-| `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成） |
-| `xgent_app` | `Args`（命令行）、组装 `XuiPlugin` + `XgentSettingsPlugin` + `XgentAgentPlugin` + `XgentUiPlugin` + `ConfigBridgePlugin` + `FsEventBridgePlugin`、`connect_or_spawn_daemon`、`IpcProviderClient` |
+| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，impl ContextProvider）、`XgentContextPlugin` |
+| `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
+| `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
+| `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）、`handle_palette_triggers` 路由 `plugin.` 前缀到 `PluginCommandTriggered` |
+| `xgent_plugin_api` | 插件作者面向的 API：`Extension` trait（new/register_tools/register_commands/register_context_providers/execute/run_command/retrieve/on_file_changed）、`register_plugin!` 宏（生成 `init-extension` 导出）、WIT 绑定（`wit/plugin.wit`：host/tool/command/context-provider 四 interface + world plugin）、`host` 模块（read_file/write_file/log/get_config/run_command/http_get import）。编译为 `wasm32-wasip2`。 |
+| `xgent_plugin` | 插件宿主核心：`PluginHost`（加载/卸载/索引/reload/load_builtin_plugins）、`WasmHost`（wasmtime Engine+Linker+Store，host import impl：read_file/write_file/run_command 带 cancel 穿透）、`WasmPlugin`（专有 tokio Task 串行调用，cancel via tokio::select! 丢弃 oneshot）、`PluginHostProxy`（反转依赖枢纽，三 proxy trait）、`PluginManifest`/`PluginIndex`、`WasmCallError`(Aborted/Failed)。cancel 用 Zed 模式（非 cancel_handle，偏差修正 3）。 |
+| `xgent_plugin_host` | ECS 桥接 + 适配器：`PluginTool`（→ Tool trait，完整 id `plugin.<id>.<short>`，schema.name 一致性硬约束）、`PluginCommand`（→ CommandRegistry + PluginCommandRegistry）、`PluginContextProvider`（→ ContextHub）、`PluginHostPlugin`（Bevy Plugin，注册 Message + `plugin_poll_system`）、`plugin_poll_system`（drain PluginEvent + 执行 PluginOp + 处理 PluginCommandTriggered）、`register_proxy_impls`（创建 channel + 三 proxy impl）。 |
+| `xgent_plugin_hello` | 测试插件：hello 工具（read tier），验证最小链路。cdylib → wasm32-wasip2。 |
+| `xgent_plugin_git` | Git 集成参考插件：git_diff/git_log/git_status 工具 + diff/log/status 命令，经 `host::run_command("git", ...)` 执行。cdylib → wasm32-wasip2，打包到 `xgent_app/assets/plugins/git/`。 |
+| `xgent_app` | `Args`（命令行）、组装 `XuiPlugin` + `XgentSettingsPlugin` + `XgentAgentPlugin` + `XgentContextPlugin` + `PluginHostPlugin` + `XgentUiPlugin` + `ConfigBridgePlugin` + `FsEventBridgePlugin`、`connect_or_spawn_daemon`、`IpcProviderClient`、`ToolExecutorResource`（Arc 共享 ToolExecutor）、`PluginHostResource`/`PluginEventRx`、启动时 `load_builtin_plugins` spawn 到 tokio runtime。 |
 
 ---
 
@@ -445,6 +450,47 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 ---
 
+### 5.14 插件系统（WASM 组件模型）
+
+插件系统已落地：WASM Component + wasmtime 29，插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider。设计文档 `doc/design/plugin-system-design.md` v3 + 偏差修正（见 `local://plugin-system-impl-plan.md`）。
+
+**crate 拓扑**（3 宿主 + 2 插件）：
+- `xgent_plugin_api` — 插件作者面向：`Extension` trait + `register_plugin!` 宏 + WIT 绑定（`wit/plugin.wit`）。rlib，被插件 crate 依赖。
+- `xgent_plugin` — 宿主核心：`PluginHost`/`WasmHost`/`WasmPlugin`/`PluginHostProxy` + 清单解析。不依赖业务 crate（经 proxy 反转依赖）。
+- `xgent_plugin_host` — ECS 桥接：`PluginTool`/`PluginCommand`/`PluginContextProvider` 适配器 + `PluginHostPlugin`（`plugin_poll_system`）。
+- `xgent_plugin_hello` / `xgent_plugin_git` — 测试/参考插件（cdylib → wasm32-wasip2）。
+
+**关键约束（开发注意）**：
+
+1. **WASM 目标用 `wasm32-wasip2`**（原生 component model，无需 adapter）。偏差修正 2：设计文档 §14 D-P1 "不在此草案定论"，实测 wasip2 + wasmtime 29 + wit-bindgen 0.22 + async + trappable_imports 组合通过。构建：`cargo build -p xgent_plugin_git --target wasm32-wasip2`。
+
+2. **id ↔ schema.name 一致性硬约束**（阻断级）：插件工具 `Tool::id()` 与 `ToolSchema.name` 必须返回完整 id `plugin.<plugin_id>.<short_id>`。`PluginTool::new` 显式覆盖 `schema.name`，不信任插件作者在 schema JSON 里写的 name。否则 LLM 回传的 `tool_call.id` 命中不到 `ToolExecutor`。
+
+3. **cancel 用 Zed 模式，非 `Store::cancel_handle()`**（偏差修正 3）：
+   - `WasmPlugin` 持 `tx: UnboundedSender<PluginCall>`，专有 tokio Task 串行处理（独占 `Store::&mut`）。
+   - `call_tool_execute` 的 cancel = `tokio::select!` on `cancel_token.cancelled()` vs oneshot；cancel 时**丢弃 oneshot**（返回 `Err(Aborted)`），不主动中断 WASM。
+   - `host.run_command` 宿主侧 impl 内部 `tokio::select!` on `cancel_token.cancelled()` → `child.kill().await` + 返回 `command-error::cancelled`。
+
+4. **ECS Message 放 `xgent_agent/src/events.rs`**（偏差修正 4，非 xgent_core）：`CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered` 用 `#[derive(Message)]` + `add_message::<E>()`。
+
+5. **proxy 取用机制（硬性，§13 Step P4）**：proxy impl 不在 `PluginHostPlugin::build` 时抓 `ResMut`（跨 tokio task 持有破坏 Send+Sync）。改为持 `Sender<PluginOp>` 发指令到 `PluginOpQueue`，`plugin_poll_system`（主线程）内 `world.resource_mut::<T>()` 执行。
+
+6. **`ToolExecutor` 改为 interior-mutable + `Resource`**：`tools: RwLock<HashMap>`，`register`/`remove_by_prefix`/`schemas` 改 `&self`。`ToolExecutorResource(Arc<ToolExecutor>)` 包装让 World 与 `AgentBridge` 共享同一实例（bridge 持 Arc，World 持 Resource(Arc clone)）。
+
+7. **`ContextHub` impl `ContextProvider`**：`xgent_app` 把 `Arc<ContextHub>` 作为 `Arc<dyn ContextProvider>` 注入 `AgentBridgeConfig.context`，agent 侧无感于内置 vs 插件 provider 区分。`ContextHub` 用 `RwLock<Vec<Arc<dyn ContextProvider>>>`，`retrieve_all` 先 clone Arc 出锁再 await（避免持有 guard 跨 await 破坏 Send）。
+
+8. **`handle_palette_triggers` 路由 `plugin.` 前缀**（偏差修正 5）：`id if id.starts_with("plugin.")` → 发 `PluginCommandTriggered` Message，`plugin_poll_system` 消费后 spawn async `PluginCommand::run`，结果经 `PluginHost::emit_command_result` → `PluginEvent::CommandResult` → `CommandResultMessage`。
+
+9. **启动时序（硬性）**：`App::new` → 业务 Plugin（XgentTools/CommandPalette/XgentContext）→ `PluginHostPlugin`（build 时 `register_proxy_impls` 已 set proxy）→ `load_builtin_plugins`（spawn 到 tokio runtime）→ run。proxy 注册在 `PluginHostPlugin::build`，此时 ToolExecutor/CommandRegistry/ContextHub 已就绪。
+
+10. **构建插件**：`./build_plugins.sh`（debug）或 `./build_plugins.sh release`。打包到 `crates/xgent_app/assets/plugins/<id>/`（plugin.toml + extension.wasm）。首次启动 `load_builtin_plugins` 检测 `installed/` 为空时从 `assets/plugins/` 预装。
+
+11. **wit-bindgen 0.22 约束**：guest 侧 `wit_bindgen::generate!` 必须在 crate 根（不在 `mod wit` 内），否则 `export!` 宏无法在 crate 根解析。host 侧 `wasmtime::component::bindgen!` 生成 `Plugin` world struct，`add_to_linker` + `instantiate_async` + `call_*_async`。WIT `result<_, E>` 用下划线表示 unit ok（非 `()`）。
+
+**集成测试**：
+- `xgent_plugin/tests/hello_plugin.rs` — 加载 hello.wasm，验证 register + execute。
+- `xgent_plugin_host/tests/git_plugin.rs` — 加载 git.wasm，验证 id 一致性 + 真实 git status 执行（经 host.run_command）。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 1. **阅读背景**：开始任务前读 `AGENTS.md`、`doc/design/`、`doc/plans/` 中相关 step 文件；编码时按需查 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。
@@ -470,6 +516,9 @@ cargo test -p <crate>              # 单 crate 测试
 cargo tree -p <crate>              # 依赖树（验证 crate 独立性，如 xui 不含 xgent_*）
 cargo fmt                          # 格式化
 cargo clippy --workspace           # lint
-```
+# 插件系统（需 wasm32-wasip2 target：rustup target add wasm32-wasip2）
+./build_plugins.sh                 # 构建内建插件（git）并打包到 xgent_app/assets/plugins/
+./build_plugins.sh release         # release profile（更小 wasm）
+cargo test -p xgent_plugin -p xgent_plugin_host  # 插件集成测试（需先 build_plugins.sh）
 
 构建依赖本地 `../bevy` 源码（0.19.0），确保该目录存在。

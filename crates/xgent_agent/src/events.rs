@@ -26,6 +26,34 @@ pub struct AbortMessage;
 #[derive(Message)]
 pub struct NewSessionMessage;
 
+
+/// 命令执行结果反馈（插件 → UI）。照设计文档 §5.4。
+///
+/// `PluginPollSystem` 收到 `command.run` 返回后发送，UI 侧（命令面板/状态栏）展示 toast。
+#[derive(Clone, Debug, Message)]
+pub struct CommandResultMessage {
+    /// 完整 plugin.<id>.<short>
+    pub command_id: String,
+    pub success: bool,
+    /// 成功消息或错误文本
+    pub message: String,
+}
+
+/// 插件卸载完成通知（插件宿主 → ECS，清理 ToolExecutor/CommandRegistry/ContextHub）。
+/// 照设计文档 §7.2 + 偏差修正 4。
+#[derive(Clone, Debug, Message)]
+pub struct PluginUnregisterMessage {
+    pub plugin_id: String,
+}
+
+/// 命令面板触发插件命令（UI → 宿主）。照设计文档 §5.4 + 偏差修正 5。
+///
+/// `handle_palette_triggers` 按 `plugin.` 前缀路由，发此 Message；
+/// `PluginPollSystem` 消费后调 `PluginCommand::run`。
+#[derive(Clone, Debug, Message)]
+pub struct PluginCommandTriggered {
+    pub command_id: String,
+}
 /// Steering 消息：用户在 agent 执行中插话（UI → agent，注入到当前对话）。
 #[derive(Message)]
 pub struct SteeringMessage {
