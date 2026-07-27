@@ -113,7 +113,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | 0008 | 会话存储 JSONL append-only | `xgent_core/src/session.rs` + `xgent_agent/src/session_store.rs`（`<agent_dir>/sessions/<session_id>.jsonl`，全局，对齐 pi 布局） |
 | 0009 | 编辑器保存绕过 WriteFile + UiOnly tier | `xgent_ui/src/editor/io.rs`（Cmd+S 直接 fs::write）+ `xgent_tools/src/editor_tool.rs`（ToolTier::UiOnly） |
 | 0010 | OQ-08 检索升级路径分段（编辑器→C，D 延后到 LSP） | `xgent_context` 仅 OnDemand 实现，其余 trait 占位 |
-| 0011 | 用户终端 PTY 选 portable-pty | `xgent_terminal`（`LocalPtyBackend`，portable-pty + spawn_blocking 桥接 ECS）+ `xgent_ui::terminal::io`（crossbeam 桥 tokio→ECS）；Win powershell/Unix $SHELL；MVP 未设 raw 模式（cooked shell 回显，见 terminal-design.md §5.3 偏离说明）。读循环直接 `tokio::mpsc::Sender::blocking_send` 转发输出（不经 std mpsc 中转 + async 桥接 task，避免阻塞 std `recv` 冻结 runtime）；读循环检测 DSR 光标查询 `\x1b[6n` 并回复 `\x1b[1;1R`（PowerShell/PSReadLine 启动时探测终端，不回复则卡死等待，输入无响应）；writer 经 `Arc<Mutex>` 共享给读循环（DSR 回写）与命令循环（用户输入）。 |
+| 0011 | 用户终端 PTY 选 portable-pty | `xgent_terminal`（`LocalPtyBackend`，portable-pty + spawn_blocking 桥接 ECS）+ `xgent_ui::terminal::io`（crossbeam 桥 tokio→ECS）；Win powershell/Unix $SHELL；MVP 未设 raw 模式（cooked shell 回显，见 terminal-design.md §5.3 偏离说明）。读循环直接 `tokio::mpsc::Sender::blocking_send` 转发输出（不经 std mpsc 中转 + async 桥接 task，避免阻塞 std `recv` 冻结 runtime）；读循环检测 DSR 光标查询 `\x1b[6n` 并回复 `\x1b[1;1R`（PowerShell/PSReadLine 启动时探测终端，不回复则卡死等待，输入无响应）；writer 经 `Arc<Mutex>` 共享给读循环（DSR 回写）与命令循环（用户输入）。**vte 解析实现 BS 退格**：shell 的 ZLE/readline 在 cooked PTY 模式回显用户输入时，先回显首字符（如 `l`），再发 BS（`\x08`）删除 + 重绘整行（`ls`）；`TerminalParser` 的 `execute` 实现 `\x08` 删除当前行末字符（`backspace_last_char`），否则 `l` 残留 + `ls` 追加 = `lls`（首字母重复）。行编辑器额外过滤 `KeyboardInput.repeat` 防御 macOS key repeat（编辑键 Backspace/Delete/方向键的 repeat 保留）。 |
 | 0012 | 终端独立 crate + TerminalBackend trait | `xgent_terminal`（`TerminalBackend` trait + `LocalPtyBackend`）+ `xgent_ui::terminal`（UI 层只依赖 trait，经 `TerminalIoRuntime` 注入实现）；对齐 xgent_tools/xgent_context 纯逻辑层模式 |
 
 ---
@@ -409,6 +409,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - **中等能力**：多行 + 行号 + undo/redo + 查找替换 + tree-sitter 语法高亮（仅 Rust grammar，随二进制编译入，不做按需下载——D-06 已决策）。
 - **不含**：LSP、编辑器内部 split view（同一编辑器内多窗格）、诊断、跳转。完整能力边界留后续。（对话/编辑器分屏见 §5.11）
 - `xui::TextEditor` 是通用裸件（纯依赖 bevy + xui_i18n + tree-sitter），多标签/文件 IO/冲突协调在业务层 `xgent_ui::editor`。
+- **字号跟随主题**：`EditorTheme`（xui）的 `font_size`/`text`/`text_dim`/`line_height_ratio` 由 `xgent_ui::editor::sync_editor_theme` 系统（跑在 `xui::TextEditorUpdateSet` 前）从 `Theme` 同步——编辑器正文字号跟随 `Theme::font_size` 单一可配源（未来接入 settings 即可「跟随系统/用户偏好」调整），行高比默认 1.5（对齐 zed `buffer_line_height = comfortable`）。
+- **系统字体**：`xgent_app::startup::load_system_font` 在 Startup 加载 macOS 系统 Menlo 字体（`/System/Library/Fonts/Menlo.ttc`）覆盖 `Assets<Font>` 的 `AssetId::default()`，替代 Bevy 内置 FiraMono——Menlo 度量紧凑、抗锯齿清晰，与 zed/VSCode 视觉一致；非 macOS 静默回退 FiraMono。
 - 外部文件变更冲突：未脏静默重载 / 脏弹窗三选（丢弃本地 / 保留本地 / 对比合并）。
 
 ### 5.10 检索升级路径（ADR-0010）

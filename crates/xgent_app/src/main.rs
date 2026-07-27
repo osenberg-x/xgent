@@ -237,7 +237,7 @@ fn main() {
             }
         });
     }
-    app.add_systems(Startup, crate::startup::open_project);
+    app.add_systems(Startup, crate::startup::load_system_font);
 
     // 清理提示：退出时 daemon 末个客户端退出后自退出
     let socket_path = daemon_socket_path();

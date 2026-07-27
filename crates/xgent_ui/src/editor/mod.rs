@@ -94,6 +94,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<SideViewContent>()
             .init_resource::<EditorIoRuntime>()
             .init_resource::<EditorStateSnapshot>()
+            .add_systems(Update, sync_editor_theme.before(xui::TextEditorUpdateSet))
             .add_systems(
                 Startup,
                 spawn_editor_view.after(crate::layout::spawn_layout),
@@ -211,6 +212,25 @@ fn spawn_editor_view(
         })
         .id();
     commands.entity(side).add_child(editor_view);
+}
+
+/// 把 xgent_ui [`Theme`]（用户/系统可配的单一字号源）同步到 xui [`EditorTheme`]。
+///
+/// 设计动机（对齐 zed 编辑器字号模型）：zed 的 `buffer_font_size` 是用户可配的
+/// 单一字号源，UI chrome 经 `rem_size` 派生。xgent 此前 `EditorTheme.font_size`
+/// 硬编码 14.0 且与 [`Theme`] 脱节——本系统让编辑器正文字号跟随 [`Theme::font_size`]，
+/// 未来 `Theme` 接入 settings（NF-04）后即可「跟随系统/用户偏好」调整编辑器字号，
+/// 无需改 xui。颜色（text / text_dim）一并同步，保持编辑器与 UI 主题一致。
+///
+/// 跑在 `xui::TextEditorUpdateSet` 之前，确保 `update_virtual_lines` 读到最新值。
+fn sync_editor_theme(theme: Res<Theme>, mut editor_theme: ResMut<xui::text_editor::render::EditorTheme>) {
+    // 仅在 Theme 变化时写（避免每帧无谓 mutation 触发 change detection）。
+    if !theme.is_changed() && !editor_theme.is_added() {
+        return;
+    }
+    editor_theme.font_size = theme.font_size;
+    editor_theme.text = theme.text;
+    editor_theme.text_dim = theme.text_dim;
 }
 /// 返回对话按钮标记。
 #[derive(Component, Default)]

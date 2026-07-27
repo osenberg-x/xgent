@@ -153,7 +153,7 @@ impl Perform for Accumulator {
     }
 
     fn execute(&mut self, byte: u8) {
-        // 控制字符：\n=LF（换行）, \r=CR（回车，忽略）, \t=Tab, \x08=BS
+        // 控制字符：\n=LF（换行）, \r=CR（回车）, \t=Tab, \x08=BS（退格）
         match byte {
             b'\n' => {
                 self.flush_pending();
@@ -161,8 +161,20 @@ impl Perform for Accumulator {
                 self.finished.push(line);
             }
             b'\r' => {
-                // CR：MVP 忽略（不实现光标回行首覆盖语义）
+                // CR（回车）：光标回行首。行模型下 flush pending 到 current
+                // 即可——真正的覆盖语义由后续 BS/重绘处理。清空 current 会
+                // 丢失合法内容（若 CR 后无重绘），故保守只 flush。
                 self.flush_pending();
+            }
+            b'\x08' => {
+                // BS（退格，0x08）：删除当前行最后一个字符。
+                //
+                // shell 的 ZLE/readline 在 cooked PTY 模式回显用户输入时，
+                // 可能先回显首字符（如 `l`），再 BS 删除 + 重绘整行（`ls`）。
+                // 若 BS 不实现，`l` 残留 + `ls` 追加 = `lls`（首字母重复）。
+                // 实现 BS：先 flush pending 到 current，再删 current 最后一个字符。
+                self.flush_pending();
+                backspace_last_char(&mut self.current);
             }
             b'\t' => {
                 self.pending_text.push_str("    ");
@@ -187,6 +199,27 @@ impl Perform for Accumulator {
         }
         self.flush_pending();
         apply_sgr(&mut self.style, params);
+    }
+}
+
+/// 删除当前行最后一个字符（BS 退格语义）。
+///
+/// 从 `RenderLine.spans` 末尾的 span 开始：若 span 文本长度 > 1，截断末字符；
+/// 若只剩 1 字符，移除整个 span。空行则无操作。
+fn backspace_last_char(line: &mut RenderLine) {
+    while let Some(last) = line.spans.last_mut() {
+        if last.text.is_empty() {
+            line.spans.pop();
+            continue;
+        }
+        // 截断末字符（注意 char 边界，避免切断多字节字符）
+        if let Some(idx) = last.text.char_indices().last() {
+            last.text.truncate(idx.0);
+        }
+        if last.text.is_empty() {
+            line.spans.pop();
+        }
+        return;
     }
 }
 
@@ -308,5 +341,31 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].spans[0].style.bold);
         assert!(!lines[0].spans[1].style.bold);
+    }
+
+    /// BS（退格）删除当前行最后一个字符，修复 shell ZLE 回显导致的 `lls`。
+    ///
+    /// shell cooked 模式回显 `ls` 时：先回显 `l`，再 BS 删除 + 重绘 `ls`。
+    /// 若 BS 不实现，`l` 残留 + `ls` 追加 = `lls`。
+    #[test]
+    fn backspace_deletes_last_char() {
+        let mut p = TerminalParser::new();
+        // l + BS + ls + \n（对齐 shell ZLE redisplay 序列）
+        let lines = p.feed(b"l\x08ls\n");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].plain_text(),
+            "ls",
+            "BS 应删除 l，再追加 ls，结果应为 ls 而非 lls"
+        );
+    }
+
+    /// BS 在空行上无副作用（不 panic、不越界）。
+    #[test]
+    fn backspace_on_empty_line_is_noop() {
+        let mut p = TerminalParser::new();
+        let lines = p.feed(b"\x08\x08hello\n");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].plain_text(), "hello");
     }
 }

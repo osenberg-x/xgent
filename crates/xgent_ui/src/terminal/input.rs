@@ -239,6 +239,13 @@ pub fn handle_terminal_keyboard(
             }
             _ => {
                 // 字符输入：从 logical_key / text 取
+                //
+                // 过滤系统 key repeat（`ev.repeat`）：macOS 长按或快速重复会
+                // 产生 repeat 事件，行编辑器是 UI 侧草稿，repeat 对字符无意义；
+                // 编辑键（Backspace/Delete/方向键）的 repeat 在各自分支保留。
+                if ev.repeat {
+                    continue;
+                }
                 if let Some(text) = &ev.text {
                     for ch in text.chars() {
                         if ch.is_control() {

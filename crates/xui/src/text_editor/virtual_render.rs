@@ -86,11 +86,12 @@ pub fn update_virtual_lines(
     theme: Res<EditorTheme>,
 ) {
     for (mut editor, scroll, node, children) in q.iter_mut() {
-        // 行高：font_size × 1.6 派生，CJK 字体度量裕量充足。
+        // 行高：font_size × line_height_ratio 派生。
         // 关键：LineHeight::Px(line_height) 让 parley 给每行精确像素高度，
         // 软换行的视觉行也在该行行盒内，不溢出到下一逻辑行——
         // 这是消除行间覆盖的关键（旧模型固定行容器高度，软换行溢出覆盖下一行）。
-        let target_lh = (theme.font_size * 1.6).round();
+        // ratio 默认 1.5（对齐 zed comfortable），宿主可经 EditorTheme 调整。
+        let target_lh = (theme.font_size * theme.line_height_ratio).round();
         if (editor.line_height - target_lh).abs() > 0.01 {
             editor.line_height = target_lh;
         }
@@ -341,12 +342,12 @@ mod tests {
         assert!((s as f32 * line_height - 10.0 * line_height).abs() <= 4.0 * line_height);
     }
 
-    /// 行高派生：line_height 应为 font_size 的 1.6 倍（CJK 安全裕量）。
+    /// 行高派生：line_height = font_size × line_height_ratio（默认 1.5，对齐 zed）。
     #[test]
     fn line_height_derives_from_font_size() {
         let font_size: f32 = 14.0;
-        let line_height = (font_size * 1.6_f32).round();
-        assert_eq!(line_height, 22.0);
+        let line_height = (font_size * 1.5_f32).round();
+        assert_eq!(line_height, 21.0);
         assert!(line_height >= font_size * 1.4);
     }
 

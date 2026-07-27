@@ -35,4 +35,33 @@ pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
     });
 }
 
-
+/// 加载 macOS 系统等宽字体（Menlo）作为全局默认，替代 Bevy 内置的 FiraMono。
+///
+/// Bevy 默认字体是 FiraMono Medium，x-height 偏高、字宽偏宽，在 14px 下视觉
+/// 显得比 zed/VSCode 的 JetBrains Mono 大且「糊」。Menlo 是 macOS Terminal/
+/// Xcode 的默认等宽字体，度量紧凑、抗锯齿清晰，与 zed 视觉一致。
+///
+/// 用系统字体而非内嵌字体文件：零打包体积、跟随系统更新、与原生应用一致。
+/// 覆盖 `Assets<Font>` 的 `AssetId::default()`（对齐 Bevy `TextPlugin` 注册
+/// 默认字体的方式），所有未显式指定 `font` 的 `TextFont` 自动用此字体。
+///
+/// 非 macOS 平台静默跳过（保留 FiraMono 兜底）。
+pub fn load_system_font(mut fonts: ResMut<Assets<Font>>) {
+    let path = if cfg!(target_os = "macos") {
+        std::path::Path::new("/System/Library/Fonts/Menlo.ttc").to_path_buf()
+    } else {
+        // 非 macOS：保留 Bevy 默认 FiraMono
+        return;
+    };
+    match std::fs::read(&path) {
+        Ok(data) => {
+            let font = Font::from_bytes(data);
+            fonts.insert(bevy::asset::AssetId::default(), font);
+            tracing::info!("已加载系统字体: {}", path.display());
+        }
+        Err(e) => {
+            let p = path.display();
+            tracing::warn!("加载系统字体失败，回退 Bevy 默认: {p}: {e}");
+        }
+    }
+}

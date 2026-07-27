@@ -129,3 +129,79 @@ async fn resize_does_not_error() {
     backend.kill(id).await.expect("kill");
     let _ = timeout(Duration::from_secs(3), rx.recv()).await;
 }
+
+/// 验证写入 `ls\n`（仅 LF，对齐 xgent_ui handle_line_submit）时 shell 的回显。
+///
+/// 复现用户报告：终端输入 `ls` 回车后，回显显示 `lls`（首字母重复）。
+/// 本测试捕获 PTY 实际回显字节流，断言是否出现重复 `l`。
+#[tokio::test]
+async fn write_lf_only_echo_no_duplicate_first_char() {
+    let backend = LocalPtyBackend::new();
+    let (tx, mut rx) = mpsc::channel::<TerminalEvent>(256);
+    let id = backend.spawn(spawn_request(), tx).await.expect("spawn");
+    // 等 shell 启动 + prompt
+    let _ = collect_output(&mut rx, None, Duration::from_secs(8)).await;
+
+    // 对齐 handle_line_submit：只 push b'\n'（无 \r）
+    backend
+        .write(id, b"ls\n".to_vec())
+        .await
+        .expect("write");
+
+    // 收集足够输出（回显 + 命令结果 + 新 prompt）
+    let buf = collect_output(&mut rx, None, Duration::from_secs(3)).await;
+    let text = String::from_utf8_lossy(&buf);
+    eprintln!("=== write_lf_only 回显 ===\n文本: {text}\n===");
+
+    backend.kill(id).await.expect("kill");
+    let _ = timeout(Duration::from_secs(3), rx.recv()).await;
+
+    // 断言：不应出现 "lls"（首字母重复）
+    assert!(
+        !text.contains("lls"),
+        "回显不应出现首字母重复的 'lls'，实际: {text}"
+    );
+}
+
+/// 回归测试：shell（真实 zsh + 用户配置）回显 `ls` 不应出现 `lls`。
+///
+/// 根因：shell 的 ZLE/readline 在 cooked PTY 模式回显用户输入时，先回显首字符
+/// （`l`），再 BS（退格 0x08）删除 + 重绘整行（`ls`）。xgent 的 vte `execute`
+/// 未实现 BS 时，`l` 残留 + `ls` 追加 = `lls`。实现 BS 后应为 `ls`。
+#[tokio::test]
+async fn shell_echo_ls_not_lls() {
+    use xgent_terminal::TerminalParser;
+    let backend = LocalPtyBackend::new();
+    let (tx, mut rx) = mpsc::channel::<TerminalEvent>(256);
+    let id = backend.spawn(spawn_request(), tx).await.expect("spawn");
+    // 等 shell 完全就绪（bracketed paste 启用 = ZLE 初始化完成）
+    let _ = collect_output(&mut rx, Some("\x1b[?2004h"), Duration::from_secs(10)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    while let Ok(Some(_)) = timeout(Duration::from_millis(50), rx.recv()).await {}
+
+    backend.write(id, b"ls\n".to_vec()).await.expect("write");
+
+    // 逐块 feed，累积所有完成行
+    let mut parser = TerminalParser::new();
+    let mut all_text = String::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    while tokio::time::Instant::now() < deadline {
+        match timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Some(TerminalEvent::Output(bytes))) => {
+                for line in parser.feed(&bytes) {
+                    all_text.push_str(&line.plain_text());
+                    all_text.push('\n');
+                }
+            }
+            Ok(Some(TerminalEvent::Exited(_))) | Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+    backend.kill(id).await.expect("kill");
+    let _ = timeout(Duration::from_secs(3), rx.recv()).await;
+
+    assert!(
+        !all_text.contains("lls"),
+        "shell 回显 ls 不应出现首字母重复的 lls，实际解析行:\n{all_text}"
+    );
+}

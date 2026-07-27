@@ -88,15 +88,20 @@ pub fn sync_highlight_layer(
         });
     }
 }
-/// 编辑器主题（颜色 + 字号），由宿主注入。xui 不依赖 xgent_ui 的 Theme。
+/// 编辑器主题（颜色 + 字号 + 行高比），由宿主注入。xui 不依赖 xgent_ui 的 Theme。
 #[derive(Resource, Debug, Clone)]
 pub struct EditorTheme {
     /// 主文本色
     pub text: Color,
     /// 次要文本色（行号等）
     pub text_dim: Color,
-    /// 字体大小
+    /// 字体大小（逻辑像素）
     pub font_size: f32,
+    /// 行高比（line_height = font_size × 此值）。
+    ///
+    /// 对齐 zed `buffer_line_height = comfortable`（≈1.5）：1.5 是主流代码编辑器
+    /// （zed / VSCode）的紧凑行高，1.6 留 CJK 裕量但偏稀疏。宿主可按需调。
+    pub line_height_ratio: f32,
 }
 
 impl Default for EditorTheme {
@@ -105,6 +110,7 @@ impl Default for EditorTheme {
             text: Color::WHITE,
             text_dim: Color::srgb(0.62, 0.64, 0.68),
             font_size: 14.0,
+            line_height_ratio: 1.5,
         }
     }
 }
