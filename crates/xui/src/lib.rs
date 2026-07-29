@@ -32,6 +32,9 @@ pub use text_editor::{
     EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope, TextEditor,
     TextEditorPlugin, TextEditorUpdateSet,
 };
+pub use text_editor::render::{
+    CursorBarMarker, HighlightLayerMarker, LineNumbersMarker, TextEditorChildren,
+};
 pub use text_editor::highlight::{highlight, span_color_for, HighlightSpan, SpanKind};
 pub use virtual_list::{VirtualItemBuilder, VirtualList, VirtualListPlugin};
 

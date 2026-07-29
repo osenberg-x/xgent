@@ -9058,6 +9058,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "crossbeam-channel",
+ "parking_lot",
  "parley 0.11.0",
  "serde",
  "serde_json",

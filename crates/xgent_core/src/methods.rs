@@ -12,19 +12,24 @@ pub const CONFIG_READ: &str = "config.read";
 pub const CONFIG_WRITE: &str = "config.write";
 /// 订阅项目文件变更。
 pub const FS_WATCH: &str = "fs.watch";
+/// 通知 daemon 文件已被本客户端修改（保存），daemon 广播 `peer.fileChanged`
+/// 给同项目其他客户端（排除来源）。与 `fs.watch` 的被动监听互补：
+/// `fs.watch` 由 notify 检测外部变更；`fs.notify` 由 UI 主动报告用户保存。
+pub const FS_NOTIFY: &str = "fs.notify";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn methods_are_nonempty_unique() {
+    fn method_names_are_unique() {
         let all = [
             PROVIDER_CHAT,
             PROVIDER_LIST_MODELS,
             CONFIG_READ,
             CONFIG_WRITE,
             FS_WATCH,
+            FS_NOTIFY,
         ];
         assert!(all.iter().all(|s| !s.is_empty()));
         // 唯一性

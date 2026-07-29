@@ -34,6 +34,9 @@ pub fn agent_poll_system(
     )>,
     provider: Res<crate::provider_state::ProviderInfo>,
     context: Res<crate::provider_state::ContextState>,
+    // editor 命令 channel（可选：测试环境未注入时为 None）
+    editor_cmd_rx: Option<ResMut<crate::bridge::EditorCommandRx>>,
+    mut editor_cmd: MessageWriter<EditorCommandRequestMessage>,
 ) {
     // 1. 处理用户输入
     for ev in readers.p0().read() {
@@ -68,7 +71,10 @@ pub fn agent_poll_system(
             &provider.model,
             Some(bridge.tool_schemas.as_ref().clone()),
         );
-        let _ = bridge.cmd_tx.try_send(AgentCommand::StartLoop { req });
+        let _ = bridge.cmd_tx.try_send(AgentCommand::StartLoop {
+            req,
+            editor_queries: ev.editor_queries.clone(),
+        });
     }
 
     // 2. 处理中断
@@ -123,6 +129,14 @@ pub fn agent_poll_system(
             }
         });
         conv.status = ConversationStatus::Streaming;
+    }
+
+    // 3b. drain editor 命令 channel：EditorTool → EditorCommandRequestMessage
+    if let Some(editor_rx) = editor_cmd_rx {
+        let mut rx = editor_rx.rx.blocking_lock();
+        while let Ok(req) = rx.try_recv() {
+            editor_cmd.write(EditorCommandRequestMessage(req));
+        }
     }
 
     // 4. 非阻塞轮询事件 channel

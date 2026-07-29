@@ -161,7 +161,11 @@ pub struct AgentBridge {
 /// 命令（ECS → 异步任务）。
 pub enum AgentCommand {
     /// 发起对话
-    StartLoop { req: ChatRequest },
+    StartLoop {
+        req: ChatRequest,
+        /// @ 引用解析的编辑器查询（供 context 检索注入）
+        editor_queries: Vec<xgent_core::EditorQuery>,
+    },
     /// 中断当前对话
     Abort,
     /// 用户确认决策
@@ -329,15 +333,29 @@ async fn agent_loop_task(
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            AgentCommand::StartLoop { mut req } => {
+            AgentCommand::StartLoop { mut req, editor_queries } => {
                 // 上下文检索：ECS 系统同步无法 await，故在此异步侧检索并刷新
                 // req 的首条 system 消息（修复上下文从未注入的 bug）。
                 // 用最近一条 user 消息作为 query；检索失败不阻塞对话（用空结果）。
                 if let Some(user_text) = crate::format::last_user_text(&req.messages) {
+                    // 把 @ 引用查询转为 hints（File → 路径，Cursor/Selection → 描述）
+                    let hints: Vec<String> = editor_queries
+                        .iter()
+                        .map(|q| match q {
+                            xgent_core::EditorQuery::File { path } => {
+                                format!("@file:{}", path.display())
+                            }
+                            xgent_core::EditorQuery::Cursor => "@cursor".into(),
+                            xgent_core::EditorQuery::Selection => "@selection".into(),
+                        })
+                        .collect();
                     let query = xgent_context::provider::ContextQuery {
                         user_message: user_text,
-                        current_file: None,
-                        hints: Vec::new(),
+                        current_file: editor_queries.iter().find_map(|q| match q {
+                            xgent_core::EditorQuery::File { path } => Some(path.clone()),
+                            _ => None,
+                        }),
+                        hints,
                         max_tokens: 8_000,
                     };
                     let result = cfg.context.retrieve(&query).await;
@@ -954,4 +972,37 @@ impl xgent_tools::ConfirmCallback for BridgeConfirm {
         let _ = self.event_tx.send(AgentEvent::ConfirmRequest(req)).await;
         rx
     }
+}
+
+/// EditorCommandSink 桥接实现：持有 mpsc::Sender，emit 写 channel。
+/// agent_poll_system 消费 receiver 端发 EditorCommandRequestMessage。
+#[derive(Clone)]
+pub struct ChannelEditorCommandSink {
+    tx: Arc<std::sync::Mutex<mpsc::Sender<xgent_tools::EditorCommandRequest>>>,
+}
+
+impl ChannelEditorCommandSink {
+    /// 构造，注入 channel 发送端。
+    pub fn new(tx: mpsc::Sender<xgent_tools::EditorCommandRequest>) -> Self {
+        Self {
+            tx: Arc::new(std::sync::Mutex::new(tx)),
+        }
+    }
+}
+
+impl xgent_tools::EditorCommandSink for ChannelEditorCommandSink {
+    fn emit(&self, req: xgent_tools::EditorCommandRequest) -> Result<(), String> {
+        self.tx
+            .lock()
+            .unwrap()
+            .try_send(req)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 持有 editor 命令 channel 的接收端，由 agent_poll_system 每帧 drain。
+#[derive(Resource)]
+pub struct EditorCommandRx {
+    /// tokio mpsc 接收端（blocking_lock + try_recv 非阻塞 drain）。
+    pub rx: Mutex<mpsc::Receiver<xgent_tools::EditorCommandRequest>>,
 }

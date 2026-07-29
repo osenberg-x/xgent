@@ -118,27 +118,27 @@ impl Default for EditorTheme {
 /// 更新行号列：根据当前文本行数重建。
 ///
 /// 只在文本变化（`HighlightCache` 变）时重建。
+/// 行数从 `TextEditor.rope.len_lines()` 取，兼容编辑态（有 `EditableText`）
+/// 与虚拟化只读态（无 `EditableText`，文本在 rope 中）。
 pub fn update_line_numbers(
     q: Query<
         (
             &TextEditor,
             &HighlightCache,
             &TextEditorChildren,
-            &bevy::text::EditableText,
         ),
         Changed<HighlightCache>,
     >,
     mut q_num: Query<&mut Text, With<LineNumbersMarker>>,
 ) {
-    for (_editor, _cache, children, editable) in q.iter() {
+    for (editor, _cache, children) in q.iter() {
         let Some(num_entity) = children.line_numbers else {
             continue;
         };
         let Ok(mut num_text) = q_num.get_mut(num_entity) else {
             continue;
         };
-        let text = editable.value().to_string();
-        let line_count = text.lines().count().max(1);
+        let line_count = editor.rope.len_lines().max(1);
         let nums = (1..=line_count)
             .map(|i| format!("{i:>4}"))
             .collect::<Vec<_>>()

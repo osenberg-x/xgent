@@ -246,7 +246,7 @@ fn delta_then_done_message_sequence() {
     ]);
     // 发起用户输入
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
 
     // 跑若干帧让事件流转
     for _ in 0..50 {
@@ -280,7 +280,7 @@ fn error_message_propagates() {
         message: "boom".into(),
     }]);
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
     for _ in 0..20 {
         app.update();
     }
@@ -298,14 +298,10 @@ fn busy_state_ignores_new_input() {
         },
     ]);
     // 第一条输入
-    app.world_mut().write_message(UserInputMessage {
-        text: "first".into(),
-    });
+    app.world_mut().write_message(UserInputMessage { text: "first".into(), editor_queries: Vec::new() });
     app.update();
     // 在 Thinking/Streaming 时发第二条
-    app.world_mut().write_message(UserInputMessage {
-        text: "second".into(),
-    });
+    app.world_mut().write_message(UserInputMessage { text: "second".into(), editor_queries: Vec::new() });
     for _ in 0..20 {
         app.update();
     }
@@ -362,9 +358,7 @@ fn tool_call_executes_approved_tool() {
     );
     app.insert_resource(Collected::default())
         .add_systems(Update, collect_messages);
-    app.world_mut().write_message(UserInputMessage {
-        text: "do echo".into(),
-    });
+    app.world_mut().write_message(UserInputMessage { text: "do echo".into(), editor_queries: Vec::new() });
     for _ in 0..50 {
         app.update();
     }
@@ -391,9 +385,7 @@ fn session_jsonl_persists_header_and_assistant_message() {
         Arc::new(ToolExecutor::with_defaults()),
         ToolPolicyConfig::default(),
     );
-    app.world_mut().write_message(UserInputMessage {
-        text: "hello".into(),
-    });
+    app.world_mut().write_message(UserInputMessage { text: "hello".into(), editor_queries: Vec::new() });
     for _ in 0..50 {
         app.update();
     }
@@ -544,7 +536,7 @@ fn retryable_error_retries_then_succeeds() {
     app.insert_resource(RetryCollected::default())
         .add_systems(Update, collect_retry);
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
     for _ in 0..80 {
         app.update();
     }
@@ -592,7 +584,7 @@ fn non_retryable_error_fails_immediately() {
     app.insert_resource(RetryCollected::default())
         .add_systems(Update, collect_retry);
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
     for _ in 0..40 {
         app.update();
     }
@@ -621,7 +613,7 @@ fn infinite_retry_can_be_aborted() {
     app.insert_resource(RetryCollected::default())
         .add_systems(Update, collect_retry);
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
     // 让首次失败 + 若干次重试发生
     for _ in 0..30 {
         app.update();
@@ -766,7 +758,7 @@ fn compaction_triggers_when_over_threshold() {
     app.insert_resource(CompactedCollected::default())
         .add_systems(Update, collect_compacted);
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
     for _ in 0..50 {
         app.update();
     }
@@ -839,7 +831,7 @@ fn steering_interrupts_streaming_and_continues() {
     )
     .0;
     app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into() });
+        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
     // 跑几帧让流式开始
     for _ in 0..5 {
         app.update();

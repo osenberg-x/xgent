@@ -24,12 +24,13 @@ use bevy::prelude::*;
 
 use crate::editor::buffer::EditorBuffer;
 use crate::theme::{Theme, px};
-use crate::editor::command::EditorCommand;
+use xgent_agent::EditorCommandRequestMessage;
+use crate::editor::command::handle_editor_commands;
 use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
     BufferSavedEvent, EditorIoRuntime, FileReadRequest, FileReadResult, FileWriteRequest,
     FileWriteResult, apply_file_read_results, handle_file_read_requests,
-    handle_file_write_requests, process_pending_reads,
+    handle_file_write_requests, poll_io_results, process_pending_reads,
 };
 use crate::editor::state::{EditorStateSnapshot, update_editor_state_snapshot};
 use crate::editor::tabs::{
@@ -88,7 +89,8 @@ impl Plugin for EditorPlugin {
             .add_message::<FileWriteResult>()
             .add_message::<BufferSavedEvent>()
             .add_message::<FileChangedEvent>()
-            .add_message::<EditorCommand>()
+            .add_message::<EditorCommandRequestMessage>()
+            .add_message::<xui::EditorDirtyChanged>()
             .init_resource::<EditorTabs>()
             .init_resource::<EditorView>()
             .init_resource::<SideViewContent>()
@@ -102,18 +104,26 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 (
+                    handle_editor_commands,
                     handle_open_file_requests,
                     handle_close_tab_requests,
                     handle_cycle_tab_requests,
                     process_pending_reads,
-                    apply_file_read_results,
                     handle_file_read_requests,
                     handle_editor_save_requests,
+                    handle_file_write_requests,
+                    poll_io_results,
+                    apply_save_result,
+                    apply_file_read_results,
+                    handle_pending_goto,
                     apply_editor_view_visibility,
                     update_buffer_visibility,
+                    sync_dirty_state,
                     update_editor_state_snapshot,
                     rebuild_editor_tabs,
                     handle_editor_tab_click,
+                    handle_file_changed,
+                    handle_conflict_decision,
                 )
                     .chain()
                     .after(xui::TextEditorUpdateSet),
@@ -130,7 +140,6 @@ fn spawn_editor_view(
     mut commands: Commands,
     q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
     theme: Res<Theme>,
-    loc: Res<xgent_settings::Localizer>,
 ) {
     let Ok(side) = q_side.single() else {
         return;
@@ -240,28 +249,25 @@ pub struct EditorBackButtonMarker;
 #[derive(Component, Default)]
 pub struct EditorAreaMarker;
 
-/// 订阅 xui 的 EditorSaveRequested，触发文件写入 + 发 BufferSavedEvent。
+/// 订阅 xui 的 EditorSaveRequested，触发文件写入。
 ///
 /// 文本从 `TextEditor.rope` 重建（虚拟化模式下无 EditableText）。
+/// `BufferSavedEvent` 由 `poll_io_results` 在写入成功后发出（非乐观）。
+/// buffer 的 saved 标记也由 `poll_io_results` 路径经 `BufferSavedEvent` →
+/// `apply_save_result` 完成，避免写失败时 buffer 状态与磁盘不一致。
 pub fn handle_editor_save_requests(
     mut reader: MessageReader<xui::EditorSaveRequested>,
     mut q_editors: Query<(&mut EditorBuffer, &xui::TextEditor)>,
     mut write_writer: MessageWriter<FileWriteRequest>,
-    mut saved_writer: MessageWriter<BufferSavedEvent>,
 ) {
     for ev in reader.read() {
-        let Ok((mut buf, editor)) = q_editors.get_mut(ev.entity) else {
+        let Ok((_buf, editor)) = q_editors.get_mut(ev.entity) else {
             continue;
         };
         let content = editor.rope.to_string();
         write_writer.write(FileWriteRequest {
-            path: buf.path.clone(),
-            content: content.clone(),
-        });
-        // 标记 saved（实际写入结果由 FileWriteResult 处理，此处乐观更新）
-        buf.mark_saved(&content);
-        saved_writer.write(BufferSavedEvent {
-            path: buf.path.clone(),
+            path: _buf.path.clone(),
+            content,
         });
     }
 }
@@ -490,5 +496,60 @@ pub fn handle_editor_tab_click(
         if *interaction == Interaction::Pressed {
             tabs.open(marker.buffer);
         }
+    }
+}
+
+/// 同步 xui 的 EditorDirtyChanged 到 EditorBuffer 状态机。
+///
+/// xui::TextEditor 编辑时发 EditorDirtyChanged{dirty:true}，
+/// 本系统把对应 EditorBuffer 标记为 Dirty。
+pub fn sync_dirty_state(
+    mut reader: MessageReader<xui::EditorDirtyChanged>,
+    mut q_buffers: Query<&mut crate::editor::buffer::EditorBuffer>,
+) {
+    for ev in reader.read() {
+        if !ev.dirty {
+            continue;
+        }
+        if let Ok(mut buf) = q_buffers.get_mut(ev.entity) {
+            buf.mark_dirty();
+        }
+    }
+}
+
+/// 订阅 `BufferSavedEvent`，把对应 buffer 标记为已保存。
+///
+/// `poll_io_results` 在写入成功后发 `BufferSavedEvent`，本系统据此
+/// 更新 `EditorBuffer` 状态为 Clean + 更新 `disk_content`，
+/// 并清除 `TextEditor.dirty`。
+pub fn apply_save_result(
+    mut reader: MessageReader<crate::editor::io::BufferSavedEvent>,
+    mut q: Query<(&mut EditorBuffer, &mut xui::TextEditor)>,
+) {
+    for ev in reader.read() {
+        for (mut buf, mut editor) in q.iter_mut() {
+            if buf.path != ev.path {
+                continue;
+            }
+            let content = editor.rope.to_string();
+            buf.mark_saved(&content);
+            editor.dirty = false;
+            break;
+        }
+    }
+}
+
+/// 消费 `PendingGoTo`：滚动到目标行 + 移除组件。
+///
+/// 目标行号 1-based，`ScrollPosition.y` 设为 `(line-1) * line_height`
+/// 让目标行对齐视口顶部。行高从 `TextEditor.line_height` 取。
+pub fn handle_pending_goto(
+    mut q: Query<(Entity, &crate::editor::buffer::PendingGoTo, &mut bevy::ui::ScrollPosition, &xui::TextEditor)>,
+    mut commands: Commands,
+) {
+    for (entity, goto, mut scroll, editor) in q.iter_mut() {
+        let target_y = goto.line.saturating_sub(1) as f32 * editor.line_height;
+        scroll.y = target_y;
+        commands.entity(entity).remove::<crate::editor::buffer::PendingGoTo>();
     }
 }

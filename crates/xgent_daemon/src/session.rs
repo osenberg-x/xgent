@@ -152,6 +152,7 @@ async fn dispatch_request(
         methods::CONFIG_READ => config_read(req, shared).await,
         methods::CONFIG_WRITE => config_write(req, shared, client_id).await,
         methods::FS_WATCH => fs_watch(req, shared, client_id).await,
+        methods::FS_NOTIFY => fs_notify(req, shared, client_id).await,
         methods::PROVIDER_LIST_MODELS => provider_list_models(req, shared).await,
         methods::PROVIDER_CHAT => provider_chat(req, shared, client_id).await,
         _ => Response::err(
@@ -238,6 +239,38 @@ async fn fs_watch(req: Request, shared: &Shared, client_id: xgent_core::ids::Cli
             req.id,
             RpcError::new(xgent_core::proto::INTERNAL_ERROR, e.to_string(), None),
         );
+    }
+    Response::ok(req.id, serde_json::json!({"ok": true}))
+}
+
+/// fs.notify：UI 通知文件已保存，广播 `peer.fileChanged` 给同项目其他客户端。
+///
+/// 参数：`{"path": "/abs/path"}`。需要反查客户端所属项目来广播。
+async fn fs_notify(req: Request, shared: &Shared, client_id: xgent_core::ids::ClientId) -> Response {
+    #[derive(serde::Deserialize)]
+    struct FsNotifyParams {
+        path: std::path::PathBuf,
+    }
+    let params: FsNotifyParams = match serde_json::from_value(req.params.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            return Response::err(
+                req.id,
+                RpcError::new(xgent_core::proto::INVALID_PARAMS, e.to_string(), None),
+            );
+        }
+    };
+    // 查找来源客户端订阅的项目，广播给同项目其他客户端（排除来源）
+    let notif = Notification::new(
+        notifications::PEER_FILE_CHANGED,
+        serde_json::json!({ "path": params.path }),
+    );
+    {
+        let reg = shared.registry.read().await;
+        let subscribed = reg.subscribed(client_id);
+        for project in &subscribed {
+            reg.broadcast_to_project(project, notif.clone(), Some(client_id));
+        }
     }
     Response::ok(req.id, serde_json::json!({"ok": true}))
 }

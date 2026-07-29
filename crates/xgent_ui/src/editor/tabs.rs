@@ -221,6 +221,7 @@ pub fn handle_open_file_requests(
     q_area: Query<Entity, With<crate::editor::EditorAreaMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
     mut content: ResMut<crate::editor::SideViewContent>,
+    editor_theme: Res<xui::text_editor::render::EditorTheme>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -232,9 +233,37 @@ pub fn handle_open_file_requests(
                     .insert(crate::editor::buffer::PendingGoTo { line });
             }
         } else {
-            // spawn 新 buffer：滚动容器（契约由 `xui::ScrollArea` 通用提供）+
-            // 虚拟化占位子节点。文本显示走 `update_virtual_lines` 动态 spawn
-            // 可见行；EditableText 暂不挂（编辑功能留后续，当前聚焦查看+滚动+性能）。
+            // spawn 新 buffer：滚动容器 + 虚拟化占位 + 行号列 + 光标条。
+            // 文本显示走 `update_virtual_lines` 动态 spawn 可见行；
+            let line_num_entity = commands.spawn((
+                Text::new(String::new()),
+                TextFont {
+                    font_size: FontSize::Px(editor_theme.font_size),
+                    ..default()
+                },
+                TextColor(bevy::color::palettes::tailwind::GRAY_400.into()),
+                xui::LineNumbersMarker,
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    width: Val::Px(48.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+            )).id();
+            let cursor_bar_entity = commands.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(48.0),
+                    width: Val::Px(2.0),
+                    height: Val::Px(20.0),
+                    ..default()
+                },
+                BackgroundColor(bevy::color::palettes::tailwind::AMBER_400.into()),
+                xui::CursorBarMarker,
+            )).id();
             let buffer_entity = commands
                 .spawn((
                     xui::ScrollArea::vertical(),
@@ -242,6 +271,11 @@ pub fn handle_open_file_requests(
                     crate::editor::buffer::EditorBuffer::from_disk(req.path.clone(), String::new()),
                     xui::TextEditor::default(),
                     xui::HighlightCache::default(),
+                    xui::TextEditorChildren {
+                        line_numbers: Some(line_num_entity),
+                        highlight_layer: None,
+                        cursor_bar: Some(cursor_bar_entity),
+                    },
                     crate::editor::buffer::PendingRead {
                         path: req.path.clone(),
                         line: req.line,
@@ -252,10 +286,8 @@ pub fn handle_open_file_requests(
                     p.spawn((
                         Node {
                             width: Val::Percent(100.0),
-                            height: Val::Px(0.0), // 由 update_virtual_lines 更新为 全文高
+                            height: Val::Px(0.0),
                             position_type: PositionType::Relative,
-                            // 关键：禁止 flex 收缩——否则占位高度被父容器（视口）
-                            // 压到 size.y，content_size ≈ size，max_offset ≈ 0，滚不到底。
                             flex_shrink: 0.0,
                             ..default()
                         },
@@ -263,6 +295,9 @@ pub fn handle_open_file_requests(
                     ));
                 })
                 .id();
+            // 行号列 + 光标条挂为 buffer 子节点
+            commands.entity(buffer_entity).add_child(line_num_entity);
+            commands.entity(buffer_entity).add_child(cursor_bar_entity);
             // 挂到编辑器区容器下
             if let Ok(area) = q_area.single() {
                 commands.entity(area).add_child(buffer_entity);

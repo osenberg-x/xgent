@@ -96,6 +96,12 @@ fn main() {
     // ToolExecutor 作为 Resource（与 AgentBridge 共享同一 Arc）。
     // 插件系统经 ToolExecutorResource 注册工具到同一实例。
     let executor = Arc::new(ToolExecutor::with_defaults());
+    // Editor 命令 channel：agent EditorTool → ECS（经 agent_poll_system 桥接）
+    let (editor_cmd_tx, editor_cmd_rx) =
+        tokio::sync::mpsc::channel::<xgent_tools::EditorCommandRequest>(32);
+    let editor_sink = Arc::new(xgent_agent::ChannelEditorCommandSink::new(editor_cmd_tx));
+    let editor_tool = xgent_tools::EditorTool::new(editor_sink);
+    executor.register(Arc::new(editor_tool));
     // ContextHub 包装内置 OnDemandContextProvider + 动态插件 provider。
     // 作为 Arc<dyn ContextProvider> 注入 bridge（agent 无感于内置 vs 插件）。
     let context_hub = Arc::new(ContextHub::default());
@@ -227,7 +233,10 @@ fn main() {
     .insert_resource(ToolExecutorResource(executor.clone()))
     .insert_resource(PluginHostResource(plugin_host.clone()))
     .insert_resource(PluginEventRx(parking_lot::Mutex::new(event_rx)))
-    .insert_resource(xgent_plugin_host::PluginOpRx(parking_lot::Mutex::new(op_rx)));
+    .insert_resource(xgent_plugin_host::PluginOpRx(parking_lot::Mutex::new(op_rx)))
+    .insert_resource(xgent_agent::EditorCommandRx {
+        rx: tokio::sync::Mutex::new(editor_cmd_rx),
+    });
     // 在 bridge 的 tokio runtime 上 spawn load_builtin_plugins（async，主线程无法 await）
     {
         let host = plugin_host.clone();

@@ -15,6 +15,7 @@
 //! 若未注入，降级为同步 `std::fs`（小文件可用，大文件会卡帧）。
 
 use std::path::PathBuf;
+use parking_lot::Mutex;
 
 use bevy::prelude::*;
 use tokio::sync::oneshot;
@@ -22,15 +23,26 @@ use tokio::sync::oneshot;
 /// 编辑器 IO runtime（由 xgent_app 注入 tokio handle）。
 ///
 /// 若 `handle` 为 None，io 模块降级为同步 IO。
-#[derive(Resource, Clone)]
+///
+/// 持有 pending oneshot receiver 列表，每帧非阻塞 poll（`try_recv`），
+/// 避免 `blocking_recv` 卡 ECS 帧循环。
+#[derive(Resource)]
 pub struct EditorIoRuntime {
     /// tokio runtime handle（可选，便于测试不依赖 runtime）
     pub handle: Option<tokio::runtime::Handle>,
+    /// 待 poll 的读取结果 receiver 列表
+    pending_reads: Mutex<Vec<(FileReadRequest, oneshot::Receiver<Result<String, String>>)>>,
+    /// 待 poll 的写入结果 receiver 列表
+    pending_writes: Mutex<Vec<(FileWriteRequest, oneshot::Receiver<Result<(), String>>)>>,
 }
 
 impl Default for EditorIoRuntime {
     fn default() -> Self {
-        Self { handle: None }
+        Self {
+            handle: None,
+            pending_reads: Mutex::new(Vec::new()),
+            pending_writes: Mutex::new(Vec::new()),
+        }
     }
 }
 
@@ -39,6 +51,8 @@ impl EditorIoRuntime {
     pub fn new(handle: tokio::runtime::Handle) -> Self {
         Self {
             handle: Some(handle),
+            pending_reads: Mutex::new(Vec::new()),
+            pending_writes: Mutex::new(Vec::new()),
         }
     }
 }
@@ -88,86 +102,131 @@ pub struct BufferSavedEvent {
     pub path: PathBuf,
 }
 
-/// 处理文件读取请求：spawn tokio task，结果经 channel 回 ECS。
+/// 处理文件读取请求：spawn tokio task，把 receiver 存入 pending 列表。
 ///
-/// 系统每帧非阻塞轮询 channel 接收结果，发 [`FileReadResult`]。
+/// 结果由 [`poll_io_results`] 系统每帧非阻塞 poll。
 pub fn handle_file_read_requests(
     mut reader: MessageReader<FileReadRequest>,
     mut writer: MessageWriter<FileReadResult>,
     rt: ResMut<EditorIoRuntime>,
 ) {
     for req in reader.read() {
-        let path = req.path.clone();
-        let line = req.line;
         if let Some(handle) = rt.handle.clone() {
             let (tx, rx) = oneshot::channel::<Result<String, String>>();
+            let path = req.path.clone();
             handle.spawn(async move {
                 let result = tokio::fs::read_to_string(&path)
                     .await
                     .map_err(|e| format!("{}: {e}", path.display()));
                 let _ = tx.send(result);
             });
-            // 阻塞等待结果——MVP 简化：文件读取通常很快，同步等待可接受。
-            // 真正非阻塞需把 rx 存起来每帧 poll（留待后续优化）。
-            // 此处用 try_recv 失败则跳过本帧，下帧再 poll。
-            // 但 oneshot 只能消费一次——故 MVP 直接 block_on。
-            // 实际为避免卡帧，用 blocking_recv 超时 50ms。
-            let result = match rx.blocking_recv() {
-                Ok(r) => r,
-                Err(_) => Err("读取任务取消".into()),
-            };
-            writer.write(FileReadResult {
-                path: req.path.clone(),
-                line,
-                content: result,
-            });
+            // 非阻塞：receiver 存入 pending，由 poll_io_results 每帧 try_recv
+            rt.pending_reads.lock().push((req.clone(), rx));
         } else {
-            // 降级同步 IO
+            // 降级同步 IO（无 runtime，小文件可用）
             let result = std::fs::read_to_string(&req.path)
                 .map_err(|e| format!("{}: {e}", req.path.display()));
             writer.write(FileReadResult {
                 path: req.path.clone(),
-                line,
+                line: req.line,
                 content: result,
             });
         }
     }
 }
 
-/// 处理文件写入请求：spawn tokio task，结果回 ECS。
+/// 处理文件写入请求：spawn tokio task，把 receiver 存入 pending 列表。
+///
+/// 结果由 [`poll_io_results`] 系统每帧非阻塞 poll。
 pub fn handle_file_write_requests(
     mut reader: MessageReader<FileWriteRequest>,
-    mut writer: MessageWriter<FileWriteResult>,
     rt: ResMut<EditorIoRuntime>,
 ) {
     for req in reader.read() {
-        let path = req.path.clone();
-        let content = req.content.clone();
         if let Some(handle) = rt.handle.clone() {
             let (tx, rx) = oneshot::channel::<Result<(), String>>();
+            let path = req.path.clone();
+            let content = req.content.clone();
             handle.spawn(async move {
                 let result = tokio::fs::write(&path, content.as_bytes())
                     .await
                     .map_err(|e| format!("{}: {e}", path.display()));
                 let _ = tx.send(result);
             });
-            let result = match rx.blocking_recv() {
-                Ok(r) => r,
-                Err(_) => Err("写入任务取消".into()),
-            };
-            writer.write(FileWriteResult {
-                path: req.path.clone(),
-                result,
-            });
+            rt.pending_writes.lock().push((req.clone(), rx));
         } else {
-            let result = std::fs::write(&req.path, content.as_bytes())
+            // 降级同步 IO
+            let _ = std::fs::write(&req.path, req.content.as_bytes())
                 .map_err(|e| format!("{}: {e}", req.path.display()));
-            writer.write(FileWriteResult {
-                path: req.path.clone(),
-                result,
-            });
         }
     }
+}
+
+/// 每帧非阻塞 poll pending IO receiver，就绪的发对应 Result 消息。
+///
+/// 读就绪 → `FileReadResult`；写就绪 → `FileWriteResult` + `BufferSavedEvent`。
+/// 未就绪的保留到下一帧。
+pub fn poll_io_results(
+    rt: ResMut<EditorIoRuntime>,
+    mut read_writer: MessageWriter<FileReadResult>,
+    mut write_writer: MessageWriter<FileWriteResult>,
+    mut saved_writer: MessageWriter<BufferSavedEvent>,
+) {
+    // poll 读取
+    let mut reads = rt.pending_reads.lock();
+    let mut still_pending = Vec::with_capacity(reads.len());
+    for (req, mut rx) in reads.drain(..) {
+        match rx.try_recv() {
+            Ok(content) => {
+                read_writer.write(FileReadResult {
+                    path: req.path.clone(),
+                    line: req.line,
+                    content,
+                });
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                still_pending.push((req, rx));
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                read_writer.write(FileReadResult {
+                    path: req.path.clone(),
+                    line: req.line,
+                    content: Err("读取任务取消".into()),
+                });
+            }
+        }
+    }
+    *reads = still_pending;
+    drop(reads);
+
+    // poll 写入
+    let mut writes = rt.pending_writes.lock();
+    let mut still_pending = Vec::with_capacity(writes.len());
+    for (req, mut rx) in writes.drain(..) {
+        match rx.try_recv() {
+            Ok(result) => {
+                write_writer.write(FileWriteResult {
+                    path: req.path.clone(),
+                    result: result.clone(),
+                });
+                if result.is_ok() {
+                    saved_writer.write(BufferSavedEvent {
+                        path: req.path.clone(),
+                    });
+                }
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                still_pending.push((req, rx));
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                write_writer.write(FileWriteResult {
+                    path: req.path.clone(),
+                    result: Err("写入任务取消".into()),
+                });
+            }
+        }
+    }
+    *writes = still_pending;
 }
 
 #[cfg(test)]

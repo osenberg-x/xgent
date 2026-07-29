@@ -9,9 +9,14 @@ use bevy::prelude::*;
 use xgent_tools::confirm::{ConfirmDecision, ConfirmRequest};
 
 /// 用户输入消息（UI → agent）。
+///
+/// `editor_queries` 携带 @ 引用解析结果（@file/@cursor/@selection），
+/// 由 chat_panel 输入预处理 `parse_at_references` 产生，
+/// 注入到 context 检索的 hints 供 ContextProvider 处理。
 #[derive(Message)]
 pub struct UserInputMessage {
     pub text: String,
+    pub editor_queries: Vec<xgent_core::EditorQuery>,
 }
 
 /// 中断当前对话（UI → agent）。
@@ -154,3 +159,9 @@ pub struct CompactedMessage {
 /// 会话已清空（agent → UI）：新建会话后通知 UI 清空消息列表。
 #[derive(Message)]
 pub struct SessionClearedMessage;
+
+/// 编辑器命令请求（agent → UI）：agent 经 EditorTool 发出，经 channel 桥接到 ECS。
+///
+/// xgent_ui::editor::command 订阅后执行：打开文件、跳转、选区、滚动、关闭标签。
+#[derive(Clone, Debug, Message)]
+pub struct EditorCommandRequestMessage(pub xgent_tools::EditorCommandRequest);

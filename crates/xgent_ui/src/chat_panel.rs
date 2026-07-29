@@ -567,8 +567,12 @@ pub fn forward_input_submission(
             continue;
         }
         if conv.status == ConversationStatus::Idle || conv.status == ConversationStatus::Error {
+            // @ 引用解析：替换占位标记 + 收集 EditorQuery
+            let (text, queries) =
+                crate::editor::at_syntax::parse_at_references(&ev.text);
             user_writer.write(UserInputMessage {
-                text: ev.text.clone(),
+                text,
+                editor_queries: queries,
             });
         } else {
             // agent 执行中：发 Steering，注入到当前对话

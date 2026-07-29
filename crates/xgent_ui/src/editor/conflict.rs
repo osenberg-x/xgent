@@ -83,8 +83,12 @@ pub fn handle_file_changed(
         };
         match buf.state {
             BufferState::Clean => {
-                // 静默重载：发 FileReadRequest
+                // 静默重载：发 FileReadRequest + 标记 FileReadPending
                 read_writer.write(FileReadRequest {
+                    path: ev.path.clone(),
+                    line: None,
+                });
+                commands.entity(entity).insert(crate::editor::io::FileReadPending {
                     path: ev.path.clone(),
                     line: None,
                 });
