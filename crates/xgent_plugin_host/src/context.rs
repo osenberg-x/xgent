@@ -9,9 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use xgent_context::provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult};
-use xgent_plugin::{
-    WasmCallError, WasmPlugin, WitContextChunk, WitContextQuery, WitContextResult,
-};
+use xgent_plugin::{WasmPlugin, WitContextChunk, WitContextQuery, WitContextResult};
 use tokio_util::sync::CancellationToken;
 
 /// 插件上下文提供者适配器。
@@ -103,6 +101,3 @@ fn context_result_from_wit(r: &WitContextResult, _project_root: &Path) -> Contex
     }
 }
 
-// 静默 WasmCallError 未用警告（match 分支保留完整性）
-#[allow(dead_code)]
-fn _silence(_: WasmCallError) {}

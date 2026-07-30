@@ -13,12 +13,11 @@
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 use xgent_plugin::{
-    PluginCommandProxy, PluginContextProxy, PluginHostProxy, PluginManifest,
-    PluginToolProxy, ProxyError, WasmPlugin, WitCommandDef, WitContextProviderDef, WitToolDef,
+    PluginCommandProxy, PluginContextProxy, PluginManifest, PluginToolProxy, ProxyError,
+    WasmPlugin, WitCommandDef, WitContextProviderDef, WitToolDef,
 };
 
 use crate::command::PluginCommand;
@@ -171,7 +170,6 @@ pub fn execute_op(
     op: PluginOp,
     world: &mut bevy::prelude::World,
 ) {
-    use bevy::prelude::Resource;
     match op {
         PluginOp::RegisterTools {
             manifest,
@@ -263,6 +261,4 @@ pub fn execute_op(
             hub.remove_by_prefix(&prefix);
         }
     }
-    // 静默未用 trait
-    let _ = std::marker::PhantomData::<Mutex<()>>;
 }

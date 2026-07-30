@@ -16,9 +16,9 @@ interface host {
     // 运行命令（受安全模型约束，走确认流程；支持 cancel）
     run-command: func(cmd: command-req) -> result<command-output, command-error>;
 
-    // HTTP GET 代理（受 permissions.network 约束）。
-    // MVP 未实现——声明占位保证契约完整，后续 P2 补宿主侧 impl。
-    http-get: func(url: string) -> result<string, string>;
+    // 推送工具执行的流式中间结果（§5.3.1）。插件在 tool.execute 内调用，
+    // update 为 tool-result 的 JSON 字符串，宿主转成 ToolUpdateCallback 回灌。
+    push-update: func(tool-id: string, update: string);
 
     variant log-level {
         debug,
@@ -51,10 +51,16 @@ interface host {
 interface tool {
     register: func() -> list<tool-def>;
 
+    // 执行工具（tool-id 为插件内短 id，input 为 JSON 字符串）。
+    // 返回 tool-result 的 JSON 字符串，或 tool-error。
     execute: func(
         tool-id: string,
         input: string,
     ) -> result<string, tool-error>;
+
+    // 生成工具输入的人类可读摘要（§5.3），供确认弹窗展示。
+    // 插件未实现时宿主回退到默认摘要。
+    summarize: func(tool-id: string, input: string) -> string;
 
     variant tool-error {
         failed(string),

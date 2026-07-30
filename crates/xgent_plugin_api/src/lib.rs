@@ -80,6 +80,12 @@ pub trait Extension: Send + Sync {
         ))
     }
 
+    /// 生成工具输入的人类可读摘要（§5.3），供确认弹窗展示。
+    /// 默认返回 `tool_id(input)`，插件可 override 提供更友好摘要。
+    fn summarize(&mut self, tool_id: &str, input: &str) -> String {
+        format!("{tool_id}({input})")
+    }
+
     /// 执行命令（默认返回 Err，插件 override）。
     fn run_command(&mut self, command_id: &str) -> Result<String, String> {
         let _ = command_id;
@@ -156,6 +162,10 @@ impl ToolGuest for Component {
 
     fn execute(tool_id: String, input: String) -> Result<String, WitToolError> {
         with_extension(|e| e.execute(&tool_id, &input))
+    }
+
+    fn summarize(tool_id: String, input: String) -> String {
+        with_extension(|e| e.summarize(&tool_id, &input))
     }
 }
 

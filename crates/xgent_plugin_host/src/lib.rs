@@ -18,7 +18,7 @@ use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 use xgent_agent::{
-    CommandResultMessage, PluginCommandTriggered, PluginUnregisterMessage,
+    CommandResultMessage, PluginCommandTriggered, PluginLoadedMessage, PluginUnregisterMessage,
 };
 use xgent_plugin::{PluginEvent, PluginHost, PluginHostProxy};
 
@@ -57,6 +57,7 @@ impl Plugin for PluginHostPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandResultMessage>()
             .add_message::<PluginUnregisterMessage>()
+            .add_message::<PluginLoadedMessage>()
             .add_message::<PluginCommandTriggered>()
             .init_resource::<PluginCommandRegistry>()
             // PluginOpRx / PluginEventRx / PluginHostResource 由 xgent_app 注入
@@ -86,6 +87,9 @@ pub fn plugin_poll_system(world: &mut World) {
     } else {
         Vec::new()
     };
+    for ev in events {
+        handle_plugin_event(world, ev);
+    }
     // 2. 执行 PluginOp（从 PluginOpRx mpsc drain，主线程 world.resource_mut）
     let ops: Vec<PluginOp> = if let Some(op_rx) = world.get_resource::<PluginOpRx>() {
         let mut rx = op_rx.0.lock();
@@ -102,11 +106,6 @@ pub fn plugin_poll_system(world: &mut World) {
     };
     for op in ops {
         execute_op(op, world);
-    }
-
-    // 4. 清理 pending_drop 中 in-flight=0 的旧 WasmPlugin 实例（§8.4 升级 in-flight 处理）
-    if let Some(host_res) = world.get_resource::<PluginHostResource>() {
-        host_res.0.drain_pending_drop();
     }
 
     // 3. 处理 PluginCommandTriggered Message：调 PluginCommand::run（async spawn）
@@ -131,9 +130,18 @@ pub fn plugin_poll_system(world: &mut World) {
             }
         }
     }
+
+    // 4. 清理 pending_drop 中 in-flight=0 的旧 WasmPlugin 实例（§8.4 升级 in-flight 处理）
+    if let Some(host_res) = world.get_resource::<PluginHostResource>() {
+        host_res.0.drain_pending_drop();
+    }
 }
 
-/// 处理单个 PluginEvent：发对应 ECS Message。
+/// 处理单个 PluginEvent：发对应 ECS Message，Unregister 额外触发清理。
+///
+/// Unregister 经 `execute_op` 调三类 `Unregister*` 清理 ToolExecutor/
+/// CommandRegistry/ContextHub（remove_by_prefix），并写 PluginUnregisterMessage
+/// 供 UI 刷新。
 fn handle_plugin_event(world: &mut World, ev: PluginEvent) {
     match ev {
         PluginEvent::CommandResult {
@@ -150,9 +158,18 @@ fn handle_plugin_event(world: &mut World, ev: PluginEvent) {
                 });
         }
         PluginEvent::Unregister { plugin_id } => {
+            // 清理 ToolExecutor/CommandRegistry/ContextHub（remove_by_prefix）
+            execute_op(PluginOp::UnregisterTools { plugin_id: plugin_id.clone() }, world);
+            execute_op(PluginOp::UnregisterCommands { plugin_id: plugin_id.clone() }, world);
+            execute_op(PluginOp::UnregisterProviders { plugin_id: plugin_id.clone() }, world);
             world
                 .resource_mut::<Messages<PluginUnregisterMessage>>()
                 .write(PluginUnregisterMessage { plugin_id });
+        }
+        PluginEvent::Loaded { plugin_id } => {
+            world
+                .resource_mut::<Messages<PluginLoadedMessage>>()
+                .write(PluginLoadedMessage { plugin_id });
         }
     }
 }

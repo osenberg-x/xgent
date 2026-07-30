@@ -51,6 +51,13 @@ pub struct PluginUnregisterMessage {
     pub plugin_id: String,
 }
 
+/// 插件加载完成通知（插件宿主 → ECS，刷新插件管理面板）。
+/// 照设计文档 §4.3 生命周期事件经 mpsc→PluginPollSystem→Message。
+#[derive(Clone, Debug, Message)]
+pub struct PluginLoadedMessage {
+    pub plugin_id: String,
+}
+
 /// 命令面板触发插件命令（UI → 宿主）。照设计文档 §5.4 + 偏差修正 5。
 ///
 /// `handle_palette_triggers` 按 `plugin.` 前缀路由，发此 Message；

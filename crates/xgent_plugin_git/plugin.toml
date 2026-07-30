@@ -23,6 +23,11 @@ id = "git_status"
 tier = "read"
 description = "查看 Git 工作区状态"
 
+[[tools]]
+id = "git_commit"
+tier = "write"
+description = "提交暂存区更改"
+
 [[commands]]
 id = "diff"
 label = "Git: 查看 Diff"
@@ -34,6 +39,14 @@ label = "Git: 提交历史"
 [[commands]]
 id = "status"
 label = "Git: 状态"
+
+[[commands]]
+id = "commit"
+label = "Git: 提交"
+
+[[context_providers]]
+id = "git_history"
+description = "Git 提交历史上下文"
 
 [permissions]
 fs-read = ["**"]
