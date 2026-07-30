@@ -18,6 +18,7 @@ hint-send = Ctrl+Enter 发送
 hint-abort = Esc 中断
 hint-palette = Ctrl+Shift+P 命令
 hint-toggle-sideview = Ctrl+\ 分屏
+hint-terminal = Ctrl+` 终端
 role-user = 用户
 role-assistant = XGent
 confirm-deny = 拒绝

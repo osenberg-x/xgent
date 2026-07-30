@@ -10,16 +10,14 @@
 //! - UI 侧行编辑（光标/Backspace/Enter，[`input`] 模块）
 //! - 视图切换（[`crate::editor::SideViewContent::Terminal`] 互斥子视图）
 //!
-//! # MVP 偏离设计之处
+//! # 输入模式
 //!
-//! 设计 §5.3 要求 PTY raw 模式 + echo off（shell 不回显，UI 行编辑器是输入唯一
-//! 显示源）。但 `portable-pty` 无跨平台 raw 模式 API（Unix 有 termios、Windows
-//! ConPTY 自管 echo），`xgent_terminal::LocalPtyBackend` 未设 raw 模式。故 MVP
-//! **保持 shell cooked 模式**——shell 回显用户输入，UI 输入框提交整行送 PTY 后
-//! 由 shell 回显产生可见命令行。代价是输入框与历史区短暂双显（输入框清空即消失），
-//! 收益是跨平台一致 + 免实现自定义行编辑的复杂度，且 shell 自带历史/补全（设计
-//! 本列为「不支持」，cooked 模式反而白送）。UI 侧行编辑降级为「输入框 + 回车提交」，
-//! 控制字符 Ctrl+C/D 即时单字节发送。
+//! PTY 保持 cooked 模式，shell 自带 readline（行编辑/历史/补全）。UI 侧**透传**
+//! 按键为原始字节直接发 PTY，不本地镜像字符——避免「输入框 + shell 回显」双显。
+//! shell 回显是输入的唯一显示源。代价是放弃 UI 侧行编辑（光标移动/编辑已输入
+//! 文本交由 shell readline 承担），收益是跨平台一致 + 获得 shell 原生历史/补全
+//! （设计本列为「不支持」，cooked 模式反而白送）。控制字符 Ctrl+C/D 即时单字节
+//! 发送，行编辑键（←→/Home/End/Backspace/Delete）发对应转义序列让 shell 处理。
 
 pub mod input;
 pub mod io;
@@ -35,6 +33,7 @@ use crate::i18n::tr;
 use crate::theme::{Theme, px, space};
 use xgent_settings::Localizer;
 use xgent_terminal::{LocalPtyBackend, TerminalBackend};
+use xui::scroll_area::{ScrollArea, StickToBottom};
 
 /// 把 f32 转为 [`FontSize`]。
 fn px_size(v: f32) -> FontSize {
@@ -207,10 +206,8 @@ impl Plugin for TerminalPlugin {
             .add_message::<io::TerminalSpawned>()
             .add_message::<io::TerminalOutputChunk>()
             .add_message::<io::TerminalExited>()
-            .add_message::<input::TerminalLineSubmitted>()
             .init_resource::<TerminalTabs>()
             .init_resource::<TerminalIoRuntime>()
-            .init_resource::<input::TerminalInputState>()
             .init_resource::<output::TerminalResizeTracker>()
             .insert_resource(bridge_tx)
             .insert_resource(bridge_rx)
@@ -229,8 +226,6 @@ impl Plugin for TerminalPlugin {
                     output::append_output_chunks,
                     apply_terminal_view_visibility,
                     tabs::rebuild_terminal_tabs,
-                    tabs::handle_terminal_tab_click,
-                    input::handle_line_submit,
                     input::handle_terminal_keyboard,
                     output::update_output_visibility,
                     output::update_status_bar,
@@ -361,17 +356,12 @@ fn spawn_terminal_view(
                     ));
                 });
 
-                // tv-body：输出历史容器（每 tab 一个，动态 spawn；见 output 模块）
+                // tv-body：输出历史容器（ScrollArea 贴底滚动，每 tab 动态 spawn 行）
+                let mut output_area = ScrollArea::vertical();
+                output_area.node.padding = UiRect::horizontal(px(space::SM));
                 view.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
-                        min_height: Val::ZERO,
-                        overflow: Overflow::clip_y(),
-                        padding: UiRect::horizontal(px(space::SM)),
-                        ..default()
-                    },
+                    output_area,
+                    StickToBottom::default(),
                     BackgroundColor(theme.bg),
                     TerminalOutputMarker,
                 ));

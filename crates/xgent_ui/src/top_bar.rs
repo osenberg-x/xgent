@@ -65,7 +65,7 @@ fn spawn_top_bar(
                 column_gap: px(space::XS),
                 ..default()
             },
-            Text::new("xgent v"),
+            Text::new("xgent ▾"),
             TextFont {
                 font_size,
                 ..default()
@@ -100,25 +100,6 @@ fn spawn_top_bar(
             flex_grow: 1.0,
             ..default()
         });
-        // 🖥 终端按钮（唤起终端 SideView）
-        p.spawn((
-            Button,
-            Node {
-                width: px(28.0),
-                height: px(28.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border_radius: BorderRadius::all(px(4.0)),
-                ..default()
-            },
-            Text::new(">_"),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(theme.text_dim),
-            TerminalButtonMarker,
-        ));
         // ＋新建会话按钮（btn 样式：panel 底 + 边框）
         p.spawn((
             Button,
@@ -138,6 +119,25 @@ fn spawn_top_bar(
             TextColor(theme.text),
             NewSessionButtonMarker,
         ));
+        // 🖥 终端按钮（唤起终端 SideView）
+        p.spawn((
+            Button,
+            Node {
+                width: px(28.0),
+                height: px(28.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4.0)),
+                ..default()
+            },
+            Text::new("🖥"),
+            TextFont {
+                font_size,
+                ..default()
+            },
+            TextColor(theme.text_dim),
+            TerminalButtonMarker,
+        ));
         // ⚙ 设置 icon-btn（28px 方形，hover panel 底）
         p.spawn((
             Button,
@@ -149,7 +149,7 @@ fn spawn_top_bar(
                 border_radius: BorderRadius::all(px(4.0)),
                 ..default()
             },
-            Text::new("="),
+            Text::new("⚙"),
             TextFont {
                 font_size,
                 ..default()
@@ -175,7 +175,7 @@ fn update_provider_label(
     text.0 = if info.id.is_empty() {
         String::new()
     } else {
-        format!("[ {} / {} ] v", info.id, info.model)
+        format!("📦 {} / {} ▾", info.id, info.model)
     };
 }
 
@@ -191,11 +191,20 @@ fn handle_top_bar_buttons(
     mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
+    mut new_session: MessageWriter<xgent_agent::NewSessionMessage>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
+    // ＋ 新建会话：直接发 NewSessionMessage（对齐原型 newSession()）
     for i in q_new.iter() {
         if *i == Interaction::Pressed {
+            new_session.write(xgent_agent::NewSessionMessage);
+        }
+    }
+    // ⚙ 设置：打开命令面板并预填 "settings" 过滤（对齐原型 openPalette('settings')）
+    for i in q_settings.iter() {
+        if *i == Interaction::Pressed {
             palette.open();
+            palette.query = "settings".into();
         }
     }
     for i in q_settings.iter() {

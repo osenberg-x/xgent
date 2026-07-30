@@ -109,7 +109,7 @@ fn spawn_tool_card(
                 .with_children(|header| {
                     // 工具图标
                     header.spawn((
-                        Text::new("»"),
+                        Text::new("🔧"),
                         TextFont {
                             font_size: FontSize::Px(font),
                             ..default()
@@ -238,7 +238,7 @@ fn update_tool_result(
                 BackgroundColor(theme_st_ok())
             };
             let line_count = ev.output.lines().count();
-            let fold_text = format!("v 结果：{} 行 · 点击折叠", line_count);
+            let fold_text = format!("▾ 结果：{} 行 · 点击折叠", line_count);
             // 结果到达 → 默认展开
             card.expanded = true;
             {
@@ -364,12 +364,12 @@ fn apply_tool_card_visibility(
             if let Ok(mut text) = q_fold.get_mut(child) {
                 if !text.0.is_empty() {
                     // 结果已到达（fold 文本非空），据 expanded 切文案
-                    let expanded_text = text.0.starts_with("v");
+                    let expanded_text = text.0.starts_with("▾");
                     if card.expanded && !expanded_text {
-                        text.0 = text.0.replacen(">", "v", 1);
+                        text.0 = text.0.replacen("▸", "▾", 1);
                         text.0 = text.0.replacen("展开", "折叠", 1);
                     } else if !card.expanded && expanded_text {
-                        text.0 = text.0.replacen("v", ">", 1);
+                        text.0 = text.0.replacen("▾", "▸", 1);
                         text.0 = text.0.replacen("折叠", "展开", 1);
                     }
                 }

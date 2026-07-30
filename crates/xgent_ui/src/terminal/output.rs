@@ -282,7 +282,8 @@ pub struct TerminalResizeTracker {
 /// 监测 `TerminalOutputMarker` 的视口尺寸变化 → 发 [`TerminalResize`]。
 ///
 /// SideView 展开/窗口 resize 时触发；按字体大小估算 cols/rows（等宽字体
-/// 宽 ≈ font × 0.6，行高 ≈ font × 1.4）。MVP 估算，精确字符度量留后续。
+/// 宽 ≈ font × 0.6，行高 ≈ font × 1.4）。物理像素经 inverse_scale_factor
+/// 转逻辑像素后再算（HiDPI 一致）。精确字符度量留后续。
 pub fn handle_terminal_resize(
     content: Res<crate::editor::SideViewContent>,
     tabs: Res<TerminalTabs>,
@@ -302,8 +303,12 @@ pub fn handle_terminal_resize(
         return;
     };
     let font = theme.font_size.max(1.0);
-    let width = node.size().x;
-    let height = node.size().y;
+    // size() 返回物理像素，font 是逻辑像素——乘 inverse_scale_factor
+    // 转逻辑像素后再算字符宽/行高（HiDPI 下不转会导致 cols/rows 翻倍，
+    // shell 自动换行与 UI 显示错位）。
+    let scale = node.inverse_scale_factor();
+    let width = node.size().x * scale;
+    let height = node.size().y * scale;
     if width <= 0.0 || height <= 0.0 {
         return;
     }
