@@ -338,7 +338,7 @@ async fn agent_loop_task(
                 // req 的首条 system 消息（修复上下文从未注入的 bug）。
                 // 用最近一条 user 消息作为 query；检索失败不阻塞对话（用空结果）。
                 if let Some(user_text) = crate::format::last_user_text(&req.messages) {
-                    // 把 @ 引用查询转为 hints（File → 路径，Cursor/Selection → 描述）
+                    // 把 @ 引用查询转为 hints（File → 路径，Cursor → 描述）
                     let hints: Vec<String> = editor_queries
                         .iter()
                         .map(|q| match q {
@@ -346,7 +346,6 @@ async fn agent_loop_task(
                                 format!("@file:{}", path.display())
                             }
                             xgent_core::EditorQuery::Cursor => "@cursor".into(),
-                            xgent_core::EditorQuery::Selection => "@selection".into(),
                         })
                         .collect();
                     let query = xgent_context::provider::ContextQuery {

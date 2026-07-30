@@ -18,8 +18,6 @@ pub trait EditorState: Send + Sync {
     fn active_path(&self) -> Option<&Path>;
     /// 当前光标位置（行，列）
     fn cursor(&self) -> Option<(usize, usize)>;
-    /// 当前选区文本（若有）
-    fn selection(&self) -> Option<&str>;
     /// 指定路径 buffer 是否存在 + 是否脏
     fn buffer_status(&self, path: &Path) -> Option<BufferStatus>;
 }
@@ -46,8 +44,6 @@ pub enum EditorQuery {
     },
     /// `@cursor`：拉取当前光标位置所在符号 + 周边若干行
     Cursor,
-    /// `@selection`：拉取当前选区文本
-    Selection,
 }
 
 #[cfg(test)]
@@ -68,8 +64,6 @@ mod tests {
     fn editor_query_variants() {
         let q = EditorQuery::Cursor;
         assert_eq!(q, EditorQuery::Cursor);
-        let q = EditorQuery::Selection;
-        assert_eq!(q, EditorQuery::Selection);
         let q = EditorQuery::File {
             path: PathBuf::from("src/main.rs"),
         };

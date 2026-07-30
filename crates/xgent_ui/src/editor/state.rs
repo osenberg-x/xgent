@@ -28,8 +28,6 @@ pub struct EditorStateSnapshot {
     pub active_path: Option<PathBuf>,
     /// 当前光标位置（行，列，1-based）
     pub cursor: Option<(usize, usize)>,
-    /// 当前选区文本
-    pub selection: Option<String>,
     /// 所有打开 buffer 的状态
     pub buffers: Vec<(PathBuf, BufferStatus)>,
 }
@@ -41,10 +39,6 @@ impl EditorStateTrait for EditorStateSnapshot {
 
     fn cursor(&self) -> Option<(usize, usize)> {
         self.cursor
-    }
-
-    fn selection(&self) -> Option<&str> {
-        self.selection.as_deref()
     }
 
     fn buffer_status(&self, path: &Path) -> Option<BufferStatus> {
@@ -63,7 +57,6 @@ pub fn update_editor_state_snapshot(
 ) {
     snapshot.active_path = None;
     snapshot.cursor = None;
-    snapshot.selection = None;
     snapshot.buffers.clear();
 
     for &e in &tabs.tabs {
@@ -94,7 +87,6 @@ mod tests {
         let s = EditorStateSnapshot::default();
         assert!(s.active_path.is_none());
         assert!(s.cursor.is_none());
-        assert!(s.selection.is_none());
         assert!(s.buffers.is_empty());
     }
 

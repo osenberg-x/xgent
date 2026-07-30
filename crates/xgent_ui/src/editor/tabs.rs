@@ -108,6 +108,25 @@ pub struct EditorTabMarker {
     pub buffer: Entity,
 }
 
+/// 脏关闭确认弹窗根节点标记。
+#[derive(Component, Default)]
+pub struct DirtyCloseDialogMarker;
+
+/// 脏关闭弹窗关联的 buffer 实体（决策时定位）。
+#[derive(Component)]
+pub struct DirtyCloseDialogFor {
+    /// 待关闭的 buffer 实体
+    pub buffer: Entity,
+}
+
+/// 脏关闭弹窗"丢弃修改"按钮标记。
+#[derive(Component, Default)]
+pub struct DirtyCloseDiscardMarker;
+
+/// 脏关闭弹窗"取消"按钮标记。
+#[derive(Component, Default)]
+pub struct DirtyCloseCancelMarker;
+
 /// 打开文件请求（由命令面板/文件面板点击/EditorTool 触发）。
 #[derive(Message, Debug, Clone)]
 pub struct OpenFileRequest {
@@ -118,10 +137,14 @@ pub struct OpenFileRequest {
 }
 
 /// 关闭标签请求。
+///
+/// `force` 为真时跳过脏 buffer 确认（用户已在确认弹窗中同意丢弃修改）。
 #[derive(Message, Debug, Clone)]
 pub struct CloseTabRequest {
     /// buffer 实体
     pub entity: Entity,
+    /// 是否跳过脏 buffer 确认弹窗
+    pub force: bool,
 }
 
 /// 循环切换标签请求（Cmd+Tab）。
@@ -218,6 +241,7 @@ pub fn handle_open_file_requests(
     mut reader: MessageReader<OpenFileRequest>,
     mut tabs: ResMut<EditorTabs>,
     q_buffers: Query<&crate::editor::buffer::EditorBuffer>,
+    mut q_pending: Query<&mut crate::editor::io::FileReadPending>,
     q_area: Query<Entity, With<crate::editor::EditorAreaMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
     mut content: ResMut<crate::editor::SideViewContent>,
@@ -228,9 +252,16 @@ pub fn handle_open_file_requests(
         if let Some(entity) = tabs.find_by_path(&req.path, &q_buffers) {
             tabs.open(entity);
             if let Some(line) = req.line {
-                commands
-                    .entity(entity)
-                    .insert(crate::editor::buffer::PendingGoTo { line });
+                // 仍在读取时更新 FileReadPending.line（读取完成后由
+                // apply_file_read_results 据此插 PendingGoTo）；否则直接插 PendingGoTo。
+                // 避免对空 rope 立即设滚动被 clamp 回 0、跳转丢失。
+                if let Ok(mut pending) = q_pending.get_mut(entity) {
+                    pending.line = Some(line);
+                } else {
+                    commands
+                        .entity(entity)
+                        .insert(crate::editor::buffer::PendingGoTo { line });
+                }
             }
         } else {
             // spawn 新 buffer：滚动容器 + 虚拟化占位 + 行号列 + 光标条。
@@ -309,18 +340,38 @@ pub fn handle_open_file_requests(
         *content = crate::editor::SideViewContent::Editor;
     }
 }
-
 /// 处理关闭标签请求：despawn buffer 实体，更新 tabs。
 ///
 /// 关闭最后一个标签时自动收起右侧分屏（切回对话视图）。
+///
+/// **脏保护**：非 `force` 关闭脏 buffer 时弹出确认弹窗，避免静默丢失
+/// 未保存修改（对齐 AGENTS.md §5.4 安全模型）。用户确认后以 `force=true`
+/// 重新发 `CloseTabRequest` 才真正 despawn。
 pub fn handle_close_tab_requests(
     mut reader: MessageReader<CloseTabRequest>,
     mut tabs: ResMut<EditorTabs>,
+    q_buffers: Query<&crate::editor::buffer::EditorBuffer>,
+    q_dialog: Query<Entity, With<DirtyCloseDialogMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
     mut content: ResMut<crate::editor::SideViewContent>,
+    rt: ResMut<crate::editor::io::EditorIoRuntime>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
+        // 脏 buffer + 非强制：弹确认或等待已有弹窗处理，绝不静默关闭
+        if !req.force {
+            if let Ok(buf) = q_buffers.get(req.entity) {
+                if buf.state.is_dirty() {
+                    // 无弹窗才弹新窗；已有弹窗则静默跳过（等用户处理完当前确认）
+                    if q_dialog.single().is_err() {
+                        spawn_dirty_close_dialog(&mut commands, req.entity, buf.path());
+                    }
+                    continue;
+                }
+            }
+        }
+        // 清理该 buffer 的 pending 写入，避免写完成后误匹配
+        rt.cancel_pending_writes(req.entity);
         if let Some((entity, _)) = tabs.close(req.entity) {
             commands.entity(entity).despawn();
             // 无剩余标签 → 收起分屏 + 清空内容
@@ -343,5 +394,112 @@ pub fn handle_cycle_tab_requests(
         } else {
             tabs.prev();
         }
+    }
+}
+
+/// spawn 脏关闭确认弹窗（丢弃修改 / 取消）。
+///
+/// 样式对齐 `conflict::spawn_conflict_dialog`，保持弹窗视觉一致。
+fn spawn_dirty_close_dialog(commands: &mut Commands, buffer: Entity, path: &std::path::Path) {
+    let accent = Color::srgb(0.36, 0.62, 0.92);
+    let danger = Color::srgb(0.85, 0.36, 0.36);
+    let panel = Color::srgb(0.13, 0.14, 0.17);
+    let border = Color::srgb(0.25, 0.26, 0.30);
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            DirtyCloseDialogMarker,
+            DirtyCloseDialogFor { buffer },
+        ))
+        .with_children(|p| {
+            p.spawn((
+                Node {
+                    padding: UiRect::all(Val::Px(16.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(12.0),
+                    min_width: Val::Px(360.0),
+                    ..default()
+                },
+                BackgroundColor(panel),
+                BorderColor::all(border),
+            ))
+            .with_children(|card| {
+                card.spawn((
+                    Text::new(format!(
+                        "关闭未保存的标签？\n\n{} 有未保存的修改，关闭将丢失。",
+                        path.display()
+                    )),
+                    TextColor(Color::WHITE),
+                ));
+                card.spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(12.0),
+                    ..default()
+                },))
+                    .with_children(|btns| {
+                        btns.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(danger),
+                            Text::new("丢弃修改"),
+                            TextColor(Color::WHITE),
+                            DirtyCloseDiscardMarker,
+                        ));
+                        btns.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(accent),
+                            Text::new("取消"),
+                            TextColor(Color::WHITE),
+                            DirtyCloseCancelMarker,
+                        ));
+                    });
+            });
+        });
+}
+
+/// 处理脏关闭弹窗决策：丢弃修改 → 以 `force=true` 重发 `CloseTabRequest`；
+/// 取消 → 仅关闭弹窗。
+pub fn handle_dirty_close_decision(
+    q_dialog: Query<(Entity, &DirtyCloseDialogFor), With<DirtyCloseDialogMarker>>,
+    q_discard: Query<&Interaction, (With<DirtyCloseDiscardMarker>, Changed<Interaction>)>,
+    q_cancel: Query<&Interaction, (With<DirtyCloseCancelMarker>, Changed<Interaction>)>,
+    mut close_writer: MessageWriter<CloseTabRequest>,
+    mut commands: Commands,
+) {
+    let Ok((dialog, for_buf)) = q_dialog.single() else {
+        return;
+    };
+    let discard = q_discard
+        .iter()
+        .any(|i| *i == Interaction::Pressed);
+    let cancel = q_cancel
+        .iter()
+        .any(|i| *i == Interaction::Pressed);
+    if discard {
+        close_writer.write(CloseTabRequest {
+            entity: for_buf.buffer,
+            force: true,
+        });
+        commands.entity(dialog).despawn();
+    } else if cancel {
+        commands.entity(dialog).despawn();
     }
 }

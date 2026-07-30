@@ -29,14 +29,14 @@ use crate::editor::command::handle_editor_commands;
 use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
     BufferSavedEvent, EditorIoRuntime, FileReadRequest, FileReadResult, FileWriteRequest,
-    FileWriteResult, apply_file_read_results, handle_file_read_requests,
+    apply_file_read_results, handle_file_read_requests,
     handle_file_write_requests, poll_io_results, process_pending_reads,
 };
 use crate::editor::state::{EditorStateSnapshot, update_editor_state_snapshot};
 use crate::editor::tabs::{
     CloseTabRequest, CycleTabRequest, EditorTabBarMarker, EditorTabMarker, EditorTabs,
     OpenFileRequest, handle_close_tab_requests, handle_cycle_tab_requests,
-    handle_open_file_requests,
+    handle_dirty_close_decision, handle_open_file_requests,
 };
 
 /// 编辑器视图状态（对话/编辑器/文件预览切换）。
@@ -86,7 +86,6 @@ impl Plugin for EditorPlugin {
             .add_message::<FileReadRequest>()
             .add_message::<FileReadResult>()
             .add_message::<FileWriteRequest>()
-            .add_message::<FileWriteResult>()
             .add_message::<BufferSavedEvent>()
             .add_message::<FileChangedEvent>()
             .add_message::<EditorCommandRequestMessage>()
@@ -104,26 +103,33 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_editor_commands,
-                    handle_open_file_requests,
-                    handle_close_tab_requests,
-                    handle_cycle_tab_requests,
-                    process_pending_reads,
-                    handle_file_read_requests,
-                    handle_editor_save_requests,
-                    handle_file_write_requests,
-                    poll_io_results,
-                    apply_save_result,
-                    apply_file_read_results,
-                    handle_pending_goto,
-                    apply_editor_view_visibility,
-                    update_buffer_visibility,
-                    sync_dirty_state,
-                    update_editor_state_snapshot,
-                    rebuild_editor_tabs,
-                    handle_editor_tab_click,
-                    handle_file_changed,
-                    handle_conflict_decision,
+                    (
+                        handle_editor_commands,
+                        handle_open_file_requests,
+                        handle_close_tab_requests,
+                        handle_cycle_tab_requests,
+                        process_pending_reads,
+                        handle_file_read_requests,
+                        handle_editor_save_requests,
+                        handle_file_write_requests,
+                        poll_io_results,
+                        apply_save_result,
+                    )
+                        .chain(),
+                    (
+                        apply_file_read_results,
+                        handle_pending_goto,
+                        apply_editor_view_visibility,
+                        update_buffer_visibility,
+                        sync_dirty_state,
+                        update_editor_state_snapshot,
+                        rebuild_editor_tabs,
+                        handle_editor_tab_click,
+                        handle_file_changed,
+                        handle_conflict_decision,
+                        handle_dirty_close_decision,
+                    )
+                        .chain(),
                 )
                     .chain()
                     .after(xui::TextEditorUpdateSet),
@@ -196,7 +202,7 @@ fn spawn_editor_view(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new("x"),
+                    Text::new("×"),
                     TextFont {
                         font_size: FontSize::Px(font),
                         ..default()
@@ -205,7 +211,11 @@ fn spawn_editor_view(
                     EditorBackButtonMarker,
                 ));
             });
-            // 编辑器区：填充顶部栏以下空间，buffer 实体动态挂入
+            // 编辑器区：填充顶部栏以下空间，buffer 实体动态挂入。
+            // 不挂 ScrollPosition——滚动职责在 buffer 实体自身的
+            // `xui::ScrollArea::vertical()`（含 ScrollPosition），外层容器
+            // 仅做裁剪（clip_y）与布局，避免双层 ScrollPosition 嵌套干扰
+            // 内层的跳转行定位（handle_pending_goto 写的是 buffer 的滚动）。
             p.spawn((
                 Node {
                     width: Val::Percent(100.0),
@@ -215,7 +225,6 @@ fn spawn_editor_view(
                     overflow: Overflow::clip_y(),
                     ..default()
                 },
-                ScrollPosition::default(),
                 EditorAreaMarker,
             ));
         })
@@ -255,18 +264,27 @@ pub struct EditorAreaMarker;
 /// `BufferSavedEvent` 由 `poll_io_results` 在写入成功后发出（非乐观）。
 /// buffer 的 saved 标记也由 `poll_io_results` 路径经 `BufferSavedEvent` →
 /// `apply_save_result` 完成，避免写失败时 buffer 状态与磁盘不一致。
+///
+/// **冲突态保护**：buffer 处于 `ConflictDetected`（外部修改已到达、等待用户
+/// 三选）时禁止落盘，避免静默覆盖外部修改（设计 §3.6）。用户须先在冲突弹窗
+/// 决策（丢弃本地 / 保留本地 / 对比合并）后，`LocalPreferred` 才允许保存覆盖。
 pub fn handle_editor_save_requests(
     mut reader: MessageReader<xui::EditorSaveRequested>,
     mut q_editors: Query<(&mut EditorBuffer, &xui::TextEditor)>,
     mut write_writer: MessageWriter<FileWriteRequest>,
 ) {
     for ev in reader.read() {
-        let Ok((_buf, editor)) = q_editors.get_mut(ev.entity) else {
+        let Ok((buf, editor)) = q_editors.get_mut(ev.entity) else {
             continue;
         };
+        // 冲突未解决：禁止覆盖磁盘，保护用户数据
+        if buf.state == crate::editor::buffer::BufferState::ConflictDetected {
+            continue;
+        }
         let content = editor.rope.to_string();
         write_writer.write(FileWriteRequest {
-            path: _buf.path.clone(),
+            entity: ev.entity,
+            path: buf.path.clone(),
             content,
         });
     }
@@ -344,7 +362,6 @@ pub fn update_buffer_visibility(
     view: Res<EditorView>,
     mut q: Query<&mut Node, With<EditorBuffer>>,
 ) {
-    let active = tabs.active_entity();
     let editor_active = *view == EditorView::Editor;
     for (i, &entity) in tabs.tabs.iter().enumerate() {
         let Ok(mut node) = q.get_mut(entity) else {
@@ -357,7 +374,6 @@ pub fn update_buffer_visibility(
             node.display = display;
         }
     }
-    let _ = active;
 }
 /// 编辑器 tab 关闭按钮标记（×，挂于 tab 项内）。
 #[derive(Component, Default)]
@@ -367,16 +383,26 @@ pub struct EditorTabCloseMarker;
 ///
 /// tabs 列表变化时（打开/关闭文件）despawn 旧 tab 项、spawn 新 tab 项；
 /// 每个 tab 项 = Button(row: 文件名 + 脏标记● + 关闭×)，active 态高亮。
+///
+/// **重建触发**：`EditorTabs` 变化（open/close/switch）或任意 `EditorBuffer`
+/// 变化（dirty 标记随保存/编辑更新）时重建。仅 `tabs.is_changed()` 不够——
+/// 保存（`apply_save_result`）与编辑（`sync_dirty_state`）只改 buffer 状态，
+/// 不触发 tabs changed，会导致脏标记 `*` 不随状态更新。
 pub fn rebuild_editor_tabs(
     tabs: Res<EditorTabs>,
     q_buffers: Query<&crate::editor::buffer::EditorBuffer>,
+    q_changed: Query<(), Changed<crate::editor::buffer::EditorBuffer>>,
     q_bar: Query<Entity, With<EditorTabBarMarker>>,
     q_existing: Query<Entity, With<EditorTabMarker>>,
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
-    // 仅在 tabs 列表变化时重建
-    if !tabs.is_changed() && !tabs.is_added() {
+    // tabs 列表变化，或任意 buffer 状态变化（脏标记需更新）时重建。
+    // 保存（apply_save_result）与编辑（sync_dirty_state）只改 EditorBuffer，
+    // 不触发 tabs changed，故需额外检测 Changed<EditorBuffer>。
+    let tabs_changed = tabs.is_changed() || tabs.is_added();
+    let buffer_changed = !q_changed.is_empty();
+    if !tabs_changed && !buffer_changed {
         return;
     }
     let Ok(bar) = q_bar.single() else {
@@ -460,7 +486,7 @@ pub fn rebuild_editor_tabs(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    Text::new("x"),
+                    Text::new("×"),
                     TextFont {
                         font_size: FontSize::Px(font + 1.0),
                         ..default()
@@ -488,6 +514,7 @@ pub fn handle_editor_tab_click(
         if *interaction == Interaction::Pressed {
             close_writer.write(CloseTabRequest {
                 entity: marker.buffer,
+                force: false,
             });
         }
     }
@@ -498,21 +525,24 @@ pub fn handle_editor_tab_click(
         }
     }
 }
-
 /// 同步 xui 的 EditorDirtyChanged 到 EditorBuffer 状态机。
 ///
-/// xui::TextEditor 编辑时发 EditorDirtyChanged{dirty:true}，
-/// 本系统把对应 EditorBuffer 标记为 Dirty。
+/// - `dirty=true`（用户编辑）→ `mark_dirty`（Clean→Dirty）。
+/// - `dirty=false`（undo 回到原始态）→ 若当前 `Dirty` 则回 `Clean`。
+///   `ConflictDetected`/`LocalPreferred` 不被覆盖（用户已决策或待决策）。
 pub fn sync_dirty_state(
     mut reader: MessageReader<xui::EditorDirtyChanged>,
     mut q_buffers: Query<&mut crate::editor::buffer::EditorBuffer>,
 ) {
     for ev in reader.read() {
-        if !ev.dirty {
+        let Some(mut buf) = q_buffers.get_mut(ev.entity).ok() else {
             continue;
-        }
-        if let Ok(mut buf) = q_buffers.get_mut(ev.entity) {
+        };
+        if ev.dirty {
             buf.mark_dirty();
+        } else if buf.state == crate::editor::buffer::BufferState::Dirty {
+            // undo 回到原始态：Dirty → Clean（不覆盖冲突态）
+            buf.state = crate::editor::buffer::BufferState::Clean;
         }
     }
 }
@@ -521,21 +551,20 @@ pub fn sync_dirty_state(
 ///
 /// `poll_io_results` 在写入成功后发 `BufferSavedEvent`，本系统据此
 /// 更新 `EditorBuffer` 状态为 Clean + 更新 `disk_content`，
-/// 并清除 `TextEditor.dirty`。
 pub fn apply_save_result(
     mut reader: MessageReader<crate::editor::io::BufferSavedEvent>,
     mut q: Query<(&mut EditorBuffer, &mut xui::TextEditor)>,
 ) {
     for ev in reader.read() {
-        for (mut buf, mut editor) in q.iter_mut() {
-            if buf.path != ev.path {
-                continue;
-            }
-            let content = editor.rope.to_string();
-            buf.mark_saved(&content);
-            editor.dirty = false;
-            break;
-        }
+        // 按实体匹配（非 path）：避免关闭 buffer A 后重开同路径 B 时，
+        // A 的保存结果误匹配 B、覆盖 B 的状态。实体已 despawn 则 q.get_mut 失败，安全丢弃。
+        let Ok((mut buf, mut editor)) = q.get_mut(ev.entity) else {
+            continue;
+        };
+        // 用事件携带的 content（写盘时的内容）更新 disk_content，
+        // 避免再次 rope.to_string()（handle_editor_save_requests 已遍历一次）
+        buf.mark_saved(&ev.content);
+        editor.dirty = false;
     }
 }
 

@@ -2,12 +2,11 @@
 //!
 //! 详见 `doc/design/editor-design.md` 第 3.5 节 / 6.5 节。
 //!
-//! MVP 三种 @ 引用：
+//! MVP 两种 @ 引用：
 //! - `@file:src/main.rs` — 拉取该文件内容作为上下文。
 //! - `@cursor` — 拉取当前光标位置所在符号 + 周边若干行。
-//! - `@selection` — 拉取当前选区文本。
 //!
-//! 不识别的 `@xxx` 原样保留，不做补全 UI（P1+ 再加）。
+//! 不识别的 `@xxx`（含 `@selection`，选区支持待 P1+）原样保留，不做补全 UI。
 
 use xgent_core::EditorQuery;
 
@@ -16,8 +15,7 @@ use xgent_core::EditorQuery;
 /// 返回 `(替换后的文本, 查询列表)`。
 /// - `@file:<path>` → 占位 `[@file:<path>]`，收集 `EditorQuery::File { path }`
 /// - `@cursor` → 占位 `[@cursor]`，收集 `EditorQuery::Cursor`
-/// - `@selection` → 占位 `[@selection]`，收集 `EditorQuery::Selection`
-/// - 其他 `@xxx`（非上述三种）原样保留
+/// - 其他 `@xxx`（含 `@selection`）原样保留
 pub fn parse_at_references(input: &str) -> (String, Vec<EditorQuery>) {
     let mut out = String::with_capacity(input.len());
     let mut queries = Vec::new();
@@ -39,12 +37,6 @@ pub fn parse_at_references(input: &str) -> (String, Vec<EditorQuery>) {
                 out.push_str("[@cursor]");
                 queries.push(EditorQuery::Cursor);
                 i += "@cursor".len();
-                continue;
-            }
-            if rest.starts_with("@selection") {
-                out.push_str("[@selection]");
-                queries.push(EditorQuery::Selection);
-                i += "@selection".len();
                 continue;
             }
             // 未知 @ 引用，原样保留
@@ -111,10 +103,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_selection_ref() {
+    fn selection_ref_not_recognized() {
+        // @selection 暂不支持，原样保留，不收集 query
         let (text, q) = parse_at_references("@selection 有问题吗");
-        assert_eq!(text, "[@selection] 有问题吗");
-        assert_eq!(q, vec![EditorQuery::Selection]);
+        assert_eq!(text, "@selection 有问题吗");
+        assert!(q.is_empty());
     }
 
     #[test]

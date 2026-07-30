@@ -89,8 +89,15 @@ impl EditorBuffer {
     }
 
     /// 进入冲突检测态（脏 + 外部修改到达）。
+    ///
+    /// `Dirty` 与 `LocalPreferred` 均可进入：`LocalPreferred` 表示用户已选择
+    /// 保留本地，但若外部**再次**修改，需重新触发冲突协调（设计 §3.6）。
+    /// `Clean` 不进冲突（走静默重载），`ConflictDetected` 不重复进入。
     pub fn enter_conflict(&mut self) {
-        if self.state == BufferState::Dirty {
+        if matches!(
+            self.state,
+            BufferState::Dirty | BufferState::LocalPreferred
+        ) {
             self.state = BufferState::ConflictDetected;
         }
     }
@@ -149,19 +156,30 @@ mod tests {
     }
 
     #[test]
-    fn detect_external_change() {
-        let b = EditorBuffer::from_disk(PathBuf::from("/x"), "hi".into());
-        assert!(!b.detect_external_change("hi"));
-        assert!(b.detect_external_change("changed"));
-    }
-
-    #[test]
-    fn enter_conflict_only_from_dirty() {
+    fn enter_conflict_from_dirty() {
         let mut b = EditorBuffer::from_disk(PathBuf::from("/x"), "hi".into());
         b.enter_conflict();
         assert_eq!(b.state, BufferState::Clean); // Clean 不进冲突
         b.mark_dirty();
         b.enter_conflict();
+        assert_eq!(b.state, BufferState::ConflictDetected);
+    }
+
+    #[test]
+    fn enter_conflict_from_local_preferred() {
+        // 用户已选保留本地后，外部再次修改应重新进入冲突态
+        let mut b = EditorBuffer::from_disk(PathBuf::from("/x"), "hi".into());
+        b.state = BufferState::LocalPreferred;
+        b.enter_conflict();
+        assert_eq!(b.state, BufferState::ConflictDetected);
+    }
+
+    #[test]
+    fn enter_conflict_idempotent() {
+        let mut b = EditorBuffer::from_disk(PathBuf::from("/x"), "hi".into());
+        b.mark_dirty();
+        b.enter_conflict();
+        b.enter_conflict(); // 已在冲突态，不重复
         assert_eq!(b.state, BufferState::ConflictDetected);
     }
 

@@ -55,6 +55,17 @@ impl EditorIoRuntime {
             pending_writes: Mutex::new(Vec::new()),
         }
     }
+
+    /// 清理指定 buffer 实体的 pending 写入请求。
+    ///
+    /// buffer 关闭时调用，避免写完成后 `BufferSavedEvent` 发给已 despawn 的实体
+    /// （`apply_save_result` 查实体失败丢弃，无害但浪费；且避免与重开同路径
+    /// buffer 的潜在竞态）。被取消的 oneshot receiver 随 Vec drop 而关闭，
+    /// tokio task 的 `tx.send` 会失败但无害。
+    pub fn cancel_pending_writes(&self, entity: Entity) {
+        let mut writes = self.pending_writes.lock();
+        writes.retain(|(req, _)| req.entity != entity);
+    }
 }
 
 /// 文件读取请求（spawn 异步任务，结果经 [`FileReadResult`] 回 ECS）。
@@ -80,26 +91,26 @@ pub struct FileReadResult {
 /// 文件写入请求。
 #[derive(Message, Debug, Clone)]
 pub struct FileWriteRequest {
+    /// 发起保存的 buffer 实体（用于结果回写时实体匹配，避免按 path 误匹配
+    /// 同路径的新 buffer）
+    pub entity: Entity,
     /// 绝对路径
     pub path: PathBuf,
     /// 文本内容
     pub content: String,
 }
 
-/// 文件写入结果。
-#[derive(Message, Debug, Clone)]
-pub struct FileWriteResult {
-    /// 绝对路径
-    pub path: PathBuf,
-    /// 写入结果（Ok(()) 或 Err(msg)）
-    pub result: Result<(), String>,
-}
 
 /// buffer 已保存事件（写入成功后发，供 xgent_app 桥接转 IPC fs.changed）。
 #[derive(Message, Debug, Clone)]
 pub struct BufferSavedEvent {
+    /// 发起保存的 buffer 实体（apply_save_result 按实体匹配，避免按 path
+    /// 误匹配关闭后重开的同路径新 buffer）
+    pub entity: Entity,
     /// 绝对路径
     pub path: PathBuf,
+    /// 已落盘的内容（用于更新 buffer 的 disk_content 快照）
+    pub content: String,
 }
 
 /// 处理文件读取请求：spawn tokio task，把 receiver 存入 pending 列表。
@@ -138,9 +149,14 @@ pub fn handle_file_read_requests(
 /// 处理文件写入请求：spawn tokio task，把 receiver 存入 pending 列表。
 ///
 /// 结果由 [`poll_io_results`] 系统每帧非阻塞 poll。
+///
+/// **降级路径**（无 runtime）：同步写入，成功直接发 `BufferSavedEvent`
+/// （让 `apply_save_result` 更新 buffer 状态），失败记 warn 日志——
+/// 不静默吞错，保证用户可感知。
 pub fn handle_file_write_requests(
     mut reader: MessageReader<FileWriteRequest>,
     rt: ResMut<EditorIoRuntime>,
+    mut saved_writer: MessageWriter<BufferSavedEvent>,
 ) {
     for req in reader.read() {
         if let Some(handle) = rt.handle.clone() {
@@ -155,21 +171,30 @@ pub fn handle_file_write_requests(
             });
             rt.pending_writes.lock().push((req.clone(), rx));
         } else {
-            // 降级同步 IO
-            let _ = std::fs::write(&req.path, req.content.as_bytes())
-                .map_err(|e| format!("{}: {e}", req.path.display()));
+            // 降级同步 IO：成功发 BufferSavedEvent，失败记 warn
+            match std::fs::write(&req.path, req.content.as_bytes()) {
+                Ok(()) => {
+                    saved_writer.write(BufferSavedEvent {
+                        entity: req.entity,
+                        path: req.path.clone(),
+                        content: req.content.clone(),
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("写入文件失败 {}: {e}", req.path.display());
+                }
+            }
         }
     }
 }
 
-/// 每帧非阻塞 poll pending IO receiver，就绪的发对应 Result 消息。
+/// 每帧非阻塞 poll pending IO receiver，就绪的发对应消息。
 ///
-/// 读就绪 → `FileReadResult`；写就绪 → `FileWriteResult` + `BufferSavedEvent`。
+/// 读就绪 → `FileReadResult`；写成功 → `BufferSavedEvent`，写失败/取消 → warn 日志。
 /// 未就绪的保留到下一帧。
 pub fn poll_io_results(
     rt: ResMut<EditorIoRuntime>,
     mut read_writer: MessageWriter<FileReadResult>,
-    mut write_writer: MessageWriter<FileWriteResult>,
     mut saved_writer: MessageWriter<BufferSavedEvent>,
 ) {
     // poll 读取
@@ -198,35 +223,33 @@ pub fn poll_io_results(
     }
     *reads = still_pending;
     drop(reads);
-
     // poll 写入
     let mut writes = rt.pending_writes.lock();
     let mut still_pending = Vec::with_capacity(writes.len());
     for (req, mut rx) in writes.drain(..) {
         match rx.try_recv() {
             Ok(result) => {
-                write_writer.write(FileWriteResult {
-                    path: req.path.clone(),
-                    result: result.clone(),
-                });
-                if result.is_ok() {
-                    saved_writer.write(BufferSavedEvent {
-                        path: req.path.clone(),
-                    });
+                match result {
+                    Ok(()) => {
+                        saved_writer.write(BufferSavedEvent {
+                            entity: req.entity,
+                            path: req.path.clone(),
+                            content: req.content.clone(),
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!("写入文件失败 {}: {e}", req.path.display());
+                    }
                 }
             }
             Err(oneshot::error::TryRecvError::Empty) => {
                 still_pending.push((req, rx));
             }
             Err(oneshot::error::TryRecvError::Closed) => {
-                write_writer.write(FileWriteResult {
-                    path: req.path.clone(),
-                    result: Err("写入任务取消".into()),
-                });
+                tracing::warn!("写入任务取消: {}", req.path.display());
             }
         }
     }
-    *writes = still_pending;
 }
 
 #[cfg(test)]
@@ -311,6 +334,9 @@ pub struct FileReadPending {
 ///
 /// 虚拟化模式下不写 `EditableText`——文本显示走 `update_virtual_lines` 从 `rope` 取。
 /// 清空 `HighlightCache` 触发下帧 tree-sitter 重解析（基于 rope）。
+///
+/// 遍历所有匹配 `pending.path` 的 buffer（不 `break`），避免同路径多 buffer
+/// （路径未规范化等场景）时后续 buffer 的 `FileReadPending` 永不清除、卡死。
 pub fn apply_file_read_results(
     mut reader: MessageReader<FileReadResult>,
     mut q: Query<(
@@ -333,7 +359,10 @@ pub fn apply_file_read_results(
                     editor.rope = xui::Rope::from(content.as_str());
                     buf.disk_content = content.clone();
                     buf.state = crate::editor::buffer::BufferState::Clean;
-                    // 压入初始 undo 快照
+                    // 压入 undo 快照（重载内容作为新基准）。
+                    // 注意：UndoStack::push 会清空 redo 栈——重载后旧 redo 快照
+                    // 指向已被覆盖的旧内容，不再适用，故清空是正确行为。
+                    // 副作用：用户若 undo 数步后触发静默重载，redo 历史丢失。
                     editor.undo.push(xui::text_editor::buffer::TextSnapshot {
                         text: content.clone(),
                     });
@@ -347,11 +376,12 @@ pub fn apply_file_read_results(
                     }
                     commands.entity(entity).remove::<FileReadPending>();
                 }
-                Err(_) => {
+                Err(e) => {
+                    // 读取失败：记日志（用户可见的反馈通道），移除 pending
+                    tracing::warn!("读取文件失败 {}: {e}", pending.path.display());
                     commands.entity(entity).remove::<FileReadPending>();
                 }
             }
-            break;
         }
     }
 }

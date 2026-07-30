@@ -60,10 +60,16 @@ pub enum ConflictDecision {
 ///
 /// 注意：用单个 `Query<&mut EditorBuffer>` 同时承担查找与修改，
 /// 避免同系统内 `Query<&EditorBuffer>` + `Query<&mut EditorBuffer>` 并存的 B0001 冲突。
+///
+/// **重入保护**：Clean 分支静默重载前检查 `FileReadPending` 是否已存在——
+/// 外部连续修改（daemon 连发 `FileChangedEvent`）时避免重复发 `FileReadRequest`
+/// 与重复插 `FileReadPending`，导致 `apply_file_read_results` 的 `break` 丢弃
+/// 后续 result、buffer 卡死。
 pub fn handle_file_changed(
     mut reader: MessageReader<FileChangedEvent>,
     tabs: Res<EditorTabs>,
     mut q_buffers: Query<&mut EditorBuffer>,
+    q_pending: Query<&crate::editor::io::FileReadPending>,
     mut read_writer: MessageWriter<FileReadRequest>,
     q_dialog: Query<Entity, With<ConflictDialogMarker>>,
     mut commands: Commands,
@@ -78,6 +84,10 @@ pub fn handle_file_changed(
         }) else {
             continue; // 未打开，忽略
         };
+        // 重入保护：已在读取中则不重复发请求（外部连续修改）
+        if q_pending.get(entity).is_ok() {
+            continue;
+        }
         let Ok(mut buf) = q_buffers.get_mut(entity) else {
             continue;
         };
@@ -231,10 +241,19 @@ pub fn handle_conflict_decision(
     if let Ok(mut buf) = q_buffers.get_mut(for_buf.buffer) {
         match decision {
             ConflictDecision::Discard => {
+                // 发重载请求 + 插 FileReadPending，让 apply_file_read_results
+                // 能匹配该 buffer（查询要求 &FileReadPending）回写 rope。
+                // 与 handle_file_changed 的 Clean 分支对齐。
                 read_writer.write(FileReadRequest {
                     path: buf.path.clone(),
                     line: None,
                 });
+                commands.entity(for_buf.buffer).insert(
+                    crate::editor::io::FileReadPending {
+                        path: buf.path.clone(),
+                        line: None,
+                    },
+                );
             }
             ConflictDecision::KeepLocal => {
                 buf.keep_local();
