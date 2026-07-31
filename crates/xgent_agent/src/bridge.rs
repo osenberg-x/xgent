@@ -152,6 +152,13 @@ pub struct AgentBridge {
     pub project_root: std::path::PathBuf,
     /// 重试配置（与 task 共享同一 Arc，运行时可刷新）
     pub retry_config: Arc<parking_lot::RwLock<RetryConfig>>,
+    /// 当前对话的 cancel_token（StartLoop 时由 task 设置，对话结束清 None）。
+    ///
+    /// ECS Abort handler 直接调 `cancel()` 即时中断——无需经 steering_rx
+    /// 让 run_agent_loop 轮询（run_agent_loop 可能 park 在 executor.execute
+    /// 或 stream_llm_response，无法及时消费 Abort 命令）。修复 Confirming/ToolRunning
+    /// 态下 Abort 无响应的 bug。用 Arc 共享给 task 与 ECS。
+    pub current_cancel: Arc<parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>>,
     /// 已注册工具的 schema 列表（启动时从 ToolExecutor 一次性提取，
     /// 运行期工具集合不变；ECS 侧构造 ChatRequest 时注入为 `tools` 字段，
     /// 修复工具 schema 从未注入导致 LLM 无法发起工具调用的 bug）。
@@ -241,11 +248,17 @@ pub enum AgentEvent {
     /// 对话已压缩（compaction 触发后发射）。
     ///
     /// UI 据此提示用户「前序对话已摘要」，可刷新上下文展示。
+    /// `new_messages` 为压缩后的 agent 层消息（含 summary 前置 + kept），
+    /// ECS 侧据此替换 `conv.messages`，保持 conv 与 req 同步
+    /// （修复下次 StartLoop 从未压缩的 conv 重建导致压缩丢失的 bug）。
+    /// 注意：system prompt 不在此处（system 在 build_request 时动态注入）。
     Compacted {
         /// 压缩前 token 估算
         tokens_before: u32,
         /// 压缩后保留消息 token 估算
         tokens_after: u32,
+        /// 压缩后的 agent 层消息（不含 system，ECS 据此替换 conv.messages）
+        new_messages: Vec<xgent_core::chat::AgentMessage>,
     },
 }
 
@@ -292,10 +305,15 @@ impl AgentBridge {
         let (event_tx, event_rx) = mpsc::channel::<AgentEvent>(64);
         let shared_confirm = SharedConfirm::default();
         let retry_config = cfg.retry_config.clone();
+        // 当前对话 cancel_token：task 与 ECS 共享，StartLoop 时 task 设置，
+        // ECS Abort handler 直接 cancel（绕过 steering_rx 即时中断）。
+        let current_cancel: Arc<parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>> =
+            Arc::new(parking_lot::Mutex::new(None));
 
         let shared_for_task = shared_confirm.clone();
+        let cancel_for_task = current_cancel.clone();
         runtime.spawn(async move {
-            agent_loop_task(cfg, cmd_rx, event_tx, shared_for_task).await;
+            agent_loop_task(cfg, cmd_rx, event_tx, shared_for_task, cancel_for_task).await;
         });
 
         Self {
@@ -305,6 +323,7 @@ impl AgentBridge {
             shared_confirm: shared_confirm.clone(),
             project_root,
             retry_config,
+            current_cancel,
             tool_schemas,
         }
     }
@@ -323,17 +342,30 @@ async fn agent_loop_task(
     mut cmd_rx: mpsc::Receiver<AgentCommand>,
     event_tx: mpsc::Sender<AgentEvent>,
     shared_confirm: SharedConfirm,
+    current_cancel: Arc<parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>>,
 ) {
     let tool_ctx = ToolCtx {
         project_root: cfg.project_root.clone(),
         tool_policy: cfg.tool_policy.clone(),
     };
-    // 中断信号：每次对话创建独立 token，Abort 时 cancel，传给 executor
-    let cancel_token = tokio_util::sync::CancellationToken::new();
+    // 中断信号：每次对话创建独立 token（见下方 StartLoop 分支）。
+    // Abort 时 cancel，传给 executor 与 stream_llm_response。
+    // 注意：token 不能跨对话复用——CancellationToken::cancel() 是永久的，
+    // 一旦 cancel 后该 token 永远处于已取消态，后续对话会立即触发 abort 分支。
+    // current_cancel 与 ECS 共享：ECS Abort handler 直接 cancel（绕过
+    // steering_rx），修复 run_agent_loop park 在 executor.execute 时无法
+    // 及时消费 Abort 命令的 bug。
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             AgentCommand::StartLoop { mut req, editor_queries } => {
+                // 每次对话创建独立的 cancel_token——CancellationToken 是一次性的，
+                // cancel() 后无法撤销。若跨对话复用，首次 Abort 后该 token 永远
+                // 处于已取消态，后续对话的 stream_llm_response 会立即命中
+                // cancel_token.cancelled() 分支，导致 agent 永久无法流式。
+                let cancel_token = tokio_util::sync::CancellationToken::new();
+                // 暴露给 ECS：Abort handler 直接 cancel（即时中断 confirm 等待）
+                *current_cancel.lock() = Some(cancel_token.clone());
                 // 上下文检索：ECS 系统同步无法 await，故在此异步侧检索并刷新
                 // req 的首条 system 消息（修复上下文从未注入的 bug）。
                 // 用最近一条 user 消息作为 query；检索失败不阻塞对话（用空结果）。
@@ -376,10 +408,13 @@ async fn agent_loop_task(
                     &cfg.compaction_settings,
                 )
                 .await;
+                // 对话结束：清除 current_cancel，ECS Abort 不再误触发
+                *current_cancel.lock() = None;
             }
             AgentCommand::Abort => {
-                // 中断当前对话：cancel token 触发 stream/工具中断
-                cancel_token.cancel();
+                // Abort 在无活跃对话时到达（run_agent_loop 已返回）：
+                // cancel_token 已随 StartLoop 作用域销毁，无需 cancel。
+                // 发 Done 通知 ECS（若对话刚结束 ECS 可能已在 Idle，幂等）。
                 let _ = event_tx
                     .send(AgentEvent::Done {
                         usage: None,
@@ -473,7 +508,7 @@ async fn run_agent_loop(
             // 流式调用 LLM（带自动重试：仅 Network/StreamParse 可重试）
             let outcome = match stream_with_retry(
                 provider,
-                &req,
+                &mut req,
                 event_tx,
                 cancel_token,
                 &retry_cfg,
@@ -489,15 +524,25 @@ async fn run_agent_loop(
             };
 
             // 流式期间被 steering 中断：发 SteeringInterrupted 让 ECS 固化半截文本，
-            // 注入 steering 文本到 req.messages，本轮重新调用 LLM。
-            // 这样 UI 不会把半截文本与新回复拼接（修复 steering 中断后文本混乱 bug）。
+            // 然后把被中断的 assistant 文本 + steering 文本注入 req.messages，
+            // 本轮重新调用 LLM。这样 UI 不会把半截文本与新回复拼接（修复文本混乱），
+            // 且 LLM 下一轮能看到自己被中断的半截话（修复 req/conv 不同步导致
+            // LLM 丢失被中断 assistant 文本的连续性 bug）。
             if let Some(steer_text) = &outcome.pending_steering {
                 let partial = outcome.partial_text.clone().unwrap_or_default();
                 let _ = event_tx
                     .send(AgentEvent::SteeringInterrupted {
-                        partial_text: partial,
+                        partial_text: partial.clone(),
                     })
                     .await;
+                // 先回灌被中断的 assistant 文本（与 conv 侧 finalize_assistant 对称），
+                // 让 LLM 下一轮看到自己刚说的半截话，避免重复/矛盾。
+                if !partial.is_empty() {
+                    req.messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: vec![ContentBlock::Text { text: partial }],
+                    });
+                }
                 req.messages.push(xgent_core::chat::ChatMessage::text(
                     Role::User,
                     steer_text.clone(),
@@ -524,7 +569,27 @@ async fn run_agent_loop(
             }
 
             if outcome.tool_calls.is_empty() {
-                // LLM 停止、无工具调用：本轮结束，记下 usage/model 供 Done 事件
+                if outcome.stop_reason == xgent_core::chat::StopReason::Aborted {
+                    // stream 被 abort 中断（cancel_token 或 steering Abort）：
+                    // stream_llm_response 已发 Done，直接退出循环，避免走到外层
+                    // select! 吞掉后续 StartLoop 命令（run_agent_loop 的外层等待
+                    // 会消费并丢弃 StartLoop，导致下一次对话无法启动）。
+                    return;
+                }
+                // LLM 停止、无工具调用：本轮结束，记下 usage/model 供 Done 事件。
+                //
+                // 回灌本轮 assistant 文本到 req.messages（与 conv 侧 finalize_assistant
+                // 对称）。修复前漏回灌：对话内 FollowUp/steering 时 req.messages 缺
+                // 最后一轮 assistant 回复，LLM 看不到自己刚说的话，上下文断裂。
+                // （tool 执行分支在第 635 行回灌 partial_text，此分支须同样处理。）
+                if let Some(text) = outcome.partial_text.as_ref()
+                    && !text.is_empty()
+                {
+                    req.messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: vec![ContentBlock::Text { text: text.clone() }],
+                    });
+                }
                 last_usage = outcome.usage.clone();
                 last_model = Some(req.model.clone());
                 has_tool_calls = false;
@@ -533,6 +598,16 @@ async fn run_agent_loop(
                 // 为每个补占位 skipped result（对齐 omp createAbortedToolResult），
                 // 让 LLM 在下一轮重新生成完整 tool_call。
                 for (call_id, name, _args) in &outcome.tool_calls {
+                    // 先发 ToolCall 事件，让 ECS 侧 conv.messages 记录 assistant tool_call，
+                    // 与后续 ToolResult 配对（修复 conv.messages 孤儿 tool_result 导致
+                    // 下次 StartLoop 时 OpenAI 协议配对断裂的 bug）
+                    let _ = event_tx
+                        .send(AgentEvent::ToolCall {
+                            call_id: call_id.clone(),
+                            tool_id: name.clone(),
+                            input: serde_json::Value::Null,
+                        })
+                        .await;
                     let _ = event_tx
                         .send(AgentEvent::ToolResult {
                             call_id: call_id.clone(),
@@ -563,8 +638,21 @@ async fn run_agent_loop(
                 }
                 has_tool_calls = true;
             } else {
-                // 执行工具调用，结果回灌为 ChatMessage 追加到 req.messages
-                for (call_id, name, args) in outcome.tool_calls {
+                // 执行工具调用，结果回灌为 ChatMessage 追加到 req.messages。
+                //
+                // OpenAI 协议要求：一条 assistant 消息可含多个 tool_calls，后跟多条
+                // tool role 消息。因此先逐个执行（保持 UI 实时性：ToolCall/ToolResult
+                // 事件逐个发），收集结果后**一次性**回灌一条含所有 ToolCall 块
+                // （+首个文本块）的 assistant ChatMessage + N 条 tool result。
+                // 修复之前每个 tool_call 都 push 一条独立 assistant 消息破坏协议的 bug。
+                let assistant_text = outcome.partial_text.clone().unwrap_or_default();
+                let mut executed: Vec<(String, String, serde_json::Value, String, bool)> =
+                    Vec::with_capacity(outcome.tool_calls.len());
+                let mut aborted = false;
+                // 先发所有 ToolCall 事件，让 conv 侧累积到同一条 assistant 消息的
+                // pending 批次（push_tool_call 累积，首个 ToolResult 时 flush），
+                // UI 侧 ToolCall 卡片先全部出现。然后再逐个执行+发 ToolResult。
+                for (call_id, name, args) in &outcome.tool_calls {
                     let _ = event_tx
                         .send(AgentEvent::ToolCall {
                             call_id: call_id.clone(),
@@ -572,18 +660,41 @@ async fn run_agent_loop(
                             input: args.clone(),
                         })
                         .await;
+                }
 
+                // 逐个执行工具，发 ToolResult 事件
+                for (call_id, name, args) in &outcome.tool_calls {
                     let cb = BridgeConfirm {
                         event_tx: event_tx.clone(),
                         shared: shared_confirm.clone(),
                     };
                     let result = executor
-                        .execute(&name, args, ctx, cancel_token.clone(), &cb)
+                        .execute(name, args.clone(), ctx, cancel_token.clone(), &cb)
                         .await;
-                    let (output, is_error, denied, side_effect) = match result {
-                        Ok(r) => (r.output, r.is_error, r.denied, r.side_effect),
+                    match result {
+                        Ok(r) => {
+                            let _ = event_tx
+                                .send(AgentEvent::ToolResult {
+                                    call_id: call_id.clone(),
+                                    tool_id: name.clone(),
+                                    output: r.output.clone(),
+                                    is_error: r.is_error,
+                                    denied: r.denied,
+                                    side_effect: r.side_effect,
+                                })
+                                .await;
+                            executed.push((
+                                call_id.clone(),
+                                name.clone(),
+                                args.clone(),
+                                r.output,
+                                r.is_error,
+                            ));
+                        }
                         Err(xgent_tools::ToolError::Aborted) => {
-                            // 中断：透传为 ToolResult 逻辑失败 + 结束本轮
+                            // 中断：当前 tool 透传为 ToolResult 逻辑失败，
+                            // 已发 ToolCall 但未执行的 tool_calls 补占位 ToolResult，
+                            // 保证所有 tool_call 都有配对的 tool result（对齐 Length 路径）。
                             let _ = event_tx
                                 .send(AgentEvent::ToolResult {
                                     call_id: call_id.clone(),
@@ -594,37 +705,80 @@ async fn run_agent_loop(
                                     side_effect: None,
                                 })
                                 .await;
+                            executed.push((
+                                call_id.clone(),
+                                name.clone(),
+                                args.clone(),
+                                "工具执行被中断".into(),
+                                true,
+                            ));
+                            // 剩余已发 ToolCall 但未执行的补占位 ToolResult
+                            let remaining = &outcome.tool_calls[executed.len()..];
+                            for (cid, nm, _) in remaining {
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolResult {
+                                        call_id: cid.clone(),
+                                        tool_id: nm.clone(),
+                                        output: "工具执行因中断而未执行".into(),
+                                        is_error: true,
+                                        denied: false,
+                                        side_effect: None,
+                                    })
+                                    .await;
+                                executed.push((
+                                    cid.clone(),
+                                    nm.clone(),
+                                    serde_json::Value::Null,
+                                    "工具执行因中断而未执行".into(),
+                                    true,
+                                ));
+                            }
+                            aborted = true;
+                            break;
+                        }
+                        Err(e) => {
+                            let output = format!("工具异常: {e}");
                             let _ = event_tx
-                                .send(AgentEvent::Done {
-                                    usage: None,
-                                    model: None,
+                                .send(AgentEvent::ToolResult {
+                                    call_id: call_id.clone(),
+                                    tool_id: name.clone(),
+                                    output: output.clone(),
+                                    is_error: true,
+                                    denied: false,
+                                    side_effect: None,
                                 })
                                 .await;
-                            return;
+                            executed.push((
+                                call_id.clone(),
+                                name.clone(),
+                                args.clone(),
+                                output,
+                                true,
+                            ));
                         }
-                        Err(e) => (format!("工具异常: {e}"), true, false, None),
-                    };
-                    let _ = event_tx
-                        .send(AgentEvent::ToolResult {
-                            call_id: call_id.clone(),
-                            tool_id: name.clone(),
-                            output: output.clone(),
-                            is_error,
-                            denied,
-                            side_effect,
-                        })
-                        .await;
+                    }
+                }
 
-                    // 工具结果回灌为 ChatMessage：
-                    // assistant tool_call 消息（带 ContentBlock::ToolCall）+ tool 结果消息
-                    req.messages.push(ChatMessage {
-                        role: Role::Assistant,
-                        content: vec![ContentBlock::ToolCall {
-                            id: call_id.clone(),
-                            name: name.clone(),
-                            args: serde_json::Value::Null, // args 已消费，回灌用 Null
-                        }],
+                // 一次性回灌：一条 assistant（文本块 + 所有 ToolCall 块）
+                // + N 条 tool result，符合 OpenAI 协议。
+                let mut asst_content = Vec::with_capacity(executed.len() + 1);
+                if !assistant_text.is_empty() {
+                    asst_content.push(ContentBlock::Text {
+                        text: assistant_text,
                     });
+                }
+                for (cid, nm, args, _, _) in &executed {
+                    asst_content.push(ContentBlock::ToolCall {
+                        id: cid.clone(),
+                        name: nm.clone(),
+                        args: args.clone(),
+                    });
+                }
+                req.messages.push(ChatMessage {
+                    role: Role::Assistant,
+                    content: asst_content,
+                });
+                for (call_id, _, _, output, is_error) in executed {
                     req.messages.push(ChatMessage {
                         role: Role::Tool,
                         content: vec![ContentBlock::ToolResult {
@@ -633,6 +787,16 @@ async fn run_agent_loop(
                             is_error,
                         }],
                     });
+                }
+
+                if aborted {
+                    let _ = event_tx
+                        .send(AgentEvent::Done {
+                            usage: None,
+                            model: None,
+                        })
+                        .await;
+                    return;
                 }
                 has_tool_calls = true;
             }
@@ -681,6 +845,15 @@ async fn run_agent_loop(
                 continue;
             }
             Some(AgentCommand::Abort) | None => {
+                // 中断对话：发 Done 通知 ECS 切回 Idle（修复前直接 return 不发 Done，
+                // 导致 ECS 永久停留在 Aborting 态）
+                cancel_token.cancel();
+                let _ = event_tx
+                    .send(AgentEvent::Done {
+                        usage: None,
+                        model: None,
+                    })
+                    .await;
                 return;
             }
             // StartLoop/ConfirmDecision 在外层等待时到达：MVP 忽略，退出
@@ -704,12 +877,22 @@ async fn maybe_compact(
     event_tx: &mpsc::Sender<AgentEvent>,
     _cancel_token: &tokio_util::sync::CancellationToken,
 ) -> Option<Vec<ChatMessage>> {
-    // ChatMessage → AgentMessage 逆映射用于 compaction（compactor 接受 AgentMessage）
     use xgent_core::chat::{AgentMessage, ContentBlock, Role};
-    let agent_msgs: Vec<AgentMessage> = messages
+
+    // 分离 system 消息：system prompt 不参与压缩（压缩会把它混入摘要后丢失，
+    // 导致后续请求缺失系统指令与项目上下文）。压缩仅作用于对话部分，
+    // 压缩后把 system 重新前置。
+    let (system_msg, conversation_msgs) = match messages.split_first() {
+        Some((first, rest)) if first.role == Role::System => {
+            (Some(first.clone()), rest)
+        }
+        _ => (None, messages),
+    };
+
+    let agent_msgs: Vec<AgentMessage> = conversation_msgs
         .iter()
         .map(|m| match m.role {
-            Role::System | Role::User => AgentMessage::User(xgent_core::chat::UserMessage {
+            Role::User => AgentMessage::User(xgent_core::chat::UserMessage {
                 content: m.content.clone(),
                 timestamp: 0,
             }),
@@ -741,6 +924,11 @@ async fn maybe_compact(
                     timestamp: 0,
                 })
             }
+            // System 已在上方分离，此处不应再出现
+            Role::System => AgentMessage::User(xgent_core::chat::UserMessage {
+                content: m.content.clone(),
+                timestamp: 0,
+            }),
         })
         .collect();
 
@@ -761,11 +949,17 @@ async fn maybe_compact(
     };
     let tokens_after = crate::tokenizer::estimate_messages_tokens(&result.kept_messages);
     let new_agent_msgs = crate::compaction::apply_compaction(result);
-    let new_messages = xgent_core::chat::convert_to_llm(&new_agent_msgs);
+    let mut new_messages = xgent_core::chat::convert_to_llm(&new_agent_msgs);
+    // 把 system prompt 重新前置（压缩前已分离，此处恢复，保证后续请求仍有
+    // 系统指令与项目上下文）
+    if let Some(sys) = system_msg {
+        new_messages.insert(0, sys);
+    }
     let _ = event_tx
         .send(AgentEvent::Compacted {
             tokens_before: ctx_tokens,
             tokens_after,
+            new_messages: new_agent_msgs,
         })
         .await;
     Some(new_messages)
@@ -780,17 +974,18 @@ async fn maybe_compact(
 /// 重试等待期间监听 `cancel_token`，用户 abort 立即中断重试循环。
 async fn stream_with_retry(
     provider: &Arc<dyn ProviderClient>,
-    req: &ChatRequest,
+    req: &mut ChatRequest,
     event_tx: &mpsc::Sender<AgentEvent>,
     cancel_token: &tokio_util::sync::CancellationToken,
     retry_config: &RetryConfig,
     steering_rx: &mut mpsc::Receiver<AgentCommand>,
 ) -> Result<StreamOutcome, (xgent_core::chat::ErrorKind, String)> {
+    use xgent_core::chat::{ContentBlock, Role};
     let mut attempt: u32 = 0;
     loop {
         match stream_llm_response(provider, req, event_tx, cancel_token, steering_rx).await {
             Ok(o) => return Ok(o),
-            Err((kind, message)) => {
+            Err((kind, message, partial_text)) => {
                 // 不可重试错误立即失败
                 if !RetryConfig::is_retryable(kind) {
                     return Err((kind, message));
@@ -811,6 +1006,17 @@ async fn stream_with_retry(
                         last_error: message.clone(),
                     })
                     .await;
+                // 重试前把半截 assistant 文本回灌到 req.messages（与 conv 侧
+                // RetryAttempt 的 finalize_assistant 对称），让 LLM 下一轮看到
+                // 自己重试前说的半截话，避免重复/矛盾。修复 req/conv 不同步。
+                if let Some(text) = &partial_text
+                    && !text.is_empty()
+                {
+                    req.messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: vec![ContentBlock::Text { text: text.clone() }],
+                    });
+                }
                 // 等待退避时长，期间可被 abort 中断
                 let delay = retry_config.delay_for(attempt);
                 tokio::select! {
@@ -850,10 +1056,10 @@ async fn stream_llm_response(
     event_tx: &mpsc::Sender<AgentEvent>,
     cancel_token: &tokio_util::sync::CancellationToken,
     steering_rx: &mut mpsc::Receiver<AgentCommand>,
-) -> Result<StreamOutcome, (xgent_core::chat::ErrorKind, String)> {
+) -> Result<StreamOutcome, (xgent_core::chat::ErrorKind, String, Option<String>)> {
     let (_sid, mut stream) = match provider.chat(req.clone()).await {
         Ok(s) => s,
-        Err((kind, msg)) => return Err((kind, msg)),
+        Err((kind, msg)) => return Err((kind, msg, None)),
     };
 
     // 累积 ToolCallStart 的 id/name（按 index），ToolCallEnd 时配对
@@ -862,8 +1068,6 @@ async fn stream_llm_response(
     let mut collected: Vec<(String, String, serde_json::Value)> = Vec::new();
     // 累积已流式 assistant 文本，供 steering 中断时返回（ECS 固化为被中断消息）
     let mut partial_text = String::new();
-    let mut usage: Option<xgent_core::chat::TokenUsage> = None;
-    let mut stop_reason = xgent_core::chat::StopReason::Stop;
 
     loop {
         tokio::select! {
@@ -882,27 +1086,33 @@ async fn stream_llm_response(
                         }
                     }
                     Some(ChatEvent::Done { reason, usage: u }) => {
-                        stop_reason = reason;
-                        usage = Some(u);
                         return Ok(StreamOutcome {
                             tool_calls: collected,
-                            usage,
-                            stop_reason,
+                            usage: Some(u),
+                            stop_reason: reason,
                             pending_steering: None,
-                            partial_text: None,
+                            // 正常完成时也携带已流式文本，供 run_agent_loop 在
+                            // tool 执行分支回灌 assistant 消息时包含文本块
+                            // （修复 LLM 同时返回文本+tool_calls 时文本丢失的 bug）
+                            partial_text: Some(partial_text.clone()),
                         });
                     }
                     Some(ChatEvent::Error { kind, message }) => {
-                        return Err((kind, message));
+                        return Err((kind, message, Some(partial_text.clone())));
                     }
                     Some(_) => {} // 忽略其他细粒度事件
-                    None => return Ok(StreamOutcome {
-                        tool_calls: collected,
-                        usage,
-                        stop_reason,
-                        pending_steering: None,
-                        partial_text: None,
-                    }),
+                    None => {
+                        // provider 流提前断开（未发 Done）：视为流解析错误，
+                        // 返回可重试错误（StreamParse）让 stream_with_retry 重试。
+                        // 不返回 Ok，避免上层误执行可能不完整的 tool_calls。
+                        // 携带 partial_text 供 stream_with_retry 重试前回灌到 req
+                        // （与 conv 侧 RetryAttempt finalize_assistant 对称）。
+                        return Err((
+                            xgent_core::chat::ErrorKind::StreamParse,
+                            "stream ended without Done event".into(),
+                            Some(partial_text.clone()),
+                        ));
+                    }
                 }
             }
             _ = cancel_token.cancelled() => {

@@ -15,8 +15,8 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 
 use xgent_agent::{
-    Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage,
-    SessionClearedMessage, SteeringMessage, UserInputMessage,
+    CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage,
+    RetryMessage, SessionClearedMessage, SteeringMessage, UserInputMessage,
 };
 use xui::input::{ChatInput, ChatInputSubmitted};
 use xui::scroll_area::{ScrollArea, StickToBottom};
@@ -74,6 +74,7 @@ impl Plugin for ChatPanelPlugin {
                     accumulate_delta,
                     finalize_on_done,
                     on_error,
+                    show_compacted_notice,
                     forward_input_submission,
                     spawn_user_message,
                     update_input_border,
@@ -83,6 +84,16 @@ impl Plugin for ChatPanelPlugin {
                     update_token_hint,
                 )
                     .after(xgent_agent::agent_loop::agent_poll_system),
+            )
+            // show_retry_status 必须在 finalize_on_done 之后：
+            // RetryAttempt 同帧发 DoneMessage + RetryMessage，finalize_on_done
+            // 先把半截回复固化为历史气泡并清空节点，show_retry_status 再写入
+            // "重试中"提示。若顺序反转，"重试中"会被固化进历史气泡，半截回复丢失。
+            .add_systems(
+                Update,
+                show_retry_status
+                    .after(xgent_agent::agent_loop::agent_poll_system)
+                    .after(finalize_on_done),
             );
         // 贴底跟随由 `xui::scroll_area::StickToBottom` 组件 +
         // `ScrollAreaPlugin` 的 `maintain_stick_to_bottom`/`auto_scroll_to_bottom`
@@ -552,6 +563,81 @@ fn on_error(
             Text::new(format!("{prefix}{}\n\n（重新输入可继续对话）", ev.message)),
             TextColor(theme.accent),
         ));
+    }
+}
+/// 重试时在当前助手消息节点显示「重试中(第 N 次)」与上次失败原因。
+///
+/// agent loop 因可重试错误（Network/StreamParse）触发自动重试前发射
+/// [`RetryMessage`]。此前 UI 完全未订阅，用户只看到半截文本被固化后空白，
+/// 不知正在重试。此系统补上进度提示（对齐 events.rs 注释要求）。
+///
+/// `finalize_on_done` 会先于本系统把半截文本固化为历史气泡并清空当前节点
+/// （RetryAttempt 分支同时发 DoneMessage），故此处直接写入已清空的当前节点。
+fn show_retry_status(
+    mut reader: MessageReader<RetryMessage>,
+    q: Query<Entity, With<CurrentAssistantText>>,
+    mut commands: Commands,
+    theme: Res<Theme>,
+) {
+    let Ok(entity) = q.single() else {
+        return;
+    };
+    for ev in reader.read() {
+        let label = if ev.infinite {
+            format!("⟳ 重试中（第 {} 次，无限重试）…", ev.attempt)
+        } else {
+            format!("⟳ 重试中（第 {} 次）…", ev.attempt)
+        };
+        commands.entity(entity).insert((
+            Text::new(format!("{label}\n上次失败：{}", ev.last_error)),
+            TextColor(theme.text_dim),
+        ));
+    }
+}
+
+/// 压缩触发后在消息列表插入一条 dim 提示气泡「前序对话已摘要压缩」。
+///
+/// agent loop compaction 触发后发射 [`CompactedMessage`]。此前 UI 完全未订阅，
+/// 用户看不到上下文被压缩的提示。此系统补上视觉标记（对齐 events.rs 注释要求）。
+fn show_compacted_notice(
+    mut reader: MessageReader<CompactedMessage>,
+    entities: Res<ChatPanelEntities>,
+    mut commands: Commands,
+    theme: Res<Theme>,
+) {
+    let Some(list) = entities.message_list else {
+        return;
+    };
+    for ev in reader.read() {
+        commands.entity(list).with_children(|p| {
+            p.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+            ))
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        padding: UiRect::all(px(space::XS)),
+                        border_radius: BorderRadius::all(px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.bar),
+                    Text::new(format!(
+                        "✦ 前序对话已摘要压缩（{}→{} tokens）",
+                        crate::status_bar::format_tokens(ev.tokens_before.into()),
+                        crate::status_bar::format_tokens(ev.tokens_after.into()),
+                    )),
+                    TextFont {
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                ));
+            });
+        });
     }
 }
 

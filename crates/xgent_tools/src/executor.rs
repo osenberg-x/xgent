@@ -140,30 +140,36 @@ impl ToolExecutor {
                     old_content,
                     new_content,
                 };
-                let rx = match tokio::time::timeout(
-                    std::time::Duration::from_secs(300),
-                    confirm.confirm(req),
-                )
-                .await
-                {
-                    Ok(rx) => rx,
-                    Err(_) => {
-                        return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None });
+                // 发起确认请求 + 等待用户决策，全程监听 cancel_token。
+                // 修复之前 timeout(confirm.confirm) 不监听 cancel，Abort 在
+                // confirm.confirm 卡住（event_tx 满）时需等满 300s 才生效。
+                let decision = tokio::select! {
+                    r = tokio::time::timeout(
+                        std::time::Duration::from_secs(300),
+                        confirm.confirm(req),
+                    ) => match r {
+                        Ok(rx) => match rx.await {
+                            Ok(d) => d,
+                            Err(_) => return Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
+                        },
+                        Err(_) => return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None }),
+                    },
+                    _ = signal.cancelled() => {
+                        return Err(ToolError::Aborted);
                     }
                 };
-                match rx.await {
-                    Ok(ConfirmDecision::Allow) => tool.execute(input, ctx, signal, None).await,
-                    Ok(ConfirmDecision::AllowAll) => {
+                match decision {
+                    ConfirmDecision::Allow => tool.execute(input, ctx, signal, None).await,
+                    ConfirmDecision::AllowAll => {
                         self.allowed_all.lock().await.insert(tool_id.to_string());
                         tool.execute(input, ctx, signal, None).await
                     }
-                    Ok(ConfirmDecision::Deny) => Ok(ToolResult {
+                    ConfirmDecision::Deny => Ok(ToolResult {
                         output: "用户拒绝".into(),
                         is_error: true,
                         denied: true,
                         side_effect: None,
                     }),
-                    Err(_) => Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
                 }
             }
         }

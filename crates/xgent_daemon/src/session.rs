@@ -336,10 +336,18 @@ async fn provider_chat(
     };
     match shared.pool.chat(chat_req, client_id, sender).await {
         Ok(stream_id) => Response::ok(req.id, serde_json::json!({"stream_id": stream_id.0})),
-        Err(e) => Response::err(
-            req.id,
-            RpcError::new(xgent_core::proto::INTERNAL_ERROR, e, None),
-        ),
+        Err((kind, message)) => {
+            // 把 ErrorKind 编码进 data 字段，供 UI 侧恢复（修复之前只传 message
+            // 导致 UI 误判为 Network 触发无意义重试的 bug）
+            Response::err(
+                req.id,
+                RpcError::new(
+                    xgent_core::proto::INTERNAL_ERROR,
+                    message,
+                    Some(serde_json::to_value(kind).unwrap_or(serde_json::Value::Null)),
+                ),
+            )
+        }
     }
 }
 

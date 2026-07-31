@@ -72,17 +72,26 @@ impl ProviderPool {
     /// 流式对话：调用 `provider.chat()`，把每个 [`ChatEvent`] 转成
     /// IPC notification 推送回客户端的 sender。
     ///
-    /// 返回 `(StreamId, ())`。错误以 [`ChatEvent::Error`] 形式推送。
+    /// 返回 `StreamId`。建流阶段错误（如 401/缺配置）返回
+    /// `(ErrorKind, message)`，由 session 编码进 RPC error.data 透传给 UI
+    /// （修复之前 map_err(to_string) 丢失 ErrorKind 导致 UI 误判为
+    /// Network 触发无意义重试的 bug）。流中错误仍以 ChatEvent::Error 推送。
     pub async fn chat(
         &self,
         req: ChatRequest,
         _client: ClientId,
         sender: tokio::sync::mpsc::Sender<Notification>,
-    ) -> Result<StreamId, String> {
+    ) -> Result<StreamId, (xgent_core::chat::ErrorKind, String)> {
         let provider_id = req.provider.clone();
-        let provider = self.get(&provider_id).await?;
+        let provider = self.get(&provider_id).await.map_err(|msg| {
+            // get 返回 String 错误（provider 不存在/配置缺失）→ NotConfigured
+            (xgent_core::chat::ErrorKind::NotConfigured, msg)
+        })?;
         let stream_id = self.next_stream_id();
-        let (_, mut stream) = provider.chat(req).await.map_err(|e| e.to_string())?;
+        let (_, mut stream) = provider.chat(req).await.map_err(|e| {
+            let kind = e.to_error_kind();
+            (kind, e.to_string())
+        })?;
         let sid = stream_id;
         tokio::spawn(async move {
             while let Some(ev) = stream.recv().await {

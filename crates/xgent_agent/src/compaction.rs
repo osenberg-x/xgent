@@ -373,7 +373,7 @@ pub fn apply_compaction(result: CompactionResult) -> Vec<AgentMessage> {
         content: vec![ContentBlock::Text {
             text: format!("[前序对话摘要]\n{}", result.summary),
         }],
-        timestamp: 0,
+        timestamp: crate::session_store::now_ms(),
     }));
     out.extend(result.kept_messages);
     out
