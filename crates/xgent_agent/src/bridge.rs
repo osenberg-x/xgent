@@ -358,7 +358,10 @@ async fn agent_loop_task(
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            AgentCommand::StartLoop { mut req, editor_queries } => {
+            AgentCommand::StartLoop {
+                mut req,
+                editor_queries,
+            } => {
                 // 每次对话创建独立的 cancel_token——CancellationToken 是一次性的，
                 // cancel() 后无法撤销。若跨对话复用，首次 Abort 后该 token 永远
                 // 处于已取消态，后续对话的 stream_llm_response 会立即命中
@@ -883,9 +886,7 @@ async fn maybe_compact(
     // 导致后续请求缺失系统指令与项目上下文）。压缩仅作用于对话部分，
     // 压缩后把 system 重新前置。
     let (system_msg, conversation_msgs) = match messages.split_first() {
-        Some((first, rest)) if first.role == Role::System => {
-            (Some(first.clone()), rest)
-        }
+        Some((first, rest)) if first.role == Role::System => (Some(first.clone()), rest),
         _ => (None, messages),
     };
 

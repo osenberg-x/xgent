@@ -8,11 +8,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use xgent_context::provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult};
-use xgent_plugin::{
-    WasmCallError, WasmPlugin, WitContextChunk, WitContextQuery, WitContextResult,
-};
 use tokio_util::sync::CancellationToken;
+use xgent_context::provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult};
+use xgent_plugin::{WasmCallError, WasmPlugin, WitContextChunk, WitContextQuery, WitContextResult};
 
 /// 插件上下文提供者适配器。
 pub struct PluginContextProvider {
@@ -34,14 +32,11 @@ impl ContextProvider for PluginContextProvider {
         // ContextQuery → WIT context-query（PathBuf → 相对路径 string，§15.3）
         let wit_query = WitContextQuery {
             user_message: query.user_message.clone(),
-            current_file: query
-                .current_file
-                .as_ref()
-                .and_then(|p| {
-                    p.strip_prefix(&self.project_root)
-                        .ok()
-                        .map(|r| r.to_string_lossy().into_owned())
-                }),
+            current_file: query.current_file.as_ref().and_then(|p| {
+                p.strip_prefix(&self.project_root)
+                    .ok()
+                    .map(|r| r.to_string_lossy().into_owned())
+            }),
             hints: query.hints.clone(),
             max_tokens: query.max_tokens,
         };

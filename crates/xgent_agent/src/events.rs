@@ -31,7 +31,6 @@ pub struct AbortMessage;
 #[derive(Message)]
 pub struct NewSessionMessage;
 
-
 /// 命令执行结果反馈（插件 → UI）。照设计文档 §5.4。
 ///
 /// `PluginPollSystem` 收到 `command.run` 返回后发送，UI 侧（命令面板/状态栏）展示 toast。
@@ -98,7 +97,6 @@ pub struct ToolResultMessage {
     /// 是否被策略/用户拒绝（UI 显示「已拒绝」态）
     pub denied: bool,
 }
-
 
 /// 需要用户确认（agent → UI，触发弹窗）。
 #[derive(Message)]

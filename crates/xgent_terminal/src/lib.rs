@@ -9,6 +9,8 @@ pub mod backend;
 pub mod local_pty;
 pub mod render;
 
-pub use backend::{ShellSpec, SpawnRequest, TerminalBackend, TerminalError, TerminalEvent, TerminalId};
+pub use backend::{
+    ShellSpec, SpawnRequest, TerminalBackend, TerminalError, TerminalEvent, TerminalId,
+};
 pub use local_pty::LocalPtyBackend;
 pub use render::{Color, RenderLine, SpanStyle, StyledSpan, TerminalParser};

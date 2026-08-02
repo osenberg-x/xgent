@@ -9,26 +9,40 @@
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::backend::{ShellSpec, SpawnRequest, TerminalBackend, TerminalError, TerminalEvent, TerminalId};
+use crate::backend::{
+    ShellSpec, SpawnRequest, TerminalBackend, TerminalError, TerminalEvent, TerminalId,
+};
 
 /// 读循环/命令循环 task 接收的命令（来自 write/resize/kill）。
 enum PtyCmd {
-    Write { bytes: Vec<u8>, reply: oneshot::Sender<Result<(), TerminalError>> },
-    Resize { cols: u16, rows: u16, reply: oneshot::Sender<Result<(), TerminalError>> },
-    Kill { reply: oneshot::Sender<Result<(), TerminalError>> },
+    Write {
+        bytes: Vec<u8>,
+        reply: oneshot::Sender<Result<(), TerminalError>>,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+        reply: oneshot::Sender<Result<(), TerminalError>>,
+    },
+    Kill {
+        reply: oneshot::Sender<Result<(), TerminalError>>,
+    },
 }
 
 /// 单个 PTY 会话的命令通道（write/resize/kill 经此发）。
 struct PtySession {
     cmd_tx: mpsc::Sender<PtyCmd>,
+    /// 子进程 killer 句柄（共享给命令循环线程 + Drop 清理）。
+    /// `Kill` 命令和 Drop 都经此 kill；`take` 后为 None（幂等）。
+    killer: Arc<Mutex<Option<Box<dyn portable_pty::ChildKiller + Send + Sync>>>>,
 }
 
 /// 本地 PTY 后端（MVP 唯一实现）。
@@ -52,6 +66,22 @@ impl Default for LocalPtyBackend {
     }
 }
 
+impl Drop for LocalPtyBackend {
+    fn drop(&mut self) {
+        // 清理所有未 kill 的 PTY 会话：take killer 后 kill 子进程，
+        // 防止 backend 被 drop 时子进程变孤儿 + 线程泄漏。
+        // take 保证幂等（kill 命令路径已 take 过的 session 此处得 None）。
+        let sessions = std::mem::take(&mut *self.sessions.lock());
+        for (_, session) in sessions {
+            if let Some(mut k) = session.killer.lock().take() {
+                let _ = k.kill();
+            }
+            // cmd_tx drop → 桥接 task 结束 → cmd_tx_sync drop → 命令循环线程退出。
+            // killer kill 后子进程退出 → reader EOF → 读循环线程结束。
+        }
+    }
+}
+
 #[async_trait]
 impl TerminalBackend for LocalPtyBackend {
     async fn spawn(
@@ -61,6 +91,10 @@ impl TerminalBackend for LocalPtyBackend {
     ) -> Result<TerminalId, TerminalError> {
         let id = TerminalId(self.next_id.fetch_add(1, Ordering::SeqCst));
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<PtyCmd>(64);
+        // 共享 killer 句柄：spawn_blocking 内填入，PtySession + Drop 经此 kill。
+        let killer_slot: Arc<Mutex<Option<Box<dyn portable_pty::ChildKiller + Send + Sync>>>> =
+            Arc::new(Mutex::new(None));
+        let killer_slot_for_blocking = killer_slot.clone();
 
         // 在 spawn_blocking 里做 PTY spawn + 起两个 std 线程（读循环 + 命令循环）
         tokio::task::spawn_blocking(move || -> Result<(), TerminalError> {
@@ -83,6 +117,13 @@ impl TerminalBackend for LocalPtyBackend {
 
             drop(pair.slave); // slave 用完即弃
 
+            // spawn_command 成功后子进程已启动。try_clone_reader / take_writer
+            // 失败时需 kill 子进程防止孤儿——portable_pty::Child 的 Drop 不杀进程。
+            // 提前 clone killer，用 guard 保证错误路径（? 提前返回）自动 kill；
+            // 成功路径 disarm 并填入共享 slot 供 PtySession/Drop 使用。
+            let killer = child.clone_killer();
+            let guard = KillGuard(Some(killer));
+
             let reader = pair
                 .master
                 .try_clone_reader()
@@ -92,11 +133,15 @@ impl TerminalBackend for LocalPtyBackend {
                 .take_writer()
                 .map_err(|e| TerminalError::Spawn(format!("take_writer: {e}")))?;
 
+            // reader/writer 均成功：取出 killer，解除 guard（不再自动 kill）
+            let killer = guard.disarm();
+
             // writer 共享：读循环需回写 DSR 响应，命令循环写用户输入。
             let writer = Arc::new(std::sync::Mutex::new(writer));
             let writer_for_read = writer.clone();
             let master = pair.master;
-            let mut killer = child.clone_killer();
+            // 填入共享 slot 供 PtySession/Drop kill
+            *killer_slot_for_blocking.lock() = Some(killer);
             let child = Arc::new(std::sync::Mutex::new(child));
             let child_for_read = child.clone();
             let output_tx_for_read = output_tx.clone();
@@ -164,6 +209,7 @@ impl TerminalBackend for LocalPtyBackend {
             });
 
             // 命令循环线程：收 cmd_rx_sync，执行 write/resize/kill
+            let killer_slot_for_cmd = killer_slot_for_blocking.clone();
             std::thread::spawn(move || {
                 let writer = writer;
                 loop {
@@ -180,16 +226,24 @@ impl TerminalBackend for LocalPtyBackend {
                         }
                         Ok(PtyCmd::Resize { cols, rows, reply }) => {
                             let r = master
-                                .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+                                .resize(PtySize {
+                                    rows,
+                                    cols,
+                                    pixel_width: 0,
+                                    pixel_height: 0,
+                                })
                                 .map_err(|e| TerminalError::Resize(e.to_string()));
                             let _ = reply.send(r);
                         }
                         Ok(PtyCmd::Kill { reply }) => {
-                            // kill 语义是"确保进程不再运行"——对已退出进程
-                            // 调 TerminateProcess 在 Windows 报 error 87
-                            // （参数错误），这是预期行为，忽略即可。对齐
-                            // portable-pty 自身 WinChild::kill 的 .ok() 模式。
-                            let _ = killer.kill();
+                            // kill 语义是"确保进程不再运行"——take killer 后 kill。
+                            // 对已退出进程调 kill 在 Windows 报 error 87（参数错误），
+                            // 这是预期行为，忽略即可。对齐 portable-pty 自身
+                            // WinChild::kill 的 .ok() 模式。take 保证幂等（Drop
+                            // 再 take 得 None）。
+                            if let Some(mut k) = killer_slot_for_cmd.lock().take() {
+                                let _ = k.kill();
+                            }
                             let _ = reply.send(Ok(()));
                             if let Ok(mut c) = child.lock() {
                                 let _ = c.wait();
@@ -216,7 +270,13 @@ impl TerminalBackend for LocalPtyBackend {
         .await
         .map_err(|e| TerminalError::Spawn(format!("spawn_blocking join: {e}")))??;
 
-        self.sessions.lock().insert(id, PtySession { cmd_tx });
+        self.sessions.lock().insert(
+            id,
+            PtySession {
+                cmd_tx,
+                killer: killer_slot,
+            },
+        );
         Ok(id)
     }
 
@@ -249,7 +309,11 @@ impl TerminalBackend for LocalPtyBackend {
         };
         let (tx, rx) = oneshot::channel();
         cmd_tx
-            .send(PtyCmd::Resize { cols, rows, reply: tx })
+            .send(PtyCmd::Resize {
+                cols,
+                rows,
+                reply: tx,
+            })
             .await
             .map_err(|_| TerminalError::Resize("cmd channel closed".into()))?;
         rx.await
@@ -283,4 +347,25 @@ fn build_shell_command(shell: ShellSpec, cwd: &PathBuf) -> CommandBuilder {
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd
+}
+
+/// RAII guard：drop 时自动 kill 子进程，防止 spawn 中途失败导致孤儿进程。
+///
+/// `portable_pty::Child` 的 Drop 不杀进程，故 `try_clone_reader` / `take_writer`
+/// 失败时需显式 kill。成功路径调 [`disarm`](Self::disarm) 取出 killer 解除自动 kill。
+struct KillGuard(Option<Box<dyn portable_pty::ChildKiller + Send + Sync>>);
+
+impl KillGuard {
+    /// 取出 killer，解除自动 kill（成功路径调用）。
+    fn disarm(mut self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+        self.0.take().expect("KillGuard disarm 后不可再用")
+    }
+}
+
+impl Drop for KillGuard {
+    fn drop(&mut self) {
+        if let Some(mut k) = self.0.take() {
+            let _ = k.kill();
+        }
+    }
 }

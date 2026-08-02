@@ -5,9 +5,7 @@
 //!
 //! 提供：git_diff / git_log / git_status 工具 + diff/log/status 命令。
 
-use xgent_plugin_api::{
-    Extension, WitCommandDef, WitToolDef, WitToolError, WitToolTier,
-};
+use xgent_plugin_api::{Extension, WitCommandDef, WitToolDef, WitToolError, WitToolTier};
 
 struct GitPlugin;
 
@@ -41,9 +39,18 @@ impl Extension for GitPlugin {
 
     fn register_commands(&mut self) -> Vec<WitCommandDef> {
         vec![
-            WitCommandDef { id: "diff".into(), label: "Git: 查看 Diff".into() },
-            WitCommandDef { id: "log".into(), label: "Git: 提交历史".into() },
-            WitCommandDef { id: "status".into(), label: "Git: 状态".into() },
+            WitCommandDef {
+                id: "diff".into(),
+                label: "Git: 查看 Diff".into(),
+            },
+            WitCommandDef {
+                id: "log".into(),
+                label: "Git: 提交历史".into(),
+            },
+            WitCommandDef {
+                id: "status".into(),
+                label: "Git: 状态".into(),
+            },
         ]
     }
 
@@ -73,9 +80,7 @@ impl Extension for GitPlugin {
                 let n_str = limit.to_string();
                 run_git_via_host_command(tool_id, vec!["log", &format!("-n{n_str}"), "--oneline"])
             }
-            "git_status" => {
-                run_git_via_host_command(tool_id, vec!["status", "--short"])
-            }
+            "git_status" => run_git_via_host_command(tool_id, vec!["status", "--short"]),
             _ => Err(WitToolError::Failed(format!("未知工具: {tool_id}"))),
         }
     }

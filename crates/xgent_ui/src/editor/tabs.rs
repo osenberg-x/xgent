@@ -235,35 +235,39 @@ pub fn handle_open_file_requests(
         } else {
             // spawn 新 buffer：滚动容器 + 虚拟化占位 + 行号列 + 光标条。
             // 文本显示走 `update_virtual_lines` 动态 spawn 可见行；
-            let line_num_entity = commands.spawn((
-                Text::new(String::new()),
-                TextFont {
-                    font_size: FontSize::Px(editor_theme.font_size),
-                    ..default()
-                },
-                TextColor(bevy::color::palettes::tailwind::GRAY_400.into()),
-                xui::LineNumbersMarker,
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    width: Val::Px(48.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-            )).id();
-            let cursor_bar_entity = commands.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(48.0),
-                    width: Val::Px(2.0),
-                    height: Val::Px(20.0),
-                    ..default()
-                },
-                BackgroundColor(bevy::color::palettes::tailwind::AMBER_400.into()),
-                xui::CursorBarMarker,
-            )).id();
+            let line_num_entity = commands
+                .spawn((
+                    Text::new(String::new()),
+                    TextFont {
+                        font_size: FontSize::Px(editor_theme.font_size),
+                        ..default()
+                    },
+                    TextColor(bevy::color::palettes::tailwind::GRAY_400.into()),
+                    xui::LineNumbersMarker,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: Val::Px(0.0),
+                        left: Val::Px(0.0),
+                        width: Val::Px(48.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                ))
+                .id();
+            let cursor_bar_entity = commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: Val::Px(0.0),
+                        left: Val::Px(48.0),
+                        width: Val::Px(2.0),
+                        height: Val::Px(20.0),
+                        ..default()
+                    },
+                    BackgroundColor(bevy::color::palettes::tailwind::AMBER_400.into()),
+                    xui::CursorBarMarker,
+                ))
+                .id();
             let buffer_entity = commands
                 .spawn((
                     xui::ScrollArea::vertical(),

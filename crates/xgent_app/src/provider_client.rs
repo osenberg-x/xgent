@@ -75,10 +75,10 @@ impl ProviderClient for IpcProviderClient {
                         }
                         let ev = match notif.method.as_str() {
                             // daemon 透传整个 ChatEvent JSON（见 ADR-0006），反序列化
-                            notifications::PROVIDER_EVENT => serde_json::from_value::<ChatEvent>(
-                                notif.params["event"].clone(),
-                            )
-                            .ok(),
+                            notifications::PROVIDER_EVENT => {
+                                serde_json::from_value::<ChatEvent>(notif.params["event"].clone())
+                                    .ok()
+                            }
                             _ => None,
                         };
                         if let Some(ev) = ev

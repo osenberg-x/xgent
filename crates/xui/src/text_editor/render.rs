@@ -121,14 +121,7 @@ impl Default for EditorTheme {
 /// 行数从 `TextEditor.rope.len_lines()` 取，兼容编辑态（有 `EditableText`）
 /// 与虚拟化只读态（无 `EditableText`，文本在 rope 中）。
 pub fn update_line_numbers(
-    q: Query<
-        (
-            &TextEditor,
-            &HighlightCache,
-            &TextEditorChildren,
-        ),
-        Changed<HighlightCache>,
-    >,
+    q: Query<(&TextEditor, &HighlightCache, &TextEditorChildren), Changed<HighlightCache>>,
     mut q_num: Query<&mut Text, With<LineNumbersMarker>>,
 ) {
     for (editor, _cache, children) in q.iter() {

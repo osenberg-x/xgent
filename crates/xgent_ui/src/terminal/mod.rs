@@ -211,7 +211,10 @@ impl Plugin for TerminalPlugin {
             .init_resource::<output::TerminalResizeTracker>()
             .insert_resource(bridge_tx)
             .insert_resource(bridge_rx)
-            .add_systems(Startup, spawn_terminal_view.after(crate::layout::spawn_layout))
+            .add_systems(
+                Startup,
+                spawn_terminal_view.after(crate::layout::spawn_layout),
+            )
             .add_systems(
                 Update,
                 (
@@ -252,190 +255,188 @@ fn spawn_terminal_view(
         return;
     };
     let font = theme.font_size;
-    commands
-        .entity(side)
-        .with_children(|p| {
-            // 终端视图容器：初始隐藏（由 apply_terminal_view_visibility 据 SideViewContent 切换）
-            p.spawn((
+    commands.entity(side).with_children(|p| {
+        // 终端视图容器：初始隐藏（由 apply_terminal_view_visibility 据 SideViewContent 切换）
+        p.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::clip(),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(theme.bg),
+            TerminalViewMarker,
+        ))
+        .with_children(|view| {
+            // tv-head：标题 + tab 条 + 新建/清屏/关闭
+            view.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    overflow: Overflow::clip(),
-                    display: Display::None,
+                    height: px(crate::theme::size::TOP_BAR_H),
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::XS),
+                    padding: UiRect::horizontal(px(space::SM)),
+                    border: UiRect::bottom(px(1.0)),
                     ..default()
                 },
-                BackgroundColor(theme.bg),
-                TerminalViewMarker,
+                BackgroundColor(theme.bar),
+                BorderColor::all(theme.border),
             ))
-            .with_children(|view| {
-                // tv-head：标题 + tab 条 + 新建/清屏/关闭
-                view.spawn((
+            .with_children(|head| {
+                // tab 条容器（动态 spawn tab 项，见 rebuild_terminal_tabs）
+                head.spawn((
                     Node {
-                        width: Val::Percent(100.0),
-                        height: px(crate::theme::size::TOP_BAR_H),
-                        align_items: AlignItems::Center,
+                        flex_grow: 1.0,
                         flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
                         column_gap: px(space::XS),
-                        padding: UiRect::horizontal(px(space::SM)),
-                        border: UiRect::bottom(px(1.0)),
+                        overflow: Overflow::clip_x(),
                         ..default()
                     },
-                    BackgroundColor(theme.bar),
-                    BorderColor::all(theme.border),
-                ))
-                .with_children(|head| {
-                    // tab 条容器（动态 spawn tab 项，见 rebuild_terminal_tabs）
-                    head.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            flex_direction: FlexDirection::Row,
-                            align_items: AlignItems::Center,
-                            column_gap: px(space::XS),
-                            overflow: Overflow::clip_x(),
-                            ..default()
-                        },
-                        TerminalTabBarMarker,
-                    ));
-                    // ＋ 新建 tab
-                    head.spawn((
-                        Button,
-                        Node {
-                            width: px(24.0),
-                            height: px(24.0),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(px(4.0)),
-                            ..default()
-                        },
-                        Text::new(tr(&loc, "terminal-new-tab")),
-                        TextFont {
-                            font_size: px_size(font),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                        TerminalNewTabButtonMarker,
-                    ));
-                    // 清屏
-                    head.spawn((
-                        Button,
-                        Node {
-                            width: px(24.0),
-                            height: px(24.0),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(px(4.0)),
-                            ..default()
-                        },
-                        Text::new(tr(&loc, "terminal-clear")),
-                        TextFont {
-                            font_size: px_size(font - 2.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                        TerminalClearButtonMarker,
-                    ));
-                    // ✕ 关闭分屏
-                    head.spawn((
-                        Button,
-                        Node {
-                            width: px(24.0),
-                            height: px(24.0),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(px(4.0)),
-                            ..default()
-                        },
-                        Text::new(tr(&loc, "terminal-close")),
-                        TextFont {
-                            font_size: px_size(font),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                        TerminalCloseButtonMarker,
-                    ));
-                });
-
-                // tv-body：输出历史容器（ScrollArea 贴底滚动，每 tab 动态 spawn 行）
-                let mut output_area = ScrollArea::vertical();
-                output_area.node.padding = UiRect::horizontal(px(space::SM));
-                view.spawn((
-                    output_area,
-                    StickToBottom::default(),
-                    BackgroundColor(theme.bg),
-                    TerminalOutputMarker,
+                    TerminalTabBarMarker,
                 ));
-
-                // tv-inputline：行编辑输入框
-                view.spawn((
+                // ＋ 新建 tab
+                head.spawn((
+                    Button,
                     Node {
-                        width: Val::Percent(100.0),
-                        height: px(28.0),
-                        flex_direction: FlexDirection::Row,
+                        width: px(24.0),
+                        height: px(24.0),
                         align_items: AlignItems::Center,
-                        column_gap: px(space::SM),
-                        padding: UiRect::horizontal(px(space::SM)),
-                        border: UiRect::top(px(1.0)),
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    BackgroundColor(theme.bar),
-                    BorderColor::all(theme.border),
-                ))
-                .with_children(|line| {
-                    // prompt ❯
-                    line.spawn((
-                        Text::new(tr(&loc, "terminal-prompt")),
-                        TextFont {
-                            font_size: px_size(font),
-                            ..default()
-                        },
-                        TextColor(theme.accent),
-                    ));
-                    // 输入文本节点（由 input 模块更新内容）
-                    line.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            min_width: Val::ZERO,
-                            ..default()
-                        },
-                        Text::new(""),
-                        TextFont {
-                            font_size: px_size(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                        TerminalInputMarker,
-                    ));
-                });
-
-                // tv-statusbar
-                view.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: px(crate::theme::size::STATUS_BAR_H),
-                        align_items: AlignItems::Center,
-                        flex_direction: FlexDirection::Row,
-                        column_gap: px(space::SM),
-                        padding: UiRect::horizontal(px(space::SM)),
-                        border: UiRect::top(px(1.0)),
+                    Text::new(tr(&loc, "terminal-new-tab")),
+                    TextFont {
+                        font_size: px_size(font),
                         ..default()
                     },
-                    BackgroundColor(theme.bar),
-                    BorderColor::all(theme.border),
-                ))
-                .with_children(|bar| {
-                    bar.spawn((
-                        Text::new(""),
-                        TextFont {
-                            font_size: px_size(font - 2.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                        TerminalStatusBarMarker,
-                    ));
-                });
+                    TextColor(theme.text_dim),
+                    TerminalNewTabButtonMarker,
+                ));
+                // 清屏
+                head.spawn((
+                    Button,
+                    Node {
+                        width: px(24.0),
+                        height: px(24.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(px(4.0)),
+                        ..default()
+                    },
+                    Text::new(tr(&loc, "terminal-clear")),
+                    TextFont {
+                        font_size: px_size(font - 2.0),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                    TerminalClearButtonMarker,
+                ));
+                // ✕ 关闭分屏
+                head.spawn((
+                    Button,
+                    Node {
+                        width: px(24.0),
+                        height: px(24.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(px(4.0)),
+                        ..default()
+                    },
+                    Text::new(tr(&loc, "terminal-close")),
+                    TextFont {
+                        font_size: px_size(font),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                    TerminalCloseButtonMarker,
+                ));
+            });
+
+            // tv-body：输出历史容器（ScrollArea 贴底滚动，每 tab 动态 spawn 行）
+            let mut output_area = ScrollArea::vertical();
+            output_area.node.padding = UiRect::horizontal(px(space::SM));
+            view.spawn((
+                output_area,
+                StickToBottom::default(),
+                BackgroundColor(theme.bg),
+                TerminalOutputMarker,
+            ));
+
+            // tv-inputline：行编辑输入框
+            view.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: px(28.0),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(space::SM),
+                    padding: UiRect::horizontal(px(space::SM)),
+                    border: UiRect::top(px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(theme.bar),
+                BorderColor::all(theme.border),
+            ))
+            .with_children(|line| {
+                // prompt ❯
+                line.spawn((
+                    Text::new(tr(&loc, "terminal-prompt")),
+                    TextFont {
+                        font_size: px_size(font),
+                        ..default()
+                    },
+                    TextColor(theme.accent),
+                ));
+                // 输入文本节点（由 input 模块更新内容）
+                line.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        min_width: Val::ZERO,
+                        ..default()
+                    },
+                    Text::new(""),
+                    TextFont {
+                        font_size: px_size(font),
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                    TerminalInputMarker,
+                ));
+            });
+
+            // tv-statusbar
+            view.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: px(crate::theme::size::STATUS_BAR_H),
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::SM),
+                    padding: UiRect::horizontal(px(space::SM)),
+                    border: UiRect::top(px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(theme.bar),
+                BorderColor::all(theme.border),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: px_size(font - 2.0),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                    TerminalStatusBarMarker,
+                ));
             });
         });
+    });
 }
 
 /// 据 [`SideViewContent`] 切换 [`TerminalViewMarker`] 显隐，并展开分屏。

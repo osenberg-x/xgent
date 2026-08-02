@@ -155,12 +155,15 @@ pub fn handle_clear_tab_requests(
 pub fn rebuild_terminal_tabs(
     tabs: Res<TerminalTabs>,
     q_tabs: Query<&TerminalTab>,
+    q_tabs_changed: Query<&TerminalTab, Changed<TerminalTab>>,
     q_bar: Query<Entity, With<crate::terminal::TerminalTabBarMarker>>,
     q_existing: Query<Entity, With<TerminalTabMarker>>,
     theme: Res<Theme>,
     mut commands: Commands,
 ) {
-    if !tabs.is_changed() && !tabs.is_added() {
+    // TerminalTabs 变化（open/close/switch）或任何 TerminalTab 组件变化
+    // （status: Created→Running→Exited）时重建 tab 条，确保状态指示点更新。
+    if !tabs.is_changed() && !tabs.is_added() && q_tabs_changed.is_empty() {
         return;
     }
     let Ok(bar) = q_bar.single() else {

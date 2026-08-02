@@ -17,7 +17,9 @@ use clap::Parser;
 use xgent_agent::bridge::{AgentBridge, AgentBridgeConfig};
 use xgent_context::{ContextHub, OnDemandContextProvider, XgentContextPlugin};
 use xgent_plugin::{PluginHost, PluginHostProxy, WasmHost};
-use xgent_plugin_host::{register_proxy_impls, PluginEventRx, PluginHostPlugin, PluginHostResource};
+use xgent_plugin_host::{
+    PluginEventRx, PluginHostPlugin, PluginHostResource, register_proxy_impls,
+};
 use xgent_settings::Localizer;
 use xgent_settings_core::paths::{daemon_socket_path, plugins_dir};
 use xgent_settings_core::store::{GlobalConfigStore, ProjectConfigStore};
@@ -164,6 +166,7 @@ fn main() {
     let notif_rx = ipc.subscribe();
     // 终端复用 agent bridge 的 tokio runtime handle（bridge 在下方 insert_resource 移动）
     let terminal_rt_handle = bridge.runtime.handle().clone();
+    let preview_rt_handle = bridge.runtime.handle().clone();
     let plugin_rt_handle = bridge.runtime.handle().clone();
     // 插件系统组装（照设计文档 §13 Step P4）：
     // 1. 创建 PluginHostProxy + WasmHost + PluginHost（event_rx 持有，注入 ECS）
@@ -180,7 +183,11 @@ fn main() {
         proxy.clone(),
         wasm_host,
         plugins_root,
-        if assets_dir.exists() { Some(assets_dir) } else { None },
+        if assets_dir.exists() {
+            Some(assets_dir)
+        } else {
+            None
+        },
         global_config.plugin_settings.clone(),
     );
     // 注册 proxy impl（返回 op_rx，包成 PluginOpRx Resource 注入 ECS，
@@ -214,10 +221,12 @@ fn main() {
     .insert_resource(xgent_ui::file_panel::ProjectRoot {
         path: project_root.clone(),
     })
-    .insert_resource(Localizer::default())
     .insert_resource(xgent_ui::terminal::TerminalIoRuntime::new(
         terminal_rt_handle,
         xgent_terminal::LocalPtyBackend::new(),
+    ))
+    .insert_resource(xgent_ui::file_panel::PreviewIoRuntime::new(
+        preview_rt_handle,
     ))
     .insert_resource(bridge)
     .insert_resource(IpcClientResource {
@@ -233,7 +242,9 @@ fn main() {
     .insert_resource(ToolExecutorResource(executor.clone()))
     .insert_resource(PluginHostResource(plugin_host.clone()))
     .insert_resource(PluginEventRx(parking_lot::Mutex::new(event_rx)))
-    .insert_resource(xgent_plugin_host::PluginOpRx(parking_lot::Mutex::new(op_rx)))
+    .insert_resource(xgent_plugin_host::PluginOpRx(parking_lot::Mutex::new(
+        op_rx,
+    )))
     .insert_resource(xgent_agent::EditorCommandRx {
         rx: tokio::sync::Mutex::new(editor_cmd_rx),
     });

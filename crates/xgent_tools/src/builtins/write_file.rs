@@ -49,11 +49,7 @@ impl Tool for WriteFile {
 
     /// 读旧文件内容，返回 (old, new) 供确认弹窗 diff。
     /// 新建文件（旧不存在）返回 (None 等价, Some(new))——UI 据此全增行。
-    async fn preview_diff(
-        &self,
-        input: &Value,
-        ctx: &ToolCtx,
-    ) -> Option<(String, String)> {
+    async fn preview_diff(&self, input: &Value, ctx: &ToolCtx) -> Option<(String, String)> {
         let path = input["path"].as_str()?;
         let new_content = input["content"].as_str()?.to_string();
         let full = resolve_in_project(&ctx.project_root, path).ok()?;
@@ -69,29 +65,59 @@ impl Tool for WriteFile {
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
         let Some(path) = input["path"].as_str() else {
-            return Ok(ToolResult { output: "缺少参数 path".into(), is_error: true, denied: false, side_effect: None });
+            return Ok(ToolResult {
+                output: "缺少参数 path".into(),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            });
         };
         let Some(content) = input["content"].as_str() else {
-            return Ok(ToolResult { output: "缺少参数 content".into(), is_error: true, denied: false, side_effect: None });
+            return Ok(ToolResult {
+                output: "缺少参数 content".into(),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            });
         };
         let full = match resolve_in_project(&ctx.project_root, path) {
             Ok(p) => p,
             Err(e) => {
-                return Ok(ToolResult { output: e, is_error: true, denied: false, side_effect: None });
+                return Ok(ToolResult {
+                    output: e,
+                    is_error: true,
+                    denied: false,
+                    side_effect: None,
+                });
             }
         };
         // 确保父目录存在
         if let Some(parent) = full.parent()
             && let Err(e) = tokio::fs::create_dir_all(parent).await
         {
-            return Ok(ToolResult { output: format!("创建目录失败: {e}"), is_error: true, denied: false, side_effect: None });
+            return Ok(ToolResult {
+                output: format!("创建目录失败: {e}"),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            });
         }
         match tokio::fs::write(&full, content).await {
             Ok(()) => {
                 let written = full.clone();
-                Ok(ToolResult { output: format!("已写入 {}（{} 字节）", full.display(), content.len()), is_error: false, denied: false, side_effect: Some(SideEffect::FileWritten(written)) })
+                Ok(ToolResult {
+                    output: format!("已写入 {}（{} 字节）", full.display(), content.len()),
+                    is_error: false,
+                    denied: false,
+                    side_effect: Some(SideEffect::FileWritten(written)),
+                })
             }
-            Err(e) => Ok(ToolResult { output: format!("写入失败 {}: {e}", full.display()), is_error: true, denied: false, side_effect: None }),
+            Err(e) => Ok(ToolResult {
+                output: format!("写入失败 {}: {e}", full.display()),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            }),
         }
     }
 }

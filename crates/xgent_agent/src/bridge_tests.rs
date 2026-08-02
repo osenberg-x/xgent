@@ -226,7 +226,12 @@ impl Tool for EchoTool {
         _signal: tokio_util::sync::CancellationToken,
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
-        Ok(ToolResult { output: input.to_string(), is_error: false, denied: false, side_effect: None })
+        Ok(ToolResult {
+            output: input.to_string(),
+            is_error: false,
+            denied: false,
+            side_effect: None,
+        })
     }
 }
 
@@ -245,8 +250,10 @@ fn delta_then_done_message_sequence() {
         },
     ]);
     // 发起用户输入
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
 
     // 跑若干帧让事件流转
     for _ in 0..50 {
@@ -279,8 +286,10 @@ fn error_message_propagates() {
         kind: xgent_core::chat::ErrorKind::ProviderError,
         message: "boom".into(),
     }]);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..20 {
         app.update();
     }
@@ -298,10 +307,16 @@ fn busy_state_ignores_new_input() {
         },
     ]);
     // 第一条输入
-    app.world_mut().write_message(UserInputMessage { text: "first".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "first".into(),
+        editor_queries: Vec::new(),
+    });
     app.update();
     // 在 Thinking/Streaming 时发第二条
-    app.world_mut().write_message(UserInputMessage { text: "second".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "second".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..20 {
         app.update();
     }
@@ -358,7 +373,10 @@ fn tool_call_executes_approved_tool() {
     );
     app.insert_resource(Collected::default())
         .add_systems(Update, collect_messages);
-    app.world_mut().write_message(UserInputMessage { text: "do echo".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "do echo".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..50 {
         app.update();
     }
@@ -385,7 +403,10 @@ fn session_jsonl_persists_header_and_assistant_message() {
         Arc::new(ToolExecutor::with_defaults()),
         ToolPolicyConfig::default(),
     );
-    app.world_mut().write_message(UserInputMessage { text: "hello".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hello".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..50 {
         app.update();
     }
@@ -535,8 +556,10 @@ fn retryable_error_retries_then_succeeds() {
     );
     app.insert_resource(RetryCollected::default())
         .add_systems(Update, collect_retry);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..80 {
         app.update();
     }
@@ -583,8 +606,10 @@ fn non_retryable_error_fails_immediately() {
     );
     app.insert_resource(RetryCollected::default())
         .add_systems(Update, collect_retry);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..40 {
         app.update();
     }
@@ -612,8 +637,10 @@ fn infinite_retry_can_be_aborted() {
     );
     app.insert_resource(RetryCollected::default())
         .add_systems(Update, collect_retry);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     // 让首次失败 + 若干次重试发生
     for _ in 0..30 {
         app.update();
@@ -757,8 +784,10 @@ fn compaction_triggers_when_over_threshold() {
     let mut app = test_app_with_compaction(provider as Arc<dyn crate::bridge::ProviderClient>);
     app.insert_resource(CompactedCollected::default())
         .add_systems(Update, collect_compacted);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..50 {
         app.update();
     }
@@ -830,8 +859,10 @@ fn steering_interrupts_streaming_and_continues() {
         crate::bridge::RetryConfig::default(),
     )
     .0;
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     // 跑几帧让流式开始
     for _ in 0..5 {
         app.update();
@@ -862,7 +893,6 @@ fn steering_interrupts_streaming_and_continues() {
     assert!(has_steer, "steering 文本应注入到对话历史");
 }
 
-
 /// 验证 compaction 后 system prompt 仍保留在 req.messages 中。
 ///
 /// 修复前：maybe_compact 把 system 消息映射为 User 并混入摘要，
@@ -883,7 +913,8 @@ fn compaction_preserves_system_prompt_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self
@@ -891,9 +922,15 @@ fn compaction_preserves_system_prompt_in_req() {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             // 首次 prompt=9999 触发 compaction；后续 prompt=1 不触发
             let usage = if n == 0 {
-                TokenUsage { prompt: 9999, completion: 1 }
+                TokenUsage {
+                    prompt: 9999,
+                    completion: 1,
+                }
             } else {
-                TokenUsage { prompt: 1, completion: 1 }
+                TokenUsage {
+                    prompt: 1,
+                    completion: 1,
+                }
             };
             let events = vec![
                 ChatEvent::TextDelta { text: "hi".into() },
@@ -906,7 +943,9 @@ fn compaction_preserves_system_prompt_in_req() {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async move {
                     for ev in events {
-                        if tx.send(ev).await.is_err() { break; }
+                        if tx.send(ev).await.is_err() {
+                            break;
+                        }
                     }
                 });
             });
@@ -921,8 +960,10 @@ fn compaction_preserves_system_prompt_in_req() {
     let mut app = test_app_with_compaction(provider as Arc<dyn crate::bridge::ProviderClient>);
     app.insert_resource(CompactedCollected::default())
         .add_systems(Update, collect_compacted);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     // 跑帧让首次对话完成（含 compaction 触发）→ 回到 Idle
     for _ in 0..60 {
         app.update();
@@ -933,8 +974,9 @@ fn compaction_preserves_system_prompt_in_req() {
         assert!(collected.count >= 1, "compaction 应触发");
     }
     // 发 FollowUp 触发第二次 chat 调用（压缩后的 req）
-    app.world_mut()
-        .write_message(FollowUpMessage { text: "more".into() });
+    app.world_mut().write_message(FollowUpMessage {
+        text: "more".into(),
+    });
     for _ in 0..80 {
         app.update();
     }
@@ -970,14 +1012,19 @@ fn compaction_syncs_conv_messages() {
         ChatEvent::TextDelta { text: "hi".into() },
         ChatEvent::Done {
             reason: xgent_core::chat::StopReason::Stop,
-            usage: TokenUsage { prompt: 9999, completion: 1 },
+            usage: TokenUsage {
+                prompt: 9999,
+                completion: 1,
+            },
         },
     ]));
     let mut app = test_app_with_compaction(provider as Arc<dyn crate::bridge::ProviderClient>);
     app.insert_resource(CompactedCollected::default())
         .add_systems(Update, collect_compacted);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..60 {
         app.update();
     }
@@ -1022,7 +1069,9 @@ fn length_truncation_pairs_tool_call_and_result_in_conv() {
             },
         ],
         vec![
-            ChatEvent::TextDelta { text: "done".into() },
+            ChatEvent::TextDelta {
+                text: "done".into(),
+            },
             ChatEvent::Done {
                 reason: xgent_core::chat::StopReason::Stop,
                 usage: TokenUsage::default(),
@@ -1042,8 +1091,10 @@ fn length_truncation_pairs_tool_call_and_result_in_conv() {
     );
     app.insert_resource(Collected::default())
         .add_systems(Update, collect_messages);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "do echo".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "do echo".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..80 {
         app.update();
     }
@@ -1055,7 +1106,10 @@ fn length_truncation_pairs_tool_call_and_result_in_conv() {
     for m in &conv.messages {
         match m {
             xgent_core::chat::AgentMessage::Assistant(a) => {
-                if a.content.iter().any(|b| matches!(b, xgent_core::chat::ContentBlock::ToolCall { .. })) {
+                if a.content
+                    .iter()
+                    .any(|b| matches!(b, xgent_core::chat::ContentBlock::ToolCall { .. }))
+                {
                     tool_calls += 1;
                 }
             }
@@ -1066,8 +1120,7 @@ fn length_truncation_pairs_tool_call_and_result_in_conv() {
     assert_eq!(
         tool_calls, tool_results,
         "conv.messages 中 tool_call({}) 与 tool_result({}) 应配对（修复前 Length 路径孤儿 tool_result）",
-        tool_calls,
-        tool_results
+        tool_calls, tool_results
     );
     assert!(tool_calls >= 1, "应至少有一对 tool_call/tool_result");
 }
@@ -1088,14 +1141,17 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             // 首次：文本 + tool_call；后续：无 tool_call 正常停止
             let n = self.captured.lock().len() - 1;
             let events = if n == 0 {
                 vec![
-                    ChatEvent::TextDelta { text: "Let me read that file.".into() },
+                    ChatEvent::TextDelta {
+                        text: "Let me read that file.".into(),
+                    },
                     ChatEvent::ToolCallStart {
                         index: 0,
                         id: "call_1".into(),
@@ -1112,7 +1168,9 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
                 ]
             } else {
                 vec![
-                    ChatEvent::TextDelta { text: "done".into() },
+                    ChatEvent::TextDelta {
+                        text: "done".into(),
+                    },
                     ChatEvent::Done {
                         reason: xgent_core::chat::StopReason::Stop,
                         usage: TokenUsage::default(),
@@ -1123,7 +1181,9 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async move {
                     for ev in events {
-                        if tx.send(ev).await.is_err() { break; }
+                        if tx.send(ev).await.is_err() {
+                            break;
+                        }
                     }
                 });
             });
@@ -1131,7 +1191,9 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
         }
     }
     let captured: Arc<Mutex<Vec<ChatRequest>>> = Arc::new(Mutex::new(vec![]));
-    let provider = Arc::new(CapturingProvider { captured: captured.clone() });
+    let provider = Arc::new(CapturingProvider {
+        captured: captured.clone(),
+    });
     let executor = Arc::new(ToolExecutor::new(vec![Arc::new(EchoTool)]));
     let policy = ToolPolicyConfig {
         approved: vec!["echo".to_string()],
@@ -1143,8 +1205,10 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
         policy,
         crate::bridge::RetryConfig::default(),
     );
-    app.world_mut()
-        .write_message(UserInputMessage { text: "do echo".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "do echo".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..80 {
         app.update();
     }
@@ -1152,11 +1216,7 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
     assert_eq!(conv.status, ConversationStatus::Idle, "应回到 Idle");
     // 第二次 chat 调用的 req.messages 应含 assistant 文本（"Let me read that file."）
     let reqs = captured.lock();
-    assert!(
-        reqs.len() >= 2,
-        "应至少两次 chat 调用，实际 {}",
-        reqs.len()
-    );
+    assert!(reqs.len() >= 2, "应至少两次 chat 调用，实际 {}", reqs.len());
     let second_req = &reqs[1];
     // 在第二次请求的消息历史中查找 assistant 消息含该文本
     let has_text = second_req.messages.iter().any(|m| {
@@ -1218,7 +1278,8 @@ fn abort_then_new_conversation_still_streams() {
         async fn chat(
             &self,
             _req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             let (tx, rx) = mpsc::channel(8);
             let n = self
                 .call_count
@@ -1254,10 +1315,14 @@ fn abort_then_new_conversation_still_streams() {
 
     let provider = Arc::new(AbortTestProvider::new(vec![
         // 首次：只发 delta（模拟流式中被中断），无 Done
-        vec![ChatEvent::TextDelta { text: "partial".into() }],
+        vec![ChatEvent::TextDelta {
+            text: "partial".into(),
+        }],
         // 第二次：正常文本 + Done
         vec![
-            ChatEvent::TextDelta { text: "second reply".into() },
+            ChatEvent::TextDelta {
+                text: "second reply".into(),
+            },
             ChatEvent::Done {
                 reason: xgent_core::chat::StopReason::Stop,
                 usage: TokenUsage::default(),
@@ -1272,8 +1337,10 @@ fn abort_then_new_conversation_still_streams() {
     );
 
     // 第一次对话
-    app.world_mut()
-        .write_message(UserInputMessage { text: "first".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "first".into(),
+        editor_queries: Vec::new(),
+    });
     // 让流式开始（delta 到达）
     for _ in 0..10 {
         app.update();
@@ -1294,8 +1361,10 @@ fn abort_then_new_conversation_still_streams() {
     }
 
     // 第二次对话（同一 App）
-    app.world_mut()
-        .write_message(UserInputMessage { text: "second".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "second".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..80 {
         app.update();
     }
@@ -1355,7 +1424,9 @@ fn confirm_decision_sets_tool_running_status() {
                 usage: TokenUsage::default(),
             },
             // 第二次（工具执行后）：无 tool_calls，正常停止
-            ChatEvent::TextDelta { text: "done".into() },
+            ChatEvent::TextDelta {
+                text: "done".into(),
+            },
             ChatEvent::Done {
                 reason: xgent_core::chat::StopReason::Stop,
                 usage: TokenUsage::default(),
@@ -1366,8 +1437,10 @@ fn confirm_decision_sets_tool_running_status() {
     );
     app.insert_resource(Collected::default())
         .add_systems(Update, collect_messages);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "do echo".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "do echo".into(),
+        editor_queries: Vec::new(),
+    });
 
     // 跑帧让 tool_call 到达 + ConfirmRequest 弹出
     for _ in 0..30 {
@@ -1429,14 +1502,17 @@ fn multi_tool_calls_single_assistant_message() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self.captured.lock().len() - 1;
             // 首次：两个并行 tool_calls（index 0 + 1）；后续：正常停止
             let events = if n == 0 {
                 vec![
-                    ChatEvent::TextDelta { text: "Let me run two tools.".into() },
+                    ChatEvent::TextDelta {
+                        text: "Let me run two tools.".into(),
+                    },
                     ChatEvent::ToolCallStart {
                         index: 0,
                         id: "call_a".into(),
@@ -1462,7 +1538,9 @@ fn multi_tool_calls_single_assistant_message() {
                 ]
             } else {
                 vec![
-                    ChatEvent::TextDelta { text: "done".into() },
+                    ChatEvent::TextDelta {
+                        text: "done".into(),
+                    },
                     ChatEvent::Done {
                         reason: xgent_core::chat::StopReason::Stop,
                         usage: TokenUsage::default(),
@@ -1473,7 +1551,9 @@ fn multi_tool_calls_single_assistant_message() {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async move {
                     for ev in events {
-                        if tx.send(ev).await.is_err() { break; }
+                        if tx.send(ev).await.is_err() {
+                            break;
+                        }
                     }
                 });
             });
@@ -1481,7 +1561,9 @@ fn multi_tool_calls_single_assistant_message() {
         }
     }
     let captured: Arc<Mutex<Vec<ChatRequest>>> = Arc::new(Mutex::new(vec![]));
-    let provider = Arc::new(CapturingProvider { captured: captured.clone() });
+    let provider = Arc::new(CapturingProvider {
+        captured: captured.clone(),
+    });
     let executor = Arc::new(ToolExecutor::new(vec![Arc::new(EchoTool)]));
     let policy = ToolPolicyConfig {
         approved: vec!["echo".to_string()],
@@ -1495,8 +1577,10 @@ fn multi_tool_calls_single_assistant_message() {
     );
     app.insert_resource(Collected::default())
         .add_systems(Update, collect_messages);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "run two".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "run two".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..80 {
         app.update();
     }
@@ -1572,8 +1656,16 @@ fn multi_tool_calls_single_assistant_message() {
 
     // UI 侧收到 2 个 ToolCall + 2 个 ToolResult
     let collected = app.world().resource::<Collected>();
-    assert_eq!(collected.tool_calls.len(), 2, "UI 应收到 2 个 ToolCall 事件");
-    assert_eq!(collected.tool_results.len(), 2, "UI 应收到 2 个 ToolResult 事件");
+    assert_eq!(
+        collected.tool_calls.len(),
+        2,
+        "UI 应收到 2 个 ToolCall 事件"
+    );
+    assert_eq!(
+        collected.tool_results.len(),
+        2,
+        "UI 应收到 2 个 ToolResult 事件"
+    );
 }
 
 /// 验证 provider 流提前断开（未发 Done）触发可重试的 StreamParse 错误，
@@ -1588,7 +1680,9 @@ fn stream_none_triggers_retryable_error() {
     // 第二次：正常文本 + Done
     let provider = Arc::new(RetryMockProvider::new(vec![
         vec![
-            ChatEvent::TextDelta { text: "partial".into() },
+            ChatEvent::TextDelta {
+                text: "partial".into(),
+            },
             ChatEvent::ToolCallStart {
                 index: 0,
                 id: "call_x".into(),
@@ -1597,7 +1691,9 @@ fn stream_none_triggers_retryable_error() {
             // 无 ToolCallEnd，无 Done：流断开
         ],
         vec![
-            ChatEvent::TextDelta { text: "recovered".into() },
+            ChatEvent::TextDelta {
+                text: "recovered".into(),
+            },
             ChatEvent::Done {
                 reason: xgent_core::chat::StopReason::Stop,
                 usage: TokenUsage::default(),
@@ -1616,8 +1712,10 @@ fn stream_none_triggers_retryable_error() {
             backoff_factor: 2.0,
         },
     );
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..150 {
         app.update();
     }
@@ -1667,7 +1765,8 @@ fn steering_interrupt_preserves_assistant_text_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let steer_seen = self.steer_seen.clone();
@@ -1678,22 +1777,34 @@ fn steering_interrupt_preserves_assistant_text_in_req() {
                     if n == 0 {
                         // 首次：发 delta 后等 steering 信号，再发 Done
                         let _ = tx
-                            .send(ChatEvent::TextDelta { text: "partial answer".into() })
+                            .send(ChatEvent::TextDelta {
+                                text: "partial answer".into(),
+                            })
                             .await;
                         for _ in 0..200 {
-                            { let s = steer_seen.lock(); if *s { break; } }
+                            {
+                                let s = steer_seen.lock();
+                                if *s {
+                                    break;
+                                }
+                            }
                             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                         }
                         let _ = tx
                             .send(ChatEvent::Done {
                                 reason: xgent_core::chat::StopReason::Stop,
-                                usage: TokenUsage { prompt: 5, completion: 1 },
+                                usage: TokenUsage {
+                                    prompt: 5,
+                                    completion: 1,
+                                },
                             })
                             .await;
                     } else {
                         // 第二次（steering 后重新流式）：正常文本 + Done
                         let _ = tx
-                            .send(ChatEvent::TextDelta { text: "final".into() })
+                            .send(ChatEvent::TextDelta {
+                                text: "final".into(),
+                            })
                             .await;
                         let _ = tx
                             .send(ChatEvent::Done {
@@ -1719,19 +1830,27 @@ fn steering_interrupt_preserves_assistant_text_in_req() {
         ToolPolicyConfig::default(),
         crate::bridge::RetryConfig::default(),
     );
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..5 {
         app.update();
     }
-    app.world_mut().write_message(SteeringMessage { text: "wait".into() });
+    app.world_mut().write_message(SteeringMessage {
+        text: "wait".into(),
+    });
     *steer_seen.lock() = true;
     for _ in 0..80 {
         app.update();
     }
 
     let conv = app.world().resource::<crate::conversation::Conversation>();
-    assert_eq!(conv.status, ConversationStatus::Idle, "steering 后应回到 Idle");
+    assert_eq!(
+        conv.status,
+        ConversationStatus::Idle,
+        "steering 后应回到 Idle"
+    );
 
     // 第二次 chat 调用的 req 应含被中断的 assistant 文本 "partial answer"
     let reqs = captured.lock();
@@ -1739,10 +1858,12 @@ fn steering_interrupt_preserves_assistant_text_in_req() {
     let second_req = &reqs[1];
     let has_partial = second_req.messages.iter().any(|m| {
         m.role == xgent_core::chat::Role::Assistant
-            && m.content.iter().any(|b| matches!(
-                b,
-                xgent_core::chat::ContentBlock::Text { text } if text == "partial answer"
-            ))
+            && m.content.iter().any(|b| {
+                matches!(
+                    b,
+                    xgent_core::chat::ContentBlock::Text { text } if text == "partial answer"
+                )
+            })
     });
     assert!(
         has_partial,
@@ -1766,7 +1887,8 @@ fn retry_preserves_partial_assistant_text_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self.captured.lock().len() - 1;
@@ -1776,13 +1898,17 @@ fn retry_preserves_partial_assistant_text_in_req() {
                     if n == 0 {
                         // 首次：发 delta 后流断开（stream None）→ StreamParse → 重试
                         let _ = tx
-                            .send(ChatEvent::TextDelta { text: "half said".into() })
+                            .send(ChatEvent::TextDelta {
+                                text: "half said".into(),
+                            })
                             .await;
                         // 无 Done，tx drop → stream None
                     } else {
                         // 重试后：正常文本 + Done
                         let _ = tx
-                            .send(ChatEvent::TextDelta { text: "recovered".into() })
+                            .send(ChatEvent::TextDelta {
+                                text: "recovered".into(),
+                            })
                             .await;
                         let _ = tx
                             .send(ChatEvent::Done {
@@ -1797,15 +1923,19 @@ fn retry_preserves_partial_assistant_text_in_req() {
         }
     }
     let captured: Arc<Mutex<Vec<ChatRequest>>> = Arc::new(Mutex::new(vec![]));
-    let provider = Arc::new(CapturingProvider { captured: captured.clone() });
+    let provider = Arc::new(CapturingProvider {
+        captured: captured.clone(),
+    });
     let (mut app, _root) = test_app_with_retry_provider(
         provider as Arc<dyn crate::bridge::ProviderClient>,
         Arc::new(ToolExecutor::with_defaults()),
         ToolPolicyConfig::default(),
         fast_retry_config(Some(2)),
     );
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     for _ in 0..150 {
         app.update();
     }
@@ -1819,10 +1949,12 @@ fn retry_preserves_partial_assistant_text_in_req() {
     let second_req = &reqs[1];
     let has_half = second_req.messages.iter().any(|m| {
         m.role == xgent_core::chat::Role::Assistant
-            && m.content.iter().any(|b| matches!(
-                b,
-                xgent_core::chat::ContentBlock::Text { text } if text == "half said"
-            ))
+            && m.content.iter().any(|b| {
+                matches!(
+                    b,
+                    xgent_core::chat::ContentBlock::Text { text } if text == "half said"
+                )
+            })
     });
     assert!(
         has_half,
@@ -1856,7 +1988,9 @@ fn abort_interrupts_confirming_state() {
                 usage: TokenUsage::default(),
             },
             // 第二次（若未被 abort）：正常停止
-            ChatEvent::TextDelta { text: "done".into() },
+            ChatEvent::TextDelta {
+                text: "done".into(),
+            },
             ChatEvent::Done {
                 reason: xgent_core::chat::StopReason::Stop,
                 usage: TokenUsage::default(),
@@ -1867,8 +2001,10 @@ fn abort_interrupts_confirming_state() {
     );
     app.insert_resource(Collected::default())
         .add_systems(Update, collect_messages);
-    app.world_mut()
-        .write_message(UserInputMessage { text: "do echo".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "do echo".into(),
+        editor_queries: Vec::new(),
+    });
 
     // 跑帧让 tool_call 到达 + ConfirmRequest 弹出
     for _ in 0..30 {
@@ -1918,7 +2054,8 @@ fn normal_completion_backfills_assistant_text_to_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
+        {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self.captured.lock().len() - 1;
@@ -1928,7 +2065,9 @@ fn normal_completion_backfills_assistant_text_to_req() {
                     if n == 0 {
                         // 首次：文本 + 正常停止（无 tool_calls）
                         let _ = tx
-                            .send(ChatEvent::TextDelta { text: "hello back".into() })
+                            .send(ChatEvent::TextDelta {
+                                text: "hello back".into(),
+                            })
                             .await;
                         let _ = tx
                             .send(ChatEvent::Done {
@@ -1951,15 +2090,19 @@ fn normal_completion_backfills_assistant_text_to_req() {
         }
     }
     let captured: Arc<Mutex<Vec<ChatRequest>>> = Arc::new(Mutex::new(vec![]));
-    let provider = Arc::new(CapturingProvider { captured: captured.clone() });
+    let provider = Arc::new(CapturingProvider {
+        captured: captured.clone(),
+    });
     let (mut app, _root) = test_app_with_retry_provider(
         provider as Arc<dyn crate::bridge::ProviderClient>,
         Arc::new(ToolExecutor::with_defaults()),
         ToolPolicyConfig::default(),
         fast_retry_config(Some(0)),
     );
-    app.world_mut()
-        .write_message(UserInputMessage { text: "hi".into(), editor_queries: Vec::new() });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
     // 跑到第一轮完成（Idle）。轮询直到 Idle，上限 300 帧避免 flaky。
     for _ in 0..300 {
         app.update();
@@ -1974,8 +2117,9 @@ fn normal_completion_backfills_assistant_text_to_req() {
     }
 
     // 发 FollowUp，触发第二次 chat 调用。轮询直到第二次 req 被捕获，上限 300 帧。
-    app.world_mut()
-        .write_message(FollowUpMessage { text: "again".into() });
+    app.world_mut().write_message(FollowUpMessage {
+        text: "again".into(),
+    });
     for _ in 0..300 {
         app.update();
         if captured.lock().len() >= 2 {
@@ -1989,10 +2133,12 @@ fn normal_completion_backfills_assistant_text_to_req() {
     let second_req = &reqs[1];
     let has_assistant = second_req.messages.iter().any(|m| {
         m.role == xgent_core::chat::Role::Assistant
-            && m.content.iter().any(|b| matches!(
-                b,
-                xgent_core::chat::ContentBlock::Text { text } if text == "hello back"
-            ))
+            && m.content.iter().any(|b| {
+                matches!(
+                    b,
+                    xgent_core::chat::ContentBlock::Text { text } if text == "hello back"
+                )
+            })
     });
     assert!(
         has_assistant,

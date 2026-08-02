@@ -28,14 +28,14 @@ pub use input::{ChatInput, ChatInputSubmitted, InputEnhancePlugin, SendModifier}
 pub use scroll_area::{ScrollArea, ScrollAreaMarker, ScrollAreaPlugin, StickToBottom};
 pub use scrollbar::{Scrollbar, ScrollbarPlugin, ScrollbarThumb, ScrollbarTrack};
 pub use shortcuts::{HotkeyTriggered, ShortcutsPlugin};
+pub use text_editor::highlight::{HighlightSpan, SpanKind, highlight, span_color_for};
+pub use text_editor::render::{
+    CursorBarMarker, HighlightLayerMarker, LineNumbersMarker, TextEditorChildren,
+};
 pub use text_editor::{
     EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope, TextEditor,
     TextEditorPlugin, TextEditorUpdateSet,
 };
-pub use text_editor::render::{
-    CursorBarMarker, HighlightLayerMarker, LineNumbersMarker, TextEditorChildren,
-};
-pub use text_editor::highlight::{highlight, span_color_for, HighlightSpan, SpanKind};
 pub use virtual_list::{VirtualItemBuilder, VirtualList, VirtualListPlugin};
 
 /// `xui` 插件：注册所有子组件插件与快捷键注册表。

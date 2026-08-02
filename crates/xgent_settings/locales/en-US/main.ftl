@@ -79,3 +79,7 @@ terminal-new-tab = +
 terminal-clear = Clear
 terminal-close = x
 terminal-prompt = >
+preview-loading = · Loading...
+preview-read-error = Read failed: { $error }
+preview-bytes = · { $bytes } bytes · Read-only preview
+preview-error = · { $error }

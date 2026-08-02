@@ -610,33 +610,31 @@ fn show_compacted_notice(
     };
     for ev in reader.read() {
         commands.entity(list).with_children(|p| {
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|row| {
-                row.spawn((
-                    Node {
-                        padding: UiRect::all(px(space::XS)),
-                        border_radius: BorderRadius::all(px(4.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme.bar),
-                    Text::new(format!(
-                        "✦ 前序对话已摘要压缩（{}→{} tokens）",
-                        crate::status_bar::format_tokens(ev.tokens_before.into()),
-                        crate::status_bar::format_tokens(ev.tokens_after.into()),
-                    )),
-                    TextFont {
-                        font_size: FontSize::Px(11.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                ));
-            });
+            p.spawn((Node {
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },))
+                .with_children(|row| {
+                    row.spawn((
+                        Node {
+                            padding: UiRect::all(px(space::XS)),
+                            border_radius: BorderRadius::all(px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.bar),
+                        Text::new(format!(
+                            "✦ 前序对话已摘要压缩（{}→{} tokens）",
+                            crate::status_bar::format_tokens(ev.tokens_before.into()),
+                            crate::status_bar::format_tokens(ev.tokens_after.into()),
+                        )),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(theme.text_dim),
+                    ));
+                });
         });
     }
 }
@@ -662,8 +660,7 @@ pub fn forward_input_submission(
         }
         if conv.status == ConversationStatus::Idle || conv.status == ConversationStatus::Error {
             // @ 引用解析：替换占位标记 + 收集 EditorQuery
-            let (text, queries) =
-                crate::editor::at_syntax::parse_at_references(&ev.text);
+            let (text, queries) = crate::editor::at_syntax::parse_at_references(&ev.text);
             user_writer.write(UserInputMessage {
                 text,
                 editor_queries: queries,

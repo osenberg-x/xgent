@@ -295,9 +295,14 @@ fn rebuild_visible_spans(
             if !buf.is_empty() {
                 let c = cur_color;
                 let s = std::mem::take(&mut buf);
-                commands
-                    .entity(text_entity)
-                    .with_child((TextSpan::new(s), TextFont { font_size, ..default() }, TextColor(c)));
+                commands.entity(text_entity).with_child((
+                    TextSpan::new(s),
+                    TextFont {
+                        font_size,
+                        ..default()
+                    },
+                    TextColor(c),
+                ));
             }
             cur_color = color;
             cur_color_set = true;
@@ -307,9 +312,14 @@ fn rebuild_visible_spans(
         }
     }
     if !buf.is_empty() {
-        commands
-            .entity(text_entity)
-            .with_child((TextSpan::new(buf), TextFont { font_size, ..default() }, TextColor(cur_color)));
+        commands.entity(text_entity).with_child((
+            TextSpan::new(buf),
+            TextFont {
+                font_size,
+                ..default()
+            },
+            TextColor(cur_color),
+        ));
     }
 }
 
@@ -425,10 +435,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<crate::text_editor::render::EditorTheme>();
-        let text_entity = app
-            .world_mut()
-            .spawn((Text::new(String::new()),))
-            .id();
+        let text_entity = app.world_mut().spawn((Text::new(String::new()),)).id();
         let rope = ropey::Rope::from_str("hello\nworld");
         let mut commands = app.world_mut().commands();
         rebuild_visible_spans(

@@ -17,7 +17,10 @@ pub mod tokenizer;
 mod bridge_tests;
 
 pub use agent_loop::agent_poll_system;
-pub use bridge::{AgentBridge, AgentBridgeConfig, AgentCommand, AgentEvent, ChannelEditorCommandSink, EditorCommandRx, ProviderClient};
+pub use bridge::{
+    AgentBridge, AgentBridgeConfig, AgentCommand, AgentEvent, ChannelEditorCommandSink,
+    EditorCommandRx, ProviderClient,
+};
 pub use compaction::{
     CompactionError, CompactionProvider, CompactionResult, CompactionSettings, LlmCompactor,
     apply_compaction, compaction_context_tokens, effective_reserve_tokens, find_cut_point,

@@ -163,6 +163,9 @@ pub fn handle_terminal_resize(
         let Some(pty_id) = tab.pty_id else {
             continue;
         };
+        if tab.status == TerminalTabStatus::Exited {
+            continue;
+        }
         let cols = req.cols;
         let rows = req.rows;
         let backend = backend.clone();
@@ -178,6 +181,7 @@ pub fn handle_terminal_resize(
 /// [`TerminalSpawned`] Message，并回填 `TerminalTab` 状态。
 pub fn handle_pty_events(
     bridge: Res<PtyBridgeRx>,
+    rt: Res<TerminalIoRuntime>,
     mut output_writer: MessageWriter<TerminalOutputChunk>,
     mut exited_writer: MessageWriter<TerminalExited>,
     mut spawned_writer: MessageWriter<TerminalSpawned>,
@@ -189,6 +193,19 @@ pub fn handle_pty_events(
                 if let Ok(mut t) = q_tabs.get_mut(tab) {
                     t.pty_id = Some(pty_id);
                     t.status = TerminalTabStatus::Running;
+                } else {
+                    // tab 实体已销毁（用户在 PTY spawn 完成前关闭了 tab）：
+                    // PTY 会话在 backend 中已创建但无 UI 引用——立即 kill
+                    // 防止孤儿进程 + 会话泄漏。drain task 随后会收到 Exited
+                    if let (Some(handle), Some(backend)) = (rt.handle.as_ref(), rt.backend.as_ref())
+                    {
+                        let backend = backend.clone();
+                        handle.spawn(async move {
+                            let _ = backend.kill(pty_id).await;
+                        });
+                    }
+                    spawned_writer.write(TerminalSpawned { tab, pty_id });
+                    continue;
                 }
                 spawned_writer.write(TerminalSpawned { tab, pty_id });
             }
@@ -206,6 +223,8 @@ pub fn handle_pty_events(
                     t.status = TerminalTabStatus::Exited;
                     t.exit_code = code;
                 }
+                // tab 已销毁时：PTY 已退出（Exited 到达 = 进程结束），
+                // Spawned 路径已 kill 孤儿会话，此处无需额外清理。
                 exited_writer.write(TerminalExited {
                     tab,
                     exit_code: code,
@@ -245,8 +264,7 @@ pub fn spawn_pty_session(
     req: xgent_terminal::SpawnRequest,
     bridge_tx: crossbeam_channel::Sender<PtyBridgeEvent>,
 ) {
-    let (output_tx, output_rx) =
-        tokio::sync::mpsc::channel::<xgent_terminal::TerminalEvent>(256);
+    let (output_tx, output_rx) = tokio::sync::mpsc::channel::<xgent_terminal::TerminalEvent>(256);
     handle.spawn(async move {
         match backend.spawn(req, output_tx).await {
             Ok(pty_id) => {
@@ -276,4 +294,3 @@ pub fn spawn_pty_session(
         }
     });
 }
-

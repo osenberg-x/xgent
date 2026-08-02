@@ -260,7 +260,7 @@ impl Conversation {
                 tool_name: tool_name.to_string(),
                 content: content.to_string(),
                 is_error,
-            timestamp: crate::session_store::now_ms(),
+                timestamp: crate::session_store::now_ms(),
             }));
     }
 
@@ -269,7 +269,7 @@ impl Conversation {
         self.messages
             .push(AgentMessage::Notification(NotificationMessage {
                 text: text.to_string(),
-            timestamp: crate::session_store::now_ms(),
+                timestamp: crate::session_store::now_ms(),
             }));
     }
 }

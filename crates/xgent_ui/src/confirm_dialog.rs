@@ -55,7 +55,9 @@ fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
     let new_lines: Vec<&str> = new.lines().collect();
     // 公共前缀
     let mut prefix = 0;
-    while prefix < old_lines.len() && prefix < new_lines.len() && old_lines[prefix] == new_lines[prefix]
+    while prefix < old_lines.len()
+        && prefix < new_lines.len()
+        && old_lines[prefix] == new_lines[prefix]
     {
         prefix += 1;
     }
@@ -70,18 +72,30 @@ fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
     let mut out = Vec::new();
     // 前缀上下文
     for i in 0..prefix {
-        out.push(DiffLine { kind: DiffKind::Context, text: old_lines[i].into() });
+        out.push(DiffLine {
+            kind: DiffKind::Context,
+            text: old_lines[i].into(),
+        });
     }
     // 中间：先删后增
     for i in prefix..old_lines.len() - suffix {
-        out.push(DiffLine { kind: DiffKind::Del, text: old_lines[i].into() });
+        out.push(DiffLine {
+            kind: DiffKind::Del,
+            text: old_lines[i].into(),
+        });
     }
     for i in prefix..new_lines.len() - suffix {
-        out.push(DiffLine { kind: DiffKind::Add, text: new_lines[i].into() });
+        out.push(DiffLine {
+            kind: DiffKind::Add,
+            text: new_lines[i].into(),
+        });
     }
     // 后缀上下文
     for i in old_lines.len() - suffix..old_lines.len() {
-        out.push(DiffLine { kind: DiffKind::Context, text: old_lines[i].into() });
+        out.push(DiffLine {
+            kind: DiffKind::Context,
+            text: old_lines[i].into(),
+        });
     }
     out
 }
@@ -157,7 +171,10 @@ fn show_on_request(
                         .with_children(|head| {
                             head.spawn((
                                 Text::new(tr(&loc, "confirm-title")),
-                                TextFont { font_size: FontSize::Px(font + 1.0), ..default() },
+                                TextFont {
+                                    font_size: FontSize::Px(font + 1.0),
+                                    ..default()
+                                },
                                 TextColor(theme.text),
                             ));
                             head.spawn((
@@ -170,22 +187,23 @@ fn show_on_request(
                                     ..default()
                                 },
                                 Text::new("x"),
-                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextFont {
+                                    font_size: FontSize::Px(font),
+                                    ..default()
+                                },
                                 TextColor(theme.text_dim),
                                 ConfirmDenyMarker,
                             ));
                         });
                     // modal-body：工具名 + 路径 + diff
                     modal
-                        .spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect::all(px(space::LG)),
-                                row_gap: px(space::SM),
-                                ..default()
-                            },
-                        ))
+                        .spawn((Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(px(space::LG)),
+                            row_gap: px(space::SM),
+                            ..default()
+                        },))
                         .with_children(|body| {
                             // 工具名 + 描述
                             body.spawn((
@@ -195,14 +213,20 @@ fn show_on_request(
                                     tr(&loc, "confirm-will-write"),
                                     path
                                 )),
-                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextFont {
+                                    font_size: FontSize::Px(font),
+                                    ..default()
+                                },
                                 TextColor(theme.text_dim),
                             ));
                             // diff 区（若有 old/new）
                             if let (Some(old), Some(new)) = (&req.old_content, &req.new_content) {
                                 body.spawn((
                                     Text::new(tr(&loc, "confirm-diff-label")),
-                                    TextFont { font_size: FontSize::Px(font - 2.0), ..default() },
+                                    TextFont {
+                                        font_size: FontSize::Px(font - 2.0),
+                                        ..default()
+                                    },
                                     TextColor(theme.text_dim),
                                 ));
                                 let lines = line_diff(old, new);
@@ -247,7 +271,10 @@ fn show_on_request(
                                 // 无 diff：展示 summary
                                 body.spawn((
                                     Text::new(req.summary.clone()),
-                                    TextFont { font_size: FontSize::Px(font), ..default() },
+                                    TextFont {
+                                        font_size: FontSize::Px(font),
+                                        ..default()
+                                    },
                                     TextColor(theme.text),
                                 ));
                             }
@@ -279,7 +306,10 @@ fn show_on_request(
                                 BackgroundColor(theme.st_fail),
                                 BorderColor::all(theme.st_fail),
                                 Text::new(format!("{} (Esc)", tr(&loc, "confirm-deny"))),
-                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextFont {
+                                    font_size: FontSize::Px(font),
+                                    ..default()
+                                },
                                 TextColor(Color::WHITE),
                                 ConfirmDenyMarker,
                             ));
@@ -294,7 +324,10 @@ fn show_on_request(
                                 BackgroundColor(theme.accent),
                                 BorderColor::all(theme.accent),
                                 Text::new(format!("{} (Enter)", tr(&loc, "confirm-allow"))),
-                                TextFont { font_size: FontSize::Px(font), ..default() },
+                                TextFont {
+                                    font_size: FontSize::Px(font),
+                                    ..default()
+                                },
                                 TextColor(Color::WHITE),
                                 ConfirmAllowMarker,
                             ));

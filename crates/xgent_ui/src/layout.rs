@@ -61,14 +61,17 @@ impl Plugin for LayoutPlugin {
             .add_systems(Startup, spawn_layout)
             .add_systems(
                 Update,
-                toggle_panel_visibility
-                    .after(crate::shortcuts::handle_hotkey_triggers),
+                toggle_panel_visibility.after(crate::shortcuts::handle_hotkey_triggers),
             );
     }
 }
 
 /// 启动时 spawn 全屏根节点与三区容器。
-pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>, widths: Res<crate::resize::PanelWidths>) {
+pub(crate) fn spawn_layout(
+    mut commands: Commands,
+    theme: Res<Theme>,
+    widths: Res<crate::resize::PanelWidths>,
+) {
     // 相机（UI 渲染需要）
     commands.spawn(Camera2d);
 
@@ -85,22 +88,21 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>, widths: Re
         ))
         .with_children(|parent| {
             // 顶栏
-            parent
-                .spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: px(size::TOP_BAR_H),
-                        padding: UiRect::horizontal(px(crate::theme::space::MD)),
-                        align_items: AlignItems::Center,
-                        flex_direction: FlexDirection::Row,
-                        column_gap: px(crate::theme::space::SM),
-                        border: UiRect::bottom(px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme.bar),
-                    BorderColor::all(theme.border),
-                    TopBarMarker,
-                ));
+            parent.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: px(size::TOP_BAR_H),
+                    padding: UiRect::horizontal(px(crate::theme::space::MD)),
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(crate::theme::space::SM),
+                    border: UiRect::bottom(px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(theme.bar),
+                BorderColor::all(theme.border),
+                TopBarMarker,
+            ));
 
             // 主区
             parent
@@ -136,7 +138,9 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>, widths: Re
                     ));
 
                     // 左拖拽手柄（文件面板 ↔ 对话主区）
-                    main.spawn(crate::resize::handle_bundle(crate::resize::ResizeEdge::Left));
+                    main.spawn(crate::resize::handle_bundle(
+                        crate::resize::ResizeEdge::Left,
+                    ));
 
                     // 对话主区
                     main.spawn((
@@ -157,7 +161,9 @@ pub(crate) fn spawn_layout(mut commands: Commands, theme: Res<Theme>, widths: Re
                     ));
 
                     // 右拖拽手柄（对话主区 ↔ 右侧分屏，分屏收起时隐藏）
-                    main.spawn(crate::resize::handle_bundle(crate::resize::ResizeEdge::Right));
+                    main.spawn(crate::resize::handle_bundle(
+                        crate::resize::ResizeEdge::Right,
+                    ));
 
                     // 右侧分屏容器（默认隐藏；展开时据 PanelWidths.side_view 显式宽度）
                     // 编辑器视图 / 文件预览 由 editor 模块 spawn 挂入此容器。
@@ -226,7 +232,11 @@ pub(crate) fn toggle_panel_visibility(
                 node.width = Val::Px(0.0);
             }
         }
-        let display = if file_collapsed.0 { Display::None } else { Display::Flex };
+        let display = if file_collapsed.0 {
+            Display::None
+        } else {
+            Display::Flex
+        };
         for (marker, mut node) in q_handles.iter_mut() {
             if marker.0 == crate::resize::ResizeEdge::Left {
                 node.display = display;
@@ -234,7 +244,11 @@ pub(crate) fn toggle_panel_visibility(
         }
     }
     if side_changed {
-        let display = if side_collapsed.0 { Display::None } else { Display::Flex };
+        let display = if side_collapsed.0 {
+            Display::None
+        } else {
+            Display::Flex
+        };
         if let Ok(mut node) = q_side.single_mut() {
             node.display = display;
         }
@@ -245,4 +259,3 @@ pub(crate) fn toggle_panel_visibility(
         }
     }
 }
-

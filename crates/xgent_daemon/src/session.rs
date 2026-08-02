@@ -246,7 +246,11 @@ async fn fs_watch(req: Request, shared: &Shared, client_id: xgent_core::ids::Cli
 /// fs.notify：UI 通知文件已保存，广播 `peer.fileChanged` 给同项目其他客户端。
 ///
 /// 参数：`{"path": "/abs/path"}`。需要反查客户端所属项目来广播。
-async fn fs_notify(req: Request, shared: &Shared, client_id: xgent_core::ids::ClientId) -> Response {
+async fn fs_notify(
+    req: Request,
+    shared: &Shared,
+    client_id: xgent_core::ids::ClientId,
+) -> Response {
     #[derive(serde::Deserialize)]
     struct FsNotifyParams {
         path: std::path::PathBuf,

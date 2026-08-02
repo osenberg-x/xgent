@@ -4,11 +4,11 @@
 //! `Result<ToolResult, ToolError>`；`resolve_policy` 用新签名
 //! （传 `tool.tier()` + `tool` 引用 + `input`）。
 
+use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
-use parking_lot::RwLock;
 
 use crate::confirm::{ConfirmDecision, ConfirmRequest};
 use crate::security::resolve_policy;
@@ -82,7 +82,6 @@ impl ToolExecutor {
         self.tools.read().values().map(|t| t.schema()).collect()
     }
 
-
     /// 执行工具调用。
     ///
     /// 流程：
@@ -106,7 +105,12 @@ impl ToolExecutor {
         let tool = match self.tools.read().get(tool_id).cloned() {
             Some(t) => t,
             None => {
-                return Ok(ToolResult { output: format!("未知工具: {tool_id}"), is_error: true, denied: false, side_effect: None });
+                return Ok(ToolResult {
+                    output: format!("未知工具: {tool_id}"),
+                    is_error: true,
+                    denied: false,
+                    side_effect: None,
+                });
             }
         };
         let policy = resolve_policy(

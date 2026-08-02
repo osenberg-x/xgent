@@ -38,7 +38,10 @@ fn editor_theme_follows_theme_font_size() {
     // 首帧已同步：EditorTheme.font_size == Theme.font_size - 1.5 (14.0 - 1.5 = 12.5)
     {
         let editor_theme = app.world().resource::<EditorTheme>();
-        assert_eq!(editor_theme.font_size, 12.5, "初始应为 Theme 默认 14.0 - 1.5");
+        assert_eq!(
+            editor_theme.font_size, 12.5,
+            "初始应为 Theme 默认 14.0 - 1.5"
+        );
         assert_eq!(editor_theme.line_height_ratio, 1.55, "行高比对齐原型 1.55");
     }
 

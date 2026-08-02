@@ -23,8 +23,6 @@ pub mod tabs;
 use bevy::prelude::*;
 
 use crate::editor::buffer::EditorBuffer;
-use crate::theme::{Theme, px};
-use xgent_agent::EditorCommandRequestMessage;
 use crate::editor::command::handle_editor_commands;
 use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
@@ -38,6 +36,8 @@ use crate::editor::tabs::{
     OpenFileRequest, handle_close_tab_requests, handle_cycle_tab_requests,
     handle_open_file_requests,
 };
+use crate::theme::{Theme, px};
+use xgent_agent::EditorCommandRequestMessage;
 
 /// 编辑器视图状态（对话/编辑器/文件预览切换）。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -238,7 +238,10 @@ fn spawn_editor_view(
 /// 行高比对齐原型 1.55（而非 1.5），让代码行间距更贴近设计预期。
 ///
 /// 跑在 `xui::TextEditorUpdateSet` 之前，确保 `update_virtual_lines` 读到最新值。
-fn sync_editor_theme(theme: Res<Theme>, mut editor_theme: ResMut<xui::text_editor::render::EditorTheme>) {
+fn sync_editor_theme(
+    theme: Res<Theme>,
+    mut editor_theme: ResMut<xui::text_editor::render::EditorTheme>,
+) {
     // 仅在 Theme 变化时写（避免每帧无谓 mutation 触发 change detection）。
     if !theme.is_changed() && !editor_theme.is_added() {
         return;
@@ -247,7 +250,6 @@ fn sync_editor_theme(theme: Res<Theme>, mut editor_theme: ResMut<xui::text_edito
     editor_theme.line_height_ratio = 1.55;
     editor_theme.text = theme.text;
     editor_theme.text_dim = theme.text_dim;
-
 }
 /// 返回对话按钮标记。
 #[derive(Component, Default)]
@@ -552,12 +554,19 @@ pub fn apply_save_result(
 /// 目标行号 1-based，`ScrollPosition.y` 设为 `(line-1) * line_height`
 /// 让目标行对齐视口顶部。行高从 `TextEditor.line_height` 取。
 pub fn handle_pending_goto(
-    mut q: Query<(Entity, &crate::editor::buffer::PendingGoTo, &mut bevy::ui::ScrollPosition, &xui::TextEditor)>,
+    mut q: Query<(
+        Entity,
+        &crate::editor::buffer::PendingGoTo,
+        &mut bevy::ui::ScrollPosition,
+        &xui::TextEditor,
+    )>,
     mut commands: Commands,
 ) {
     for (entity, goto, mut scroll, editor) in q.iter_mut() {
         let target_y = goto.line.saturating_sub(1) as f32 * editor.line_height;
         scroll.y = target_y;
-        commands.entity(entity).remove::<crate::editor::buffer::PendingGoTo>();
+        commands
+            .entity(entity)
+            .remove::<crate::editor::buffer::PendingGoTo>();
     }
 }
