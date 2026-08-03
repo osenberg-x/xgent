@@ -4,11 +4,11 @@
 //! `Result<ToolResult, ToolError>`；`resolve_policy` 用新签名
 //! （传 `tool.tier()` + `tool` 引用 + `input`）。
 
+use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
-use parking_lot::RwLock;
 
 use crate::confirm::{ConfirmDecision, ConfirmRequest};
 use crate::security::resolve_policy;
@@ -82,7 +82,6 @@ impl ToolExecutor {
         self.tools.read().values().map(|t| t.schema()).collect()
     }
 
-
     /// 执行工具调用。
     ///
     /// 流程：
@@ -106,7 +105,12 @@ impl ToolExecutor {
         let tool = match self.tools.read().get(tool_id).cloned() {
             Some(t) => t,
             None => {
-                return Ok(ToolResult { output: format!("未知工具: {tool_id}"), is_error: true, denied: false, side_effect: None });
+                return Ok(ToolResult {
+                    output: format!("未知工具: {tool_id}"),
+                    is_error: true,
+                    denied: false,
+                    side_effect: None,
+                });
             }
         };
         let policy = resolve_policy(
@@ -140,30 +144,36 @@ impl ToolExecutor {
                     old_content,
                     new_content,
                 };
-                let rx = match tokio::time::timeout(
-                    std::time::Duration::from_secs(300),
-                    confirm.confirm(req),
-                )
-                .await
-                {
-                    Ok(rx) => rx,
-                    Err(_) => {
-                        return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None });
+                // 发起确认请求 + 等待用户决策，全程监听 cancel_token。
+                // 修复之前 timeout(confirm.confirm) 不监听 cancel，Abort 在
+                // confirm.confirm 卡住（event_tx 满）时需等满 300s 才生效。
+                let decision = tokio::select! {
+                    r = tokio::time::timeout(
+                        std::time::Duration::from_secs(300),
+                        confirm.confirm(req),
+                    ) => match r {
+                        Ok(rx) => match rx.await {
+                            Ok(d) => d,
+                            Err(_) => return Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
+                        },
+                        Err(_) => return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None }),
+                    },
+                    _ = signal.cancelled() => {
+                        return Err(ToolError::Aborted);
                     }
                 };
-                match rx.await {
-                    Ok(ConfirmDecision::Allow) => tool.execute(input, ctx, signal, None).await,
-                    Ok(ConfirmDecision::AllowAll) => {
+                match decision {
+                    ConfirmDecision::Allow => tool.execute(input, ctx, signal, None).await,
+                    ConfirmDecision::AllowAll => {
                         self.allowed_all.lock().await.insert(tool_id.to_string());
                         tool.execute(input, ctx, signal, None).await
                     }
-                    Ok(ConfirmDecision::Deny) => Ok(ToolResult {
+                    ConfirmDecision::Deny => Ok(ToolResult {
                         output: "用户拒绝".into(),
                         is_error: true,
                         denied: true,
                         side_effect: None,
                     }),
-                    Err(_) => Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
                 }
             }
         }

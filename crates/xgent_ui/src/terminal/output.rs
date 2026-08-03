@@ -11,8 +11,7 @@ use bevy::prelude::*;
 
 use crate::terminal::io::{TerminalOutputChunk, TerminalResize};
 use crate::terminal::{
-    TerminalOutputMarker, TerminalStatusBarMarker, TerminalTab,
-    TerminalTabStatus, TerminalTabs,
+    TerminalOutputMarker, TerminalStatusBarMarker, TerminalTab, TerminalTabStatus, TerminalTabs,
 };
 use crate::theme::{Theme, px};
 
@@ -141,6 +140,33 @@ pub fn update_output_visibility(
                 }
             });
         }
+        // 追加渲染未结束的当前行（PTY 正在输出的行，无尾随 \n）。
+        // shell prompt 行和正在输入的命令行都属于此——不渲染则用户看不到。
+        let current = hist.parser.current_line();
+        if !current.spans.is_empty() {
+            c.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                },
+                OutputLineMarker,
+            ))
+            .with_children(|row| {
+                for span in &current.spans {
+                    row.spawn((
+                        Text::new(span.text.clone()),
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
+                        TextColor(map_color(span.style.fg, &theme)),
+                        OutputSpanMarker,
+                    ));
+                }
+            });
+        }
     });
 }
 
@@ -166,14 +192,14 @@ fn map_color(color: Option<xgent_terminal::Color>, theme: &Theme) -> bevy::color
 /// 基本色（0-7）。
 fn basic_color(idx: u8) -> bevy::color::Color {
     const COLORS: [bevy::color::Color; 8] = [
-        bevy::color::Color::srgb_u8(0, 0, 0),         // 黑
-        bevy::color::Color::srgb_u8(194, 54, 33),     // 红
-        bevy::color::Color::srgb_u8(37, 188, 36),     // 绿
-        bevy::color::Color::srgb_u8(173, 173, 39),    // 黄
-        bevy::color::Color::srgb_u8(73, 46, 225),     // 蓝
-        bevy::color::Color::srgb_u8(211, 56, 211),    // 品红
-        bevy::color::Color::srgb_u8(51, 187, 200),    // 青
-        bevy::color::Color::srgb_u8(203, 204, 205),   // 白
+        bevy::color::Color::srgb_u8(0, 0, 0),       // 黑
+        bevy::color::Color::srgb_u8(194, 54, 33),   // 红
+        bevy::color::Color::srgb_u8(37, 188, 36),   // 绿
+        bevy::color::Color::srgb_u8(173, 173, 39),  // 黄
+        bevy::color::Color::srgb_u8(73, 46, 225),   // 蓝
+        bevy::color::Color::srgb_u8(211, 56, 211),  // 品红
+        bevy::color::Color::srgb_u8(51, 187, 200),  // 青
+        bevy::color::Color::srgb_u8(203, 204, 205), // 白
     ];
     COLORS[(idx as usize) % 8]
 }
@@ -181,14 +207,14 @@ fn basic_color(idx: u8) -> bevy::color::Color {
 /// 亮色（0-7）。
 fn bright_color(idx: u8) -> bevy::color::Color {
     const COLORS: [bevy::color::Color; 8] = [
-        bevy::color::Color::srgb_u8(129, 131, 131),   // 亮黑（灰）
-        bevy::color::Color::srgb_u8(252, 57, 31),     // 亮红
-        bevy::color::Color::srgb_u8(49, 231, 34),     // 亮绿
-        bevy::color::Color::srgb_u8(231, 197, 71),    // 亮黄
-        bevy::color::Color::srgb_u8(88, 86, 214),     // 亮蓝
-        bevy::color::Color::srgb_u8(249, 53, 248),    // 亮品红
-        bevy::color::Color::srgb_u8(63, 230, 224),    // 亮青
-        bevy::color::Color::srgb_u8(233, 235, 235),   // 亮白
+        bevy::color::Color::srgb_u8(129, 131, 131), // 亮黑（灰）
+        bevy::color::Color::srgb_u8(252, 57, 31),   // 亮红
+        bevy::color::Color::srgb_u8(49, 231, 34),   // 亮绿
+        bevy::color::Color::srgb_u8(231, 197, 71),  // 亮黄
+        bevy::color::Color::srgb_u8(88, 86, 214),   // 亮蓝
+        bevy::color::Color::srgb_u8(249, 53, 248),  // 亮品红
+        bevy::color::Color::srgb_u8(63, 230, 224),  // 亮青
+        bevy::color::Color::srgb_u8(233, 235, 235), // 亮白
     ];
     COLORS[(idx as usize) % 8]
 }
@@ -273,10 +299,13 @@ pub fn update_status_bar(
     let _ = theme; // 主题用于颜色，Text 颜色由 TextColor 组件控制（spawn 时设）
 }
 /// 上次 PTY resize 的尺寸缓存（避免每帧重复发 resize）。
+///
+/// 缓存按 tab 实体区分——切换 tab 时即使视口尺寸不变，新 tab 的 PTY
+/// 也需要 resize 到匹配视口（新 spawn 的 tab 初始 80×24，可能与视口不符）。
 #[derive(Resource, Default)]
 pub struct TerminalResizeTracker {
-    /// (cols, rows) 上次发送的尺寸。
-    pub last: Option<(u16, u16)>,
+    /// (tab, cols, rows) 上次发送的尺寸 + 目标 tab。
+    pub last: Option<(Entity, u16, u16)>,
 }
 
 /// 监测 `TerminalOutputMarker` 的视口尺寸变化 → 发 [`TerminalResize`]。
@@ -314,10 +343,10 @@ pub fn handle_terminal_resize(
     }
     let cols = (width / (font * 0.6)).max(1.0) as u16;
     let rows = (height / (font * 1.4)).max(1.0) as u16;
-    if tracker.last == Some((cols, rows)) {
+    if tracker.last == Some((active_tab, cols, rows)) {
         return;
     }
-    tracker.last = Some((cols, rows));
+    tracker.last = Some((active_tab, cols, rows));
     writer.write(TerminalResize {
         tab: active_tab,
         cols,

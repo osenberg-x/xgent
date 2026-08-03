@@ -102,16 +102,13 @@ impl PluginManifest {
     fn validate(&self) -> Result<(), ManifestError> {
         validate_id(&self.id).map_err(|e| ManifestError::Invalid(format!("id: {e}")))?;
         for t in &self.tools {
-            validate_id(&t.id)
-                .map_err(|e| ManifestError::Invalid(format!("tool id: {e}")))?;
+            validate_id(&t.id).map_err(|e| ManifestError::Invalid(format!("tool id: {e}")))?;
         }
         for c in &self.commands {
-            validate_id(&c.id)
-                .map_err(|e| ManifestError::Invalid(format!("command id: {e}")))?;
+            validate_id(&c.id).map_err(|e| ManifestError::Invalid(format!("command id: {e}")))?;
         }
         for p in &self.context_providers {
-            validate_id(&p.id)
-                .map_err(|e| ManifestError::Invalid(format!("provider id: {e}")))?;
+            validate_id(&p.id).map_err(|e| ManifestError::Invalid(format!("provider id: {e}")))?;
         }
         Ok(())
     }

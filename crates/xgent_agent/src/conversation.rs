@@ -22,6 +22,13 @@ pub struct Conversation {
     /// 会话 JSONL 持久化句柄（None 表示未开启持久化，见 ADR-0008）。
     /// 首次用户输入时由 agent_poll_system 打开并写入 Header。
     pub session_store: Option<crate::session_store::SessionStore>,
+    /// 本轮待固化的 assistant tool_call 块（批量累积）。
+    ///
+    /// OpenAI 协议要求一条 assistant 消息可含多个 tool_calls，后跟多条 tool role
+    /// 消息。ToolCall 事件逐个到达时累积到此；首个 ToolResult 到达时把累积的
+    /// blocks 作为一条 AssistantMessage 固化到 messages，再追写 tool result。
+    /// 修复之前逐个 push_tool_call 把一条 assistant 拆成多条破坏协议的 bug。
+    pub pending_tool_calls: Vec<ContentBlock>,
 }
 
 impl Default for Conversation {
@@ -32,6 +39,7 @@ impl Default for Conversation {
             status: ConversationStatus::Idle,
             current_assistant_text: String::new(),
             session_store: None,
+            pending_tool_calls: Vec::new(),
         }
     }
 }
@@ -47,6 +55,7 @@ impl Conversation {
         self.id = SessionId(ts);
         self.messages.clear();
         self.current_assistant_text.clear();
+        self.pending_tool_calls.clear();
         self.status = ConversationStatus::Idle;
         self.session_store = None;
     }
@@ -57,7 +66,7 @@ impl Conversation {
             content: vec![ContentBlock::Text {
                 text: text.to_string(),
             }],
-            timestamp: 0,
+            timestamp: crate::session_store::now_ms(),
         }));
     }
 
@@ -191,21 +200,41 @@ impl Conversation {
         }
     }
 
-    /// 追加 assistant 的 tool_call 消息（工具开始执行时调用）。
+    /// 累积 assistant 的 tool_call 块（工具开始执行时调用）。
     ///
-    /// 与 [`push_tool_result`] 配对：assistant 发起 tool_call → tool 返回结果。
-    /// 两者都进 `conv.messages`，下次 StartLoop 时 `convert_to_llm` 生成
-    /// 符合 OpenAI 协议的消息序列（tool_call 后跟 tool result，配对完整）。
-    /// 修复之前 conv.messages 缺 tool_call 导致 tool result 孤儿、
-    /// 多轮工具调用后 LLM 请求被 OpenAI 拒绝的 bug。
+    /// 不立即 push assistant 消息，而是把 ToolCall 块追加到 `pending_tool_calls`。
+    /// 当首个 [`push_tool_result`] 到达时，把累积的 blocks 连同本轮流式文本
+    /// （`current_assistant_text`）作为**一条** AssistantMessage 固化到 messages，
+    /// 再追写 tool result。这样一轮多个 tool_calls 生成符合 OpenAI 协议的
+    /// `assistant(text + tool_call_1 + ... + tool_call_N) → tool(r1) → ... → tool(rN)`，
+    /// 修复之前逐个 push 把一条 assistant 拆成多条破坏协议的 bug。
     pub fn push_tool_call(&mut self, call_id: &str, tool_name: &str, args: &serde_json::Value) {
+        self.pending_tool_calls.push(ContentBlock::ToolCall {
+            id: call_id.to_string(),
+            name: tool_name.to_string(),
+            args: args.clone(),
+        });
+    }
+
+    /// 把累积的 `pending_tool_calls` 固化为一条 AssistantMessage。
+    ///
+    /// 在首个 [`push_tool_result`] 到达时调用：把本轮流式文本（若有）作为首个
+    /// Text 块前置，后接所有 ToolCall 块，组装成单条 AssistantMessage push 到
+    /// messages，并清空 pending 与 current_assistant_text。对应 bridge 侧 req
+    /// 回灌时「首个 tool_call 携带本轮文本块」的语义。
+    fn flush_pending_tool_calls(&mut self) {
+        if self.pending_tool_calls.is_empty() {
+            return;
+        }
+        let mut content: Vec<ContentBlock> = Vec::with_capacity(self.pending_tool_calls.len() + 1);
+        if !self.current_assistant_text.is_empty() {
+            let text = std::mem::take(&mut self.current_assistant_text);
+            content.push(ContentBlock::Text { text });
+        }
+        content.extend(self.pending_tool_calls.drain(..));
         self.messages
             .push(AgentMessage::Assistant(AssistantMessage {
-                content: vec![ContentBlock::ToolCall {
-                    id: call_id.to_string(),
-                    name: tool_name.to_string(),
-                    args: args.clone(),
-                }],
+                content,
                 model: None,
                 usage: None,
                 timestamp: crate::session_store::now_ms(),
@@ -213,6 +242,10 @@ impl Conversation {
     }
 
     /// 追加工具结果消息（工具执行完成后调用）。
+    ///
+    /// 首次调用时先把累积的 tool_call 块固化为一条 AssistantMessage
+    /// （见 [`flush_pending_tool_calls`]），保证 assistant tool_call 与
+    /// 后续 tool result 配对，且多个 tool_call 不被拆成多条 assistant 消息。
     pub fn push_tool_result(
         &mut self,
         tool_call_id: &str,
@@ -220,13 +253,14 @@ impl Conversation {
         content: &str,
         is_error: bool,
     ) {
+        self.flush_pending_tool_calls();
         self.messages
             .push(AgentMessage::ToolResult(ToolResultMessage {
                 tool_call_id: tool_call_id.to_string(),
                 tool_name: tool_name.to_string(),
                 content: content.to_string(),
                 is_error,
-                timestamp: 0,
+                timestamp: crate::session_store::now_ms(),
             }));
     }
 
@@ -235,7 +269,7 @@ impl Conversation {
         self.messages
             .push(AgentMessage::Notification(NotificationMessage {
                 text: text.to_string(),
-                timestamp: 0,
+                timestamp: crate::session_store::now_ms(),
             }));
     }
 }

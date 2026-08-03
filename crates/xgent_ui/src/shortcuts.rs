@@ -11,11 +11,11 @@ use xui::command_palette::CommandPaletteState;
 use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
-use crate::editor::{EditorView, SideViewContent};
+use crate::confirm_dialog::ConfirmDialogMarker;
 use crate::editor::tabs::CycleTabRequest;
+use crate::editor::{EditorView, SideViewContent};
 use crate::i18n::tr;
 use crate::layout::FilePanelCollapsed;
-use crate::confirm_dialog::ConfirmDialogMarker;
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
 

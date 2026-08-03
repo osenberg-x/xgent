@@ -10,13 +10,13 @@
 //!
 //! 焦点：终端视图激活（`SideViewContent::Terminal`）时捕获键盘；否则忽略。
 
-use bevy::input::keyboard::KeyCode;
 use bevy::input::ButtonInput;
+use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 
 use crate::editor::SideViewContent;
-use crate::terminal::io::TerminalInput;
 use crate::terminal::TerminalTabs;
+use crate::terminal::io::TerminalInput;
 
 /// 终端键盘透传处理：终端视图激活且无输入框聚焦时捕获 `KeyboardInput` 事件，
 /// 把按键转为原始字节直接发 [`TerminalInput`]（经 `handle_terminal_input` 送 PTY）。

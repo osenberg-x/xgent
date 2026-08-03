@@ -79,3 +79,8 @@ terminal-new-tab = ＋
 terminal-clear = 清屏
 terminal-close = ✕
 terminal-prompt = ❯
+
+preview-loading = · 加载中...
+preview-read-error = 读取失败: { $error }
+preview-bytes = · { $bytes } 字节 · 只读预览
+preview-error = · { $error }

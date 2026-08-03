@@ -78,7 +78,10 @@ pub fn update_virtual_lines(
     >,
     mut q_content: Query<&mut Node, (With<VirtualContentMarker>, Without<VirtualTextMarker>)>,
     q_text_marker: Query<&VirtualTextMarker>,
-    mut q_text_mut: Query<&mut Node, (With<VirtualTextMarker>, Without<VirtualContentMarker>)>,
+    mut q_text_mut: Query<
+        (&mut Node, &mut TextFont, &mut LineHeight),
+        (With<VirtualTextMarker>, Without<VirtualContentMarker>),
+    >,
     q_content_children: Query<&Children, With<VirtualContentMarker>>,
     q_text_children: Query<&Children, With<VirtualTextMarker>>,
     q_span: Query<&TextSpan>,
@@ -149,8 +152,10 @@ pub fn update_virtual_lines(
                         Node {
                             position_type: PositionType::Absolute,
                             top: Val::Px(0.0),
-                            left: Val::Px(0.0),
-                            width: Val::Percent(100.0),
+                            // 左偏移行号列宽度（48px），避免文本与行号重叠。
+                            // 用 left + right（而非 width:100%）让宽度自动 = 父宽 - 48px。
+                            left: Val::Px(48.0),
+                            right: Val::Px(0.0),
                             ..default()
                         },
                         Text::new(String::new()),
@@ -186,13 +191,22 @@ pub fn update_virtual_lines(
         //    上移 scroll_y + top 上移 start×lh ≈ 2×scroll_y，滚得越多内容飞得越远，
         //    视口变空——"滚动后内容显示不全"的根因。
         let target_top = start as f32 * line_height;
-        if let Ok(mut text_node) = q_text_mut.get_mut(text_entity) {
+        if let Ok((mut text_node, mut text_font, mut line_h)) = q_text_mut.get_mut(text_entity) {
             let cur_top = match text_node.top {
                 Val::Px(h) => h,
                 _ => f32::NAN,
             };
             if !cur_top.is_finite() || (cur_top - target_top).abs() > 0.5 {
                 text_node.top = Val::Px(target_top);
+            }
+            // 字号/行高跟随 EditorTheme 动态更新（修复字号变化后已 spawn 的
+            // 文本节点 TextFont/LineHeight 不更新，仍用旧值渲染的问题）。
+            let target_fs = FontSize::Px(theme.font_size);
+            if text_font.font_size != target_fs {
+                text_font.font_size = target_fs;
+            }
+            if *line_h != LineHeight::Px(line_height) {
+                *line_h = LineHeight::Px(line_height);
             }
         }
 
@@ -225,6 +239,7 @@ pub fn update_virtual_lines(
                 start,
                 end,
                 theme.text,
+                FontSize::Px(theme.font_size),
             );
         }
     }
@@ -243,6 +258,7 @@ fn rebuild_visible_spans(
     start: usize,
     end: usize,
     default_color: Color,
+    font_size: FontSize,
 ) {
     if start >= end {
         return;
@@ -279,9 +295,14 @@ fn rebuild_visible_spans(
             if !buf.is_empty() {
                 let c = cur_color;
                 let s = std::mem::take(&mut buf);
-                commands
-                    .entity(text_entity)
-                    .with_child((TextSpan::new(s), TextColor(c)));
+                commands.entity(text_entity).with_child((
+                    TextSpan::new(s),
+                    TextFont {
+                        font_size,
+                        ..default()
+                    },
+                    TextColor(c),
+                ));
             }
             cur_color = color;
             cur_color_set = true;
@@ -291,9 +312,14 @@ fn rebuild_visible_spans(
         }
     }
     if !buf.is_empty() {
-        commands
-            .entity(text_entity)
-            .with_child((TextSpan::new(buf), TextColor(cur_color)));
+        commands.entity(text_entity).with_child((
+            TextSpan::new(buf),
+            TextFont {
+                font_size,
+                ..default()
+            },
+            TextColor(cur_color),
+        ));
     }
 }
 
@@ -397,5 +423,48 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(count, 1, "应 spawn 一个 VirtualTextMarker");
+    }
+
+    /// TextSpan 子节点必须带 TextFont（字号跟随 EditorTheme），而非 Bevy 默认 20px。
+    ///
+    /// 修复前：spawn TextSpan 只加 TextColor，Bevy `#[require(TextFont)]` 自动
+    /// 补默认 TextFont（font_size=20px），导致编辑器正文渲染为 20px 而非
+    /// EditorTheme.font_size——"字号偏大"的根因。
+    #[test]
+    fn rebuild_visible_spans_text_span_has_correct_font_size() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::text_editor::render::EditorTheme>();
+        let text_entity = app.world_mut().spawn((Text::new(String::new()),)).id();
+        let rope = ropey::Rope::from_str("hello\nworld");
+        let mut commands = app.world_mut().commands();
+        rebuild_visible_spans(
+            &mut commands,
+            text_entity,
+            &rope,
+            &[],
+            0,
+            2,
+            Color::WHITE,
+            FontSize::Px(12.5),
+        );
+        drop(commands);
+        // app.update 让 MinimalPlugins 的 apply_deferred flush 命令
+        app.update();
+        // 所有 TextSpan 子节点应带 TextFont，字号 = 12.5（非默认 20）
+        let mut q = app
+            .world_mut()
+            .query::<(&bevy::prelude::TextSpan, &bevy::prelude::TextFont)>();
+        let spans: Vec<bevy::prelude::TextFont> =
+            q.iter(app.world()).map(|(_, f)| f.clone()).collect();
+        assert!(!spans.is_empty(), "应 spawn 至少一个 TextSpan");
+        for f in &spans {
+            assert_eq!(
+                f.font_size,
+                FontSize::Px(12.5),
+                "TextSpan 字号应为 12.5，实际 {:?}",
+                f.font_size
+            );
+        }
     }
 }

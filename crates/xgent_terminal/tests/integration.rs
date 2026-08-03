@@ -8,9 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use xgent_terminal::{
-    LocalPtyBackend, ShellSpec, SpawnRequest, TerminalBackend, TerminalEvent,
-};
+use xgent_terminal::{LocalPtyBackend, ShellSpec, SpawnRequest, TerminalBackend, TerminalEvent};
 
 /// 默认 shell（跨平台）。
 fn default_shell() -> ShellSpec {
@@ -80,7 +78,12 @@ async fn spawn_write_echo_kill() {
         .expect("write");
 
     // 收输出，找 marker
-    let buf = collect_output(&mut rx, Some("xgent_test_marker_42"), Duration::from_secs(8)).await;
+    let buf = collect_output(
+        &mut rx,
+        Some("xgent_test_marker_42"),
+        Duration::from_secs(8),
+    )
+    .await;
     let text = String::from_utf8_lossy(&buf);
     assert!(
         text.contains("xgent_test_marker_42"),
@@ -143,10 +146,7 @@ async fn write_lf_only_echo_no_duplicate_first_char() {
     let _ = collect_output(&mut rx, None, Duration::from_secs(8)).await;
 
     // 对齐 handle_line_submit：只 push b'\n'（无 \r）
-    backend
-        .write(id, b"ls\n".to_vec())
-        .await
-        .expect("write");
+    backend.write(id, b"ls\n".to_vec()).await.expect("write");
 
     // 收集足够输出（回显 + 命令结果 + 新 prompt）
     let buf = collect_output(&mut rx, None, Duration::from_secs(3)).await;
@@ -204,4 +204,40 @@ async fn shell_echo_ls_not_lls() {
         !all_text.contains("lls"),
         "shell 回显 ls 不应出现首字母重复的 lls，实际解析行:\n{all_text}"
     );
+}
+
+/// 回归测试：backend 被 drop（不调 kill）时应清理所有 PTY 子进程。
+///
+/// 复现：LocalPtyBackend 无 Drop 实现时，drop 后子进程变孤儿、读循环
+/// 线程泄漏。实现 Drop 后，drop 应 kill 所有未显式 kill 的会话。
+#[tokio::test]
+async fn drop_kills_unterminated_sessions() {
+    let backend = LocalPtyBackend::new();
+    let (tx, mut rx) = mpsc::channel::<TerminalEvent>(256);
+
+    let id = backend.spawn(spawn_request(), tx).await.expect("spawn");
+    // 等 shell 启动
+    let _ = collect_output(&mut rx, None, Duration::from_secs(5)).await;
+
+    // 不调 kill，直接 drop backend——Drop 应 kill 子进程。
+    // receiver 持续收集，期望收到 Exited（子进程被 kill → reader EOF → Exited）。
+    drop(backend);
+
+    let mut got_exited = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        match timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Some(TerminalEvent::Exited(_))) => {
+                got_exited = true;
+                break;
+            }
+            Ok(Some(TerminalEvent::Output(_))) => continue,
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+    assert!(got_exited, "drop backend 后应收到 Exited（子进程被 kill）");
+
+    // 避免未使用变量警告
+    let _ = id;
 }

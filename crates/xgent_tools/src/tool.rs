@@ -166,11 +166,7 @@ pub trait Tool: Send + Sync {
     /// 写文件类工具 override 此方法：读旧文件内容，配合输入中的新内容，
     /// 返回 `(old, new)` 供 UI 渲染增删行 diff。非写工具返回 None，
     /// UI 退化为展示 `summary` 文本。
-    async fn preview_diff(
-        &self,
-        _input: &Value,
-        _ctx: &ToolCtx,
-    ) -> Option<(String, String)> {
+    async fn preview_diff(&self, _input: &Value, _ctx: &ToolCtx) -> Option<(String, String)> {
         None
     }
 

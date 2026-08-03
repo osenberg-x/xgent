@@ -3,16 +3,16 @@
 //! 提供统一的 [`ContextProvider`] 抽象，MVP 实现方案 A（无索引·按需读取）。
 //! 方案 B/C/D/E 为占位，后续迭代实现。agent 侧通过 trait 调用，无感于策略切换。
 
-pub mod hybrid;
 pub mod hub;
+pub mod hybrid;
 pub mod lsp;
 pub mod on_demand;
 pub mod provider;
 pub mod repo_map;
 pub mod vector;
 
-pub use hybrid::HybridContextProvider;
 pub use hub::ContextHub;
+pub use hybrid::HybridContextProvider;
 pub use lsp::LspContextProvider;
 pub use on_demand::OnDemandContextProvider;
 pub use provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult, estimate_tokens};

@@ -12,8 +12,8 @@
 //! 不引入 `bevy_picking`（默认未启用，会拉重依赖）；改用手柄 `Interaction::Pressed`
 //! 触发拖拽 + `ButtonInput<MouseButton>` 维持 + 释放清除的状态机。
 
-use bevy::input::mouse::{AccumulatedMouseMotion, MouseButton};
 use bevy::input::ButtonInput;
+use bevy::input::mouse::{AccumulatedMouseMotion, MouseButton};
 use bevy::prelude::*;
 
 use crate::layout::{FilePanelCollapsed, MainAreaMarker, SideViewCollapsed};
@@ -116,8 +116,20 @@ pub fn handle_bundle(edge: ResizeEdge) -> impl Bundle {
 pub(crate) fn apply_panel_widths(
     widths: Res<PanelWidths>,
     file_collapsed: Res<FilePanelCollapsed>,
-    mut q_file: Query<&mut Node, (With<crate::layout::FilePanelMarker>, Without<crate::layout::SideViewMarker>)>,
-    mut q_side: Query<&mut Node, (With<crate::layout::SideViewMarker>, Without<crate::layout::FilePanelMarker>)>,
+    mut q_file: Query<
+        &mut Node,
+        (
+            With<crate::layout::FilePanelMarker>,
+            Without<crate::layout::SideViewMarker>,
+        ),
+    >,
+    mut q_side: Query<
+        &mut Node,
+        (
+            With<crate::layout::SideViewMarker>,
+            Without<crate::layout::FilePanelMarker>,
+        ),
+    >,
 ) {
     if !widths.is_changed() && !widths.is_added() && !file_collapsed.is_changed() {
         return;

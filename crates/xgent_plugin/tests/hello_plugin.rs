@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use xgent_plugin::{PluginHostProxy, WasmHost};
 use xgent_plugin::manifest::PluginManifest;
+use xgent_plugin::{PluginHostProxy, WasmHost};
 
 /// 定位 hello 插件 wasm（cargo build --target wasm32-wasip2 产出）。
 fn hello_wasm_path() -> Option<PathBuf> {
@@ -49,7 +49,9 @@ async fn load_and_call_hello_plugin() {
     let wasm_path = match hello_wasm_path() {
         Some(p) => p,
         None => {
-            eprintln!("跳过：hello.wasm 未找到（先 cargo build -p xgent_plugin_hello --target wasm32-wasip2）");
+            eprintln!(
+                "跳过：hello.wasm 未找到（先 cargo build -p xgent_plugin_hello --target wasm32-wasip2）"
+            );
             return;
         }
     };
@@ -77,8 +79,15 @@ async fn load_and_call_hello_plugin() {
 
     // execute 应返回 Ok（JSON 含 output 字段）
     let result = plugin
-        .call_tool_execute("hello", r#"{"name":"world"}"#, tokio_util::sync::CancellationToken::new())
+        .call_tool_execute(
+            "hello",
+            r#"{"name":"world"}"#,
+            tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .expect("execute");
-    assert!(result.contains("hello: world"), "结果应含 hello: world, got: {result}");
+    assert!(
+        result.contains("hello: world"),
+        "结果应含 hello: world, got: {result}"
+    );
 }

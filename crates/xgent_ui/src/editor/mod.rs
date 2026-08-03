@@ -23,8 +23,6 @@ pub mod tabs;
 use bevy::prelude::*;
 
 use crate::editor::buffer::EditorBuffer;
-use crate::theme::{Theme, px};
-use xgent_agent::EditorCommandRequestMessage;
 use crate::editor::command::handle_editor_commands;
 use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
@@ -38,6 +36,8 @@ use crate::editor::tabs::{
     OpenFileRequest, handle_close_tab_requests, handle_cycle_tab_requests,
     handle_dirty_close_decision, handle_open_file_requests,
 };
+use crate::theme::{Theme, px};
+use xgent_agent::EditorCommandRequestMessage;
 
 /// 编辑器视图状态（对话/编辑器/文件预览切换）。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -234,19 +234,29 @@ fn spawn_editor_view(
 
 /// 把 xgent_ui [`Theme`]（用户/系统可配的单一字号源）同步到 xui [`EditorTheme`]。
 ///
-/// 设计动机（对齐 zed 编辑器字号模型）：zed 的 `buffer_font_size` 是用户可配的
-/// 单一字号源，UI chrome 经 `rem_size` 派生。xgent 此前 `EditorTheme.font_size`
-/// 硬编码 14.0 且与 [`Theme`] 脱节——本系统让编辑器正文字号跟随 [`Theme::font_size`]，
-/// 未来 `Theme` 接入 settings（NF-04）后即可「跟随系统/用户偏好」调整编辑器字号，
-/// 无需改 xui。颜色（text / text_dim）一并同步，保持编辑器与 UI 主题一致。
+/// 设计动机（对齐 zed 编辑器字号模型 + ui-prototype.html）：
+/// zed 的 `buffer_font_size` 是用户可配的单一字号源，UI chrome 经 `rem_size` 派生。
+/// xgent 此前 `EditorTheme.font_size` 硬编码 14.0 且与 [`Theme`] 脱节——本系统让
+/// 编辑器正文字号跟随 [`Theme::font_size`]，未来 `Theme` 接入 settings（NF-04）后
+/// 即可「跟随系统/用户偏好」调整编辑器字号，无需改 xui。颜色（text / text_dim）
+/// 一并同步，保持编辑器与 UI 主题一致。
+///
+/// 字号偏移（对齐 ui-prototype.html `.ed-content`/`.gutter` 的 12.5px）：
+/// 原型中 UI 正文 14px、编辑器代码 12.5px（等宽代码字号略小于 UI 正文，符合
+/// 主流编辑器惯例）。故编辑器字号 = `Theme.font_size - 1.5`，而非直接等于。
+/// 行高比对齐原型 1.55（而非 1.5），让代码行间距更贴近设计预期。
 ///
 /// 跑在 `xui::TextEditorUpdateSet` 之前，确保 `update_virtual_lines` 读到最新值。
-fn sync_editor_theme(theme: Res<Theme>, mut editor_theme: ResMut<xui::text_editor::render::EditorTheme>) {
+fn sync_editor_theme(
+    theme: Res<Theme>,
+    mut editor_theme: ResMut<xui::text_editor::render::EditorTheme>,
+) {
     // 仅在 Theme 变化时写（避免每帧无谓 mutation 触发 change detection）。
     if !theme.is_changed() && !editor_theme.is_added() {
         return;
     }
-    editor_theme.font_size = theme.font_size;
+    editor_theme.font_size = (theme.font_size - 1.5).max(10.0);
+    editor_theme.line_height_ratio = 1.55;
     editor_theme.text = theme.text;
     editor_theme.text_dim = theme.text_dim;
 }
@@ -573,12 +583,19 @@ pub fn apply_save_result(
 /// 目标行号 1-based，`ScrollPosition.y` 设为 `(line-1) * line_height`
 /// 让目标行对齐视口顶部。行高从 `TextEditor.line_height` 取。
 pub fn handle_pending_goto(
-    mut q: Query<(Entity, &crate::editor::buffer::PendingGoTo, &mut bevy::ui::ScrollPosition, &xui::TextEditor)>,
+    mut q: Query<(
+        Entity,
+        &crate::editor::buffer::PendingGoTo,
+        &mut bevy::ui::ScrollPosition,
+        &xui::TextEditor,
+    )>,
     mut commands: Commands,
 ) {
     for (entity, goto, mut scroll, editor) in q.iter_mut() {
         let target_y = goto.line.saturating_sub(1) as f32 * editor.line_height;
         scroll.y = target_y;
-        commands.entity(entity).remove::<crate::editor::buffer::PendingGoTo>();
+        commands
+            .entity(entity)
+            .remove::<crate::editor::buffer::PendingGoTo>();
     }
 }

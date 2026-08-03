@@ -79,6 +79,12 @@ pub fn agent_poll_system(
 
     // 2. 处理中断
     for _ in readers.p1().read() {
+        // 直接 cancel 当前对话的 token——即时中断 stream/confirm/重试等待，
+        // 无需等 run_agent_loop 轮询 steering_rx 消费 Abort 命令
+        // （run_agent_loop 可能 park 在 executor.execute，无法及时轮询）。
+        if let Some(token) = bridge.current_cancel.lock().as_ref() {
+            token.cancel();
+        }
         let _ = bridge.cmd_tx.try_send(AgentCommand::Abort);
         conv.status = ConversationStatus::Aborting;
     }
@@ -128,7 +134,7 @@ pub fn agent_poll_system(
                 let _ = tx.send(d);
             }
         });
-        conv.status = ConversationStatus::Streaming;
+        conv.status = ConversationStatus::ToolRunning;
     }
 
     // 3b. drain editor 命令 channel：EditorTool → EditorCommandRequestMessage
@@ -235,6 +241,14 @@ fn handle_agent_event(
             // 清空 current_assistant_text，避免与新一轮流式拼接。
             // 复用 DoneMessage 让 UI 把半截文本固化为历史气泡并清空当前节点
             // （usage 为 None，token 统计无害）。
+            //
+            // 清空 pending_tool_calls：中断轮已发 ToolCallStart 事件累积的
+            // tool_call 块不执行（bridge 侧 steering 分支不执行 tool_calls、
+            // 不回灌到 req），不应残留到 conv.messages。否则新一轮 push_tool_result
+            // 触发 flush_pending_tool_calls 时，会把中断轮的孤儿 tool_call 与
+            // 新一轮的 tool_call 一起固化进一条 assistant 消息，破坏 OpenAI
+            // tool_call/tool_result 配对（中断轮 tool_call 无对应 tool_result）。
+            conv.pending_tool_calls.clear();
             if !partial_text.is_empty() {
                 conv.current_assistant_text = partial_text;
                 conv.finalize_assistant(None, None);
@@ -263,10 +277,18 @@ fn handle_agent_event(
             kind,
             last_error,
         } => {
-            // 清空半截助手文本（重试后重新流式输出，避免拼接）
-            conv.current_assistant_text.clear();
+            // 把半截助手文本固化为历史气泡（被中断的回复），清空当前节点，
+            // 避免 retry 后新一轮流式与残留半截文本拼接。
+            // 复用 DoneMessage 让 UI finalize_on_done 把半截文本固化为历史气泡
+            // 并清空 CurrentAssistantText 实体（修复前 UI 实体未被清空，文本残留）。
+            conv.finalize_assistant(None, None);
+            conv.persist_last_assistant();
             // 状态保持 Streaming（重试中），不切到 Error
             conv.status = ConversationStatus::Streaming;
+            done.write(DoneMessage {
+                usage: None,
+                model: None,
+            });
             retry.write(RetryMessage {
                 attempt,
                 infinite,
@@ -283,7 +305,13 @@ fn handle_agent_event(
         AgentEvent::Compacted {
             tokens_before,
             tokens_after,
+            new_messages,
         } => {
+            // 用压缩后的 agent 层消息替换 conv.messages，保持 conv 与 req 同步
+            // （修复下次 StartLoop 从未压缩的 conv 重建导致压缩丢失的 bug）。
+            // conv.messages 不含 system（system 在 build_request 时动态注入），
+            // new_messages 也不含 system（maybe_compact 已分离），语义一致。
+            conv.messages = new_messages;
             // 持久化 compaction 记录（不重写历史，append CompactionEntry）
             conv.persist_compaction(
                 &format!("[compacted: {tokens_before}→{tokens_after} tokens]"),

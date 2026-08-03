@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use xgent_plugin::{PluginHostProxy, WasmHost};
 use xgent_plugin::manifest::PluginManifest;
-use xgent_plugin_host::{execute_op, PluginOp, PluginCommandRegistry, register_proxy_impls};
+use xgent_plugin::{PluginHostProxy, WasmHost};
+use xgent_plugin_host::{PluginCommandRegistry, PluginOp, execute_op, register_proxy_impls};
 use xgent_tools::{ToolExecutor, ToolExecutorResource};
 
 fn git_wasm_path() -> Option<PathBuf> {
@@ -31,14 +31,18 @@ fn git_manifest() -> Arc<PluginManifest> {
 
 fn setup_world() -> World {
     let mut world = World::new();
-    world.insert_resource(ToolExecutorResource(Arc::new(ToolExecutor::with_defaults())));
+    world.insert_resource(ToolExecutorResource(
+        Arc::new(ToolExecutor::with_defaults()),
+    ));
     world.insert_resource(xui::command_palette::CommandRegistry::default());
     world.insert_resource(PluginCommandRegistry::default());
     world.insert_resource(xgent_context::ContextHub::default());
     world
 }
 
-async fn load_git_plugin(proxy: Arc<PluginHostProxy>) -> (Arc<PluginManifest>, Arc<xgent_plugin::WasmPlugin>) {
+async fn load_git_plugin(
+    proxy: Arc<PluginHostProxy>,
+) -> (Arc<PluginManifest>, Arc<xgent_plugin::WasmPlugin>) {
     let wasm_path = git_wasm_path().expect("git wasm");
     let wasm_bytes = std::fs::read(&wasm_path).expect("读 wasm");
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -49,7 +53,12 @@ async fn load_git_plugin(proxy: Arc<PluginHostProxy>) -> (Arc<PluginManifest>, A
     let work_dir = tempfile::tempdir().expect("tempdir");
     let manifest = git_manifest();
     let plugin = wasm_host
-        .load(&wasm_bytes, manifest.clone(), toml::Value::Table(Default::default()), work_dir.path().to_path_buf())
+        .load(
+            &wasm_bytes,
+            manifest.clone(),
+            toml::Value::Table(Default::default()),
+            work_dir.path().to_path_buf(),
+        )
         .await
         .expect("加载 git 插件");
     (manifest, plugin)
@@ -71,14 +80,18 @@ async fn proxy_op_registers_tool_to_executor() {
     assert_eq!(tool_defs.len(), 3);
 
     let op_rx = register_proxy_impls(&proxy);
-    proxy.tool().expect("tool proxy")
+    proxy
+        .tool()
+        .expect("tool proxy")
         .register_tools(manifest.clone(), plugin.clone(), tool_defs)
         .expect("register_tools op sent");
 
     let ops: Vec<PluginOp> = {
         let mut rx = op_rx;
         let mut ops = Vec::new();
-        while let Ok(op) = rx.try_recv() { ops.push(op); }
+        while let Ok(op) = rx.try_recv() {
+            ops.push(op);
+        }
         ops
     };
     assert_eq!(ops.len(), 1, "应收到 1 个 RegisterTools op");
@@ -96,29 +109,39 @@ async fn proxy_op_registers_tool_to_executor() {
 
 #[tokio::test]
 async fn proxy_op_unregisters_tool_by_prefix() {
-    if git_wasm_path().is_none() { return; }
+    if git_wasm_path().is_none() {
+        return;
+    }
     let proxy = Arc::new(PluginHostProxy::new());
     let (manifest, plugin) = load_git_plugin(proxy.clone()).await;
     let tool_defs = plugin.call_tool_register().await.expect("register");
 
     let op_rx = register_proxy_impls(&proxy);
-    proxy.tool().expect("tool proxy")
+    proxy
+        .tool()
+        .expect("tool proxy")
         .register_tools(manifest.clone(), plugin.clone(), tool_defs)
         .expect("register");
-    proxy.tool().expect("tool proxy")
+    proxy
+        .tool()
+        .expect("tool proxy")
         .unregister_tools(&manifest.id)
         .expect("unregister");
 
     let ops: Vec<PluginOp> = {
         let mut rx = op_rx;
         let mut ops = Vec::new();
-        while let Ok(op) = rx.try_recv() { ops.push(op); }
+        while let Ok(op) = rx.try_recv() {
+            ops.push(op);
+        }
         ops
     };
     assert_eq!(ops.len(), 2, "应收到 register + unregister 两个 op");
 
     let mut world = setup_world();
-    for op in ops { execute_op(op, &mut world); }
+    for op in ops {
+        execute_op(op, &mut world);
+    }
 
     let executor = world.resource::<ToolExecutorResource>();
     let schemas = executor.0.schemas();

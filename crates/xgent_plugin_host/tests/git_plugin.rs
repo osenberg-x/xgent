@@ -6,11 +6,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use xgent_plugin::{PluginHostProxy, WasmHost};
 use xgent_plugin::manifest::PluginManifest;
+use xgent_plugin::{PluginHostProxy, WasmHost};
 use xgent_plugin_host::tool::PluginTool;
 use xgent_tools::tool::Tool;
-
 
 /// 定位 git 插件 wasm（assets/plugins/git/extension.wasm 或 target 产出）。
 fn git_wasm_path() -> Option<PathBuf> {
@@ -69,7 +68,8 @@ async fn git_plugin_register_and_id_consistency() {
 
     // id 一致性硬约束：PluginTool::id() == schema.name == "plugin.git.git_diff"
     let git_diff_def = tools.iter().find(|t| t.id == "git_diff").unwrap();
-    let tool = PluginTool::new(&manifest.id, git_diff_def, plugin.clone()).expect("构造 PluginTool");
+    let tool =
+        PluginTool::new(&manifest.id, git_diff_def, plugin.clone()).expect("构造 PluginTool");
     assert_eq!(tool.id(), "plugin.git.git_diff");
     assert_eq!(tool.schema().name, "plugin.git.git_diff");
 }
@@ -107,7 +107,11 @@ async fn git_plugin_execute_git_status() {
 
     // 调 git_status 工具（经 host.run_command 执行真实 git status）
     let result = plugin
-        .call_tool_execute("git_status", "{}", tokio_util::sync::CancellationToken::new())
+        .call_tool_execute(
+            "git_status",
+            "{}",
+            tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .expect("execute git_status");
     // 解析返回的 JSON ToolResult

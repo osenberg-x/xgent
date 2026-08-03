@@ -14,8 +14,8 @@
 //! `EditorIoRuntime` Resource 持有 tokio runtime handle，由 `xgent_app` 注入。
 //! 若未注入，降级为同步 `std::fs`（小文件可用，大文件会卡帧）。
 
-use std::path::PathBuf;
 use parking_lot::Mutex;
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use tokio::sync::oneshot;

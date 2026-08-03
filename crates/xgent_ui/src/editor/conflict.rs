@@ -98,10 +98,12 @@ pub fn handle_file_changed(
                     path: ev.path.clone(),
                     line: None,
                 });
-                commands.entity(entity).insert(crate::editor::io::FileReadPending {
-                    path: ev.path.clone(),
-                    line: None,
-                });
+                commands
+                    .entity(entity)
+                    .insert(crate::editor::io::FileReadPending {
+                        path: ev.path.clone(),
+                        line: None,
+                    });
             }
             BufferState::Dirty | BufferState::LocalPreferred => {
                 // 进入冲突态，弹窗

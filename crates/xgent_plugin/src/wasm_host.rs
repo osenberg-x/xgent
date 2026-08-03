@@ -146,9 +146,16 @@ impl xgent::plugin::host::Host for HostState {
     async fn run_command(
         &mut self,
         cmd: xgent::plugin::host::CommandReq,
-    ) -> wasmtime::Result<Result<xgent::plugin::host::CommandOutput, xgent::plugin::host::CommandError>>
-    {
-        if !self.manifest.permissions.command.iter().any(|c| c == &cmd.program) {
+    ) -> wasmtime::Result<
+        Result<xgent::plugin::host::CommandOutput, xgent::plugin::host::CommandError>,
+    > {
+        if !self
+            .manifest
+            .permissions
+            .command
+            .iter()
+            .any(|c| c == &cmd.program)
+        {
             return Ok(Err(xgent::plugin::host::CommandError::PermissionDenied));
         }
         let cwd = cmd
@@ -165,7 +172,7 @@ impl xgent::plugin::host::Host for HostState {
             Err(e) => {
                 return Ok(Err(xgent::plugin::host::CommandError::SpawnFailed(
                     e.to_string(),
-                )))
+                )));
             }
         };
         // cancel 关键点：select on child.wait() vs cancel_token.cancelled()
@@ -313,9 +320,8 @@ fn validate_api_version(wasm_bytes: &[u8]) -> Result<(), WasmCallError> {
             }
         }
     }
-    let bytes = found.ok_or_else(|| {
-        WasmCallError::Failed("插件缺少 xgent:api-version custom section".into())
-    })?;
+    let bytes = found
+        .ok_or_else(|| WasmCallError::Failed("插件缺少 xgent:api-version custom section".into()))?;
     // 6 字节：major(2) + minor(2) + patch(2) big-endian（对齐 Zed zed:api-version）
     let major = u16::from_be_bytes([bytes[0], bytes[1]]);
     let minor = u16::from_be_bytes([bytes[2], bytes[3]]);
@@ -419,7 +425,9 @@ impl WasmHost {
 
         // 调 init-extension：构造插件 Extension 实例（register_plugin! 宏导出此函数）。
         // 必须在 register/execute 前调，否则 with_extension panic（OnceLock 未 set）。
-        bindings.call_init_extension(&mut store).await
+        bindings
+            .call_init_extension(&mut store)
+            .await
             .map_err(|e| WasmCallError::Failed(format!("init-extension 调用失败: {e}")))?;
         let plugin = Arc::new(WasmPlugin::new(bindings, store));
         Ok(plugin)
@@ -431,7 +439,11 @@ impl WasmHost {
 /// 闭包签名为 `for<'a> FnOnce(&'a mut Plugin, &'a mut Store<HostState>) -> BoxFuture<'a, ()>`，
 /// future 生命周期绑定到调用时的借用（对齐 Zed `ExtensionCall`，wasm_host.rs:310）。
 type PluginCall = Box<
-    dyn Send + for<'a> FnOnce(&'a mut Plugin, &'a mut Store<HostState>) -> futures::future::BoxFuture<'a, ()>,
+    dyn Send
+        + for<'a> FnOnce(
+            &'a mut Plugin,
+            &'a mut Store<HostState>,
+        ) -> futures::future::BoxFuture<'a, ()>,
 >;
 
 /// 加载后的插件实例：专有 tokio Task 串行处理同一插件的调用（独占 Store::&mut）。
@@ -452,15 +464,18 @@ impl WasmPlugin {
             drop(bindings);
             drop(store);
         });
-        Self {
-            tx,
-            in_flight,
-        }
+        Self { tx, in_flight }
     }
 
-    async fn dispatch<F, R>(&self, cancel_token: CancellationToken, build: F) -> Result<R, WasmCallError>
+    async fn dispatch<F, R>(
+        &self,
+        cancel_token: CancellationToken,
+        build: F,
+    ) -> Result<R, WasmCallError>
     where
-        F: FnOnce(CancellationToken, oneshot::Sender<Result<R, WasmCallError>>) -> PluginCall + Send + 'static,
+        F: FnOnce(CancellationToken, oneshot::Sender<Result<R, WasmCallError>>) -> PluginCall
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         self.in_flight
@@ -607,7 +622,8 @@ impl WasmPlugin {
                         .xgent_plugin_context_provider()
                         .call_on_file_changed(store, &short_id, path.as_deref())
                         .await;
-                    let mapped = result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped =
+                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -622,7 +638,8 @@ impl WasmPlugin {
             Box::new(move |ext: &mut Plugin, store: &mut Store<HostState>| {
                 Box::pin(async move {
                     let result = ext.xgent_plugin_tool().call_register(store).await;
-                    let mapped = result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped =
+                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -638,7 +655,8 @@ impl WasmPlugin {
             Box::new(move |ext: &mut Plugin, store: &mut Store<HostState>| {
                 Box::pin(async move {
                     let result = ext.xgent_plugin_command().call_register(store).await;
-                    let mapped = result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped =
+                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -657,7 +675,8 @@ impl WasmPlugin {
                         .xgent_plugin_context_provider()
                         .call_register(store)
                         .await;
-                    let mapped = result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped =
+                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
                     let _ = resp_tx.send(mapped);
                 })
             })

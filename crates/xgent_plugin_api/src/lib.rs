@@ -75,9 +75,7 @@ pub trait Extension: Send + Sync {
     /// 返回 JSON 序列化的 `ToolResult` 字符串，或 `WitToolError`。
     fn execute(&mut self, tool_id: &str, input: &str) -> Result<String, WitToolError> {
         let _ = (tool_id, input);
-        Err(WitToolError::Failed(
-            "tool execute not implemented".into(),
-        ))
+        Err(WitToolError::Failed("tool execute not implemented".into()))
     }
 
     /// 执行命令（默认返回 Err，插件 override）。
@@ -112,7 +110,9 @@ pub fn register_extension(f: impl FnOnce() -> Box<dyn Extension> + 'static) {
 
 /// 取全局插件实例的可变引用闭包（WIT export 实现内调）。
 fn with_extension<R>(f: impl FnOnce(&mut dyn Extension) -> R) -> R {
-    let ext = EXTENSION.get().expect("init-extension 未调用即触发 WIT export");
+    let ext = EXTENSION
+        .get()
+        .expect("init-extension 未调用即触发 WIT export");
     let mut guard = ext.lock().expect("插件实例锁中毒");
     f(guard.as_mut())
 }
@@ -143,9 +143,9 @@ macro_rules! register_plugin {
 // `export!(Component)` 把它们接到 `Component` 上。我们在此桥接到
 // Extension trait 的对应方法。
 
-use exports::xgent::plugin::{command::Guest as CommandGuest, tool::Guest as ToolGuest};
 use exports::xgent::plugin::context_provider::Guest as ContextProviderGuest;
 pub use exports::xgent::plugin::tool::ToolError as WitToolError;
+use exports::xgent::plugin::{command::Guest as CommandGuest, tool::Guest as ToolGuest};
 
 struct Component;
 
@@ -174,10 +174,7 @@ impl ContextProviderGuest for Component {
         with_extension(|e| e.register_context_providers())
     }
 
-    fn retrieve(
-        provider_id: String,
-        query: WitContextQuery,
-    ) -> Result<WitContextResult, String> {
+    fn retrieve(provider_id: String, query: WitContextQuery) -> Result<WitContextResult, String> {
         with_extension(|e| e.retrieve(&provider_id, &query))
     }
 

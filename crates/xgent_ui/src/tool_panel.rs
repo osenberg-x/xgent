@@ -17,7 +17,9 @@ use crate::theme::{Theme, space};
 /// 工具调用卡片标记。
 #[derive(Component, Default)]
 pub struct ToolCardMarker {
-    /// 工具 id（用于匹配 result）
+    /// 工具调用 id（精确匹配 result，修复前用 tool_id 同名工具会错配）
+    pub tool_call_id: String,
+    /// 工具 id（展示用）
     pub tool_id: String,
     /// 是否展开结果详情
     pub expanded: bool,
@@ -84,9 +86,8 @@ fn spawn_tool_card(
                     row_gap: px(space::XS),
                     ..default()
                 },
-                BackgroundColor(theme.panel),
-                BorderColor::all(theme.border),
                 ToolCardMarker {
+                    tool_call_id: ev.tool_call_id.clone(),
                     tool_id: ev.tool_id.clone(),
                     expanded: false,
                 },
@@ -218,7 +219,7 @@ fn update_tool_result(
 ) {
     for ev in reader.read() {
         for (mut card, children) in q_cards.iter_mut() {
-            if card.tool_id != ev.tool_id {
+            if card.tool_call_id != ev.tool_call_id {
                 continue;
             }
             let is_error = ev.is_error;

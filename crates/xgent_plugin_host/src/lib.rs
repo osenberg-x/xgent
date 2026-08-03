@@ -17,15 +17,13 @@ use bevy::prelude::*;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-use xgent_agent::{
-    CommandResultMessage, PluginCommandTriggered, PluginUnregisterMessage,
-};
+use xgent_agent::{CommandResultMessage, PluginCommandTriggered, PluginUnregisterMessage};
 use xgent_plugin::{PluginEvent, PluginHost, PluginHostProxy};
 
 pub use command::PluginCommand;
 pub use context::PluginContextProvider;
 pub use proxy_impl::{
-    execute_op, PluginCommandProxyImpl, PluginContextProxyImpl, PluginOp, PluginToolProxyImpl,
+    PluginCommandProxyImpl, PluginContextProxyImpl, PluginOp, PluginToolProxyImpl, execute_op,
 };
 pub use tool::PluginTool;
 
@@ -118,7 +116,11 @@ pub fn plugin_poll_system(world: &mut World) {
         let cmd_reg = world.resource::<PluginCommandRegistry>();
         let host_res = world.get_resource::<PluginHostResource>();
         for t in triggered {
-            let cmd = cmd_reg.0.iter().find(|c| c.full_id == t.command_id).cloned();
+            let cmd = cmd_reg
+                .0
+                .iter()
+                .find(|c| c.full_id == t.command_id)
+                .cloned();
             if let Some(cmd) = cmd {
                 let host = host_res.map(|h| h.0.clone());
                 // spawn async run；结果经 host.emit_command_result 回传

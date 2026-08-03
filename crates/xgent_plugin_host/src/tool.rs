@@ -12,11 +12,10 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use xgent_core::chat::ToolSchema;
-use xgent_tools::tool::{
-    Concurrency, SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult, ToolTier,
-    ToolUpdateCallback,
-};
 use xgent_plugin::{WasmCallError, WasmPlugin};
+use xgent_tools::tool::{
+    Concurrency, SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult, ToolTier, ToolUpdateCallback,
+};
 
 /// 插件工具适配器。
 ///

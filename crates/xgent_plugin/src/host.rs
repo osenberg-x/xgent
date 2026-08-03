@@ -24,7 +24,11 @@ use crate::wasm_host::{WasmCallError, WasmHost, WasmPlugin};
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
     /// 命令执行完成（command.run 返回）。
-    CommandResult { command_id: String, success: bool, message: String },
+    CommandResult {
+        command_id: String,
+        success: bool,
+        message: String,
+    },
     /// 插件卸载完成（通知 ECS 清理 ToolExecutor/CommandRegistry/ContextHub）。
     Unregister { plugin_id: String },
 }
@@ -105,26 +109,30 @@ impl PluginHost {
         // notify watcher 是 blocking，放独立线程；事件经 channel 发到 tokio task
         let (tx, mut rx) = mpsc::unbounded_channel::<()>();
         std::thread::spawn(move || {
-            use notify::{EventKind, RecursiveMode, Watcher};
             use notify::event::{AccessKind, AccessMode};
-            let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(ev) = res {
-                    // 仅 .wasm 文件的写后关闭事件（避免部分写入时加载损坏 WASM）
-                    let is_wasm_close = matches!(
-                        ev.kind,
-                        EventKind::Access(AccessKind::Close(AccessMode::Write))
-                    ) && ev.paths.iter().any(|p| p.extension().is_some_and(|e| e == "wasm"));
-                    if is_wasm_close {
-                        let _ = tx.send(());
+            use notify::{EventKind, RecursiveMode, Watcher};
+            let mut watcher =
+                match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                    if let Ok(ev) = res {
+                        // 仅 .wasm 文件的写后关闭事件（避免部分写入时加载损坏 WASM）
+                        let is_wasm_close = matches!(
+                            ev.kind,
+                            EventKind::Access(AccessKind::Close(AccessMode::Write))
+                        ) && ev
+                            .paths
+                            .iter()
+                            .any(|p| p.extension().is_some_and(|e| e == "wasm"));
+                        if is_wasm_close {
+                            let _ = tx.send(());
+                        }
                     }
-                }
-            }) {
-                Ok(w) => w,
-                Err(e) => {
-                    tracing::warn!(error = %e, "插件目录文件监听启动失败");
-                    return;
-                }
-            };
+                }) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "插件目录文件监听启动失败");
+                        return;
+                    }
+                };
             let _ = watcher.watch(&installed_dir.as_path(), RecursiveMode::Recursive);
             // 保持 watcher 活着：线程阻塞在此
             std::thread::park();
@@ -244,11 +252,8 @@ impl PluginHost {
                 .map(|(m, _)| m.id.clone())
                 .collect()
         };
-        let new_ids: std::collections::HashSet<String> = new_index
-            .plugins
-            .keys()
-            .map(|k| k.to_string())
-            .collect();
+        let new_ids: std::collections::HashSet<String> =
+            new_index.plugins.keys().map(|k| k.to_string()).collect();
         // 卸载移除的
         for id in old_ids.difference(&new_ids) {
             self.unregister(id).await;
@@ -273,10 +278,7 @@ impl PluginHost {
     }
 
     /// 加载单个插件：读 wasm + instantiate + register 工具/命令/provider。
-    async fn load_plugin(
-        &self,
-        manifest: Arc<PluginManifest>,
-    ) -> Result<(), PluginHostError> {
+    async fn load_plugin(&self, manifest: Arc<PluginManifest>) -> Result<(), PluginHostError> {
         let plugin_dir = self.installed_dir.join(&manifest.id);
         let wasm_path = plugin_dir.join("extension.wasm");
         let wasm_bytes = std::fs::read(&wasm_path)
@@ -309,7 +311,10 @@ impl PluginHost {
             }
         }
         // register 命令
-        let cmd_defs = wasm_plugin.call_command_register().await.unwrap_or_default();
+        let cmd_defs = wasm_plugin
+            .call_command_register()
+            .await
+            .unwrap_or_default();
         if !cmd_defs.is_empty() {
             if let Err(e) = self
                 .proxy
@@ -320,7 +325,10 @@ impl PluginHost {
             }
         }
         // register context providers
-        let provider_defs = wasm_plugin.call_context_provider_register().await.unwrap_or_default();
+        let provider_defs = wasm_plugin
+            .call_context_provider_register()
+            .await
+            .unwrap_or_default();
         if !provider_defs.is_empty() {
             if let Err(e) = self.proxy.context().and_then(|p| {
                 p.register_providers(
