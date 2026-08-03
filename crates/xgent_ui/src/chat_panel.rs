@@ -780,18 +780,29 @@ fn update_conversation_info(
 fn clear_on_new_session(
     mut reader: MessageReader<SessionClearedMessage>,
     entities: Res<ChatPanelEntities>,
+    theme: Res<Theme>,
     mut commands: Commands,
 ) {
     if reader.read().next().is_none() {
         return;
     }
-    // 清空消息列表子节点（历史气泡）
-    if let Some(list) = entities.message_list {
-        commands.entity(list).despawn_related::<Children>();
-    }
-    // 清空当前助手文本节点
+    let Some(list) = entities.message_list else {
+        return;
+    };
+    // current_text 是 message_list 的常驻子节点（见 spawn_chat_panel）。
+    // despawn_related::<Children>() 会连带销毁它，之后 insert 必 panic。
+    // 故先 detach current_text → despawn 历史气泡 → add_child 回去 → 清空文本。
     if let Some(cur) = entities.current_text {
-        commands.entity(cur).insert(Text::new(String::new()));
+        commands
+            .entity(list)
+            .detach_children(&[cur])
+            .despawn_related::<Children>()
+            .add_child(cur);
+        commands
+            .entity(cur)
+            .insert((Text::new(String::new()), TextColor(theme.text)));
+    } else {
+        commands.entity(list).despawn_related::<Children>();
     }
 }
 
