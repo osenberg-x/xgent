@@ -175,7 +175,8 @@ fn main() {
     //    ToolExecutor/CommandRegistry/ContextHub 已就绪
     // 4. load_builtin_plugins 扫描 assets/plugins/ 预装内建插件
     let proxy = Arc::new(PluginHostProxy::new());
-    let wasm_host = WasmHost::new(proxy.clone(), project_root.clone());
+    let wasm_host = WasmHost::new(proxy.clone(), project_root.clone())
+        .expect("wasmtime 引擎初始化失败（致命错误）");
     let plugins_root = plugins_dir();
     let _ = std::fs::create_dir_all(&plugins_root);
     let assets_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/plugins");
@@ -189,6 +190,7 @@ fn main() {
             None
         },
         global_config.plugin_settings.clone(),
+        global_config.plugin.enabled.clone(),
     );
     // 注册 proxy impl（返回 op_rx，包成 PluginOpRx Resource 注入 ECS，
     let op_rx = register_proxy_impls(&proxy);

@@ -277,6 +277,7 @@ mod tests {
                 m
             },
             preferences: Preferences::default(),
+            ..Default::default()
         };
         let j = serde_json::to_string(&cfg).unwrap();
         let cfg2: GlobalConfig = serde_json::from_str(&j).unwrap();

@@ -27,6 +27,9 @@ impl PluginCommand {
     ///
     /// `success=true` 时 `message` 为成功消息；`success=false` 时为错误文本。
     pub async fn run(&self) -> (bool, String) {
+        // 命令面板触发的命令无外部 cancel 入口（用户主动操作，非 agent loop 调度）。
+        // 新建独立 token——长跑命令靠 WASM 自然完成或 host.run-command 子进程超时。
+        // 后续若需"停止命令"UI，改为接收上层 token。
         let result = self
             .plugin
             .call_command_run(&self.short_id, CancellationToken::new())

@@ -49,7 +49,7 @@ async fn load_git_plugin(
         .join("../../")
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from("."));
-    let wasm_host = WasmHost::new(proxy, project_root);
+    let wasm_host = WasmHost::new(proxy, project_root).expect("WasmHost::new");
     let work_dir = tempfile::tempdir().expect("tempdir");
     let manifest = git_manifest();
     let plugin = wasm_host
@@ -148,5 +148,43 @@ async fn proxy_op_unregisters_tool_by_prefix() {
     assert!(
         schemas.iter().all(|s| !s.name.starts_with("plugin.git.")),
         "卸载后不应含 plugin.git.* 工具"
+    );
+}
+
+/// N1 回归测试：handle_plugin_event(Unregister) 调三个 execute_op（Tools/Commands/Providers）清理。
+/// 验证 N1 修复——卸载链路不再断裂，工具/命令/provider 全部移除。
+#[tokio::test]
+async fn unregister_clears_all_extension_points() {
+    if git_wasm_path().is_none() { return; }
+    let proxy = Arc::new(PluginHostProxy::new());
+    let (manifest, plugin) = load_git_plugin(proxy.clone()).await;
+    let tool_defs = plugin.call_tool_register().await.expect("register tools");
+    let cmd_defs = plugin.call_command_register().await.expect("register commands");
+
+    let mut world = setup_world();
+    // 注册工具 + 命令
+    execute_op(PluginOp::RegisterTools { manifest: manifest.clone(), plugin: plugin.clone(), tool_defs }, &mut world);
+    execute_op(PluginOp::RegisterCommands { manifest: manifest.clone(), plugin: plugin.clone(), command_defs: cmd_defs }, &mut world);
+
+    // 验证注册成功
+    let executor = world.resource::<ToolExecutorResource>();
+    assert!(executor.0.schemas().iter().any(|s| s.name.starts_with("plugin.git.")));
+
+    // 模拟 handle_plugin_event(Unregister) 的清理序列（N1 修复）
+    let pid = manifest.id.clone();
+    execute_op(PluginOp::UnregisterTools { plugin_id: pid.clone() }, &mut world);
+    execute_op(PluginOp::UnregisterCommands { plugin_id: pid.clone() }, &mut world);
+    execute_op(PluginOp::UnregisterProviders { plugin_id: pid }, &mut world);
+
+    // 验证全部清理
+    let executor = world.resource::<ToolExecutorResource>();
+    assert!(
+        executor.0.schemas().iter().all(|s| !s.name.starts_with("plugin.git.")),
+        "卸载后不应含 plugin.git.* 工具"
+    );
+    let cmd_reg = world.resource::<PluginCommandRegistry>();
+    assert!(
+        cmd_reg.0.iter().all(|c| !c.full_id.starts_with("plugin.git.")),
+        "卸载后不应含 plugin.git.* 命令"
     );
 }

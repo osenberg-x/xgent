@@ -213,16 +213,17 @@ agent_loop 回灌 conv.messages（不另开 PluginEvent 通道）
 
 ### 4.4 异步取消（CancellationToken → WASM）
 
-插件工具的 `execute` 接收 `tokio_util::sync::CancellationToken`（ADR-0007），cancel 时需中断 WASM 调用。机制：
+插件工具的 `execute` 接收 `tokio_util::sync::CancellationToken`（ADR-0007），cancel 时需中断 WASM 调用。机制（据 ADR-0013 线程模型裁决）：
 
-- `WasmHost::execute_tool` 在 tokio task 内 `tokio::select!` 监听 `signal.cancelled()` 与 wasmtime async future。
-- cancel 触发时 **drop wasmtime future**：wasmtime async store 的 future 被 drop 即停止推进，`Store` 状态保留（不损坏），返回 `ToolError::Aborted`。
-- **不使用** `Store::cancel_handle`（那是同步中断 WASM 执行的 API，与 async future drop 语义重叠，选 drop 更简洁）。
+- WASM 调用跑在专用 `LocalSet` task（wasmtime async future 是 `!Send`，不能跨线程 spawn），经 `mpsc::UnboundedSender<PluginCall>` channel 与 `agent_loop_task` 通信——同一插件的调用串行、不同插件并行。
+- `WasmPlugin::dispatch` 在 `agent_loop_task` 内 `tokio::select!`（biased）监听 `signal.cancelled()` 与 oneshot Receiver。
+- cancel 触发时 **丢弃 oneshot Receiver**：上层 future 返回 `Err(WasmCallError::Aborted)`，不主动中断 WASM——专有 task 内的 WASM future 继续推进到完成（结果发到已 drop 的 `resp_tx` 静默失败），`Store` 状态保留。
+- `host.run_command` 子进程 cancel：宿主侧 impl 内部 `tokio::select!` on `cancel_token.cancelled()` → `child.kill().await` + 返回 `command-error::cancelled`。
+- **不使用** `Store::cancel_handle`（与 async future drop 语义重叠，选丢弃 oneshot更简洁）。
 
-**实现风险标注**（Step P2 验证项）：
-- 需验证 wasmtime 27 的 async future drop 是否可靠中断 WASM 执行（不残留后台 task、不泄漏 Store）。
-- 需验证 WASM 内调宿主回调（`host.read-file` 等）期间 cancel 是否立即生效（若回调阻塞，drop future 可能等回调返回）。
-- 若 drop 语义不足，退化为 `Store::cancel_handle` + 轮询超时兜底。此项在 Step P2 单元测试中验证后定稿。
+> 偏差说明：早期草案写"drop wasmtime future"，但 ADR-0013 的 `!Send` 约束使 `agent_loop_task` 不能直接 await WASM future，改经 channel 解耦后无法 drop 对端 future。实测纯计算型 WASM 调用无法主动中断（仅子进程 `run_command` 可 kill），MVP 接受此限制。
+
+**验证**（Step P2）：集成测试 `git_plugin_cancel_returns_aborted` 验证已 cancel 的 token 调 `call_tool_execute` 返回 `Aborted`（dispatch select! biased 优先 cancelled 分支）。
 
 ---
 
@@ -255,16 +256,12 @@ interface host {
 
 interface tool {
     // 插件提供给宿主的工具能力
-    register: func(tools: list<tool-def>);
+    register: func() -> list<tool-def>;
 
-    // 同步方法：供 PluginTool 适配器实现 Tool trait 的同步方法
-    summarize: func(tool-id: string, input: json) -> string;
-    approval-for: func(tool-id: string, input: json) -> tool-tier;
-
-    // 异步方法：execute 返回完整 tool-result；
-    // preview-diff 返回 option，None 时确认弹窗退化为纯文本。
-    execute: func(tool-id: string, input: json) -> result<tool-result, string>;
-    preview-diff: func(tool-id: string, input: json) -> option<diff-pair>;
+    // execute 返回完整 tool-result JSON。
+    // preview-diff：ADR-0013 明确保留，MVP 暂未实现（返回 None 退化为纯文本）。
+    execute: func(tool-id: string, input: string) -> result<string, tool-error>;
+    preview-diff: func(tool-id: string, input: string) -> option<diff-pair>;
 }
 
 // execute 期间插件经 host.push-update 推流式中间结果（对齐 ToolUpdateCallback）。
@@ -289,11 +286,10 @@ world plugin {
 
 ### 5.3 Agent 工具扩展点（详细）
 
-插件注册的工具经 `PluginTool` 适配器包装为 `xgent_tools::Tool` trait 实现，注入 `ToolExecutor`。适配器必须实现现有 `Tool` trait 的**全部**方法（`id` / `schema` / `tier` / `approval_for` / `concurrency` / `summarize` / `preview_diff` / `execute`），签名与返回类型须与 `crates/xgent_tools/src/tool.rs` 完全一致：
+插件注册的工具经 `PluginTool` 适配器包装为 `xgent_tools::Tool` trait 实现，注入 `ToolExecutor`。`PluginTool` 实现 `id` / `schema` / `tier` / `concurrency` / `summarize` / `execute` 方法（签名与 `crates/xgent_tools/src/tool.rs` 一致）；`approval_for` 回退 trait 默认 `self.tier()`、`summarize` 回退清单 description——经 ADR-0013 裁决（wasmtime v40 async 全有或全无规则使同步方法无法进 async WIT），`preview_diff` 暂返回 `None`（MVP 未实现，待补）：
 
 ```rust
 /// 插件工具适配器：把 WIT tool 调用桥接为 Tool trait。
-///
 /// 持有宿主侧 `WasmHost` 句柄，各方法经 WIT 回调插件实例。
 /// `tool_def` 来自清单 + 插件 `register` 时的 `tool-def`。
 pub struct PluginTool {
@@ -664,9 +660,11 @@ fs-write = ["src/**"]      # 可写 src 目录
 network = ["api.github.com"]  # 可访问的域名
 command = ["git", "rg"]    # 可运行的命令
 ```
-
 宿主 API 调用时校验权限，拒绝越权操作。
 
+> **已落地校验**（review 修复）：`resolve_and_check` 三重防护——拒绝含 `..` 的输入路径（防穿越）、绝对路径须在 project_root 内、`canonicalize` 解析后路径（跟随 symlink）再 `starts_with` 校验。`run_command` 的 `cwd` 同样经 `fs-read` 权限校验。
+
+> **已知限制（MVP）**：`command` 仅校验 program 名精确相等，`args` 无白名单/黑名单——已授权程序（如 `git`）可传任意参数（`-c core.pager=恶意脚本`、`--upload-pack`），构成 argv 注入面。需在后续按程序加 args 约束。`http-get` 已移除（YAGNI，需时再加）。
 ### 9.3 工具安全模型对接
 
 插件注册的工具经 `ToolExecutor.execute` 时，`resolve_policy` 正常工作：
@@ -737,6 +735,10 @@ pub struct PluginConfig {
 项目配置 `<project>/.xgent/config.toml` 可覆盖全局插件配置：
 - 禁用特定插件（如项目不需要 Git 集成）
 - 覆盖插件工具策略（`tool_policy` 按 `plugin.id.tool_id` 设定）
+
+### 10.4 已知限制：配置不热更新
+
+`HostState.config` 在插件 `load` 时从 `plugin_settings` 快照一次，`update_plugin_settings` 仅更新 `PluginHost.plugin_settings` 内存缓存，**不触及已加载插件的 `HostState.config`**。`host.get_config` 读取的是快照旧值。配置变更需 `uninstall + reload`（或 `disable + enable`）才生效。MVP 接受此限制，后续可经 WIT 通知插件重载配置。
 
 ---
 
@@ -980,6 +982,24 @@ wit-component = "0.40"
 - 方案 A（推荐）：插件清单声明 `default_locale`（如 `"zh-CN"`），插件自带 `.ftl` 资源（打包进 WASM 或 `installed/<id>/locales/`），宿主经 WIT `host.get-locale` 查询当前语言，插件据当前语言选字符串。宿主不负责翻译插件字符串。
 - 方案 B：插件经 WIT `host.tr(key)` 调宿主 `Localizer`，由宿主统一翻译。需插件向宿主注册 `.ftl` 资源，复杂度高。
 - 倾向 A：插件自治，宿主不背插件翻译复杂度。MVP 先不实现 WIT `host.get-locale`（插件字符串硬编码），P1 阶段补 WIT 接口 + 方案 A。
+
+### D-P7: WASM 纯计算死循环的 task 回收
+
+**问题**：`WasmPlugin` 专有 task 无 `JoinHandle`，WASM 调用若为纯计算死循环（无 host import await 点），`call().await` 永不返回，task + Store 永久泄漏。`drain_pending_drop` 60s 超时仅移除 `Arc<WasmPlugin>`（减引用计数），不 kill task。
+
+**MVP 接受**：设计 §4.4 已接受"不主动中断 WASM"。纯计算死循环属恶意/异常插件，风险在于 task 永驻。后续可考虑 `Store::cancel_handle` 或 wasmtime fuel/epoch 中断机制。
+
+### D-P8: on_update 流式回灌未接通
+
+**问题**：`push-update` WIT 接口 + `HostState.push_update` + `call_tool_execute` 参数已就绪，但 `PluginTool::execute` 桥接断点——`ToolUpdateCallback` 是 `Box<dyn Fn>`（非 `'static`），无法转 `Arc<dyn Fn + 'static>` 传入 `call_tool_execute`。且 `ToolExecutor` MVP 总传 `None`。
+
+**MVP 接受**：整条 on_update 链路实际未启用。后续接通需将 `ToolUpdateCallback` 改为 `Arc<dyn Fn(ToolResult) + Send + Sync + 'static>`，并让 executor 构造 Arc 传入。
+
+### D-P9: PluginOp channel 无背压
+
+**问题**：`register_proxy_impls` 用 `mpsc::unbounded_channel`，proxy trait 方法是同步签名（非 async），无法用 bounded channel 的 await send。注册风暴时单帧入队 >64（`plugin_poll_system` drain 上限）则积压。
+
+**MVP 接受**：正常场景 reload 量小，风险低。proxy trait 同步签名约束使 bounded 改造影响面大。后续若需背压，需将 proxy trait 改 async 或引入容量告警。
 
 ---
 

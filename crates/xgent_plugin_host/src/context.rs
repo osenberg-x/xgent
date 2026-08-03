@@ -10,7 +10,7 @@ use async_trait::async_trait;
 
 use tokio_util::sync::CancellationToken;
 use xgent_context::provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult};
-use xgent_plugin::{WasmCallError, WasmPlugin, WitContextChunk, WitContextQuery, WitContextResult};
+use xgent_plugin::{WasmPlugin, WitContextChunk, WitContextQuery, WitContextResult};
 
 /// 插件上下文提供者适配器。
 pub struct PluginContextProvider {
@@ -97,7 +97,3 @@ fn context_result_from_wit(r: &WitContextResult, _project_root: &Path) -> Contex
         total_tokens: r.total_tokens,
     }
 }
-
-// 静默 WasmCallError 未用警告（match 分支保留完整性）
-#[allow(dead_code)]
-fn _silence(_: WasmCallError) {}

@@ -472,7 +472,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 **crate 拓扑**（3 宿主 + 2 插件）：
 - `xgent_plugin_api` — 插件作者面向：`Extension` trait + `register_plugin!` 宏 + WIT 绑定（`wit/plugin.wit`）。rlib，被插件 crate 依赖。
-- `xgent_plugin` — 宿主核心：`PluginHost`/`WasmHost`/`WasmPlugin`/`PluginHostProxy` + 清单解析。不依赖业务 crate（经 proxy 反转依赖）。
+- `xgent_plugin` — 宿主核心：`PluginHost`/`WasmHost`/`WasmPlugin`/`PluginHostProxy` + 清单解析 + `host_state`（HostState + Host trait impl，从 wasm_host.rs 拆出控行数）。不依赖业务 crate（经 proxy 反转依赖）。
 - `xgent_plugin_host` — ECS 桥接：`PluginTool`/`PluginCommand`/`PluginContextProvider` 适配器 + `PluginHostPlugin`（`plugin_poll_system`）。
 - `xgent_plugin_hello` / `xgent_plugin_git` — 测试/参考插件（cdylib → wasm32-wasip2）。
 
@@ -487,7 +487,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - `call_tool_execute` 的 cancel = `tokio::select!` on `cancel_token.cancelled()` vs oneshot；cancel 时**丢弃 oneshot**（返回 `Err(Aborted)`），不主动中断 WASM。
    - `host.run_command` 宿主侧 impl 内部 `tokio::select!` on `cancel_token.cancelled()` → `child.kill().await` + 返回 `command-error::cancelled`。
 
-4. **ECS Message 放 `xgent_agent/src/events.rs`**（偏差修正 4，非 xgent_core）：`CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered` 用 `#[derive(Message)]` + `add_message::<E>()`。
+4. **ECS Message 放 `xgent_agent/src/events.rs`**（偏差修正 4，非 xgent_core）：`CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`/`PluginLoadedMessage`（P5 新增，加载完成通知）用 `#[derive(Message)]` + `add_message::<E>()`。`plugin_poll_system` drain `PluginEvent`（含 `CommandResult`/`Unregister`/`Loaded` 三变体）转对应 Message。
 
 5. **proxy 取用机制（硬性，§13 Step P4）**：proxy impl 不在 `PluginHostPlugin::build` 时抓 `ResMut`（跨 tokio task 持有破坏 Send+Sync）。改为持 `Sender<PluginOp>` 发指令到 `PluginOpQueue`，`plugin_poll_system`（主线程）内 `world.resource_mut::<T>()` 执行。
 
@@ -503,9 +503,29 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 11. **wit-bindgen 0.22 约束**：guest 侧 `wit_bindgen::generate!` 必须在 crate 根（不在 `mod wit` 内），否则 `export!` 宏无法在 crate 根解析。host 侧 `wasmtime::component::bindgen!` 生成 `Plugin` world struct，`add_to_linker` + `instantiate_async` + `call_*_async`。WIT `result<_, E>` 用下划线表示 unit ok（非 `()`）。
 
-**集成测试**：
-- `xgent_plugin/tests/hello_plugin.rs` — 加载 hello.wasm，验证 register + execute。
-- `xgent_plugin_host/tests/git_plugin.rs` — 加载 git.wasm，验证 id 一致性 + 真实 git status 执行（经 host.run_command）。
+12. **WASM 引擎错误传播**（review S1）：`wasm_engine()` 返回 `Result<&'static Engine, WasmCallError>`，用 `LazyLock<Result<Engine, WasmCallError>>` 持存（非 `OnceLock + expect`，AGENTS §5.7 库代码避免 expect；稳定 Rust 无 `get_or_try_init` 故用 LazyLock）。
+
+13. **`InFlightGuard` RAII 计数**（review S4）：`WasmPlugin::dispatch` 用 `InFlightGuard`（构造 +1，Drop -1）管理 in-flight 计数，避免错误路径手写 `fetch_sub` 遗漏。`map_result_string` 统一双层 `Result<Result<T,String>, wasm::Error>` 映射。
+
+14. **`SchemaVersion` newtype + tier 校验**（review S7S8/P3）：`PluginManifest.schema_version: SchemaVersion(i32)` newtype + `SUPPORTED: RangeInclusive` 常量。`validate` 校验清单 tier ∈ {read,write,exec}，`ui_only` 加载拒绝（§5.3.2 插件不支持 UiOnly）。`validate_ids` 批量校验去重。
+
+15. **`push-update` + `on_update` 桥接**（review P1）：WIT host 接口加 `push-update(tool-id, update: string)`，`HostState.push_update` 持回调，`call_tool_execute` 接收 `Option<Arc<dyn Fn(String)>>`，execute 前 set、后 clear。`PluginTool::execute` 桥接受限（`ToolUpdateCallback` 是 `Box` 非 `'static`，且 ToolExecutor MVP 总传 None）——基础设施就绪，待 `ToolUpdateCallback` 改 `Arc` 后接通。
+
+16. **`summarize` WIT 接口**（review P2/S11）：WIT tool 接口加 `summarize(tool-id, input) -> string`，`Extension` trait 加默认实现，`WasmPlugin::call_tool_summarize` 暴露。`PluginTool::summarize` 因 `Tool::summarize` 是同步 trait 方法而 WIT 是 async，MVP 保留本地默认（接口已留待 summarize 改 async 后接通）。
+
+17. **enable/disable/install_dev + reload 过滤**（review P4/P5）：`PluginHost` 持 `enabled: Mutex<BTreeMap<String,bool>>`，`reload_all` 跳过 disabled。`enable_extension`/`disable_extension`（设 enabled + reload/unregister）、`install_dev_extension(src, id)`（复制源码目录到 installed/，跨平台稳定替代 symlink）。`stop_file_watcher` 显式停止 watcher 线程。
+
+18. **Git 插件补 git_commit/git_history**（review P6）：`xgent_plugin_git` 现提供 4 工具（git_diff/git_log/git_status read + **git_commit write**）+ 4 命令 + `git_history` ContextProvider（`retrieve` 调 `git log -n20`）。
+
+19. **YAGNI 移除 http-get 占位**（review S9）：WIT `host.http-get` 与 `HostState::http_get` 永远返回未实现的占位已移除（需时再加，避免 Speculative Generality）。
+
+20. **沙箱路径穿越修复**（深度 review D1/D3）：`HostState::resolve_and_check` 三重防护——拒绝含 `..` 组件的输入路径（防 `../` 穿越沙箱边界）、绝对路径须在 project_root 内、`canonicalize` 解析后路径（跟随 symlink）再 `starts_with` 校验。`Path::starts_with` 是字面组件前缀匹配不规范化 `..`，故必须显式拒绝 + canonicalize。
+
+21. **run_command cwd 权限校验**（深度 review D2）：cwd 经 `resolve_and_check` + `fs-read` 权限校验（此前 cwd 无校验，可逃逸项目根）。`command` program 仅字符串相等校验，`args` 无白名单（argv 注入面，设计 §9.2 已知限制）。
+
+22. **install_dev 用 symlink**（深度 review P5）：`install_dev_extension` 优先 symlink 指向源码目录（跨平台 `symlink_dir`，Windows 需开发者模式），失败回退复制 + warn。源码改动自动反映到 `installed/`，dev 热重载生效。
+
+23. **已标注的 MVP 限制**（深度 review，设计文档 §10.4/§14 D-P7~D-P9）：配置不热更新（`HostState.config` 快照，需 reload）、WASM 纯计算死循环致 task 永驻（`drain_pending_drop` 不 kill task）、on_update 流式回灌未接通（`ToolUpdateCallback` 签名限制）、PluginOp channel 无背压（proxy trait 同步约束）。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

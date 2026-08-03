@@ -6,6 +6,7 @@
 //! 详见 `doc/design/plugin-system-design.md` §6 / §7 / §13 Step P2。
 
 pub mod host;
+pub mod host_state;
 pub mod index;
 pub mod manifest;
 pub mod proxy;
@@ -15,7 +16,7 @@ pub use host::{PluginEvent, PluginHost, PluginHostError};
 pub use index::{PluginIndex, PluginIndexEntry};
 pub use manifest::{
     CommandManifestEntry, ContextProviderManifestEntry, LibManifest, ManifestError,
-    PermissionsManifest, PluginManifest, ToolManifestEntry,
+    PermissionsManifest, PluginManifest, SchemaVersion, ToolManifestEntry,
 };
 pub use proxy::{
     PluginCommandProxy, PluginContextProxy, PluginHostProxy, PluginToolProxy, ProxyError,

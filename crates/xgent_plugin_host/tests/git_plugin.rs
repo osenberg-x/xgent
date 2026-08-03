@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use xgent_plugin::{PluginHostProxy, WasmCallError, WasmHost};
 use xgent_plugin::manifest::PluginManifest;
-use xgent_plugin::{PluginHostProxy, WasmHost};
+
 use xgent_plugin_host::tool::PluginTool;
 use xgent_tools::tool::Tool;
 
@@ -48,7 +49,7 @@ async fn git_plugin_register_and_id_consistency() {
         .join("../../")
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from("."));
-    let wasm_host = WasmHost::new(proxy, project_root);
+    let wasm_host = WasmHost::new(proxy, project_root).expect("WasmHost::new");
 
     let work_dir = tempfile::tempdir().expect("tempdir");
     let manifest = git_manifest();
@@ -91,7 +92,7 @@ async fn git_plugin_execute_git_status() {
         .join("../../")
         .canonicalize()
         .expect("canonicalize xgent root");
-    let wasm_host = WasmHost::new(proxy, project_root.clone());
+    let wasm_host = WasmHost::new(proxy, project_root.clone()).expect("WasmHost::new");
 
     let work_dir = tempfile::tempdir().expect("tempdir");
     let manifest = git_manifest();
@@ -107,14 +108,47 @@ async fn git_plugin_execute_git_status() {
 
     // 调 git_status 工具（经 host.run_command 执行真实 git status）
     let result = plugin
-        .call_tool_execute(
-            "git_status",
-            "{}",
-            tokio_util::sync::CancellationToken::new(),
-        )
+        .call_tool_execute("git_status", "{}", tokio_util::sync::CancellationToken::new(), None)
         .await
         .expect("execute git_status");
     // 解析返回的 JSON ToolResult
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap_or_default();
     assert!(parsed.get("output").is_some(), "应含 output 字段: {result}");
+}
+
+/// §4.4 Step P2 验证项：cancel 穿透。
+/// 已 cancel 的 token 调 call_tool_execute，dispatch 的 `tokio::select!`（biased）
+/// 应优先命中 `cancelled()` 分支返回 `WasmCallError::Aborted`，不执行 WASM。
+#[tokio::test]
+async fn git_plugin_cancel_returns_aborted() {
+    let wasm_path = match git_wasm_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("跳过：git 插件 wasm 未找到");
+            return;
+        }
+    };
+    let wasm_bytes = std::fs::read(&wasm_path).expect("读 wasm");
+    let proxy = Arc::new(PluginHostProxy::new());
+    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../")
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let wasm_host = WasmHost::new(proxy, project_root).expect("WasmHost::new");
+    let work_dir = tempfile::tempdir().expect("tempdir");
+    let plugin = wasm_host
+        .load(
+            &wasm_bytes,
+            git_manifest(),
+            toml::Value::Table(Default::default()),
+            work_dir.path().to_path_buf(),
+        )
+        .await
+        .expect("加载 git 插件");
+
+    // 先 cancel，再调用——验证 dispatch select! biased 优先 cancelled 分支
+    let token = tokio_util::sync::CancellationToken::new();
+    token.cancel();
+    let result = plugin.call_tool_execute("git_status", "{}", token, None).await;
+    assert!(matches!(result, Err(WasmCallError::Aborted)), "应返回 Aborted, got: {result:?}");
 }

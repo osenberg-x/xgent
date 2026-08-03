@@ -133,6 +133,7 @@ mod tests {
                 );
                 m
             },
+            ..Default::default()
         };
 
         GlobalConfigStore::save_to(&cfg, &path).unwrap();

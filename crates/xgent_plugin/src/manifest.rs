@@ -25,7 +25,7 @@ pub struct PluginManifest {
     #[serde(default)]
     pub description: String,
     pub version: String,
-    pub schema_version: i32,
+    pub schema_version: SchemaVersion,
     #[serde(default)]
     pub authors: Vec<String>,
     pub repository: Option<String>,
@@ -38,6 +38,18 @@ pub struct PluginManifest {
     pub context_providers: Vec<ContextProviderManifestEntry>,
     #[serde(default)]
     pub permissions: PermissionsManifest,
+}
+
+/// 清单 schema 版本（§6.3）。
+///
+/// newtype 包裹 i32，序列化透明（toml/json 中仍为整数）。宿主声明支持范围，
+/// 不兼容的清单拒绝加载。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchemaVersion(pub i32);
+
+impl SchemaVersion {
+    /// 当前宿主支持的版本范围（§6.3）。
+    pub const SUPPORTED: std::ops::RangeInclusive<i32> = 1..=1;
 }
 
 /// 库清单（编译语言）。
@@ -98,20 +110,46 @@ impl PluginManifest {
         Ok(manifest)
     }
 
-    /// 校验 id 与短 id 命名规则：`[a-z][a-z0-9_]*`。
+    /// 校验 id、tier、schema_version 规则。
     fn validate(&self) -> Result<(), ManifestError> {
+        // §6.3 schema_version 必须在 SUPPORTED 范围内
+        if !SchemaVersion::SUPPORTED.contains(&self.schema_version.0) {
+            return Err(ManifestError::Invalid(format!(
+                "schema_version: 支持 {:?}，实际 {}",
+                SchemaVersion::SUPPORTED, self.schema_version.0
+            )));
+        }
         validate_id(&self.id).map_err(|e| ManifestError::Invalid(format!("id: {e}")))?;
+        validate_ids(self.tools.iter().map(|t| &t.id), "tool id")?;
+        validate_ids(self.commands.iter().map(|c| &c.id), "command id")?;
+        validate_ids(self.context_providers.iter().map(|p| &p.id), "provider id")?;
+        // §9.3 清单 tier 必须是 read/write/exec；ui_only 对插件不支持（§5.3.2）
         for t in &self.tools {
-            validate_id(&t.id).map_err(|e| ManifestError::Invalid(format!("tool id: {e}")))?;
-        }
-        for c in &self.commands {
-            validate_id(&c.id).map_err(|e| ManifestError::Invalid(format!("command id: {e}")))?;
-        }
-        for p in &self.context_providers {
-            validate_id(&p.id).map_err(|e| ManifestError::Invalid(format!("provider id: {e}")))?;
+            validate_tier(&t.tier, "tool tier")?;
         }
         Ok(())
     }
+}
+
+/// 校验清单 tier 字符串值域（§9.3）。ui_only 对插件不支持（§5.3.2）。
+fn validate_tier(tier: &str, label: &str) -> Result<(), ManifestError> {
+    match tier {
+        "read" | "write" | "exec" => Ok(()),
+        "ui_only" => Err(ManifestError::Invalid(format!(
+            "{label}: ui_only 不支持插件工具（§5.3.2）"
+        ))),
+        other => Err(ManifestError::Invalid(format!(
+            "{label}: 未知 tier {other}（期望 read/write/exec）"
+        ))),
+    }
+}
+
+/// 批量校验多个 id，失败时附前缀标签。
+fn validate_ids<'a>(ids: impl IntoIterator<Item = &'a String>, label: &str) -> Result<(), ManifestError> {
+    for id in ids {
+        validate_id(id).map_err(|e| ManifestError::Invalid(format!("{label}: {e}")))?;
+    }
+    Ok(())
 }
 
 /// 校验 id 匹配 `[a-z][a-z0-9_]*`。
@@ -120,7 +158,7 @@ fn validate_id(id: &str) -> Result<(), String> {
         return Err("id 不能为空".into());
     }
     let mut chars = id.chars();
-    let first = chars.next().unwrap();
+    let first = chars.next().ok_or_else(|| "id 不能为空".to_string())?;
     if !first.is_ascii_lowercase() {
         return Err(format!("id 必须以小写字母开头: {id}"));
     }

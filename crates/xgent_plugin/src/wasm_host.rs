@@ -5,10 +5,10 @@
 //!
 //! 核心结构：
 //! - `wasm_engine()` — 全局单例 Engine（component_model + async）。
-//! - `WasmHost` — 持 Engine + Linker（OnceLock 单例，含 host import + WASI）。
+//! - `WasmHost` — 持 Engine + Linker（LazyLock 单例，含 host import + WASI）。
 //! - `WasmPlugin` — 每插件实例：专有 tokio Task 串行处理调用（独占 Store::&mut），
 //!   对齐 Zed wasm_host.rs:380-386。
-//! - `HostState` — Store 数据：WASI ctx + ResourceTable + manifest + config + cancel。
+//! - `HostState` — Store 数据（见 `host_state.rs`）。
 //!
 //! cancel 机制（偏差修正 3）：`call_tool_execute` 用 `tokio::select!` on
 //! `signal.cancelled()` vs oneshot Receiver；cancel 时丢弃 oneshot（上层 future
@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Store};
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder};
 
 // 宿主侧绑定：生成 `Plugin` world struct + `xgent::plugin::host::Host` trait。
 wasmtime::component::bindgen!({
@@ -32,6 +32,7 @@ wasmtime::component::bindgen!({
     path: "../xgent_plugin_api/wit",
 });
 
+use crate::host_state::HostState;
 use crate::manifest::PluginManifest;
 use crate::proxy::PluginHostProxy;
 
@@ -40,265 +41,17 @@ use crate::proxy::PluginHostProxy;
 /// 照设计文档 §5.3：`Aborted` 对应 `ToolError::Aborted`，`Failed` 对应 `ToolError::Failed`。
 #[derive(Debug, Error)]
 pub enum WasmCallError {
-    #[error("插件调用被中断")]
+    #[error("WASM 调用被中断")]
     Aborted,
-    #[error("插件调用失败: {0}")]
+    #[error("WASM 调用失败: {0}")]
     Failed(String),
 }
 
-/// 插件 Store 数据（命名为 `HostState` 避免与 bindgen 生成的 `PluginState` 冲突）。
-///
-/// impl `WasiView`（table + ctx）供 WASI host import 使用。
-/// 持有 manifest（权限校验）+ config（host.get_config 读取源）+ cancel_token。
-pub struct HostState {
-    pub ctx: WasiCtx,
-    pub table: wasmtime::component::ResourceTable,
-    pub manifest: Arc<PluginManifest>,
-    /// 插件级配置子表（来自 GlobalConfig.plugin_settings[<id>]）。
-    pub config: toml::Value,
-    /// 当前调用的 cancel token（每次 call_tool_execute 注入新 token）。
-    pub cancel_token: CancellationToken,
-    /// 项目根（host.read_file/write_file 路径校验 + run-command 默认 cwd）。
-    pub project_root: PathBuf,
-    /// 插件工作目录（WASI preopen 沙箱）。
-    pub work_dir: PathBuf,
-}
 
-impl WasiView for HostState {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.ctx
-    }
-    fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
-        &mut self.table
-    }
-}
-
-// ===== Host trait 实现（host import 侧）=====
-//
-// wasmtime bindgen 为 `interface host` 生成 `xgent::plugin::host::Host` trait。
-// 我们在 `HostState` 上 impl 它，转发到 manifest/config/cancel。
-// 注意：Host trait 方法是 async（因 `async: true`），返回 `Result<T>`（trappable）。
-
-impl xgent::plugin::host::Host for HostState {
-    async fn read_file(&mut self, path: String) -> wasmtime::Result<Result<String, String>> {
-        let abs = self.resolve_project_path(&path);
-        match self.check_fs_read(&abs) {
-            Err(e) => return Ok(Err(e)),
-            Ok(()) => {}
-        }
-        match tokio::fs::read_to_string(&abs).await {
-            Ok(s) => Ok(Ok(s)),
-            Err(e) => Ok(Err(format!("读取文件失败: {e}"))),
-        }
-    }
-
-    async fn write_file(
-        &mut self,
-        path: String,
-        content: String,
-    ) -> wasmtime::Result<Result<(), String>> {
-        let abs = self.resolve_project_path(&path);
-        match self.check_fs_write(&abs) {
-            Err(e) => return Ok(Err(e)),
-            Ok(()) => {}
-        }
-        match tokio::fs::write(&abs, content).await {
-            Ok(()) => Ok(Ok(())),
-            Err(e) => Ok(Err(format!("写入文件失败: {e}"))),
-        }
-    }
-
-    async fn log(
-        &mut self,
-        level: xgent::plugin::host::LogLevel,
-        message: String,
-    ) -> wasmtime::Result<()> {
-        match level {
-            xgent::plugin::host::LogLevel::Debug => {
-                tracing::debug!(plugin = %self.manifest.id, "{message}")
-            }
-            xgent::plugin::host::LogLevel::Info => {
-                tracing::info!(plugin = %self.manifest.id, "{message}")
-            }
-            xgent::plugin::host::LogLevel::Warn => {
-                tracing::warn!(plugin = %self.manifest.id, "{message}")
-            }
-            xgent::plugin::host::LogLevel::Error => {
-                tracing::error!(plugin = %self.manifest.id, "{message}")
-            }
-        }
-        Ok(())
-    }
-
-    async fn get_config(&mut self, key: String) -> wasmtime::Result<Option<String>> {
-        // key 形如 "<plugin_id>.<field>"，从 config 子表取 <field>。
-        let field = match key.split_once('.') {
-            Some((pid, f)) if pid == self.manifest.id => f,
-            _ => return Ok(None),
-        };
-        let val = self.config.as_table().and_then(|t| t.get(field));
-        match val {
-            Some(v) => Ok(Some(v.to_string())),
-            None => Ok(None),
-        }
-    }
-
-    async fn run_command(
-        &mut self,
-        cmd: xgent::plugin::host::CommandReq,
-    ) -> wasmtime::Result<
-        Result<xgent::plugin::host::CommandOutput, xgent::plugin::host::CommandError>,
-    > {
-        if !self
-            .manifest
-            .permissions
-            .command
-            .iter()
-            .any(|c| c == &cmd.program)
-        {
-            return Ok(Err(xgent::plugin::host::CommandError::PermissionDenied));
-        }
-        let cwd = cmd
-            .cwd
-            .as_deref()
-            .map(|p| self.resolve_project_path(p))
-            .unwrap_or_else(|| self.project_root.clone());
-        let mut command = tokio::process::Command::new(&cmd.program);
-        command.args(&cmd.args).current_dir(&cwd);
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
-        let mut child = match command.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                return Ok(Err(xgent::plugin::host::CommandError::SpawnFailed(
-                    e.to_string(),
-                )));
-            }
-        };
-        // cancel 关键点：select on child.wait() vs cancel_token.cancelled()
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let wait_fut = async {
-            let status = child.wait().await?;
-            let out = match stdout {
-                Some(mut s) => {
-                    use tokio::io::AsyncReadExt;
-                    let mut buf = String::new();
-                    s.read_to_string(&mut buf).await.ok();
-                    buf
-                }
-                None => String::new(),
-            };
-            let err = match stderr {
-                Some(mut s) => {
-                    use tokio::io::AsyncReadExt;
-                    let mut buf = String::new();
-                    s.read_to_string(&mut buf).await.ok();
-                    buf
-                }
-                None => String::new(),
-            };
-            std::io::Result::Ok(xgent::plugin::host::CommandOutput {
-                stdout: out,
-                stderr: err,
-                exit_code: status.code().unwrap_or(-1),
-            })
-        };
-        tokio::select! {
-            biased;
-            _ = self.cancel_token.cancelled() => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                Ok(Err(xgent::plugin::host::CommandError::Cancelled))
-            }
-            res = wait_fut => match res {
-                Ok(o) => Ok(Ok(o)),
-                Err(e) => Ok(Err(xgent::plugin::host::CommandError::Io(e.to_string()))),
-            },
-        }
-    }
-
-    async fn http_get(&mut self, _url: String) -> wasmtime::Result<Result<String, String>> {
-        Ok(Err("http-get not implemented".into()))
-    }
-}
-
-impl HostState {
-    fn resolve_project_path(&self, path: &str) -> PathBuf {
-        let p = Path::new(path);
-        if p.is_absolute() {
-            if p.starts_with(&self.project_root) {
-                p.to_path_buf()
-            } else {
-                self.project_root.join(path)
-            }
-        } else {
-            self.project_root.join(path)
-        }
-    }
-
-    fn check_fs_read(&self, abs: &Path) -> Result<(), String> {
-        if !abs.starts_with(&self.project_root) {
-            return Err(format!("路径不在项目根内: {}", abs.display()));
-        }
-        if self.manifest.permissions.fs_read.is_empty() {
-            return Err("插件未声明 fs-read 权限".into());
-        }
-        let rel = abs
-            .strip_prefix(&self.project_root)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        for pat in &self.manifest.permissions.fs_read {
-            if pat == "**" || glob_match(pat, &rel) {
-                return Ok(());
-            }
-        }
-        Err(format!("路径不匹配 fs-read 权限: {rel}"))
-    }
-
-    fn check_fs_write(&self, abs: &Path) -> Result<(), String> {
-        if !abs.starts_with(&self.project_root) {
-            return Err(format!("路径不在项目根内: {}", abs.display()));
-        }
-        if self.manifest.permissions.fs_write.is_empty() {
-            return Err("插件未声明 fs-write 权限".into());
-        }
-        let rel = abs
-            .strip_prefix(&self.project_root)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        for pat in &self.manifest.permissions.fs_write {
-            if pat == "**" || glob_match(pat, &rel) {
-                return Ok(());
-            }
-        }
-        Err(format!("路径不匹配 fs-write 权限: {rel}"))
-    }
-}
-
-/// 简易 glob 匹配：支持 `*`（单层任意）与 `**`（多层任意）。
-fn glob_match(pat: &str, s: &str) -> bool {
-    if pat == "**" {
-        return true;
-    }
-    if pat.contains("**") {
-        let parts: Vec<&str> = pat.split("**").collect();
-        if parts.len() == 2 {
-            return s.starts_with(parts[0]) && s.ends_with(parts[1]);
-        }
-    }
-    if pat.contains('*') {
-        let parts: Vec<&str> = pat.split('*').collect();
-        if parts.len() == 2 {
-            return s.starts_with(parts[0]) && s.ends_with(parts[1]);
-        }
-    }
-    pat == s
-}
 /// 校验插件 API 版本（计划 Step 3.2 + 偏差修正）。
 ///
 /// 扫 WASM component 的 custom section `xgent:api-version`，反解 6 字节
-/// （3 字节 major + 3 字节 minor + patch，big-endian），MVP 只接受 `0.1.0`。
+/// （major(2) + minor(2) + patch(2)，big-endian），MVP 只接受 `0.1.0`。
 /// 缺失 section 或版本不兼容返回 `Err`，拒绝加载。
 fn validate_api_version(wasm_bytes: &[u8]) -> Result<(), WasmCallError> {
     use wasmparser::Parser;
@@ -307,7 +60,10 @@ fn validate_api_version(wasm_bytes: &[u8]) -> Result<(), WasmCallError> {
     for payload in parser.parse_all(wasm_bytes) {
         let payload = match payload {
             Ok(p) => p,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!(error = %e, "WASM payload 解析失败，跳过该段");
+                continue;
+            }
         };
         if let wasmparser::Payload::CustomSection(cs) = payload {
             if cs.name() == "xgent:api-version" {
@@ -337,15 +93,23 @@ fn validate_api_version(wasm_bytes: &[u8]) -> Result<(), WasmCallError> {
 }
 
 /// WASM 引擎单例（全局唯一，所有插件共享）。照设计文档 §4.2。
-fn wasm_engine() -> &'static Engine {
-    use std::sync::OnceLock;
-    static ENGINE: OnceLock<Engine> = OnceLock::new();
-    ENGINE.get_or_init(|| {
-        let mut config = wasmtime::Config::new();
-        config.wasm_component_model(true);
-        config.async_support(true);
-        Engine::new(&config).expect("wasmtime Engine 构造失败")
-    })
+///
+/// 用 `LazyLock<Result<Engine, WasmCallError>>` 持存构造结果，避免库代码
+/// `expect`（AGENTS §5.7）。构造失败极罕见（系统资源不足），首次失败后
+/// 被缓存，后续调用复用同一错误。
+///
+/// 注：稳定 Rust（1.97）`OnceLock::get_or_try_init` 仍不稳定（issue #109737），
+/// 故用 `LazyLock` 而非 `OnceLock + get_or_try_init`。
+fn wasm_engine() -> Result<&'static Engine, WasmCallError> {
+    static ENGINE: std::sync::LazyLock<Result<Engine, WasmCallError>> =
+        std::sync::LazyLock::new(|| {
+            let mut config = wasmtime::Config::new();
+            config.wasm_component_model(true);
+            config.async_support(true);
+            Engine::new(&config)
+                .map_err(|e| WasmCallError::Failed(format!("wasmtime Engine 构造失败: {e}")))
+        });
+    ENGINE.as_ref().map_err(|e| WasmCallError::Failed(e.to_string()))
 }
 
 /// 构造 WASI ctx：preopen 插件 work_dir 为 `.`，inherit stdio，env。
@@ -369,18 +133,23 @@ pub struct WasmHost {
 }
 
 impl WasmHost {
-    pub fn new(proxy: Arc<PluginHostProxy>, project_root: PathBuf) -> Arc<Self> {
-        let engine = wasm_engine().clone();
+    /// 构造 WasmHost。Engine/Linker 构造失败经 `Result` 传播（AGENTS §5.7）。
+    pub fn new(
+        proxy: Arc<PluginHostProxy>,
+        project_root: PathBuf,
+    ) -> Result<Arc<Self>, WasmCallError> {
+        let engine = wasm_engine()?.clone();
         let mut linker: Linker<HostState> = Linker::new(&engine);
         Plugin::add_to_linker(&mut linker, |state: &mut HostState| state)
-            .expect("add_to_linker 失败");
-        wasmtime_wasi::add_to_linker_async(&mut linker).expect("add_to_linker_async 失败");
-        Arc::new(Self {
+            .map_err(|e| WasmCallError::Failed(format!("add_to_linker 失败: {e}")))?;
+        wasmtime_wasi::add_to_linker_async(&mut linker)
+            .map_err(|e| WasmCallError::Failed(format!("add_to_linker_async 失败: {e}")))?;
+        Ok(Arc::new(Self {
             engine,
             linker: Arc::new(linker),
             proxy,
             project_root,
-        })
+        }))
     }
 
     pub fn engine(&self) -> &Engine {
@@ -416,6 +185,7 @@ impl WasmHost {
             cancel_token: CancellationToken::new(),
             project_root: self.project_root.clone(),
             work_dir: work_dir.clone(),
+            push_update: None,
         };
         let mut store = Store::new(&self.engine, state);
 
@@ -467,38 +237,29 @@ impl WasmPlugin {
         Self { tx, in_flight }
     }
 
-    async fn dispatch<F, R>(
-        &self,
-        cancel_token: CancellationToken,
-        build: F,
-    ) -> Result<R, WasmCallError>
+    async fn dispatch<F, R>(&self, cancel_token: CancellationToken, build: F) -> Result<R, WasmCallError>
     where
         F: FnOnce(CancellationToken, oneshot::Sender<Result<R, WasmCallError>>) -> PluginCall
             + Send
             + 'static,
         R: Send + 'static,
     {
-        self.in_flight
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _guard = InFlightGuard::new(self.in_flight.clone());
         let (resp_tx, resp_rx) = oneshot::channel::<Result<R, WasmCallError>>();
         // clone cancel_token 给 build（select 侧保留原 token 的借用）
         let call = build(cancel_token.child_token(), resp_tx);
         if self.tx.send(call).is_err() {
-            self.in_flight
-                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             return Err(WasmCallError::Failed("插件 Task 已退出".into()));
         }
-        let in_flight = self.in_flight.clone();
+        // guard 在 select! 命中 resp_rx 后由 Drop 减计数；cancel 分支
+        // 同样经 guard drop 减计数（future 结束）。
         tokio::select! {
             biased;
             _ = cancel_token.cancelled() => Err(WasmCallError::Aborted),
-            res = resp_rx => {
-                in_flight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                match res {
-                    Ok(r) => r,
-                    Err(_) => Err(WasmCallError::Failed("插件调用 oneshot 失败".into())),
-                }
-            }
+            res = resp_rx => match res {
+                Ok(r) => r,
+                Err(_) => Err(WasmCallError::Failed("插件调用 oneshot 失败".into())),
+            },
         }
     }
 
@@ -508,6 +269,7 @@ impl WasmPlugin {
         short_id: &str,
         input_json: &str,
         cancel_token: CancellationToken,
+        on_update: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>>,
     ) -> Result<String, WasmCallError> {
         let short_id = short_id.to_string();
         let input = input_json.to_string();
@@ -518,24 +280,44 @@ impl WasmPlugin {
                 let short_id = short_id.clone();
                 let input = input.clone();
                 let cancel = cancel.clone();
+                let on_update = on_update.clone();
                 Box::pin(async move {
                     store.data_mut().cancel_token = cancel;
+                    // set push-update 回调（§5.3.1），execute 后 clear
+                    store.data_mut().push_update = on_update;
                     let result = ext
                         .xgent_plugin_tool()
-                        .call_execute(store, &short_id, &input)
+                        .call_execute(&mut *store, &short_id, &input)
                         .await;
-                    let mapped = match result {
-                        Ok(Ok(s)) => Ok(s),
-                        Ok(Err(e)) => match e {
-                            exports::xgent::plugin::tool::ToolError::Aborted => {
-                                Err(WasmCallError::Aborted)
-                            }
-                            exports::xgent::plugin::tool::ToolError::Failed(msg) => {
-                                Err(WasmCallError::Failed(msg))
-                            }
-                        },
-                        Err(trap) => Err(WasmCallError::Failed(format!("wasm trap: {trap}"))),
-                    };
+                    store.data_mut().push_update = None;
+                    let mapped = map_tool_result(result);
+                    let _ = resp_tx.send(mapped);
+                })
+            })
+        })
+        .await
+    }
+
+    /// 调用插件 `tool.summarize`（async WIT 调用，无 cancel 需求）。
+    pub async fn call_tool_summarize(
+        &self,
+        short_id: &str,
+        input_json: &str,
+    ) -> Result<String, WasmCallError> {
+        let short_id = short_id.to_string();
+        let input = input_json.to_string();
+        self.dispatch(CancellationToken::new(), move |_cancel, resp_tx| {
+            let short_id = short_id.clone();
+            let input = input.clone();
+            Box::new(move |ext: &mut Plugin, store: &mut Store<HostState>| {
+                let short_id = short_id.clone();
+                let input = input.clone();
+                Box::pin(async move {
+                    let result = ext
+                        .xgent_plugin_tool()
+                        .call_summarize(store, &short_id, &input)
+                        .await;
+                    let mapped = map_trap(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -558,11 +340,7 @@ impl WasmPlugin {
                 Box::pin(async move {
                     store.data_mut().cancel_token = cancel;
                     let result = ext.xgent_plugin_command().call_run(store, &short_id).await;
-                    let mapped = match result {
-                        Ok(Ok(s)) => Ok(s),
-                        Ok(Err(e)) => Err(WasmCallError::Failed(e)),
-                        Err(trap) => Err(WasmCallError::Failed(format!("wasm trap: {trap}"))),
-                    };
+                    let mapped = map_result_string(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -591,11 +369,7 @@ impl WasmPlugin {
                         .xgent_plugin_context_provider()
                         .call_retrieve(store, &short_id, &query)
                         .await;
-                    let mapped = match result {
-                        Ok(Ok(r)) => Ok(r),
-                        Ok(Err(e)) => Err(WasmCallError::Failed(e)),
-                        Err(trap) => Err(WasmCallError::Failed(format!("wasm trap: {trap}"))),
-                    };
+                    let mapped = map_result_string(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -622,14 +396,14 @@ impl WasmPlugin {
                         .xgent_plugin_context_provider()
                         .call_on_file_changed(store, &short_id, path.as_deref())
                         .await;
-                    let mapped =
-                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped = map_trap(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
         })
         .await
     }
+
     /// 调用插件 `tool.register`（加载时调，返回工具定义列表）。
     pub async fn call_tool_register(
         &self,
@@ -638,8 +412,7 @@ impl WasmPlugin {
             Box::new(move |ext: &mut Plugin, store: &mut Store<HostState>| {
                 Box::pin(async move {
                     let result = ext.xgent_plugin_tool().call_register(store).await;
-                    let mapped =
-                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped = map_trap(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -655,8 +428,7 @@ impl WasmPlugin {
             Box::new(move |ext: &mut Plugin, store: &mut Store<HostState>| {
                 Box::pin(async move {
                     let result = ext.xgent_plugin_command().call_register(store).await;
-                    let mapped =
-                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped = map_trap(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -675,8 +447,7 @@ impl WasmPlugin {
                         .xgent_plugin_context_provider()
                         .call_register(store)
                         .await;
-                    let mapped =
-                        result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")));
+                    let mapped = map_trap(result);
                     let _ = resp_tx.send(mapped);
                 })
             })
@@ -687,5 +458,56 @@ impl WasmPlugin {
     /// 当前 in-flight 调用数（升级 in-flight 处理用，§8.4）。
     pub fn in_flight(&self) -> usize {
         self.in_flight.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// `tool.execute` 返回的 `wasmtime::Result<Result<String, ToolError>>` 映射为 `WasmCallError`。
+fn map_tool_result(
+    result: wasmtime::Result<Result<String, exports::xgent::plugin::tool::ToolError>>,
+) -> Result<String, WasmCallError> {
+    match result {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => match e {
+            exports::xgent::plugin::tool::ToolError::Aborted => Err(WasmCallError::Aborted),
+            exports::xgent::plugin::tool::ToolError::Failed(msg) => Err(WasmCallError::Failed(msg)),
+        },
+        Err(trap) => Err(WasmCallError::Failed(format!("wasm trap: {trap}"))),
+    }
+}
+
+/// `Result<Result<T, String>, wasmtime::Error>` → `Result<T, WasmCallError>`。
+///
+/// command.run / context-provider.retrieve 的 WIT 返回 `result<T, string>`，
+/// 外层是 wasmtime trap。统一映射避免各处手写。
+fn map_result_string<T>(
+    result: wasmtime::Result<Result<T, String>>,
+) -> Result<T, WasmCallError> {
+    match result {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(WasmCallError::Failed(e)),
+        Err(trap) => Err(WasmCallError::Failed(format!("wasm trap: {trap}"))),
+    }
+}
+
+/// `wasmtime::Result<T>` 的 trap 映射为 `WasmCallError`（单层，非双层 execute）。
+fn map_trap<T>(result: wasmtime::Result<T>) -> Result<T, WasmCallError> {
+    result.map_err(|e| WasmCallError::Failed(format!("wasm trap: {e}")))
+}
+
+/// in-flight 调用计数 RAII guard：构造时 +1，Drop 时 -1。
+///
+/// 避免错误路径手写 fetch_sub 遗漏（AGENTS §5.7 DRY）。
+struct InFlightGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl InFlightGuard {
+    fn new(counter: Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self(counter)
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }

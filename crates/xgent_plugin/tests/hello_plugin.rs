@@ -59,7 +59,7 @@ async fn load_and_call_hello_plugin() {
 
     let proxy = Arc::new(PluginHostProxy::new());
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let wasm_host = WasmHost::new(proxy, project_root);
+    let wasm_host = WasmHost::new(proxy, project_root).expect("WasmHost::new");
 
     let work_dir = tempfile::tempdir().expect("tempdir");
     let plugin = wasm_host
@@ -79,11 +79,7 @@ async fn load_and_call_hello_plugin() {
 
     // execute 应返回 Ok（JSON 含 output 字段）
     let result = plugin
-        .call_tool_execute(
-            "hello",
-            r#"{"name":"world"}"#,
-            tokio_util::sync::CancellationToken::new(),
-        )
+        .call_tool_execute("hello", r#"{"name":"world"}"#, tokio_util::sync::CancellationToken::new(), None)
         .await
         .expect("execute");
     assert!(

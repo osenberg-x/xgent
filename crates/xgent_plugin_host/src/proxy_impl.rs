@@ -13,12 +13,11 @@
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 use xgent_plugin::{
-    PluginCommandProxy, PluginContextProxy, PluginHostProxy, PluginManifest, PluginToolProxy,
-    ProxyError, WasmPlugin, WitCommandDef, WitContextProviderDef, WitToolDef,
+    PluginCommandProxy, PluginContextProxy, PluginManifest, PluginToolProxy, ProxyError,
+    WasmPlugin, WitCommandDef, WitContextProviderDef, WitToolDef,
 };
 
 use crate::command::PluginCommand;
@@ -167,8 +166,10 @@ impl PluginContextProxy for PluginContextProxyImpl {
 /// 在主线程 system 内执行一个 PluginOp（操作 ToolExecutor/CommandRegistry/ContextHub）。
 ///
 /// 由 `plugin_poll_system` 调用，传入 `&mut World` 取用 Resources。
-pub fn execute_op(op: PluginOp, world: &mut bevy::prelude::World) {
-    use bevy::prelude::Resource;
+pub fn execute_op(
+    op: PluginOp,
+    world: &mut bevy::prelude::World,
+) {
     match op {
         PluginOp::RegisterTools {
             manifest,
@@ -260,6 +261,4 @@ pub fn execute_op(op: PluginOp, world: &mut bevy::prelude::World) {
             hub.remove_by_prefix(&prefix);
         }
     }
-    // 静默未用 trait
-    let _ = std::marker::PhantomData::<Mutex<()>>;
 }

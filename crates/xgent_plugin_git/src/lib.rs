@@ -3,7 +3,7 @@
 //! 照设计文档 §11.3 + Step P5。验证完整链路：工具经 `host.run_command("git", ...)`
 //! 执行 git 子命令，返回 JSON 序列化的 ToolResult。
 //!
-//! 提供：git_diff / git_log / git_status 工具 + diff/log/status 命令。
+//! 提供：git_diff / git_commit / git_log / git_status 工具 + diff/commit/log/status 命令 + git_history ContextProvider。
 
 use xgent_plugin_api::{Extension, WitCommandDef, WitToolDef, WitToolError, WitToolTier};
 
@@ -34,24 +34,29 @@ impl Extension for GitPlugin {
                 schema: r#"{"type":"object"}"#.into(),
                 tier: WitToolTier::Read,
             },
+            WitToolDef {
+                id: "git_commit".into(),
+                description: "提交暂存区更改".into(),
+                schema: r#"{"type":"object","properties":{"message":{"type":"string","description":"提交信息"}},"required":["message"]}"#.into(),
+                tier: WitToolTier::Write,
+            },
         ]
     }
 
     fn register_commands(&mut self) -> Vec<WitCommandDef> {
         vec![
-            WitCommandDef {
-                id: "diff".into(),
-                label: "Git: 查看 Diff".into(),
-            },
-            WitCommandDef {
-                id: "log".into(),
-                label: "Git: 提交历史".into(),
-            },
-            WitCommandDef {
-                id: "status".into(),
-                label: "Git: 状态".into(),
-            },
+            WitCommandDef { id: "diff".into(), label: "Git: 查看 Diff".into() },
+            WitCommandDef { id: "log".into(), label: "Git: 提交历史".into() },
+            WitCommandDef { id: "status".into(), label: "Git: 状态".into() },
+            WitCommandDef { id: "commit".into(), label: "Git: 提交".into() },
         ]
+    }
+
+    fn register_context_providers(&mut self) -> Vec<xgent_plugin_api::WitProviderDef> {
+        vec![xgent_plugin_api::WitProviderDef {
+            id: "git_history".into(),
+            description: "Git 提交历史上下文".into(),
+        }]
     }
 
     fn execute(&mut self, tool_id: &str, input: &str) -> Result<String, WitToolError> {
@@ -63,7 +68,6 @@ impl Extension for GitPlugin {
                     .get("cached")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let flag = if cached { "--cached" } else { "" };
                 let args: Vec<&str> = if cached {
                     vec!["diff", "--cached", "--stat"]
                 } else {
@@ -80,7 +84,19 @@ impl Extension for GitPlugin {
                 let n_str = limit.to_string();
                 run_git_via_host_command(tool_id, vec!["log", &format!("-n{n_str}"), "--oneline"])
             }
-            "git_status" => run_git_via_host_command(tool_id, vec!["status", "--short"]),
+            "git_status" => {
+                run_git_via_host_command(tool_id, vec!["status", "--short"])
+            }
+            "git_commit" => {
+                let message = input_val
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if message.is_empty() {
+                    return Err(WitToolError::Failed("提交信息不能为空".into()));
+                }
+                run_git_via_host_command(tool_id, vec!["commit", "-m", message])
+            }
             _ => Err(WitToolError::Failed(format!("未知工具: {tool_id}"))),
         }
     }
@@ -91,6 +107,7 @@ impl Extension for GitPlugin {
             "diff" => "git_diff",
             "log" => "git_log",
             "status" => "git_status",
+            "commit" => "git_commit",
             _ => return Err(format!("未知命令: {command_id}")),
         };
         self.execute(tool_id, "{}").map_err(|e| match e {
@@ -98,24 +115,38 @@ impl Extension for GitPlugin {
             WitToolError::Aborted => "被中断".into(),
         })
     }
+
+    fn retrieve(
+        &mut self,
+        provider_id: &str,
+        _query: &xgent_plugin_api::WitContextQuery,
+    ) -> Result<xgent_plugin_api::WitContextResult, String> {
+        if provider_id != "git_history" {
+            return Err(format!("未知 provider: {provider_id}"));
+        }
+        // 取最近 20 条提交历史作为上下文
+        let req = xgent_plugin_api::WitCommandReq {
+            program: "git".into(),
+            args: vec!["log".into(), "-n20".into(), "--oneline".into()],
+            cwd: None,
+        };
+        let out = xgent_plugin_api::host::run_command(&req)
+            .map_err(|e| format!("git log 失败: {:?}", e))?;
+        let content = if !out.stdout.is_empty() { out.stdout } else { out.stderr };
+        let chunk = xgent_plugin_api::WitContextChunk {
+            path: "git_history".into(),
+            content,
+            relevance: "high".into(),
+            token_estimate: 0,
+        };
+        Ok(xgent_plugin_api::WitContextResult {
+            chunks: vec![chunk],
+            tree_summary: None,
+            total_tokens: 0,
+        })
+    }
 }
 
-/// 经 `host.run_command` 调 git。
-///
-/// 注：xgent_plugin_api 的 host import 经 wit_bindgen 生成绑定，插件可调
-/// `xgent::plugin::host::Host` trait 方法。但 MVP 简化：API crate 的默认
-/// Component impl 不直接暴露 host 调用给 Extension trait（设计上 host 调用
-/// 经 Store 的 Host trait impl，插件需经 wit 绑定的 import 调用）。
-///
-/// 此处采用 MVP 简化路径：git 插件直接返回待执行的 git 命令描述，
-/// 宿主侧 PluginTool::execute 调本函数返回的字符串作为 ToolResult.output。
-/// 真实 git 执行由宿主侧 host.run-command 完成——但这需插件能调 host import。
-///
-/// 完整实现需在 Extension trait 加 host 调用入口（如 `host()` 方法），
-/// 或插件直接用 wit 绑定的 `xgent::plugin::host` 模块。MVP 阶段先用占位：
-/// 返回命令描述，宿主侧若需真实执行由 PluginContextProvider/PluginTool
-/// 在 execute 内调 host.run-command（当前 PluginTool::execute 调插件的
-/// tool.execute WIT export，插件内调 host.run-command）。
 fn run_git_via_host_command(tool_id: &str, args: Vec<&str>) -> Result<String, WitToolError> {
     let req = xgent_plugin_api::WitCommandReq {
         program: "git".into(),

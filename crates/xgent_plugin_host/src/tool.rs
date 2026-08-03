@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use xgent_core::chat::ToolSchema;
 use xgent_plugin::{WasmCallError, WasmPlugin};
 use xgent_tools::tool::{
-    Concurrency, SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult, ToolTier, ToolUpdateCallback,
+    Concurrency, Tool, ToolCtx, ToolError, ToolResult, ToolTier, ToolUpdateCallback,
 };
 
 /// 插件工具适配器。
@@ -49,8 +49,13 @@ impl PluginTool {
         let full_id: Arc<str> = format!("plugin.{}.{}", plugin_id, tool_def.id).into();
         // tool_def.schema 是 JSON Schema 字符串。ToolSchema 的 input_schema 是
         // 该 JSON Schema（描述工具输入参数）；name/description 由我们填充。
-        let input_schema: serde_json::Value =
-            serde_json::from_str(&tool_def.schema).unwrap_or(serde_json::json!({"type":"object"}));
+        let input_schema: serde_json::Value = match serde_json::from_str(&tool_def.schema) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(plugin = %plugin_id, tool = %tool_def.id, error = %e, "插件工具 schema 解析失败，降级为空 object");
+                serde_json::json!({"type":"object"})
+            }
+        };
         let tier = match tool_def.tier {
             xgent_plugin::WitToolTier::Read => ToolTier::Read,
             xgent_plugin::WitToolTier::Write => ToolTier::Write,
@@ -100,31 +105,53 @@ impl Tool for PluginTool {
         }
     }
 
+    /// 生成工具输入的人类可读摘要（§5.3）。
+    ///
+    /// 设计 §5.3 要求经 WIT `tool.summarize` 调用插件，但 WIT 方法是 async，
+    /// 而 `Tool::summarize` 是同步 trait 方法（被 `ToolExecutor::execute` 在
+    /// 确认流程中同步调用）。MVP 保留本地默认摘要；WIT `tool.summarize` 接口
+    /// 已声明（供未来 summarize 改 async 后接通）。
     fn summarize(&self, input: &Value) -> String {
         format!("{}({})", self.short_id, input)
     }
+
+    /// approval_for / preview_diff：MVP 裁决（设计 §5.3 289 行）暂不接 WIT，
+    /// 回退 trait 默认（approval_for = tier()，preview_diff = None）。
+    /// 确认弹窗对插件工具退化为纯文本 summary（与内建只读工具一致）。
 
     async fn execute(
         &self,
         input: Value,
         _ctx: &ToolCtx,
         signal: CancellationToken,
-        _on_update: Option<&ToolUpdateCallback>,
+        on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
         let input_json = serde_json::to_string(&input).unwrap_or_default();
+        // on_update 桥接受限：ToolUpdateCallback 是 Box<dyn Fn>（非 'static），
+        // call_tool_execute 要求 Arc<dyn Fn + 'static>，且 ToolExecutor MVP
+        // 总传 None（executor.rs:126/155）。push-update 基础设施（WIT/HostState/
+        // call_tool_execute 参数）已就绪，待 ToolUpdateCallback 改 Arc 后接通。
+        let _ = on_update;
+        let update_cb: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>> = None;
         match self
             .plugin
-            .call_tool_execute(&self.short_id, &input_json, signal)
+            .call_tool_execute(&self.short_id, &input_json, signal, update_cb)
             .await
         {
             Ok(s) => {
                 // 反序列化为 ToolResult；失败则构造默认（偏差修正 8：side_effect=None）
-                let result: ToolResult = serde_json::from_str(&s).unwrap_or(ToolResult {
-                    output: s.clone(),
-                    is_error: false,
-                    denied: false,
-                    side_effect: None,
-                });
+                let result: ToolResult = match serde_json::from_str(&s) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(tool = %self.short_id, error = %e, "插件工具 execute 返回非法 ToolResult JSON，降级为原始字符串");
+                        ToolResult {
+                            output: s.clone(),
+                            is_error: false,
+                            denied: false,
+                            side_effect: None,
+                        }
+                    }
+                };
                 Ok(result)
             }
             Err(e) => match e {
@@ -134,7 +161,3 @@ impl Tool for PluginTool {
         }
     }
 }
-
-// 静默 SecurityPolicy 未用警告（trait 默认 approval_for 返回 tier，不需显式引用）
-#[allow(dead_code)]
-fn _silence(_: SecurityPolicy) {}
