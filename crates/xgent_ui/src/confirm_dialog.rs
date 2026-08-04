@@ -241,7 +241,7 @@ fn show_on_request(
                                         border_radius: BorderRadius::all(px(4.0)),
                                         ..default()
                                     },
-                                    BackgroundColor(Color::srgba(0.07, 0.08, 0.10, 1.0)),
+                                    BackgroundColor(theme.deep),
                                     BorderColor::all(theme.border),
                                     ScrollPosition::default(),
                                 ))

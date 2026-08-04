@@ -249,30 +249,38 @@ fn update_tool_result(
         Query<&mut Text, With<ToolFoldMarker>>,
     )>,
     loc: Res<Localizer>,
+    theme: Res<Theme>,
 ) {
     for ev in reader.read() {
         for (mut card, children) in q_cards.iter_mut() {
             if card.tool_call_id != ev.tool_call_id {
                 continue;
             }
-            let is_error = ev.is_error;
-            let status_label = if is_error {
-                tr(&loc, "tool-failed")
+            let (status_label, status_color, dot_color) = if ev.denied {
+                (
+                    tr(&loc, "tool-denied"),
+                    theme.st_deny,
+                    BackgroundColor(theme.st_deny),
+                )
+            } else if ev.is_error {
+                (
+                    tr(&loc, "tool-failed"),
+                    theme.st_fail,
+                    BackgroundColor(theme.st_fail),
+                )
             } else {
-                tr(&loc, "tool-done")
-            };
-            let status_color = if is_error {
-                Color::srgba(0.9, 0.3, 0.3, 1.0)
-            } else {
-                Color::srgba(0.133, 0.773, 0.369, 1.0)
-            };
-            let dot_color = if is_error {
-                BackgroundColor(Color::srgba(0.937, 0.267, 0.267, 1.0))
-            } else {
-                BackgroundColor(Color::srgba(0.133, 0.773, 0.369, 1.0))
+                (
+                    tr(&loc, "tool-done"),
+                    theme.st_ok,
+                    BackgroundColor(theme.st_ok),
+                )
             };
             let line_count = ev.output.lines().count();
-            let fold_text = format!("▾ 结果：{} 行 · 点击折叠", line_count);
+            let fold_text = crate::i18n::tr_with(
+                &loc,
+                "tool-fold-result",
+                &[("lines", line_count.to_string().into())],
+            );
             card.expanded = true;
             {
                 let mut q_status = params.p0();
@@ -339,8 +347,10 @@ fn format_tool_summary(tool_id: &str, input: &serde_json::Value) -> String {
         _ => {}
     }
     let s = input.to_string();
-    if s.len() > 50 {
-        format!("{}…", &s[..47])
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() > 50 {
+        let truncated: String = chars[..47].iter().collect();
+        format!("{truncated}…")
     } else {
         s
     }
@@ -370,6 +380,7 @@ fn apply_tool_card_visibility(
     q_cards: Query<(&ToolCardMarker, &Children)>,
     mut q_result: Query<&mut Node, With<ToolResultTextMarker>>,
     mut q_fold: Query<&mut Text, With<ToolFoldMarker>>,
+    loc: Res<Localizer>,
 ) {
     for (card, children) in q_cards.iter() {
         for child in children.iter() {
@@ -382,14 +393,23 @@ fn apply_tool_card_visibility(
             }
             if let Ok(mut text) = q_fold.get_mut(child) {
                 if !text.0.is_empty() {
-                    let expanded_text = text.0.starts_with("▾");
-                    if card.expanded && !expanded_text {
-                        text.0 = text.0.replacen("▸", "▾", 1);
-                        text.0 = text.0.replacen("展开", "折叠", 1);
-                    } else if !card.expanded && expanded_text {
-                        text.0 = text.0.replacen("▾", "▸", 1);
-                        text.0 = text.0.replacen("折叠", "展开", 1);
-                    }
+                    let prefix = if card.expanded { "▾" } else { "▸" };
+                    let label_key = if card.expanded {
+                        "tool-fold-result"
+                    } else {
+                        "tool-unfold-result"
+                    };
+                    let lines = text
+                        .0
+                        .split_whitespace()
+                        .find(|s| s.parse::<usize>().is_ok())
+                        .unwrap_or("0");
+                    let new_text = crate::i18n::tr_with(
+                        &loc,
+                        label_key,
+                        &[("lines", lines.to_string().into())],
+                    );
+                    text.0 = format!("{prefix} {new_text}");
                 }
             }
         }
