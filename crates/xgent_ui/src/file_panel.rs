@@ -1083,12 +1083,17 @@ fn handle_file_preview_close(
 }
 /// 更新文件/目录条目背景色：选中态半透明 accent、悬停态更淡 accent、默认透明。
 ///
-/// 条目 Button 在 spawn 时挂 `BackgroundColor(Color::NONE)`，本系统每帧据
+/// 条目 Button 在 spawn 时挂 `BackgroundColor(Color::NONE)`，本系统据
 /// `FileSelectedMarker`（选中）与 `Interaction::Hovered`（悬停）改写背景色。
+///
+/// 优化：仅处理 Interaction 变化或 SelectedMarker 变化的条目，避免每帧全量遍历。
 fn update_file_entry_style(
     q: Query<
         (Entity, Option<&FileSelectedMarker>, &Interaction),
-        Or<(With<FileEntry>, With<DirEntry>)>,
+        (
+            Or<(With<FileEntry>, With<DirEntry>)>,
+            Or<(Changed<Interaction>, Changed<FileSelectedMarker>)>,
+        ),
     >,
     mut q_bg: Query<&mut BackgroundColor>,
     theme: Res<Theme>,

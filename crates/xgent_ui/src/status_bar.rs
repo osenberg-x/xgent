@@ -141,7 +141,7 @@ fn spawn_status_bar(
     });
 }
 
-/// 每帧更新各分段文本。
+/// 每帧更新各分段文本（有变更检测，避免每帧分配 i18n 字符串）。
 fn update_status_segments(
     conv: Res<Conversation>,
     info: Res<ProviderInfo>,
@@ -153,7 +153,9 @@ fn update_status_segments(
         Query<&mut Text, With<TokenTextMarker>>,
     )>,
 ) {
-    if let Ok(mut text) = q.p0().single_mut() {
+    if !info.is_changed() && !loc.is_changed() {
+        // provider 段无变化
+    } else if let Ok(mut text) = q.p0().single_mut() {
         let label = if info.id.is_empty() {
             crate::i18n::tr(&loc, "status-provider-not-configured").to_string()
         } else {
@@ -163,28 +165,32 @@ fn update_status_segments(
             text.0 = label;
         }
     }
-    if let Ok(mut text) = q.p1().single_mut() {
-        let label = match conv.status {
-            ConversationStatus::Idle => crate::i18n::tr(&loc, "status-ready"),
-            ConversationStatus::Thinking => crate::i18n::tr(&loc, "status-thinking"),
-            ConversationStatus::Streaming => crate::i18n::tr(&loc, "status-streaming"),
-            ConversationStatus::ToolRunning => crate::i18n::tr(&loc, "status-tool-running"),
-            ConversationStatus::Confirming => crate::i18n::tr(&loc, "status-confirming"),
-            ConversationStatus::Aborting => crate::i18n::tr(&loc, "status-aborting"),
-            ConversationStatus::Error => crate::i18n::tr(&loc, "status-error"),
-        };
-        if text.0 != label {
-            text.0 = label.to_string();
+    if conv.is_changed() || loc.is_changed() {
+        if let Ok(mut text) = q.p1().single_mut() {
+            let label = match conv.status {
+                ConversationStatus::Idle => crate::i18n::tr(&loc, "status-ready"),
+                ConversationStatus::Thinking => crate::i18n::tr(&loc, "status-thinking"),
+                ConversationStatus::Streaming => crate::i18n::tr(&loc, "status-streaming"),
+                ConversationStatus::ToolRunning => crate::i18n::tr(&loc, "status-tool-running"),
+                ConversationStatus::Confirming => crate::i18n::tr(&loc, "status-confirming"),
+                ConversationStatus::Aborting => crate::i18n::tr(&loc, "status-aborting"),
+                ConversationStatus::Error => crate::i18n::tr(&loc, "status-error"),
+            };
+            if text.0 != label {
+                text.0 = label.to_string();
+            }
         }
     }
-    if let Ok(mut text) = q.p2().single_mut() {
-        let label = if tokens.total > 0 {
-            format!("↑ {} tokens", format_tokens(tokens.total))
-        } else {
-            String::new()
-        };
-        if text.0 != label {
-            text.0 = label;
+    if tokens.is_changed() {
+        if let Ok(mut text) = q.p2().single_mut() {
+            let label = if tokens.total > 0 {
+                format!("↑ {} tokens", format_tokens(tokens.total))
+            } else {
+                String::new()
+            };
+            if text.0 != label {
+                text.0 = label;
+            }
         }
     }
 }

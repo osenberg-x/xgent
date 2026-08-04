@@ -2,6 +2,7 @@
 
 > 对照 `doc/design/ui-prototype.html` 原型图与当前 `xgent_ui` 实现的差距分析。
 > A-C 阶段 + 本轮修补（光标位置/pending-deny 态/Aborting/确认 diff/预览高亮/顶栏 caret）已落地（2026-07-20）。
+> v2 原型深度 review（5 轮，2026-08-04）：i18n 全量合规、工具 denied 态、硬编码色值集中到 Theme、文件树图标修正为 Unicode、终端 tab 点击修复、系统变更检测优化。
 > 剩余 D（markdown 渲染）未实现。
 
 ---

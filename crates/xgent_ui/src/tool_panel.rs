@@ -376,8 +376,10 @@ fn handle_tool_card_click(
 }
 
 /// 据 `ToolCardMarker.expanded` 切换结果区显隐 + fold 文本。
+///
+/// 优化：仅处理 `expanded` 状态变化的卡片（Changed<ToolCardMarker>）。
 fn apply_tool_card_visibility(
-    q_cards: Query<(&ToolCardMarker, &Children)>,
+    q_cards: Query<(&ToolCardMarker, &Children), Changed<ToolCardMarker>>,
     mut q_result: Query<&mut Node, With<ToolResultTextMarker>>,
     mut q_fold: Query<&mut Text, With<ToolFoldMarker>>,
     loc: Res<Localizer>,

@@ -730,13 +730,16 @@ fn update_streaming_cursor(
         text.0.pop();
     }
 }
-/// 更新会话信息文本。
+/// 更新会话信息文本（有变更检测，避免每帧遍历消息列表）。
 fn update_conversation_info(
     conv: Res<Conversation>,
     tokens: Res<TokenUsage>,
     loc: Res<xgent_settings::Localizer>,
     mut q: Query<&mut Text, With<ConversationInfoMarker>>,
 ) {
+    if !conv.is_changed() && !tokens.is_changed() && !loc.is_changed() {
+        return;
+    }
     let Ok(mut text) = q.single_mut() else {
         return;
     };
@@ -798,12 +801,15 @@ fn clear_on_new_session(
     }
 }
 
-/// 更新输入框右侧 tokenhint 文本。
+/// 更新输入框右侧 tokenhint 文本（有变更检测）。
 fn update_token_hint(
     conv: Res<Conversation>,
     loc: Res<xgent_settings::Localizer>,
     mut q: Query<&mut Text, With<TokenHintMarker>>,
 ) {
+    if !conv.is_changed() && !loc.is_changed() {
+        return;
+    }
     let Ok(mut text) = q.single_mut() else {
         return;
     };
