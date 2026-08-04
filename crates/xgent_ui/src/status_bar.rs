@@ -50,6 +50,7 @@ fn spawn_status_bar(
     mut commands: Commands,
     q_bar: Query<Entity, With<StatusBarMarker>>,
     theme: Res<Theme>,
+    loc: Res<xgent_settings::Localizer>,
 ) {
     let Ok(bar) = q_bar.single() else {
         return;
@@ -130,7 +131,7 @@ fn spawn_status_bar(
         },));
         // 编码/语言段
         p.spawn((
-            Text::new("UTF-8 · LF · Rust"),
+            Text::new(crate::i18n::tr(&loc, "status-encoding").to_string()),
             TextFont {
                 font_size,
                 ..default()
@@ -145,6 +146,7 @@ fn update_status_segments(
     conv: Res<Conversation>,
     info: Res<ProviderInfo>,
     tokens: Res<TokenUsage>,
+    loc: Res<xgent_settings::Localizer>,
     mut q: ParamSet<(
         Query<&mut Text, With<ProviderTextMarker>>,
         Query<&mut Text, With<ConvStatusMarker>>,
@@ -153,7 +155,7 @@ fn update_status_segments(
 ) {
     if let Ok(mut text) = q.p0().single_mut() {
         let label = if info.id.is_empty() {
-            "未配置 provider".to_string()
+            crate::i18n::tr(&loc, "status-provider-not-configured").to_string()
         } else {
             format!("{} / {}", info.id, info.model)
         };
@@ -163,13 +165,13 @@ fn update_status_segments(
     }
     if let Ok(mut text) = q.p1().single_mut() {
         let label = match conv.status {
-            ConversationStatus::Idle => "就绪",
-            ConversationStatus::Thinking => "思考中…",
-            ConversationStatus::Streaming => "生成中…",
-            ConversationStatus::ToolRunning => "执行工具…",
-            ConversationStatus::Confirming => "等待确认",
-            ConversationStatus::Aborting => "中断中…",
-            ConversationStatus::Error => "出错",
+            ConversationStatus::Idle => crate::i18n::tr(&loc, "status-ready"),
+            ConversationStatus::Thinking => crate::i18n::tr(&loc, "status-thinking"),
+            ConversationStatus::Streaming => crate::i18n::tr(&loc, "status-streaming"),
+            ConversationStatus::ToolRunning => crate::i18n::tr(&loc, "status-tool-running"),
+            ConversationStatus::Confirming => crate::i18n::tr(&loc, "status-confirming"),
+            ConversationStatus::Aborting => crate::i18n::tr(&loc, "status-aborting"),
+            ConversationStatus::Error => crate::i18n::tr(&loc, "status-error"),
         };
         if text.0 != label {
             text.0 = label.to_string();

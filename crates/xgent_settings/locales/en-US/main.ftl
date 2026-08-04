@@ -83,3 +83,27 @@ preview-loading = · Loading...
 preview-read-error = Read failed: { $error }
 preview-bytes = · { $bytes } bytes · Read-only preview
 preview-error = · { $error }
+
+# Error prefixes
+error-not-configured = ⚠ [Not configured]
+error-auth-failed = ⚠ [Auth failed]
+error-network = ⚠ [Network]
+error-stream-parse = ⚠ [Parse]
+error-provider = ⚠
+error-retry-hint = Type again to continue
+
+# Retry status
+retry-attempt = ⟳ Retrying (attempt { $n })…
+retry-attempt-infinite = ⟳ Retrying (attempt { $n }, infinite)…
+retry-last-error = Last error: { $error }
+
+# Compaction notice
+compaction-notice = ✦ Previous context compacted ({ $before } → { $after } tokens)
+
+# Conversation info
+conversation-info = Session #{ $id } · { $turns } turns{ $tokens }
+conversation-tokens = · ↑ { $tokens } tokens
+
+# Status bar
+status-encoding = UTF-8 · LF · Rust
+status-provider-not-configured = No provider configured

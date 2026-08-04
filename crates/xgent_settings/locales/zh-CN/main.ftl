@@ -84,3 +84,27 @@ preview-loading = · 加载中...
 preview-read-error = 读取失败: { $error }
 preview-bytes = · { $bytes } 字节 · 只读预览
 preview-error = · { $error }
+
+# 错误前缀
+error-not-configured = ⚠ [未配置]
+error-auth-failed = ⚠ [鉴权失败]
+error-network = ⚠ [网络]
+error-stream-parse = ⚠ [解析]
+error-provider = ⚠
+error-retry-hint = 重新输入可继续对话
+
+# 重试状态
+retry-attempt = ⟳ 重试中（第 { $n } 次）…
+retry-attempt-infinite = ⟳ 重试中（第 { $n } 次，无限重试）…
+retry-last-error = 上次失败：{ $error }
+
+# 压缩提示
+compaction-notice = ✦ 前序对话已摘要压缩（{ $before } → { $after } tokens）
+
+# 会话信息
+conversation-info = 会话 #{ $id } · { $turns } 轮{ $tokens }
+conversation-tokens = · ↑ { $tokens } tokens
+
+# 状态栏
+status-encoding = UTF-8 · LF · Rust
+status-provider-not-configured = 未配置 provider

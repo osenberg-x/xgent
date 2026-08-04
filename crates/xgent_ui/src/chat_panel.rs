@@ -337,6 +337,7 @@ fn spawn_user_message(
     mut reader: MessageReader<ChatInputSubmitted>,
     entities: Res<ChatPanelEntities>,
     theme: Res<Theme>,
+    loc: Res<xgent_settings::Localizer>,
     mut commands: Commands,
 ) {
     let Some(list) = entities.message_list else {
@@ -393,10 +394,7 @@ fn spawn_user_message(
                 .with_children(|body| {
                     // role 行
                     body.spawn((
-                        Text::new(crate::i18n::tr(
-                            &xgent_settings::Localizer::default(),
-                            "role-user",
-                        )),
+                        Text::new(crate::i18n::tr(&loc, "role-user")),
                         TextFont {
                             font_size: FontSize::Px(12.0),
                             ..default()
@@ -441,6 +439,7 @@ fn finalize_on_done(
     q: Query<&Text, With<CurrentAssistantText>>,
     mut commands: Commands,
     theme: Res<Theme>,
+    loc: Res<xgent_settings::Localizer>,
 ) {
     let Some(current) = entities.current_text else {
         return;
@@ -500,10 +499,7 @@ fn finalize_on_done(
             ))
             .with_children(|body| {
                 body.spawn((
-                    Text::new(crate::i18n::tr(
-                        &xgent_settings::Localizer::default(),
-                        "role-assistant",
-                    )),
+                    Text::new(crate::i18n::tr(&loc, "role-assistant")),
                     TextFont {
                         font_size: FontSize::Px(12.0),
                         ..default()
@@ -530,20 +526,28 @@ fn on_error(
     q: Query<Entity, With<CurrentAssistantText>>,
     mut commands: Commands,
     theme: Res<Theme>,
+    loc: Res<xgent_settings::Localizer>,
 ) {
     let Ok(entity) = q.single() else {
         return;
     };
     for ev in reader.read() {
         let prefix = match ev.kind {
-            xgent_core::chat::ErrorKind::NotConfigured => "⚠ [未配置] ",
-            xgent_core::chat::ErrorKind::AuthFailed => "⚠ [鉴权失败] ",
-            xgent_core::chat::ErrorKind::Network => "⚠ [网络] ",
-            xgent_core::chat::ErrorKind::StreamParse => "⚠ [解析] ",
-            xgent_core::chat::ErrorKind::ProviderError => "⚠ ",
+            xgent_core::chat::ErrorKind::NotConfigured => {
+                crate::i18n::tr(&loc, "error-not-configured")
+            }
+            xgent_core::chat::ErrorKind::AuthFailed => {
+                crate::i18n::tr(&loc, "error-auth-failed")
+            }
+            xgent_core::chat::ErrorKind::Network => crate::i18n::tr(&loc, "error-network"),
+            xgent_core::chat::ErrorKind::StreamParse => {
+                crate::i18n::tr(&loc, "error-stream-parse")
+            }
+            xgent_core::chat::ErrorKind::ProviderError => crate::i18n::tr(&loc, "error-provider"),
         };
+        let retry_hint = crate::i18n::tr(&loc, "error-retry-hint");
         commands.entity(entity).insert((
-            Text::new(format!("{prefix}{}\n\n（重新输入可继续对话）", ev.message)),
+            Text::new(format!("{prefix} {}\n\n{retry_hint}", ev.message)),
             TextColor(theme.accent),
         ));
     }
@@ -554,18 +558,34 @@ fn show_retry_status(
     q: Query<Entity, With<CurrentAssistantText>>,
     mut commands: Commands,
     theme: Res<Theme>,
+    loc: Res<xgent_settings::Localizer>,
 ) {
     let Ok(entity) = q.single() else {
         return;
     };
     for ev in reader.read() {
         let label = if ev.infinite {
-            format!("⟳ 重试中（第 {} 次，无限重试）…", ev.attempt)
+            crate::i18n::tr_with(
+                &loc,
+                "retry-attempt-infinite",
+                &[("n", ev.attempt.to_string().into())],
+            )
+            .to_string()
         } else {
-            format!("⟳ 重试中（第 {} 次）…", ev.attempt)
+            crate::i18n::tr_with(
+                &loc,
+                "retry-attempt",
+                &[("n", ev.attempt.to_string().into())],
+            )
+            .to_string()
         };
+        let last_error = crate::i18n::tr_with(
+            &loc,
+            "retry-last-error",
+            &[("error", ev.last_error.clone().into())],
+        );
         commands.entity(entity).insert((
-            Text::new(format!("{label}\n上次失败：{}", ev.last_error)),
+            Text::new(format!("{label}\n{last_error}")),
             TextColor(theme.text_dim),
         ));
     }
@@ -577,11 +597,22 @@ fn show_compacted_notice(
     entities: Res<ChatPanelEntities>,
     mut commands: Commands,
     theme: Res<Theme>,
+    loc: Res<xgent_settings::Localizer>,
 ) {
     let Some(list) = entities.message_list else {
         return;
     };
     for ev in reader.read() {
+        let before = crate::status_bar::format_tokens(ev.tokens_before.into());
+        let after = crate::status_bar::format_tokens(ev.tokens_after.into());
+        let notice = crate::i18n::tr_with(
+            &loc,
+            "compaction-notice",
+            &[
+                ("before", before.into()),
+                ("after", after.into()),
+            ],
+        );
         commands.entity(list).with_children(|p| {
             p.spawn((Node {
                 width: Val::Percent(100.0),
@@ -596,11 +627,7 @@ fn show_compacted_notice(
                             ..default()
                         },
                         BackgroundColor(theme.elevated),
-                        Text::new(format!(
-                            "✦ 前序对话已摘要压缩（{}→{} tokens）",
-                            crate::status_bar::format_tokens(ev.tokens_before.into()),
-                            crate::status_bar::format_tokens(ev.tokens_after.into()),
-                        )),
+                        Text::new(notice.to_string()),
                         TextFont {
                             font_size: FontSize::Px(11.0),
                             ..default()
@@ -707,6 +734,7 @@ fn update_streaming_cursor(
 fn update_conversation_info(
     conv: Res<Conversation>,
     tokens: Res<TokenUsage>,
+    loc: Res<xgent_settings::Localizer>,
     mut q: Query<&mut Text, With<ConversationInfoMarker>>,
 ) {
     let Ok(mut text) = q.single_mut() else {
@@ -718,14 +746,26 @@ fn update_conversation_info(
         .filter(|m| matches!(m, xgent_core::chat::AgentMessage::User(_)))
         .count();
     let token_part = if tokens.total > 0 {
-        format!(
-            " · ↑ {} tokens",
-            crate::status_bar::format_tokens(tokens.total)
+        let token_str = crate::status_bar::format_tokens(tokens.total);
+        crate::i18n::tr_with(
+            &loc,
+            "conversation-tokens",
+            &[("tokens", token_str.into())],
         )
+        .to_string()
     } else {
         String::new()
     };
-    let new_text = format!("会话 #{} · {} 轮{}", conv.id, turns, token_part);
+    let new_text = crate::i18n::tr_with(
+        &loc,
+        "conversation-info",
+        &[
+            ("id", conv.id.0.to_string().into()),
+            ("turns", turns.to_string().into()),
+            ("tokens", token_part.into()),
+        ],
+    )
+    .to_string();
     if text.0 != new_text {
         text.0 = new_text;
     }
