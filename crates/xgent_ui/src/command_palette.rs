@@ -123,7 +123,7 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                 padding: UiRect::top(px(space::XL)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.4)),
+            BackgroundColor(theme.overlay),
             CommandPaletteOverlayMarker,
         ))
         .with_children(|overlay| {
@@ -287,7 +287,7 @@ fn rebuild_list(
     for (marker, mut bg, mut color) in q_items_visual.iter_mut() {
         let is_selected = marker.index == selected_idx;
         bg.0 = if is_selected {
-            Color::srgba(0.36, 0.62, 0.92, 0.3)
+            theme.accent_bg
         } else {
             Color::NONE
         };

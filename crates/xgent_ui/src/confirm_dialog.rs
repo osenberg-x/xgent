@@ -133,7 +133,7 @@ fn show_on_request(
                 // z_index: ZIndex::Arbitrary(50),  // 用 GlobalZIndex 组件替代
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            BackgroundColor(theme.overlay),
             GlobalZIndex(50),
             ConfirmDialogMarker,
         ))

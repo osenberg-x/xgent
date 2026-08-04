@@ -230,7 +230,7 @@ fn spawn_file_panel(
                     border_radius: BorderRadius::all(px(4.0)),
                     ..default()
                 },
-                Text::new("<"),
+                Text::new("◀"),
                 TextFont {
                     font_size: FontSize::Px(font),
                     ..default()
@@ -487,13 +487,13 @@ fn spawn_entry(
                     BackgroundColor(Color::NONE),
                 ))
                 .with_children(|row| {
-                    // 箭头（> 折叠 / v 展开）
+                    // 箭头（▸ 折叠 / ▾ 展开）
                     row.spawn((
                         Node {
                             width: px(10.0),
                             ..default()
                         },
-                        Text::new(if is_expanded { "v" } else { ">" }),
+                        Text::new(if is_expanded { "▾" } else { "▸" }),
                         TextFont {
                             font_size,
                             ..default()
@@ -501,13 +501,13 @@ fn spawn_entry(
                         TextColor(theme.text_dim),
                         DirArrowMarker,
                     ));
-                    // 图标（+ 折叠 / - 展开）
+                    // 图标（📁 折叠 / 📂 展开）
                     row.spawn((
                         Node {
                             width: px(14.0),
                             ..default()
                         },
-                        Text::new(if is_expanded { "-" } else { "+" }),
+                        Text::new(if is_expanded { "📂" } else { "📁" }),
                         TextFont {
                             font_size,
                             ..default()
@@ -583,7 +583,7 @@ fn spawn_entry(
                     width: px(14.0),
                     ..default()
                 },
-                Text::new("-"),
+                Text::new("📄"),
                 TextFont {
                     font_size,
                     ..default()
@@ -1005,12 +1005,12 @@ fn handle_dir_click(
             expanded.0.retain(|p| !p.starts_with(&collapsed_path));
             if let Some(e) = arrow_entity {
                 if let Ok(mut t) = q_text.p0().get_mut(e) {
-                    *t = Text::new(">");
+                    *t = Text::new("▸");
                 }
             }
             if let Some(e) = icon_entity {
                 if let Ok(mut t) = q_text.p1().get_mut(e) {
-                    *t = Text::new("+");
+                    *t = Text::new("📁");
                 }
             }
             commands.entity(child_container).despawn_children();
@@ -1020,12 +1020,12 @@ fn handle_dir_click(
             expanded.0.insert(dir.path.clone());
             if let Some(e) = arrow_entity {
                 if let Ok(mut t) = q_text.p0().get_mut(e) {
-                    *t = Text::new("v");
+                    *t = Text::new("▾");
                 }
             }
             if let Some(e) = icon_entity {
                 if let Ok(mut t) = q_text.p1().get_mut(e) {
-                    *t = Text::new("-");
+                    *t = Text::new("📂");
                 }
             }
             let entries = list_dir(&dir.path);
@@ -1091,9 +1091,10 @@ fn update_file_entry_style(
         Or<(With<FileEntry>, With<DirEntry>)>,
     >,
     mut q_bg: Query<&mut BackgroundColor>,
+    theme: Res<Theme>,
 ) {
-    let sel_color = BackgroundColor(Color::srgba(0.36, 0.62, 0.92, 0.22));
-    let hover_color = BackgroundColor(Color::srgba(0.36, 0.62, 0.92, 0.12));
+    let sel_color = BackgroundColor(theme.accent_bg);
+    let hover_color = BackgroundColor(theme.hover_bg);
     let none_color = BackgroundColor(Color::NONE);
     for (entity, selected, interaction) in q.iter() {
         let want = if selected.is_some() {

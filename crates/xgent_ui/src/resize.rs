@@ -27,8 +27,6 @@ const SIDE_VIEW_MIN: f32 = 200.0;
 const CHAT_MIN: f32 = 240.0;
 /// 分隔手柄命中宽度（逻辑像素）。
 const HANDLE_W: f32 = 6.0;
-/// 手柄 hover/拖拽时的强调色背景。
-const HANDLE_ACTIVE_COLOR: Color = Color::srgba(0.5, 0.65, 1.0, 0.6);
 
 /// 拖拽边界标识。
 #[derive(Component, Copy, Clone, Eq, PartialEq, Debug, Default)]
@@ -158,6 +156,7 @@ pub(crate) fn handle_resize_drag(
     handles: Query<(&ResizeEdgeMarker, &Interaction)>,
     side_collapsed: Res<SideViewCollapsed>,
     mut q_handle_bg: Query<(&ResizeEdgeMarker, &mut BackgroundColor)>,
+    theme: Res<crate::theme::Theme>,
 ) {
     // 1. 启动：任一手柄被按下（鼠标在按下瞬间位于手柄上）
     if active.0.is_none() {
@@ -177,7 +176,7 @@ pub(crate) fn handle_resize_drag(
             .any(|(m, i)| m.0 == marker.0 && *i == Interaction::Hovered);
         let highlighted = active_edge == Some(marker.0) || hovered;
         let target = if highlighted {
-            HANDLE_ACTIVE_COLOR
+            theme.handle_active
         } else {
             Color::NONE
         };

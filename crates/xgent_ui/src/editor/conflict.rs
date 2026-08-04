@@ -72,6 +72,7 @@ pub fn handle_file_changed(
     q_pending: Query<&crate::editor::io::FileReadPending>,
     mut read_writer: MessageWriter<FileReadRequest>,
     q_dialog: Query<Entity, With<ConflictDialogMarker>>,
+    theme: Res<crate::theme::Theme>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
@@ -109,7 +110,7 @@ pub fn handle_file_changed(
                 // 进入冲突态，弹窗
                 buf.enter_conflict();
                 if q_dialog.single().is_err() {
-                    spawn_conflict_dialog(&mut commands, entity, &ev.path);
+                    spawn_conflict_dialog(&mut commands, entity, &ev.path, &theme);
                 }
             }
             BufferState::ConflictDetected => {
@@ -120,10 +121,15 @@ pub fn handle_file_changed(
 }
 
 /// spawn 外部修改冲突弹窗（三选）。
-fn spawn_conflict_dialog(commands: &mut Commands, buffer: Entity, path: &std::path::Path) {
-    let accent = Color::srgb(0.36, 0.62, 0.92);
-    let panel = Color::srgb(0.13, 0.14, 0.17);
-    let border = Color::srgb(0.25, 0.26, 0.30);
+fn spawn_conflict_dialog(
+    commands: &mut Commands,
+    buffer: Entity,
+    path: &std::path::Path,
+    theme: &crate::theme::Theme,
+) {
+    let accent = theme.accent;
+    let panel = theme.panel;
+    let border = theme.border;
     commands
         .spawn((
             Node {
@@ -136,7 +142,7 @@ fn spawn_conflict_dialog(commands: &mut Commands, buffer: Entity, path: &std::pa
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            BackgroundColor(theme.overlay),
             ConflictDialogMarker,
             ConflictDialogFor { buffer },
         ))

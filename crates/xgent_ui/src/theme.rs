@@ -76,6 +76,16 @@ pub struct Theme {
     pub com: Color,
     /// 标点
     pub punc: Color,
+
+    // ===== 半透明覆盖色 =====
+    /// 遮罩背景（modal overlay）
+    pub overlay: Color,
+    /// 选中态半透明背景
+    pub accent_bg: Color,
+    /// 悬停态半透明背景
+    pub hover_bg: Color,
+    /// 拖拽手柄激活色
+    pub handle_active: Color,
 }
 
 impl Theme {
@@ -121,6 +131,12 @@ impl Theme {
             ty: Color::srgba(0.988, 0.827, 0.302, 1.0),   // #FCD34D
             com: Color::srgba(0.392, 0.455, 0.545, 1.0),  // #64748B
             punc: Color::srgba(0.796, 0.835, 0.882, 1.0), // #CBD5E1
+
+            // 半透明覆盖色
+            overlay: Color::srgba(0.0, 0.0, 0.0, 0.55),
+            accent_bg: Color::srgba(0.133, 0.773, 0.369, 0.10), // rgba(34,197,94,0.10)
+            hover_bg: Color::srgba(0.58, 0.64, 0.72, 0.05),     // rgba(148,163,184,0.05)
+            handle_active: Color::srgba(0.5, 0.65, 1.0, 0.6),
         }
     }
 }

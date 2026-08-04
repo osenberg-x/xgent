@@ -136,7 +136,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            BackgroundColor(theme.overlay),
             SettingsPanelMarker,
         ))
         .with_children(|p| {

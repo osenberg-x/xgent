@@ -358,6 +358,7 @@ pub fn handle_close_tab_requests(
     mut view: ResMut<crate::editor::EditorView>,
     mut content: ResMut<crate::editor::SideViewContent>,
     rt: ResMut<crate::editor::io::EditorIoRuntime>,
+    theme: Res<crate::theme::Theme>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -367,7 +368,7 @@ pub fn handle_close_tab_requests(
                 if buf.state.is_dirty() {
                     // 无弹窗才弹新窗；已有弹窗则静默跳过（等用户处理完当前确认）
                     if q_dialog.single().is_err() {
-                        spawn_dirty_close_dialog(&mut commands, req.entity, buf.path());
+                        spawn_dirty_close_dialog(&mut commands, req.entity, buf.path(), &theme);
                     }
                     continue;
                 }
@@ -403,11 +404,16 @@ pub fn handle_cycle_tab_requests(
 /// spawn 脏关闭确认弹窗（丢弃修改 / 取消）。
 ///
 /// 样式对齐 `conflict::spawn_conflict_dialog`，保持弹窗视觉一致。
-fn spawn_dirty_close_dialog(commands: &mut Commands, buffer: Entity, path: &std::path::Path) {
-    let accent = Color::srgb(0.36, 0.62, 0.92);
-    let danger = Color::srgb(0.85, 0.36, 0.36);
-    let panel = Color::srgb(0.13, 0.14, 0.17);
-    let border = Color::srgb(0.25, 0.26, 0.30);
+fn spawn_dirty_close_dialog(
+    commands: &mut Commands,
+    buffer: Entity,
+    path: &std::path::Path,
+    theme: &crate::theme::Theme,
+) {
+    let accent = theme.accent;
+    let danger = theme.st_fail;
+    let panel = theme.panel;
+    let border = theme.border;
     commands
         .spawn((
             Node {
@@ -420,7 +426,7 @@ fn spawn_dirty_close_dialog(commands: &mut Commands, buffer: Entity, path: &std:
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            BackgroundColor(theme.overlay),
             DirtyCloseDialogMarker,
             DirtyCloseDialogFor { buffer },
         ))
