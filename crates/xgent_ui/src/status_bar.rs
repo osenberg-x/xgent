@@ -1,6 +1,7 @@
-//! 状态栏：分段布局（status-dot + provider/model · 会话状态 · token · spacer · 编码语言）。
+//! 状态栏：药丸标签布局（provider pill + token pill + 状态 + spacer + 编码语言）。
 //!
-//! 状态点（小圆点）忙时脉冲；空闲时 ok 色。对齐 ui-prototype.html #statusbar。
+//! v2 重构：每个信息块用圆角容器（pill）包裹，视觉更清晰。
+//! 状态点忙时脉冲；空闲时 ok 色。
 
 use bevy::prelude::*;
 use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
@@ -44,7 +45,7 @@ impl Plugin for StatusBarPlugin {
     }
 }
 
-/// 启动时在状态栏内 spawn 分段：status-dot + provider · 状态 · token · spacer · 编码。
+/// 启动时在状态栏内 spawn：provider pill + token pill + 状态 + spacer + 编码。
 fn spawn_status_bar(
     mut commands: Commands,
     q_bar: Query<Entity, With<StatusBarMarker>>,
@@ -53,41 +54,65 @@ fn spawn_status_bar(
     let Ok(bar) = q_bar.single() else {
         return;
     };
-    let font = theme.font_size;
-    let font_size = FontSize::Px(font);
-    let dim = theme.text_dim;
+    let font_size = FontSize::Px(11.0);
+    let dim = theme.text_muted;
+
     commands.entity(bar).with_children(|p| {
-        // status-dot（小圆点，7px）
+        // provider pill（elevated 底 + dot + 文本）
         p.spawn((
             Node {
-                width: px(7.0),
-                height: px(7.0),
-                border_radius: BorderRadius::all(px(3.5)),
-                margin: UiRect::right(px(space::SM)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(space::XS),
+                padding: UiRect::horizontal(px(space::SM)),
+                border_radius: BorderRadius::all(px(16.0)),
                 ..default()
             },
-            BackgroundColor(theme.st_ok),
-            StatusDotMarker,
-        ));
-        // provider/model 文本
+            BackgroundColor(theme.elevated),
+        ))
+        .with_children(|pill| {
+            pill.spawn((
+                Node {
+                    width: px(6.0),
+                    height: px(6.0),
+                    border_radius: BorderRadius::all(px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(theme.st_ok),
+                StatusDotMarker,
+            ));
+            pill.spawn((
+                Text::new(String::new()),
+                TextFont {
+                    font_size,
+                    ..default()
+                },
+                TextColor(dim),
+                ProviderTextMarker,
+            ));
+        });
+        // token pill
         p.spawn((
-            Text::new(String::new()),
-            TextFont {
-                font_size,
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                padding: UiRect::horizontal(px(space::SM)),
+                border_radius: BorderRadius::all(px(16.0)),
                 ..default()
             },
-            TextColor(dim),
-            ProviderTextMarker,
-        ));
-        // 分隔 ·
-        p.spawn((
-            Text::new("·"),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(dim),
-        ));
+            BackgroundColor(theme.elevated),
+        ))
+        .with_children(|pill| {
+            pill.spawn((
+                Text::new(String::new()),
+                TextFont {
+                    font_size,
+                    ..default()
+                },
+                TextColor(dim),
+                TokenTextMarker,
+            ));
+        });
         // 会话状态文本
         p.spawn((
             Text::new(String::new()),
@@ -98,31 +123,12 @@ fn spawn_status_bar(
             TextColor(dim),
             ConvStatusMarker,
         ));
-        // 分隔 ·
-        p.spawn((
-            Text::new("·"),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(dim),
-        ));
-        // token 文本
-        p.spawn((
-            Text::new(String::new()),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(dim),
-            TokenTextMarker,
-        ));
         // spacer
         p.spawn((Node {
             flex_grow: 1.0,
             ..default()
         },));
-        // 编码/语言段（右侧）
+        // 编码/语言段
         p.spawn((
             Text::new("UTF-8 · LF · Rust"),
             TextFont {
@@ -134,7 +140,7 @@ fn spawn_status_bar(
     });
 }
 
-/// 每帧更新各分段文本（provider / 状态 / token）。
+/// 每帧更新各分段文本。
 fn update_status_segments(
     conv: Res<Conversation>,
     info: Res<ProviderInfo>,
@@ -181,7 +187,7 @@ fn update_status_segments(
     }
 }
 
-/// 状态点：忙时 running 色 + 脉冲（opacity 正弦），空闲 ok 色。
+/// 状态点：忙时 running 色 + 脉冲，空闲 ok 色。
 fn update_status_dot(
     conv: Res<Conversation>,
     time: Res<Time>,
@@ -214,11 +220,6 @@ fn update_status_dot(
 }
 
 /// 收到 DoneMessage 时累加真实 token 用量。
-///
-/// 之前读 `conv.current_assistant_text` 字符估算——但 `handle_agent_event`
-/// 在发 DoneMessage **之前** 已 `finalize_assistant` 把文本 take 走，
-/// 导致读到空字符串、token 永远为 0。改为直接用 DoneMessage 携带的
-/// provider usage（prompt + completion）。
 fn track_token_usage(mut reader: MessageReader<DoneMessage>, mut tokens: ResMut<TokenUsage>) {
     for ev in reader.read() {
         if let Some(u) = &ev.usage {
@@ -234,9 +235,4 @@ pub fn format_tokens(n: u64) -> String {
     } else {
         n.to_string()
     }
-}
-
-/// 便捷：f32 → Val::Px
-fn px(v: f32) -> Val {
-    Val::Px(v)
 }

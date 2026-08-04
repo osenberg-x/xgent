@@ -52,7 +52,7 @@ pub enum EditorView {
 /// 右侧分屏内容类型：编辑器视图 / 文件预览 / 终端 / 无（收起）。
 ///
 /// 由 [`crate::file_panel::handle_file_click`]（Editor/Preview）与终端模块
-/// （Terminal，`Ctrl+`` / 顶栏 🖥）设置；[`apply_editor_view_visibility`]
+/// （Terminal，`Ctrl+`` / 活动栏 🖥）设置；[`apply_editor_view_visibility`]
 /// 统一据它切换 `EditorViewMarker` 与 `FilePreviewMarker` 的显隐，避免多系统
 /// 并发写同一组件（B0001）。终端容器（`TerminalViewMarker`）的显隐由终端模块
 /// 自身的 `apply_terminal_view_visibility` 系统[^1]据本 Resource 切换。

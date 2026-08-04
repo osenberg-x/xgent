@@ -1,15 +1,11 @@
-//! 对话面板：消息列表（流式渲染）+ 输入框 + 中断。
+//! 对话面板：消息列表（全宽行式布局）+ 浮动输入卡 + 中断。
+//!
+//! v2 重构：消息不再使用气泡，改为"全宽行 + 头像 + 消息体"布局（参考 Cursor/ChatGPT），
+//! 代码块成为对话流中的一级元素。输入区改为浮动卡片风格，带工具栏。
 //!
 //! 订阅 agent 的 [`DeltaMessage`] 累加到当前助手消息节点；[`DoneMessage`] 时把当前消息
-//! 固化为历史消息节点并清空当前；输入框发送语义由 [`xui::ChatInput`] 处理，
-//! 提交时转发为 [`UserInputMessage`]。
-//!
-//! 用户消息右对齐（`bubble_user`），助手消息左对齐（`bubble_assistant`）。
-//! 消息列表自动滚动到底部。
-//!
-//! 消息列表 MVP 用简单列容器 + 每条消息一个文本节点；大列表虚拟化留待后续接入 xui::VirtualList。
+//! 固化为历史消息节点并清空当前。
 
-use bevy::color::palettes::css;
 use bevy::input_focus::AutoFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -85,23 +81,16 @@ impl Plugin for ChatPanelPlugin {
                 )
                     .after(xgent_agent::agent_loop::agent_poll_system),
             )
-            // show_retry_status 必须在 finalize_on_done 之后：
-            // RetryAttempt 同帧发 DoneMessage + RetryMessage，finalize_on_done
-            // 先把半截回复固化为历史气泡并清空节点，show_retry_status 再写入
-            // "重试中"提示。若顺序反转，"重试中"会被固化进历史气泡，半截回复丢失。
             .add_systems(
                 Update,
                 show_retry_status
                     .after(xgent_agent::agent_loop::agent_poll_system)
                     .after(finalize_on_done),
             );
-        // 贴底跟随由 `xui::scroll_area::StickToBottom` 组件 +
-        // `ScrollAreaPlugin` 的 `maintain_stick_to_bottom`/`auto_scroll_to_bottom`
-        // 系统通用驱动（PostLayout 后），本插件不再自管。
     }
 }
 
-/// 启动时在对话主区内 spawn 视图标签条 + 消息列表 + 输入框（含快捷键提示栏）。
+/// 启动时在对话主区内 spawn 视图标签条 + 消息列表 + 浮动输入卡。
 fn spawn_chat_panel(
     mut commands: Commands,
     q_panel: Query<Entity, With<ChatPanelMarker>>,
@@ -115,12 +104,12 @@ fn spawn_chat_panel(
     let font = theme.font_size;
     let font_size = FontSize::Px(font);
 
-    // 视图标签条：💬 对话 + 右侧会话信息
+    // 视图标签条：对话/编辑器/文件预览 + 右侧会话信息
     let viewtabs = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                height: px(32.0),
+                height: px(crate::theme::size::VIEW_TABS_H),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 column_gap: px(space::XS),
@@ -129,18 +118,20 @@ fn spawn_chat_panel(
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(theme.bar),
-            BorderColor::all(theme.border),
+            BackgroundColor(theme.surface),
+            BorderColor::all(theme.line),
         ))
         .with_children(|tabs| {
-            // 对话标签（💬 对话，active 态：底部 accent 边框）
+            // 对话标签（active 态：elevated 底 + 边框）
             tabs.spawn((
                 Node {
-                    padding: UiRect::all(px(space::SM)),
-                    border: UiRect::bottom(px(2.0)),
+                    padding: UiRect::all(px(space::XS)),
+                    border: UiRect::all(px(1.0)),
+                    border_radius: BorderRadius::all(px(6.0)),
                     ..default()
                 },
-                BorderColor::all(theme.accent),
+                BackgroundColor(theme.elevated),
+                BorderColor::all(theme.border),
                 Text::new(crate::i18n::tr(&loc, "chat-tab-label").to_string()),
                 TextFont {
                     font_size,
@@ -153,28 +144,28 @@ fn spawn_chat_panel(
                 flex_grow: 1.0,
                 ..default()
             },));
-            // 会话信息（右侧，小字 dim，由 update_conversation_info 系统填充）
+            // 会话信息
             tabs.spawn((
                 Text::new(String::new()),
                 TextFont {
                     font_size: FontSize::Px(11.0),
                     ..default()
                 },
-                TextColor(theme.text_dim),
+                TextColor(theme.text_muted),
                 ConversationInfoMarker,
             ));
         })
         .id();
 
+    // 当前正在流式的助手消息节点（全宽行式，无气泡背景）
     let current_text = commands
         .spawn((
             Node {
-                max_width: Val::Percent(80.0),
-                padding: UiRect::all(px(space::SM)),
-                border_radius: BorderRadius::all(px(6.0)),
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: px(space::MD),
                 ..default()
             },
-            BackgroundColor(theme.bubble_assistant),
             Text::new(String::new()),
             TextFont {
                 font_size,
@@ -185,26 +176,26 @@ fn spawn_chat_panel(
         ))
         .id();
 
-    // 消息列表
+    // 消息列表（居中 max-width 容器 + 可滚动）
     let mut scroll_area = ScrollArea::vertical();
-    scroll_area.node.padding = UiRect::all(px(space::LG));
-    scroll_area.node.row_gap = px(space::LG);
+    scroll_area.node.padding = UiRect::all(px(space::XXL));
+    scroll_area.node.row_gap = px(space::XL);
     let message_list = commands
         .spawn((scroll_area, StickToBottom::default(), MessageListMarker))
         .add_child(current_text)
         .id();
 
-    // 输入框容器（inputbar）：input-wrap + input-meta
+    // 浮动输入卡
     let input_entity = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                min_height: px(60.0),
+                min_height: px(38.0),
                 max_height: px(200.0),
                 flex_shrink: 0.0,
                 padding: UiRect::all(px(space::SM)),
                 border: UiRect::all(px(1.0)),
-                border_radius: BorderRadius::all(px(6.0)),
+                border_radius: BorderRadius::all(px(8.0)),
                 ..default()
             },
             BackgroundColor(theme.panel),
@@ -213,7 +204,7 @@ fn spawn_chat_panel(
                 font_size,
                 ..default()
             },
-            TextColor(theme.text_dim),
+            TextColor(theme.text),
             bevy::text::TextCursorStyle::default(),
             EditableText {
                 allow_newlines: true,
@@ -226,14 +217,16 @@ fn spawn_chat_panel(
         ))
         .id();
 
-    // 快捷键提示栏（input-meta）：左侧 hint，右侧 tokenhint
-    let input_meta = commands
+    // 工具栏（快捷键提示 + 发送按钮区）
+    let toolbar = commands
         .spawn((Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
             margin: UiRect::top(px(space::SM)),
+            padding: UiRect::top(px(space::XS)),
+            border: UiRect::top(px(1.0)),
             ..default()
         },))
         .with_children(|meta| {
@@ -244,77 +237,88 @@ fn spawn_chat_panel(
                 align_items: AlignItems::Center,
                 ..default()
             },))
-                .with_children(|hint| {
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-send")),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-abort")),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-palette")),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-toggle-sideview")),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-terminal")),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
-                });
-            // 右侧 tokenhint（状态文本）
-            meta.spawn((
-                Text::new(crate::i18n::tr(&loc, "status-ready")),
-                TextFont {
-                    font_size: FontSize::Px(11.0),
-                    ..default()
-                },
-                TextColor(theme.text_dim),
-                TokenHintMarker,
-            ));
+            .with_children(|hint| {
+                hint.spawn((
+                    Text::new(crate::i18n::tr(&loc, "hint-send")),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(theme.text_muted),
+                ));
+                hint.spawn((
+                    Text::new(crate::i18n::tr(&loc, "hint-abort")),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(theme.text_muted),
+                ));
+                hint.spawn((
+                    Text::new(crate::i18n::tr(&loc, "hint-palette")),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(theme.text_muted),
+                ));
+                hint.spawn((
+                    Text::new(crate::i18n::tr(&loc, "hint-toggle-sideview")),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(theme.text_muted),
+                ));
+                hint.spawn((
+                    Text::new(crate::i18n::tr(&loc, "hint-terminal")),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(theme.text_muted),
+                ));
+            });
+            // 右侧 tokenhint + 发送按钮
+            meta.spawn((Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(space::SM),
+                ..default()
+            },))
+            .with_children(|right| {
+                right.spawn((
+                    Text::new(crate::i18n::tr(&loc, "status-ready")),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(theme.text_muted),
+                    TokenHintMarker,
+                ));
+            });
         })
         .id();
 
-    // inputbar 容器：input + input-meta
+    // inputbar 容器（渐变背景模拟 + 居中限制宽度）
     let inputbar = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::horizontal(px(space::LG)),
-                border: UiRect::top(px(1.0)),
+                padding: UiRect::new(
+                    Val::Px(space::SM),
+                    Val::Px(space::XXL),
+                    Val::Px(space::LG),
+                    Val::Px(space::XXL),
+                ),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(theme.bg),
-            BorderColor::all(theme.border),
+            BackgroundColor(theme.surface),
         ))
         .add_child(input_entity)
-        .add_child(input_meta)
+        .add_child(toolbar)
         .id();
 
     commands
@@ -328,7 +332,7 @@ fn spawn_chat_panel(
     entities.input = Some(input_entity);
 }
 
-/// 用户提交输入时，在消息列表中 spawn 用户消息气泡（右对齐）。
+/// 用户提交输入时，在消息列表中 spawn 用户消息（全宽行式布局）。
 fn spawn_user_message(
     mut reader: MessageReader<ChatInputSubmitted>,
     entities: Res<ChatPanelEntities>,
@@ -346,82 +350,72 @@ fn spawn_user_message(
         if ev.text.is_empty() {
             continue;
         }
-        // 在当前助手节点之前插入用户消息气泡
+        // 在当前助手节点之前插入用户消息（全宽行式：头像 + 消息体）
         commands.entity(list).with_children(|p| {
-            // 右对齐行容器
-            p.spawn((Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::FlexEnd,
-                ..default()
-            },))
-                .with_children(|row| {
-                    row.spawn((
-                        Node {
-                            max_width: Val::Percent(80.0),
-                            padding: UiRect::all(px(space::SM)),
-                            border_radius: BorderRadius::all(px(6.0)),
-                            flex_direction: FlexDirection::Column,
+            p.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::MD),
+                    ..default()
+                },
+            ))
+            .with_children(|row| {
+                // 头像（elevated 底圆 + "你" 文字）
+                row.spawn((
+                    Node {
+                        width: px(28.0),
+                        height: px(28.0),
+                        border_radius: BorderRadius::all(px(6.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    BackgroundColor(theme.elevated),
+                    BorderColor::all(theme.border),
+                    Text::new("你"),
+                    TextFont {
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                ));
+                // 消息体（role + content）
+                row.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        min_width: Val::ZERO,
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ))
+                .with_children(|body| {
+                    // role 行
+                    body.spawn((
+                        Text::new(crate::i18n::tr(
+                            &xgent_settings::Localizer::default(),
+                            "role-user",
+                        )),
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
                             ..default()
                         },
-                        BackgroundColor(theme.bubble_user),
-                    ))
-                    .with_children(|bubble| {
-                        // role 行：头像（你）+ 角色名
-                        bubble
-                            .spawn((Node {
-                                flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                column_gap: px(6.0),
-                                margin: UiRect::bottom(px(space::XS)),
-                                ..default()
-                            },))
-                            .with_children(|role| {
-                                // 头像（蓝底圆「你」）
-                                role.spawn((
-                                    Node {
-                                        width: px(18.0),
-                                        height: px(18.0),
-                                        border_radius: BorderRadius::all(px(9.0)),
-                                        align_items: AlignItems::Center,
-                                        justify_content: JustifyContent::Center,
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.23, 0.35, 0.55, 1.0)),
-                                    Text::new("你"),
-                                    TextFont {
-                                        font_size: FontSize::Px(10.0),
-                                        ..default()
-                                    },
-                                    TextColor(css::WHITE.into()),
-                                ));
-                                // 角色名
-                                role.spawn((
-                                    Text::new(crate::i18n::tr(
-                                        &xgent_settings::Localizer::default(),
-                                        "role-user",
-                                    )),
-                                    TextFont {
-                                        font_size: FontSize::Px(11.0),
-                                        ..default()
-                                    },
-                                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
-                                ));
-                            });
-                        // 正文
-                        bubble.spawn((
-                            Text::new(ev.text.clone()),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(theme.text),
-                        ));
-                    });
+                        TextColor(theme.text),
+                    ));
+                    // 正文
+                    body.spawn((
+                        Text::new(ev.text.clone()),
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
+                        TextColor(theme.text),
+                    ));
                 });
+            });
         });
-        // 把当前助手节点移到列表末尾（在用户消息之后）
         commands.entity(list).add_child(current);
-        // 清空当前助手节点（清除上一轮的错误文本或残留内容）
         commands.entity(current).insert(Text::new(String::new()));
     }
 }
@@ -434,7 +428,6 @@ fn accumulate_delta(
         return;
     };
     for ev in reader.read() {
-        // 剥离流式光标（▋）再追加新 delta，避免光标被推到中间
         if text.0.ends_with('▋') {
             text.0.pop();
         }
@@ -461,83 +454,73 @@ fn finalize_on_done(
     let Ok(text) = q.get(current) else {
         return;
     };
-    // 剥离流式光标（▋）—— 光标挂在 CurrentAssistantText 末尾，固化历史副本时去掉
     let content = text.0.trim_end_matches('▋').to_string();
     if content.is_empty() {
         return;
     }
     let font = theme.font_size;
-    // 在消息列表插入历史副本（左对齐行容器 + 助手气泡）
+    // 历史副本（全宽行式：头像 + 消息体）
     commands.entity(list).with_children(|p| {
-        p.spawn((Node {
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::FlexStart,
-            ..default()
-        },))
-            .with_children(|row| {
-                row.spawn((
-                    Node {
-                        max_width: Val::Percent(80.0),
-                        padding: UiRect::all(px(space::SM)),
-                        border_radius: BorderRadius::all(px(6.0)),
-                        flex_direction: FlexDirection::Column,
+        p.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: px(space::MD),
+                ..default()
+            },
+        ))
+        .with_children(|row| {
+            // 头像（渐变色 — 用 accent 底 + ✦ 文字模拟）
+            row.spawn((
+                Node {
+                    width: px(28.0),
+                    height: px(28.0),
+                    border_radius: BorderRadius::all(px(6.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(theme.accent),
+                Text::new("✦"),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(theme.bg),
+            ));
+            // 消息体
+            row.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::ZERO,
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
+            ))
+            .with_children(|body| {
+                body.spawn((
+                    Text::new(crate::i18n::tr(
+                        &xgent_settings::Localizer::default(),
+                        "role-assistant",
+                    )),
+                    TextFont {
+                        font_size: FontSize::Px(12.0),
                         ..default()
                     },
-                    BackgroundColor(theme.bubble_assistant),
-                ))
-                .with_children(|bubble| {
-                    // role 行：头像（✦）+ 角色名
-                    bubble
-                        .spawn((Node {
-                            flex_direction: FlexDirection::Row,
-                            align_items: AlignItems::Center,
-                            column_gap: px(6.0),
-                            margin: UiRect::bottom(px(space::XS)),
-                            ..default()
-                        },))
-                        .with_children(|role| {
-                            role.spawn((
-                                Node {
-                                    width: px(18.0),
-                                    height: px(18.0),
-                                    border_radius: BorderRadius::all(px(9.0)),
-                                    align_items: AlignItems::Center,
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.42, 0.44, 0.72, 1.0)),
-                                Text::new("✦"),
-                                TextFont {
-                                    font_size: FontSize::Px(10.0),
-                                    ..default()
-                                },
-                                TextColor(css::WHITE.into()),
-                            ));
-                            role.spawn((
-                                Text::new(crate::i18n::tr(
-                                    &xgent_settings::Localizer::default(),
-                                    "role-assistant",
-                                )),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
-                            ));
-                        });
-                    // 正文
-                    bubble.spawn((
-                        Text::new(content),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
-                });
+                    TextColor(theme.text),
+                ));
+                body.spawn((
+                    Text::new(content),
+                    TextFont {
+                        font_size: FontSize::Px(font),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                ));
             });
+        });
     });
-    // 清空当前节点
     commands.entity(current).insert(Text::new(String::new()));
 }
 
@@ -566,13 +549,6 @@ fn on_error(
     }
 }
 /// 重试时在当前助手消息节点显示「重试中(第 N 次)」与上次失败原因。
-///
-/// agent loop 因可重试错误（Network/StreamParse）触发自动重试前发射
-/// [`RetryMessage`]。此前 UI 完全未订阅，用户只看到半截文本被固化后空白，
-/// 不知正在重试。此系统补上进度提示（对齐 events.rs 注释要求）。
-///
-/// `finalize_on_done` 会先于本系统把半截文本固化为历史气泡并清空当前节点
-/// （RetryAttempt 分支同时发 DoneMessage），故此处直接写入已清空的当前节点。
 fn show_retry_status(
     mut reader: MessageReader<RetryMessage>,
     q: Query<Entity, With<CurrentAssistantText>>,
@@ -595,10 +571,7 @@ fn show_retry_status(
     }
 }
 
-/// 压缩触发后在消息列表插入一条 dim 提示气泡「前序对话已摘要压缩」。
-///
-/// agent loop compaction 触发后发射 [`CompactedMessage`]。此前 UI 完全未订阅，
-/// 用户看不到上下文被压缩的提示。此系统补上视觉标记（对齐 events.rs 注释要求）。
+/// 压缩触发后在消息列表插入一条 dim 提示。
 fn show_compacted_notice(
     mut reader: MessageReader<CompactedMessage>,
     entities: Res<ChatPanelEntities>,
@@ -622,7 +595,7 @@ fn show_compacted_notice(
                             border_radius: BorderRadius::all(px(4.0)),
                             ..default()
                         },
-                        BackgroundColor(theme.bar),
+                        BackgroundColor(theme.elevated),
                         Text::new(format!(
                             "✦ 前序对话已摘要压缩（{}→{} tokens）",
                             crate::status_bar::format_tokens(ev.tokens_before.into()),
@@ -632,7 +605,7 @@ fn show_compacted_notice(
                             font_size: FontSize::Px(11.0),
                             ..default()
                         },
-                        TextColor(theme.text_dim),
+                        TextColor(theme.text_muted),
                     ));
                 });
         });
@@ -650,7 +623,6 @@ pub fn forward_input_submission(
 ) {
     for ev in reader.read() {
         if ev.text.is_empty() {
-            // 空输入：插入 InputBusyMarker 触发红边闪烁
             if let Some(input) = entities.input {
                 commands.entity(input).insert(InputBusyMarker {
                     started_at: time.elapsed().as_secs_f64(),
@@ -659,21 +631,19 @@ pub fn forward_input_submission(
             continue;
         }
         if conv.status == ConversationStatus::Idle || conv.status == ConversationStatus::Error {
-            // @ 引用解析：替换占位标记 + 收集 EditorQuery
             let (text, queries) = crate::editor::at_syntax::parse_at_references(&ev.text);
             user_writer.write(UserInputMessage {
                 text,
                 editor_queries: queries,
             });
         } else {
-            // agent 执行中：发 Steering，注入到当前对话
             steering_writer.write(SteeringMessage {
                 text: ev.text.clone(),
             });
         }
     }
 }
-/// 更新输入框边框颜色：忙时 accent；空输入发送时红边闪烁 0.4s（InputBusyMarker）后移除。
+/// 更新输入框边框颜色：忙时 accent；空输入发送时红边闪烁。
 fn update_input_border(
     conv: Res<Conversation>,
     time: Res<Time>,
@@ -688,11 +658,9 @@ fn update_input_border(
     if let Some(b) = busy {
         let elapsed = now - b.started_at;
         if elapsed >= 0.4 {
-            // 0.4s 后移除 marker
             commands.entity(entity).remove::<InputBusyMarker>();
             border.set_all(theme.border);
         } else {
-            // 红边 / 默认 交替（每 0.1s 切换）
             let phase = ((elapsed * 10.0) as usize) % 2;
             border.set_all(if phase == 0 {
                 theme.st_fail
@@ -710,12 +678,7 @@ fn update_input_border(
         border.set_all(theme.border);
     }
 }
-/// 流式光标：会话进行中（Thinking/Streaming/ToolRunning）时，在当前助手
-/// 消息文本末尾闪烁 `▋` 字符表示正在生成；空闲时移除光标。
-///
-/// 对齐 ui-prototype.html `.cursor` —— 光标位于正在生成的助手气泡正文末尾，
-/// 而非会话元信息。
-/// 闪烁频率 1Hz（500ms 显 / 500ms 隐），用 `Time` 累计秒数取奇偶判定。
+/// 流式光标：会话进行中时，在当前助手消息文本末尾闪烁 `▋`。
 fn update_streaming_cursor(
     conv: Res<Conversation>,
     time: Res<Time>,
@@ -727,13 +690,11 @@ fn update_streaming_cursor(
     let is_busy =
         conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error;
     if !is_busy {
-        // 空闲：确保无光标（文本末尾无 ▋）
         if text.0.ends_with('▋') {
             text.0.pop();
         }
         return;
     }
-    // 忙：每 500ms toggle 末尾 ▋
     let show = (time.elapsed().as_secs_f64() % 1.0) < 0.5;
     let has_cursor = text.0.ends_with('▋');
     if show && !has_cursor {
@@ -742,10 +703,7 @@ fn update_streaming_cursor(
         text.0.pop();
     }
 }
-/// 更新会话信息文本：`会话 #{id} · {N} 轮 · ↑{tokens} tokens`。
-///
-/// 流式光标（▋）现挂在 `CurrentAssistantText` 末尾（见 `update_streaming_cursor`），
-/// 本系统只设会话信息基础文本，不再与光标竞争。
+/// 更新会话信息文本。
 fn update_conversation_info(
     conv: Res<Conversation>,
     tokens: Res<TokenUsage>,
@@ -774,9 +732,6 @@ fn update_conversation_info(
 }
 
 /// 收到 SessionClearedMessage 时清空消息列表的所有子节点。
-///
-/// 新建会话后 Conversation 已 reset，UI 消息列表需同步清空。
-/// 同时清空当前助手文本节点（防止残留）。
 fn clear_on_new_session(
     mut reader: MessageReader<SessionClearedMessage>,
     entities: Res<ChatPanelEntities>,
@@ -789,9 +744,6 @@ fn clear_on_new_session(
     let Some(list) = entities.message_list else {
         return;
     };
-    // current_text 是 message_list 的常驻子节点（见 spawn_chat_panel）。
-    // despawn_related::<Children>() 会连带销毁它，之后 insert 必 panic。
-    // 故先 detach current_text → despawn 历史气泡 → add_child 回去 → 清空文本。
     if let Some(cur) = entities.current_text {
         commands
             .entity(list)
@@ -806,9 +758,7 @@ fn clear_on_new_session(
     }
 }
 
-/// 更新输入框右侧 tokenhint 文本：据会话状态显示就绪/思考中/生成中/中断中…等。
-///
-/// 对齐 ui-prototype.html `setStatus` 的 tokenhint 映射（行 562）。
+/// 更新输入框右侧 tokenhint 文本。
 fn update_token_hint(
     conv: Res<Conversation>,
     loc: Res<xgent_settings::Localizer>,

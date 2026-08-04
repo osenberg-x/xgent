@@ -1,8 +1,7 @@
-//! 工具调用卡片：内联在对话流中，展示工具名/参数/状态/结果。
+//! 工具调用时间线：内联在对话流中，展示工具名/参数/状态/结果。
 //!
-//! 订阅 [`ToolCallMessage`] 在消息列表中 spawn 卡片；
-//! 订阅 [`ToolResultMessage`] 更新卡片状态与结果。
-//! 折叠态只显示摘要，点击展开看详情。
+//! v2 重构：从独立卡片改为"嵌入式时间线"节点，左侧带图标节点 +
+//! 连接线，体现 agent 执行流程序列。
 
 use bevy::prelude::*;
 use bevy::ui::ScrollPosition;
@@ -14,10 +13,10 @@ use crate::chat_panel::MessageListMarker;
 use crate::i18n::tr;
 use crate::theme::{Theme, space};
 
-/// 工具调用卡片标记。
+/// 工具调用时间线节点标记。
 #[derive(Component, Default)]
 pub struct ToolCardMarker {
-    /// 工具调用 id（精确匹配 result，修复前用 tool_id 同名工具会错配）
+    /// 工具调用 id
     pub tool_call_id: String,
     /// 工具 id（展示用）
     pub tool_id: String,
@@ -41,9 +40,10 @@ pub struct ToolStatusDotMarker;
 #[derive(Component, Default)]
 pub struct ToolCardHeadMarker;
 
-/// 工具卡片折叠行标记（▾ 结果：N 行，点击 toggle 展开）。
+/// 工具卡片折叠行标记。
 #[derive(Component, Default)]
 pub struct ToolFoldMarker;
+
 /// 工具面板插件。
 pub struct ToolPanelPlugin;
 impl Plugin for ToolPanelPlugin {
@@ -61,7 +61,7 @@ impl Plugin for ToolPanelPlugin {
     }
 }
 
-/// 订阅 ToolCallMessage，在消息列表中 spawn 工具调用卡片。
+/// 订阅 ToolCallMessage，在消息列表中 spawn 时间线节点。
 fn spawn_tool_card(
     mut reader: MessageReader<ToolCallMessage>,
     q_list: Query<Entity, With<MessageListMarker>>,
@@ -76,136 +76,169 @@ fn spawn_tool_card(
     for ev in reader.read() {
         let summary = format_tool_summary(&ev.tool_id, &ev.input);
         commands.entity(list).with_children(|p| {
+            // 时间线行：图标节点 + 卡片体
             p.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    padding: UiRect::all(px(space::SM)),
-                    border: UiRect::all(px(1.0)),
-                    border_radius: BorderRadius::all(px(4.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(space::XS),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::MD),
                     ..default()
                 },
-                ToolCardMarker {
-                    tool_call_id: ev.tool_call_id.clone(),
-                    tool_id: ev.tool_id.clone(),
-                    expanded: false,
-                },
             ))
-            .with_children(|card| {
-                // head：图标 + 工具名 + 参数摘要 + 状态点 + 状态标签（点击 toggle 展开）
-                card.spawn((
-                    Button,
+            .with_children(|tl| {
+                // 时间线图标节点（左侧，带连接线效果）
+                tl.spawn((
                     Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Row,
-                        column_gap: px(space::SM),
+                        width: px(28.0),
+                        height: px(28.0),
+                        border_radius: BorderRadius::all(px(6.0)),
                         align_items: AlignItems::Center,
-                        padding: UiRect::all(px(space::SM)),
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(px(1.0)),
+                        flex_shrink: 0.0,
                         ..default()
                     },
-                    BackgroundColor(theme.bar),
-                    ToolCardHeadMarker,
+                    BackgroundColor(theme.panel),
+                    BorderColor::all(theme.border),
+                    Text::new("🔧"),
+                    TextFont {
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(theme.text_dim),
+                ));
+                // 卡片体
+                tl.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        min_width: Val::ZERO,
+                        padding: UiRect::all(px(space::SM)),
+                        border: UiRect::all(px(1.0)),
+                        border_radius: BorderRadius::all(px(8.0)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(space::XS),
+                        ..default()
+                    },
+                    BackgroundColor(theme.panel),
+                    BorderColor::all(theme.border),
+                    ToolCardMarker {
+                        tool_call_id: ev.tool_call_id.clone(),
+                        tool_id: ev.tool_id.clone(),
+                        expanded: false,
+                    },
                 ))
-                .with_children(|header| {
-                    // 工具图标
-                    header.spawn((
-                        Text::new("🔧"),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
-                    // 工具名
-                    header.spawn((
-                        Text::new(ev.tool_id.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
-                    // 参数摘要
-                    header.spawn((
+                .with_children(|card| {
+                    // head：工具名 + 参数摘要 + 状态药丸
+                    card.spawn((
+                        Button,
                         Node {
-                            flex_grow: 1.0,
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            column_gap: px(space::SM),
+                            align_items: AlignItems::Center,
                             ..default()
                         },
-                        Text::new(summary),
+                        ToolCardHeadMarker,
+                    ))
+                    .with_children(|header| {
+                        // 工具名
+                        header.spawn((
+                            Text::new(ev.tool_id.clone()),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(theme.text),
+                        ));
+                        // 参数摘要
+                        header.spawn((
+                            Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            },
+                            Text::new(summary),
+                            TextFont {
+                                font_size: FontSize::Px(11.5),
+                                ..default()
+                            },
+                            TextColor(theme.text_dim),
+                        ));
+                        // 状态药丸（elevated 底 + dot + 标签）
+                        header.spawn((
+                            Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: px(space::XS),
+                                padding: UiRect::horizontal(px(space::SM)),
+                                border_radius: BorderRadius::all(px(16.0)),
+                                ..default()
+                            },
+                            BackgroundColor(theme.elevated),
+                        ))
+                        .with_children(|pill| {
+                            pill.spawn((
+                                Node {
+                                    width: px(6.0),
+                                    height: px(6.0),
+                                    border_radius: BorderRadius::all(px(3.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(theme.st_running),
+                                ToolStatusDotMarker,
+                            ));
+                            pill.spawn((
+                                Text::new(tr(&loc, "tool-running")),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                                TextColor(theme.text_dim),
+                                ToolStatusLabelMarker,
+                            ));
+                        });
+                    });
+                    // 结果区域（初始隐藏）
+                    card.spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            overflow: Overflow::clip_y(),
+                            max_height: Val::Px(0.0),
+                            ..default()
+                        },
+                        ScrollPosition::default(),
+                        Text::new(String::new()),
                         TextFont {
-                            font_size: FontSize::Px(font),
+                            font_size: FontSize::Px(font - 1.5),
                             ..default()
                         },
                         TextColor(theme.text_dim),
+                        ToolResultTextMarker,
                     ));
-                    // 状态点（dot，初始 running 色）
-                    header.spawn((
+                    // fold 行
+                    card.spawn((
+                        Button,
                         Node {
-                            width: px(8.0),
-                            height: px(8.0),
-                            border_radius: BorderRadius::all(px(4.0)),
+                            width: Val::Percent(100.0),
+                            padding: UiRect::all(px(space::XS)),
+                            border: UiRect::top(px(1.0)),
                             ..default()
                         },
-                        BackgroundColor(theme.st_running),
-                        ToolStatusDotMarker,
-                    ));
-                    // 状态标签（初始"执行中"）
-                    header.spawn((
-                        Text::new(tr(&loc, "tool-running")),
+                        BorderColor::all(theme.line),
+                        Text::new(String::new()),
                         TextFont {
-                            font_size: FontSize::Px(font),
+                            font_size: FontSize::Px(11.0),
                             ..default()
                         },
-                        TextColor(theme.text_dim),
-                        ToolStatusLabelMarker,
+                        TextColor(theme.text_muted),
+                        ToolFoldMarker,
                     ));
                 });
-                // 结果区域（初始隐藏，max_height=0）
-                card.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        overflow: Overflow::clip_y(),
-                        max_height: Val::Px(0.0),
-                        ..default()
-                    },
-                    ScrollPosition::default(),
-                    Text::new(String::new()),
-                    TextFont {
-                        font_size: FontSize::Px(font - 2.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                    ToolResultTextMarker,
-                ));
-                // fold 行（▾ 结果：N 行，初始隐藏，结果到达显示）
-                card.spawn((
-                    Button,
-                    Node {
-                        width: Val::Percent(100.0),
-                        padding: UiRect::all(px(space::SM)),
-                        border: UiRect::top(px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme.bar),
-                    BorderColor::all(theme.border),
-                    Text::new(String::new()),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                    ToolFoldMarker,
-                ));
             });
         });
     }
 }
 
-/// 订阅 ToolResultMessage，更新对应卡片：状态点/标签/结果/fold 行。
-///
-/// 结果到达时设 `expanded=true`（默认展开，不 toggle），显示结果区，
-/// 填充 fold 行「▾ 结果：N 行」，状态点变 ok/fail 色。
+/// 订阅 ToolResultMessage，更新对应卡片。
 fn update_tool_result(
     mut reader: MessageReader<ToolResultMessage>,
     mut q_cards: Query<(&mut ToolCardMarker, &Children), With<ToolCardMarker>>,
@@ -231,16 +264,15 @@ fn update_tool_result(
             let status_color = if is_error {
                 Color::srgba(0.9, 0.3, 0.3, 1.0)
             } else {
-                Color::srgba(0.3, 0.8, 0.4, 1.0)
+                Color::srgba(0.133, 0.773, 0.369, 1.0)
             };
             let dot_color = if is_error {
-                BackgroundColor(theme_st_fail())
+                BackgroundColor(Color::srgba(0.937, 0.267, 0.267, 1.0))
             } else {
-                BackgroundColor(theme_st_ok())
+                BackgroundColor(Color::srgba(0.133, 0.773, 0.369, 1.0))
             };
             let line_count = ev.output.lines().count();
             let fold_text = format!("▾ 结果：{} 行 · 点击折叠", line_count);
-            // 结果到达 → 默认展开
             card.expanded = true;
             {
                 let mut q_status = params.p0();
@@ -281,15 +313,6 @@ fn update_tool_result(
     }
 }
 
-/// 便捷：从全局 Theme 取 fail 色（避免 update_tool_result 加 Theme 参数致 query 冲突）。
-fn theme_st_fail() -> Color {
-    Color::srgba(0.88, 0.34, 0.34, 1.0)
-}
-/// 便捷：从全局 Theme 取 ok 色。
-fn theme_st_ok() -> Color {
-    Color::srgba(0.31, 0.78, 0.47, 1.0)
-}
-
 /// 格式化工具调用的参数摘要。
 fn format_tool_summary(tool_id: &str, input: &serde_json::Value) -> String {
     match tool_id {
@@ -315,7 +338,6 @@ fn format_tool_summary(tool_id: &str, input: &serde_json::Value) -> String {
         }
         _ => {}
     }
-    // 回退：取 JSON 的前 50 字符
     let s = input.to_string();
     if s.len() > 50 {
         format!("{}…", &s[..47])
@@ -324,8 +346,6 @@ fn format_tool_summary(tool_id: &str, input: &serde_json::Value) -> String {
     }
 }
 /// 处理工具卡片 head / fold 点击：toggle `expanded`。
-///
-/// head 与 fold 都可点击 toggle；`apply_tool_card_visibility` 据 expanded 应用显隐。
 fn handle_tool_card_click(
     q_head: Query<(&Interaction, &ChildOf), (With<ToolCardHeadMarker>, Changed<Interaction>)>,
     q_fold: Query<(&Interaction, &ChildOf), (With<ToolFoldMarker>, Changed<Interaction>)>,
@@ -336,9 +356,7 @@ fn handle_tool_card_click(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        // head/fold 的父节点是卡片本体
         if let Ok(card_children) = q_children.get(parent.0) {
-            // 卡片本体即 parent.0，直接查 ToolCardMarker
             if let Ok(mut card) = q_cards.get_mut(parent.0) {
                 card.expanded = !card.expanded;
             }
@@ -364,7 +382,6 @@ fn apply_tool_card_visibility(
             }
             if let Ok(mut text) = q_fold.get_mut(child) {
                 if !text.0.is_empty() {
-                    // 结果已到达（fold 文本非空），据 expanded 切文案
                     let expanded_text = text.0.starts_with("▾");
                     if card.expanded && !expanded_text {
                         text.0 = text.0.replacen("▸", "▾", 1);

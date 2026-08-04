@@ -12,7 +12,6 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 
 use crate::editor::buffer::EditorBuffer;
-use crate::theme::px;
 
 /// 多标签页管理 Resource。
 #[derive(Resource, Debug, Default)]

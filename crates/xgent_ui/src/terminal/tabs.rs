@@ -22,7 +22,7 @@ use crate::terminal::{
 };
 use crate::theme::{Theme, px, space};
 
-/// 新建 tab 请求（由 ＋ 按钮 / Ctrl+` 首次唤起 / 顶栏 🖥 触发）。
+/// 新建 tab 请求（由 ＋ 按钮 / Ctrl+` 首次唤起 / 活动栏 🖥 触发）。
 #[derive(Message, Debug, Clone)]
 pub struct SpawnTabRequest {
     /// 初始 cwd。
