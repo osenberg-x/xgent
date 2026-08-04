@@ -375,7 +375,7 @@ fn spawn_user_message(
                     },
                     BackgroundColor(theme.elevated),
                     BorderColor::all(theme.border),
-                    Text::new("你"),
+                    Text::new(crate::i18n::tr(&loc, "role-user")),
                     TextFont {
                         font_size: FontSize::Px(12.0),
                         ..default()

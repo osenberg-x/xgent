@@ -73,6 +73,7 @@ pub fn handle_file_changed(
     mut read_writer: MessageWriter<FileReadRequest>,
     q_dialog: Query<Entity, With<ConflictDialogMarker>>,
     theme: Res<crate::theme::Theme>,
+    loc: Res<xgent_settings::Localizer>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
@@ -110,7 +111,7 @@ pub fn handle_file_changed(
                 // 进入冲突态，弹窗
                 buf.enter_conflict();
                 if q_dialog.single().is_err() {
-                    spawn_conflict_dialog(&mut commands, entity, &ev.path, &theme);
+                    spawn_conflict_dialog(&mut commands, entity, &ev.path, &theme, &loc);
                 }
             }
             BufferState::ConflictDetected => {
@@ -126,10 +127,21 @@ fn spawn_conflict_dialog(
     buffer: Entity,
     path: &std::path::Path,
     theme: &crate::theme::Theme,
+    loc: &xgent_settings::Localizer,
 ) {
     let accent = theme.accent;
     let panel = theme.panel;
     let border = theme.border;
+    let title = crate::i18n::tr(loc, "conflict-title");
+    let body_path = crate::i18n::tr_with(
+        loc,
+        "conflict-body",
+        &[("path", path.display().to_string().into())],
+    );
+    let body_dirty = crate::i18n::tr(loc, "conflict-body-dirty");
+    let discard_label = crate::i18n::tr(loc, "conflict-discard");
+    let keep_label = crate::i18n::tr(loc, "conflict-keep-local");
+    let diff_label = crate::i18n::tr(loc, "conflict-diff");
     commands
         .spawn((
             Node {
@@ -161,10 +173,7 @@ fn spawn_conflict_dialog(
             ))
             .with_children(|card| {
                 card.spawn((
-                    Text::new(format!(
-                        "文件已被外部修改\n\n{} 在编辑器外被修改。\n你有未保存的本地修改。",
-                        path.display()
-                    )),
+                    Text::new(format!("{title}\n\n{body_path}\n{body_dirty}")),
                     TextColor(Color::WHITE),
                 ));
                 card.spawn((Node {
@@ -180,7 +189,7 @@ fn spawn_conflict_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new("丢弃本地"),
+                            Text::new(discard_label),
                             TextColor(Color::WHITE),
                             ConflictDiscardMarker,
                         ));
@@ -191,7 +200,7 @@ fn spawn_conflict_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new("保留本地"),
+                            Text::new(keep_label),
                             TextColor(Color::WHITE),
                             ConflictKeepLocalMarker,
                         ));
@@ -202,7 +211,7 @@ fn spawn_conflict_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new("对比合并"),
+                            Text::new(diff_label),
                             TextColor(Color::WHITE),
                             ConflictDiffMarker,
                         ));

@@ -109,3 +109,15 @@ conversation-tokens = · ↑ { $tokens } tokens
 # Status bar
 status-encoding = UTF-8 · LF · Rust
 status-provider-not-configured = No provider configured
+
+# Editor dialogs
+dirty-close-title = Close unsaved tab?
+dirty-close-body = { $path } has unsaved changes that will be lost.
+dirty-close-discard = Discard
+dirty-close-cancel = Cancel
+conflict-title = File changed externally
+conflict-body = { $path } was modified outside the editor.
+conflict-body-dirty = You have unsaved local changes.
+conflict-discard = Discard Local
+conflict-keep-local = Keep Local
+conflict-diff = Compare

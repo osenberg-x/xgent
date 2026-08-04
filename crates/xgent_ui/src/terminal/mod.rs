@@ -222,6 +222,7 @@ impl Plugin for TerminalPlugin {
                     tabs::handle_close_tab_requests,
                     tabs::handle_switch_tab_requests,
                     tabs::handle_clear_tab_requests,
+                    tabs::handle_terminal_tab_click,
                     io::handle_pty_events,
                     io::handle_terminal_input,
                     output::handle_terminal_resize,

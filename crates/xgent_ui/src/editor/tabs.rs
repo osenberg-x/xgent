@@ -359,6 +359,7 @@ pub fn handle_close_tab_requests(
     mut content: ResMut<crate::editor::SideViewContent>,
     rt: ResMut<crate::editor::io::EditorIoRuntime>,
     theme: Res<crate::theme::Theme>,
+    loc: Res<xgent_settings::Localizer>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -368,7 +369,7 @@ pub fn handle_close_tab_requests(
                 if buf.state.is_dirty() {
                     // 无弹窗才弹新窗；已有弹窗则静默跳过（等用户处理完当前确认）
                     if q_dialog.single().is_err() {
-                        spawn_dirty_close_dialog(&mut commands, req.entity, buf.path(), &theme);
+                        spawn_dirty_close_dialog(&mut commands, req.entity, buf.path(), &theme, &loc);
                     }
                     continue;
                 }
@@ -409,11 +410,20 @@ fn spawn_dirty_close_dialog(
     buffer: Entity,
     path: &std::path::Path,
     theme: &crate::theme::Theme,
+    loc: &xgent_settings::Localizer,
 ) {
     let accent = theme.accent;
     let danger = theme.st_fail;
     let panel = theme.panel;
     let border = theme.border;
+    let title = crate::i18n::tr(loc, "dirty-close-title");
+    let body = crate::i18n::tr_with(
+        loc,
+        "dirty-close-body",
+        &[("path", path.display().to_string().into())],
+    );
+    let discard_label = crate::i18n::tr(loc, "dirty-close-discard");
+    let cancel_label = crate::i18n::tr(loc, "dirty-close-cancel");
     commands
         .spawn((
             Node {
@@ -445,10 +455,7 @@ fn spawn_dirty_close_dialog(
             ))
             .with_children(|card| {
                 card.spawn((
-                    Text::new(format!(
-                        "关闭未保存的标签？\n\n{} 有未保存的修改，关闭将丢失。",
-                        path.display()
-                    )),
+                    Text::new(format!("{title}\n\n{body}")),
                     TextColor(Color::WHITE),
                 ));
                 card.spawn((Node {
@@ -464,7 +471,7 @@ fn spawn_dirty_close_dialog(
                                 ..default()
                             },
                             BackgroundColor(danger),
-                            Text::new("丢弃修改"),
+                            Text::new(discard_label),
                             TextColor(Color::WHITE),
                             DirtyCloseDiscardMarker,
                         ));
@@ -475,7 +482,7 @@ fn spawn_dirty_close_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new("取消"),
+                            Text::new(cancel_label),
                             TextColor(Color::WHITE),
                             DirtyCloseCancelMarker,
                         ));

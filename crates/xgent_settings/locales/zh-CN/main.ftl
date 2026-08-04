@@ -110,3 +110,15 @@ conversation-tokens = · ↑ { $tokens } tokens
 # 状态栏
 status-encoding = UTF-8 · LF · Rust
 status-provider-not-configured = 未配置 provider
+
+# 编辑器弹窗
+dirty-close-title = 关闭未保存的标签？
+dirty-close-body = { $path } 有未保存的修改，关闭将丢失。
+dirty-close-discard = 丢弃修改
+dirty-close-cancel = 取消
+conflict-title = 文件已被外部修改
+conflict-body = { $path } 在编辑器外被修改。
+conflict-body-dirty = 你有未保存的本地修改。
+conflict-discard = 丢弃本地
+conflict-keep-local = 保留本地
+conflict-diff = 对比合并
