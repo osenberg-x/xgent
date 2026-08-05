@@ -18,7 +18,7 @@ use xgent_agent::bridge::AgentBridge;
 use xgent_core::config::{ConfigReadRequest, ConfigScope, ConfigWriteRequest};
 use xgent_core::methods;
 use xgent_settings_core::global::{ProviderConfig, ProviderKind};
-use xgent_ui::settings_panel::SaveProviderConfigMessage;
+use xgent_ui::settings_panel::{FetchModelsMessage, ModelListResultMessage, SaveLanguageMessage, SaveProviderConfigMessage};
 
 use crate::fs_event_bridge::{ConfigChangedMessage, IpcClientResource};
 
@@ -41,24 +41,46 @@ pub struct PendingRefresh {
 #[derive(Resource, Clone)]
 struct RefreshSender(mpsc::Sender<RefreshResult>);
 
+/// 模型列表结果（从 async task 经 channel 传回 ECS）。
+struct ModelListResult {
+    models: Vec<String>,
+    error: String,
+}
+
+/// 模型列表结果的接收端。
+#[derive(Resource)]
+pub struct ModelListRx {
+    rx: mpsc::Receiver<ModelListResult>,
+}
+
 /// 配置桥接插件：注册系统与资源。
 pub struct ConfigBridgePlugin;
 
 impl Plugin for ConfigBridgePlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = mpsc::channel::<RefreshResult>(16);
+        let (ml_tx, ml_rx) = mpsc::channel::<ModelListResult>(16);
         app.insert_resource(PendingRefresh { rx })
             .insert_resource(RefreshSender(tx))
+            .insert_resource(ModelListRx { rx: ml_rx })
+            .insert_resource(ModelListSender(ml_tx))
             .add_systems(
                 Update,
                 (
                     save_provider_config,
                     drain_pending_refresh,
                     refresh_on_startup,
+                    fetch_models,
+                    drain_model_list,
+                    save_language,
                 ),
             );
     }
 }
+
+/// 模型列表结果发送端。
+#[derive(Resource, Clone)]
+struct ModelListSender(mpsc::Sender<ModelListResult>);
 
 /// 处理保存 provider 配置：经 IPC 写 daemon 全局配置。
 ///
@@ -249,5 +271,102 @@ fn is_provider_ready(pc: &ProviderConfig) -> bool {
     match pc.kind {
         ProviderKind::Ollama => base_ok,
         _ => base_ok && !pc.api_key.is_empty(),
+    }
+}
+
+/// 处理拉取模型列表请求：经 IPC 调 daemon `provider.listModels`。
+fn fetch_models(
+    mut reader: MessageReader<FetchModelsMessage>,
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+    ml_tx: Res<ModelListSender>,
+) {
+    for ev in reader.read() {
+        let ipc = ipc.client.clone();
+        let provider_id = ev.provider_id.clone();
+        let api_base = ev.api_base.clone();
+        let api_key = ev.api_key.clone();
+        let kind = ev.kind;
+        let tx = ml_tx.0.clone();
+
+        bridge.runtime.handle().spawn(async move {
+            // 先确保 provider 配置已写入 daemon（临时写入，不打扰用户全局配置）
+            let fields: [(&str, serde_json::Value); 3] = [
+                ("kind", serde_json::to_value(kind).unwrap_or(serde_json::Value::Null)),
+                ("api_base", serde_json::Value::String(api_base)),
+                ("api_key", serde_json::Value::String(api_key)),
+            ];
+            for (field, value) in fields {
+                let key = format!("providers.{provider_id}.{field}");
+                let req = ConfigWriteRequest {
+                    scope: ConfigScope::Global,
+                    key,
+                    value,
+                };
+                let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
+                let _ = ipc.call_ok(methods::CONFIG_WRITE, params).await;
+            }
+
+            // 调 provider.listModels
+            let req = serde_json::json!({ "provider": provider_id });
+            let result = ipc.call_ok(methods::PROVIDER_LIST_MODELS, req).await;
+            match result {
+                Ok(v) => {
+                    let models: Vec<String> = v.as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let _ = tx.send(ModelListResult {
+                        models,
+                        error: String::new(),
+                    }).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(ModelListResult {
+                        models: Vec::new(),
+                        error: format!("拉取模型失败: {e}"),
+                    }).await;
+                }
+            }
+        });
+    }
+}
+
+/// 每帧 drain 模型列表结果，发 ModelListResultMessage。
+fn drain_model_list(
+    mut rx: ResMut<ModelListRx>,
+    mut writer: MessageWriter<ModelListResultMessage>,
+) {
+    while let Ok(r) = rx.rx.try_recv() {
+        writer.write(ModelListResultMessage {
+            models: r.models,
+            error: r.error,
+        });
+    }
+}
+
+/// 处理语言切换持久化：经 IPC 写 daemon 全局配置 preferences.language。
+fn save_language(
+    mut reader: MessageReader<SaveLanguageMessage>,
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+) {
+    for ev in reader.read() {
+        let ipc = ipc.client.clone();
+        let lang = ev.language.clone();
+        bridge.runtime.handle().spawn(async move {
+            let req = ConfigWriteRequest {
+                scope: ConfigScope::Global,
+                key: "preferences.language".into(),
+                value: serde_json::Value::String(lang),
+            };
+            let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
+            if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
+                tracing::error!("写入 preferences.language 失败: {e}");
+            }
+        });
     }
 }

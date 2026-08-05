@@ -87,17 +87,83 @@ pub struct SaveProviderConfigMessage {
     pub model: String,
 }
 
+/// 请求拉取模型列表（UI → xgent_app IPC 系统）。
+#[derive(Message, Debug, Clone)]
+pub struct FetchModelsMessage {
+    /// provider id
+    pub provider_id: String,
+    /// api_base（用于构建 provider）
+    pub api_base: String,
+    /// api_key
+    pub api_key: String,
+    /// provider 类型
+    pub kind: xgent_settings_core::global::ProviderKind,
+}
+
+/// 模型列表结果（xgent_app → UI）。
+#[derive(Message, Debug, Clone)]
+pub struct ModelListResultMessage {
+    /// 模型 id 列表
+    pub models: Vec<String>,
+    /// 错误信息（空表示成功）
+    pub error: String,
+}
+
+/// 模型列表状态（缓存）。
+#[derive(Resource, Default)]
+pub struct ModelListState {
+    /// 可用模型列表
+    pub models: Vec<String>,
+    /// 是否正在加载
+    pub loading: bool,
+    /// 错误信息
+    pub error: String,
+}
+
+/// 保存语言偏好消息（UI → xgent_app IPC 系统）。
+#[derive(Message, Debug, Clone)]
+pub struct SaveLanguageMessage {
+    /// 语言代码，如 "zh-CN" / "en-US"
+    pub language: String,
+}
+
+/// 刷新模型按钮标记。
+#[derive(Component, Default)]
+pub struct FetchModelsButtonMarker;
+
+/// 模型列表项标记（携带模型 id）。
+#[derive(Component)]
+pub struct ModelItemMarker {
+    pub model_id: String,
+}
+
+/// 模型列表容器标记。
+#[derive(Component, Default)]
+pub struct ModelListContainerMarker;
+
 /// 设置面板插件。
 pub struct SettingsPanelPlugin;
 
 impl Plugin for SettingsPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SaveProviderConfigMessage>()
+            .add_message::<FetchModelsMessage>()
+            .add_message::<ModelListResultMessage>()
+            .add_message::<SaveLanguageMessage>()
             .insert_resource(SettingsPanelState::default())
             .insert_resource(KindSelector::default())
+            .insert_resource(ModelListState::default())
             .add_systems(
                 Update,
-                (toggle_panel, handle_kind_button, handle_save_button).chain(),
+                (
+                    toggle_panel,
+                    handle_kind_button,
+                    handle_save_button,
+                    handle_fetch_models,
+                    handle_model_list_results,
+                    handle_model_click,
+                )
+                    .chain(),
             );
     }
 }
@@ -260,7 +326,41 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     },
                     TextColor(theme.text_dim),
                 ));
-                card.spawn(text_input_node(theme, font, ModelInput));
+                // Model 输入 + 刷新按钮行
+                card.spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::SM),
+                    ..default()
+                },))
+                .with_children(|row| {
+                    row.spawn(text_input_node(theme, font, ModelInput));
+                    row.spawn((
+                        Button,
+                        Node {
+                            padding: UiRect::all(px(space::SM)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.bar),
+                        Text::new("↻"),
+                        TextFont {
+                            font_size: FontSize::Px(font),
+                            ..default()
+                        },
+                        TextColor(theme.text_dim),
+                        FetchModelsButtonMarker,
+                    ));
+                });
+                // 模型列表容器（动态填充）
+                card.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        max_height: px(150.0),
+                        overflow: Overflow::clip_y(),
+                        ..default()
+                    },
+                    ModelListContainerMarker,
+                ));
 
                 // 按钮行
                 card.spawn((Node {
@@ -406,6 +506,131 @@ fn handle_save_button(
     for interaction in q_close.iter() {
         if *interaction == Interaction::Pressed {
             state.open = false;
+        }
+    }
+}
+
+/// 处理刷新模型按钮点击：发 FetchModelsMessage。
+fn handle_fetch_models(
+    q_fetch: Query<&Interaction, (With<FetchModelsButtonMarker>, Changed<Interaction>)>,
+    q_id: Query<&EditableText, With<ProviderIdInput>>,
+    q_base: Query<&EditableText, With<ApiBaseInput>>,
+    q_key: Query<&EditableText, With<ApiKeyInput>>,
+    kind_selector: Res<KindSelector>,
+    mut fetch_writer: MessageWriter<FetchModelsMessage>,
+    mut model_state: ResMut<ModelListState>,
+) {
+    for interaction in q_fetch.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let provider_id = q_id
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
+        let api_base = q_base
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
+        let api_key = q_key
+            .single()
+            .map(|e| e.value().to_string())
+            .unwrap_or_default();
+        if provider_id.is_empty() || api_base.is_empty() {
+            model_state.error = "需要填写 Provider ID 和 API Base".into();
+            model_state.loading = false;
+            continue;
+        }
+        model_state.loading = true;
+        model_state.error.clear();
+        fetch_writer.write(FetchModelsMessage {
+            provider_id,
+            api_base,
+            api_key,
+            kind: kind_selector.current,
+        });
+    }
+}
+
+/// 订阅 ModelListResultMessage，更新 ModelListState 并重建列表 UI。
+fn handle_model_list_results(
+    mut reader: MessageReader<ModelListResultMessage>,
+    mut model_state: ResMut<ModelListState>,
+    mut commands: Commands,
+    theme: Res<Theme>,
+    q_container: Query<Entity, With<ModelListContainerMarker>>,
+) {
+    for ev in reader.read() {
+        model_state.loading = false;
+        model_state.error = ev.error.clone();
+        model_state.models = ev.models.clone();
+
+        // 重建列表 UI
+        if let Ok(container) = q_container.single() {
+            commands.entity(container).despawn_related::<Children>();
+            let font = theme.font_size;
+            if !ev.error.is_empty() {
+                commands.entity(container).with_children(|c| {
+                    c.spawn((
+                        Text::new(ev.error.clone()),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(theme.st_fail),
+                    ));
+                });
+            } else if ev.models.is_empty() {
+                commands.entity(container).with_children(|c| {
+                    c.spawn((
+                        Text::new("（无模型）"),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                });
+            } else {
+                commands.entity(container).with_children(|c| {
+                    for model_id in &ev.models {
+                        c.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(px(space::XS)),
+                                border: UiRect::bottom(px(1.0)),
+                                ..default()
+                            },
+                            BorderColor::all(theme.line),
+                            Text::new(model_id.clone()),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.text_dim),
+                            ModelItemMarker {
+                                model_id: model_id.clone(),
+                            },
+                        ));
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// 处理模型列表项点击：填充到 Model 输入框。
+fn handle_model_click(
+    q_items: Query<(&Interaction, &ModelItemMarker), Changed<Interaction>>,
+    mut q_model: Query<&mut EditableText, With<ModelInput>>,
+) {
+    if let Ok(mut model_input) = q_model.single_mut() {
+        for (interaction, marker) in q_items.iter() {
+            if *interaction == Interaction::Pressed {
+                // 用 clear + Insert 语义：先 clear 再 Insert
+                model_input.clear();
+                model_input.queue_edit(bevy::text::TextEdit::Insert(marker.model_id.clone().into()));
+            }
         }
     }
 }

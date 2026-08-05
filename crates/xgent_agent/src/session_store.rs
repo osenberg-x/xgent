@@ -76,6 +76,114 @@ impl SessionStore {
         &self.path
     }
 }
+/// 会话摘要（用于历史列表 UI）。
+#[derive(Debug, Clone)]
+pub struct SessionSummary {
+    /// 会话 id（文件名 stem）
+    pub id: String,
+    /// 创建时间戳（ms epoch），从 Header entry 读取
+    pub timestamp: u64,
+    /// 可选标题
+    pub title: Option<String>,
+    /// 消息条数（Message entry 计数）
+    pub message_count: usize,
+    /// 工作目录
+    pub cwd: String,
+}
+
+/// 扫描 sessions 目录，返回所有会话的摘要（按时间倒序）。
+///
+/// 遍历 `<sessions_dir>/*.jsonl`，读取每文件的 Header（首行）与 Message 计数。
+/// 损坏文件跳过（不阻塞其他会话的列出）。
+pub fn list_sessions() -> Vec<SessionSummary> {
+    let dir = xgent_settings_core::paths::sessions_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+
+    let mut summaries = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string());
+        let Some(stem) = stem else {
+            continue;
+        };
+        let store = match SessionStore::open(path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let Ok(entries) = store.load_all() else {
+            continue;
+        };
+        let mut summary = SessionSummary {
+            id: stem,
+            timestamp: 0,
+            title: None,
+            message_count: 0,
+            cwd: String::new(),
+        };
+        for entry in &entries {
+            match entry {
+                xgent_core::session::SessionEntry::Header(h) => {
+                    summary.timestamp = h.timestamp;
+                    summary.title = h.title.clone();
+                    summary.cwd = h.cwd.clone();
+                }
+                xgent_core::session::SessionEntry::Message(_) => {
+                    summary.message_count += 1;
+                }
+                _ => {}
+            }
+        }
+        // 跳过无 Header 的无效文件
+        if summary.timestamp > 0 {
+            summaries.push(summary);
+        }
+    }
+    // 按时间倒序
+    summaries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    summaries
+}
+
+/// 从 JSONL 文件恢复会话消息历史。
+///
+/// 读取 `session_id` 对应的 JSONL，重建 `AgentMessage` 列表。
+/// Compaction entry 之后的历史为压缩后保留的消息。
+/// Error entry 不进消息历史。
+pub fn restore_session(session_id: &str) -> Option<Vec<xgent_core::chat::AgentMessage>> {
+    let path = session_file_path(session_id);
+    let store = SessionStore::open(path).ok()?;
+    let entries = store.load_all().ok()?;
+
+    let mut messages = Vec::new();
+    for entry in &entries {
+        match entry {
+            xgent_core::session::SessionEntry::Header(_) => {}
+            xgent_core::session::SessionEntry::Message(m) => {
+                messages.push(m.message.clone());
+            }
+            xgent_core::session::SessionEntry::Compaction(c) => {
+                // 遇到 compaction：用摘要替换之前的所有消息
+                messages.clear();
+                messages.push(xgent_core::chat::AgentMessage::User(
+                    xgent_core::chat::UserMessage {
+                        content: vec![xgent_core::chat::ContentBlock::Text {
+                            text: format!("[前序对话摘要]\n{}", c.summary),
+                        }],
+                        timestamp: c.timestamp,
+                    },
+                ));
+            }
+            xgent_core::session::SessionEntry::ModelChange(_) => {}
+            xgent_core::session::SessionEntry::Error(_) => {}
+        }
+    }
+    Some(messages)
+}
+
 /// 计算会话 JSONL 文件路径：`<agent_dir>/sessions/<session_id>.jsonl`。
 ///
 /// 转发到 [`xgent_settings_core::paths::session_file_path`]（全局用户目录）。

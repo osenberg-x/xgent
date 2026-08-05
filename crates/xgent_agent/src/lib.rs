@@ -30,7 +30,7 @@ pub use conversation::{Conversation, ConversationStatus};
 pub use events::*;
 pub use format::build_request;
 pub use provider_state::{ContextState, ProviderInfo};
-pub use session_store::{SessionStore, session_file_path};
+pub use session_store::{SessionStore, SessionSummary, list_sessions, restore_session, session_file_path};
 
 use bevy::prelude::*;
 
@@ -57,6 +57,10 @@ impl Plugin for XgentAgentPlugin {
             .add_message::<CompactedMessage>()
             .add_message::<NewSessionMessage>()
             .add_message::<SessionClearedMessage>()
+            .add_message::<ListSessionsMessage>()
+            .add_message::<SessionListMessage>()
+            .add_message::<RestoreSessionMessage>()
+            .add_message::<SessionRestoredMessage>()
             .add_message::<CommandResultMessage>()
             .add_message::<PluginUnregisterMessage>()
             .add_message::<PluginCommandTriggered>()

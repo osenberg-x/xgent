@@ -20,6 +20,10 @@ pub struct ProviderLabelMarker;
 #[derive(Component, Default)]
 pub struct NewSessionButtonMarker;
 
+/// 历史会话按钮标记。
+#[derive(Component, Default)]
+pub struct HistoryButtonMarker;
+
 /// 顶栏 provider 标签按钮标记（点击打开设置面板切换 provider）。
 #[derive(Component, Default)]
 pub struct ProviderButtonMarker;
@@ -174,6 +178,29 @@ fn spawn_top_bar(
             NewSessionButtonMarker,
         ));
 
+        // 🕐 历史会话按钮
+        p.spawn((
+            Button,
+            Node {
+                width: px(30.0),
+                height: px(30.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(px(1.0)),
+                border_radius: BorderRadius::all(px(6.0)),
+                ..default()
+            },
+            BackgroundColor(theme.elevated),
+            BorderColor::all(theme.border),
+            Text::new("🕐"),
+            TextFont {
+                font_size: FontSize::Px(13.0),
+                ..default()
+            },
+            TextColor(theme.text_dim),
+            HistoryButtonMarker,
+        ));
+
         // 🔍 命令面板按钮
         p.spawn((
             Button,
@@ -238,16 +265,24 @@ fn update_provider_label(
 /// 处理顶栏按钮点击。
 fn handle_top_bar_buttons(
     q_new: Query<&Interaction, (With<NewSessionButtonMarker>, Changed<Interaction>)>,
+    q_history: Query<&Interaction, (With<HistoryButtonMarker>, Changed<Interaction>)>,
     q_palette: Query<&Interaction, (With<PaletteButtonMarker>, Changed<Interaction>)>,
     q_settings: Query<&Interaction, (With<SettingsButtonMarker>, Changed<Interaction>)>,
     q_provider: Query<&Interaction, (With<ProviderButtonMarker>, Changed<Interaction>)>,
     mut palette: ResMut<CommandPaletteState>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
+    mut history_state: ResMut<crate::session_history::SessionHistoryState>,
     mut new_session: MessageWriter<xgent_agent::NewSessionMessage>,
 ) {
     for i in q_new.iter() {
         if *i == Interaction::Pressed {
             new_session.write(xgent_agent::NewSessionMessage);
+        }
+    }
+    // 🕐 历史会话按钮
+    for i in q_history.iter() {
+        if *i == Interaction::Pressed {
+            history_state.open = true;
         }
     }
     // 🔍 命令面板按钮

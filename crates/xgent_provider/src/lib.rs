@@ -30,7 +30,11 @@ pub fn build_provider(id: &str, cfg: &ProviderConfig) -> Box<dyn LlmProvider> {
             cfg.api_key.clone(),
         )),
         ProviderKind::ResponseApi => Box::new(ResponseApiProvider::new(id.to_string())),
-        ProviderKind::Anthropic => Box::new(AnthropicProvider::new(id.to_string())),
+        ProviderKind::Anthropic => Box::new(AnthropicProvider::new(
+            id.to_string(),
+            cfg.api_base.clone(),
+            cfg.api_key.clone(),
+        )),
         ProviderKind::Custom => Box::new(CustomApiProvider::new(id.to_string())),
     }
 }

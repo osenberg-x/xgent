@@ -35,6 +35,7 @@ file-panel-empty = Open a project to see the file tree
 confirm-allow = Allow
 confirm-deny = Deny
 cmd-session-new = New Session
+cmd-session-history = Session History
 cmd-lang-en = Switch language to English
 cmd-lang-zh = Switch language to Chinese
 cmd-settings-open = Open Settings
@@ -121,3 +122,12 @@ conflict-body-dirty = You have unsaved local changes.
 conflict-discard = Discard Local
 conflict-keep-local = Keep Local
 conflict-diff = Compare
+
+# Session history
+history-title = Session History
+history-empty = No saved sessions
+history-loading = Loading...
+history-close = x
+history-message-count = { $count } messages
+history-restore = Restore
+history-restore-failed = Restore failed: session file missing or corrupted

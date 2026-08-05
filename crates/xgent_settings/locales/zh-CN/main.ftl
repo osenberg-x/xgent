@@ -23,6 +23,7 @@ role-user = 用户
 role-assistant = XGent
 confirm-deny = 拒绝
 cmd-session-new = 新建会话
+cmd-session-history = 历史会话
 cmd-lang-en = 切换语言为英文
 cmd-lang-zh = 切换语言为中文
 cmd-settings-open = 打开设置
@@ -122,3 +123,12 @@ conflict-body-dirty = 你有未保存的本地修改。
 conflict-discard = 丢弃本地
 conflict-keep-local = 保留本地
 conflict-diff = 对比合并
+
+# 会话历史
+history-title = 历史会话
+history-empty = 暂无历史会话
+history-loading = 加载中...
+history-close = ✕
+history-message-count = { $count } 条消息
+history-restore = 恢复
+history-restore-failed = 恢复失败：会话文件不存在或已损坏

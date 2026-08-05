@@ -15,6 +15,7 @@ pub mod file_panel;
 pub mod i18n;
 pub mod layout;
 pub mod resize;
+pub mod session_history;
 pub mod settings_panel;
 pub mod shortcuts;
 pub mod status_bar;
@@ -42,6 +43,7 @@ impl Plugin for XgentUiPlugin {
             status_bar::StatusBarPlugin,
             command_palette::CommandPalettePlugin,
             settings_panel::SettingsPanelPlugin,
+            session_history::SessionHistoryPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
             editor::EditorPlugin,

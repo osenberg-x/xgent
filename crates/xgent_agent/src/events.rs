@@ -161,9 +161,34 @@ pub struct CompactedMessage {
     pub tokens_after: u32,
 }
 
-/// 会话已清空（agent → UI）：新建会话后通知 UI 清空消息列表。
+/// 会话已清空（agent → UI）：新建会话或恢复会话后通知 UI 清空消息列表。
 #[derive(Message)]
 pub struct SessionClearedMessage;
+
+/// 请求列出历史会话（UI → agent）。
+#[derive(Message)]
+pub struct ListSessionsMessage;
+
+/// 历史会话列表结果（agent → UI）。
+#[derive(Clone, Message)]
+pub struct SessionListMessage {
+    /// 会话摘要列表（按时间倒序）
+    pub sessions: Vec<crate::session_store::SessionSummary>,
+}
+
+/// 请求恢复指定会话（UI → agent）。
+#[derive(Message)]
+pub struct RestoreSessionMessage {
+    /// 要恢复的会话 id
+    pub session_id: String,
+}
+
+/// 会话恢复完成（agent → UI）：通知 UI 用恢复的消息重建消息列表。
+#[derive(Clone, Message)]
+pub struct SessionRestoredMessage {
+    /// 恢复的消息列表
+    pub messages: Vec<xgent_core::chat::AgentMessage>,
+}
 
 /// 编辑器命令请求（agent → UI）：agent 经 EditorTool 发出，经 channel 桥接到 ECS。
 ///

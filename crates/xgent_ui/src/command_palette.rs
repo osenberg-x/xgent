@@ -71,6 +71,11 @@ pub fn register_xgent_commands(mut registry: ResMut<CommandRegistry>, loc: Res<L
         kind: CommandKind::Action,
     });
     registry.register(PaletteCommand {
+        id: "session.history".into(),
+        label: tr(&loc, "cmd-session-history"),
+        kind: CommandKind::Action,
+    });
+    registry.register(PaletteCommand {
         id: "lang.switch.en".into(),
         label: tr(&loc, "cmd-lang-en"),
         kind: CommandKind::Action,
@@ -329,16 +334,32 @@ pub(crate) fn handle_palette_triggers(
     mut state: ResMut<CommandPaletteState>,
     mut loc: ResMut<Localizer>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
+    mut history_state: ResMut<crate::session_history::SessionHistoryState>,
     mut new_session: MessageWriter<NewSessionMessage>,
     mut plugin_command: MessageWriter<xgent_agent::PluginCommandTriggered>,
+    mut save_lang: MessageWriter<crate::settings_panel::SaveLanguageMessage>,
 ) {
     for ev in reader.read() {
         match ev.command_id.as_str() {
-            "lang.switch.en" => loc.switch("en-US"),
-            "lang.switch.zh" => loc.switch("zh-CN"),
+            "lang.switch.en" => {
+                loc.switch("en-US");
+                save_lang.write(crate::settings_panel::SaveLanguageMessage {
+                    language: "en-US".into(),
+                });
+            }
+            "lang.switch.zh" => {
+                loc.switch("zh-CN");
+                save_lang.write(crate::settings_panel::SaveLanguageMessage {
+                    language: "zh-CN".into(),
+                });
+            }
             "session.new" => {
                 // 新建会话：发 NewSessionMessage，agent_poll_system 处理 reset
                 new_session.write(NewSessionMessage);
+            }
+            "session.history" => {
+                // 打开会话历史面板
+                history_state.open = true;
             }
             "settings.open" => {
                 settings_state.open = true;

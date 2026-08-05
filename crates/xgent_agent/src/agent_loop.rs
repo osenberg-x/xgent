@@ -14,15 +14,19 @@ use crate::format::build_request;
 pub fn agent_poll_system(
     bridge: Res<AgentBridge>,
     mut conv: ResMut<Conversation>,
-    mut delta: MessageWriter<DeltaMessage>,
-    mut tool_call: MessageWriter<ToolCallMessage>,
-    mut tool_result: MessageWriter<ToolResultMessage>,
-    mut confirm: MessageWriter<ConfirmRequestMessage>,
-    mut done: MessageWriter<DoneMessage>,
-    mut error: MessageWriter<ErrorMessage>,
-    mut retry: MessageWriter<RetryMessage>,
-    mut compacted: MessageWriter<CompactedMessage>,
+    mut writers: ParamSet<(
+        MessageWriter<DeltaMessage>,
+        MessageWriter<ToolCallMessage>,
+        MessageWriter<ToolResultMessage>,
+        MessageWriter<ConfirmRequestMessage>,
+        MessageWriter<DoneMessage>,
+        MessageWriter<ErrorMessage>,
+        MessageWriter<RetryMessage>,
+        MessageWriter<CompactedMessage>,
+    )>,
     mut session_cleared: MessageWriter<SessionClearedMessage>,
+    mut session_list: MessageWriter<SessionListMessage>,
+    mut session_restored: MessageWriter<SessionRestoredMessage>,
     // ParamSet 合并所有 MessageReader，突破 SystemParam 数量上限
     mut readers: ParamSet<(
         MessageReader<UserInputMessage>,
@@ -31,6 +35,8 @@ pub fn agent_poll_system(
         MessageReader<SteeringMessage>,
         MessageReader<FollowUpMessage>,
         MessageReader<NewSessionMessage>,
+        MessageReader<ListSessionsMessage>,
+        MessageReader<RestoreSessionMessage>,
     )>,
     provider: Res<crate::provider_state::ProviderInfo>,
     context: Res<crate::provider_state::ContextState>,
@@ -50,7 +56,7 @@ pub fn agent_poll_system(
         }
         // 闸门：provider 未就绪时不构造请求，发引导错误
         if !provider.ready {
-            error.write(ErrorMessage {
+            writers.p5().write(ErrorMessage {
                 kind: xgent_core::chat::ErrorKind::NotConfigured,
                 message: "未配置 Provider，请先在设置中配置 API 信息".to_string(),
             });
@@ -124,6 +130,23 @@ pub fn agent_poll_system(
         session_cleared.write(SessionClearedMessage);
     }
 
+    // 2e. 处理列出历史会话：扫描 sessions 目录，返回摘要列表
+    for _ in readers.p6().read() {
+        let sessions = crate::session_store::list_sessions();
+        session_list.write(SessionListMessage { sessions });
+    }
+
+    // 2f. 处理恢复会话：仅 Idle/Error 接受（忙碌时忽略）
+    for ev in readers.p7().read() {
+        if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
+            continue;
+        }
+        if let Some(messages) = crate::session_store::restore_session(&ev.session_id) {
+            conv.restore(&ev.session_id, messages.clone());
+            session_restored.write(SessionRestoredMessage { messages });
+        }
+    }
+
     // 3. 处理确认决策：经 SharedConfirm 回填给等待的 async task
     for ev in readers.p2().read() {
         let handle = bridge.runtime.handle().clone();
@@ -156,20 +179,15 @@ pub fn agent_poll_system(
                 handle_agent_event(
                     ev,
                     &mut conv,
-                    &mut delta,
-                    &mut tool_call,
-                    &mut tool_result,
-                    &mut confirm,
-                    &mut done,
-                    &mut error,
-                    &mut retry,
-                    &mut compacted,
+                    &mut writers,
+                    &mut session_cleared,
+                    &mut session_restored,
                 );
             }
             Err(mpsc::error::TryRecvError::Empty) => break,
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 // 异步任务退出，视为完成
-                done.write(DoneMessage {
+                writers.p4().write(DoneMessage {
                     usage: None,
                     model: None,
                 });
@@ -180,23 +198,28 @@ pub fn agent_poll_system(
 }
 
 /// 处理单个 AgentEvent，更新状态并发 Bevy Message。
+#[allow(clippy::too_many_arguments)]
 fn handle_agent_event(
     ev: AgentEvent,
     conv: &mut Conversation,
-    delta: &mut MessageWriter<DeltaMessage>,
-    tool_call: &mut MessageWriter<ToolCallMessage>,
-    tool_result: &mut MessageWriter<ToolResultMessage>,
-    confirm: &mut MessageWriter<ConfirmRequestMessage>,
-    done: &mut MessageWriter<DoneMessage>,
-    error: &mut MessageWriter<ErrorMessage>,
-    retry: &mut MessageWriter<RetryMessage>,
-    compacted: &mut MessageWriter<CompactedMessage>,
+    writers: &mut ParamSet<(
+        MessageWriter<DeltaMessage>,
+        MessageWriter<ToolCallMessage>,
+        MessageWriter<ToolResultMessage>,
+        MessageWriter<ConfirmRequestMessage>,
+        MessageWriter<DoneMessage>,
+        MessageWriter<ErrorMessage>,
+        MessageWriter<RetryMessage>,
+        MessageWriter<CompactedMessage>,
+    )>,
+    _session_cleared: &mut MessageWriter<SessionClearedMessage>,
+    _session_restored: &mut MessageWriter<SessionRestoredMessage>,
 ) {
     match ev {
         AgentEvent::Delta(text) => {
             conv.status = ConversationStatus::Streaming;
             conv.current_assistant_text.push_str(&text);
-            delta.write(DeltaMessage { text });
+            writers.p0().write(DeltaMessage { text });
         }
         AgentEvent::ToolCall {
             call_id,
@@ -207,7 +230,7 @@ fn handle_agent_event(
             // （修复多轮工具调用后 conv 缺 tool_call 导致 LLM 请求被拒的 bug）
             conv.push_tool_call(&call_id, &tool_id, &input);
             conv.status = ConversationStatus::ToolRunning;
-            tool_call.write(ToolCallMessage {
+            writers.p1().write(ToolCallMessage {
                 tool_call_id: call_id,
                 tool_id,
                 input,
@@ -224,7 +247,7 @@ fn handle_agent_event(
             // 记录 tool result，与 push_tool_call 的 call_id 配对
             // （OpenAI 要求 tool result 的 tool_call_id 与前述 tool_call 的 id 一致）
             conv.push_tool_result(&call_id, &tool_id, &output, is_error);
-            tool_result.write(ToolResultMessage {
+            writers.p2().write(ToolResultMessage {
                 tool_call_id: call_id,
                 tool_id,
                 output,
@@ -234,7 +257,7 @@ fn handle_agent_event(
         }
         AgentEvent::ConfirmRequest(req) => {
             conv.status = ConversationStatus::Confirming;
-            confirm.write(ConfirmRequestMessage(req));
+            writers.p3().write(ConfirmRequestMessage(req));
         }
         AgentEvent::SteeringInterrupted { partial_text } => {
             // 流式被 steering 中断：把半截文本固化为被中断的 assistant 消息，
@@ -258,7 +281,7 @@ fn handle_agent_event(
             }
             // status 保持 Streaming/Thinking 语义：对话未结束，steering 后继续流式
             conv.status = ConversationStatus::Thinking;
-            done.write(DoneMessage {
+            writers.p4().write(DoneMessage {
                 usage: None,
                 model: None,
             });
@@ -269,7 +292,7 @@ fn handle_agent_event(
             conv.finalize_assistant(usage.clone(), model.clone());
             conv.persist_last_assistant();
             conv.status = ConversationStatus::Idle;
-            done.write(DoneMessage { usage, model });
+            writers.p4().write(DoneMessage { usage, model });
         }
         AgentEvent::RetryAttempt {
             attempt,
@@ -285,11 +308,11 @@ fn handle_agent_event(
             conv.persist_last_assistant();
             // 状态保持 Streaming（重试中），不切到 Error
             conv.status = ConversationStatus::Streaming;
-            done.write(DoneMessage {
+            writers.p4().write(DoneMessage {
                 usage: None,
                 model: None,
             });
-            retry.write(RetryMessage {
+            writers.p6().write(RetryMessage {
                 attempt,
                 infinite,
                 kind,
@@ -300,7 +323,7 @@ fn handle_agent_event(
             // 错误不进 conv.messages（不发给 LLM），但持久化为独立 entry 供审计
             conv.persist_error(kind, &message);
             conv.status = ConversationStatus::Error;
-            error.write(ErrorMessage { kind, message });
+            writers.p5().write(ErrorMessage { kind, message });
         }
         AgentEvent::Compacted {
             tokens_before,
@@ -318,7 +341,7 @@ fn handle_agent_event(
                 "kept",
                 tokens_before,
             );
-            compacted.write(CompactedMessage {
+            writers.p7().write(CompactedMessage {
                 tokens_before,
                 tokens_after,
             });

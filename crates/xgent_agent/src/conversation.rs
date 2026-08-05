@@ -45,6 +45,25 @@ impl Default for Conversation {
 }
 
 impl Conversation {
+    /// 恢复会话：用给定 id 与消息列表重建对话状态。
+    ///
+    /// 用于「查看历史会话」功能：从 JSONL 恢复消息历史，
+    /// 打开对应的 SessionStore（后续 append 继续写同一文件）。
+    pub fn restore(&mut self, session_id: &str, messages: Vec<AgentMessage>) {
+        // 解析 session_id 为 SessionId（时间戳）
+        let id_num: u64 = session_id.parse().unwrap_or(0);
+        self.id = SessionId(id_num);
+        self.messages = messages;
+        self.current_assistant_text.clear();
+        self.pending_tool_calls.clear();
+        self.status = ConversationStatus::Idle;
+        // 打开对应的 SessionStore（不写 Header，因为文件已有）
+        let path = crate::session_store::session_file_path(session_id);
+        if let Ok(store) = crate::session_store::SessionStore::open(path) {
+            self.session_store = Some(store);
+        }
+    }
+
     /// 重置会话：生成新 SessionId、清空消息与累加文本、重置状态。
     ///
     /// `session_store` 置 None（下次首次对话时 `ensure_session_store` 重新打开）。

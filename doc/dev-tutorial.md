@@ -21,8 +21,8 @@
 | F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md` |
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
 | F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`（445 行实现）；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md` |
-| F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only）+ `conversation.rs`；**错误持久化为 `SessionEntry::Error`**（2026-07-20 新增）；**新建会话功能**（`NewSessionMessage`/`SessionClearedMessage` + 命令面板 `session.new`，2026-07-20 新增） | `plans/step9`、ADR-0008、`conversation-flow-fixes-2026-07-20.md` |
-| F-07 | Provider 切换 | ✅ | `xgent_provider/src/openai_compat.rs`（完整实现）；`response_api.rs`/`anthropic.rs`/`custom.rs` 仅 trait 占位；`xgent_ui/src/settings_panel.rs` | `plans/step5` |
+| F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only + `list_sessions` + `restore_session`）+ `conversation.rs`（`restore` 方法）+ `xgent_ui/src/session_history.rs`（历史面板 UI）+ `events.rs`（`ListSessionsMessage`/`SessionListMessage`/`RestoreSessionMessage`/`SessionRestoredMessage`）；**新建、列出、恢复** 均完整可用 | `plans/step9`、ADR-0008 |
+| F-07 | Provider 切换 | ✅ | `xgent_provider/src/openai_compat.rs`（完整实现）+ `anthropic.rs`（完整实现：Anthropic Messages API 流式 + 工具调用）；`response_api.rs`/`custom.rs` 仅 trait 占位；`xgent_ui/src/settings_panel.rs`（含**模型列表拉取**：`FetchModelsMessage`/`ModelListResultMessage` + ↻ 按钮触发 IPC `provider.listModels`，点击模型项填充输入框）| `plans/step5` |
 | F-08 | 命令面板 | ✅ | `xui/src/command_palette.rs`（通用组件）+ `xgent_ui/src/command_palette.rs`（业务命令注册） | `plans/step10`/`step11`、`design/ui-design.md` §8 |
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
@@ -417,6 +417,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - 所有用户可见字符串走 fluent（`crates/xgent_settings/locales/{zh-CN,en-US}/main.ftl`）。
 - 经 `xui::tr`/`tr_with`/`Strings` Resource（由 `xgent_app` 注入 `Localizer::default()`）。
 - 新增 UI 文案时，在两份 `.ftl` 都加 entry，代码用 `tr("key")`，不硬编码字符串。
+- **语言切换持久化**：命令面板切换语言时经 IPC `config.write` 写 `preferences.language` 到全局配置（`SaveLanguageMessage` → `config_bridge::save_language`），重启后保持。
 
 ### 5.9 编辑器（F-11）边界
 
