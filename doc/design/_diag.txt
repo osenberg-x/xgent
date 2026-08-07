@@ -1,0 +1,3 @@
+cwd= E:\ws\xgent\doc\design
+exists= True
+pyver ok
