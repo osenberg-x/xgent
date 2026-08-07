@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XGent UI v3 — 陪伴锚点 · 冷电品牌 · 运行时仪表</title>
+<style>
+/* ==================================================================
+   XGent UI v3 原型
+   设计系统：《XGent v3 设计令牌文档》(doc/design/ui-v3-design-tokens.md)
+             主参考 Linear（冷电克制 / 发丝边框 / 强调-语义分轨）
+             辅参考 Raycast（1.75px 几何线性图标 / 命令面板 / 冷暖分工）
+   需求依据：《XGent UI v3 优化 · 需求摘要》(doc/design/ui-v3-requirements-brief.md)
+
+   ── v3 相对 v2 的八处结构性改动（逐条对应优化目标）──
+   ① 陪伴锚点：状态栏常驻暖色 agent 状态胶囊 + 输入卡回声，覆盖
+      idle/思考/执行工具/待确认/出错 五态；宠物关闭时退化为纯状态指示器。
+      硬约束：主 GUI 内不内嵌任何宠物形象（宠物是独立置顶窗口）。
+   ② 导航收敛 6 层 → 3 层：顶栏(全局) + 活动栏(视图) + 侧视图内容标签。
+      删除 v2 的 viewtabs（与活动栏重复）与 sv-tabs（与 ed-tabs/tv-tabs 重复），
+      编辑器/预览/终端统一为一条"内容标签"，标签自带类型图标。
+   ③ 强调色与语义状态彻底分离：CTA/聚焦环/选中态/发送键 = --brand 冷电蓝；
+      绿色 --ok 只出现在"完成/成功/Diff 新增"。
+   ④ 排版三档分级：正文 13.5/1.65 · 代码 12.5/1.6 · 元信息 11.5/1.4；
+      对话流纵向留白由 --s5 上调一档至 --s6。
+   ⑤ 微交互全部 ≤200ms 且遵守 prefers-reduced-motion：
+      流式光标与模拟 streaming、工具卡展开、待确认脉冲、状态过渡淡入。
+   ⑥ 「待确认」升级为界面级信号：对话流醒目待确认卡 + 弹窗顶部状态条
+      + 陪伴锚点整体转暖琥珀，而非仅时间线一个黄点。
+   ⑦ 状态栏升级为运行时仪表：provider/模型 · token 用量 · 预估成本 ·
+      daemon 连接态 · 宠物开关态。
+   ⑧ 图标与令牌统一：全部 SVG 1.75px 几何线性，CSS 变量与令牌文档一一对应。
+   ================================================================== */
+
+:root{
+  /* ── 2.1 深度阶梯（沿用 v2 已验证值） ─────────────────────── */
+  --bg:       #0B1120;   /* L0   顶栏/活动栏/状态栏统一底 */
+  --panel:    #131A2B;   /* L1   侧栏/弹窗/命令面板/卡片 */
+  --elevated: #1C2640;   /* L2   hover/选中/pill/徽章 */
+  --surface:  #0F1623;   /* L0.5 对话流底，略"浮起" */
+  --deep:     #060A14;   /* L-1  代码块/终端/Diff */
+
+  /* ── 2.2 边框丝线三档（聚焦边框由绿改冷电，v3 关键分离动作） ── */
+  --line:        rgba(148,163,184,0.10);
+  --line-strong: rgba(148,163,184,0.18);
+  --line-focus:  rgba(45,157,255,0.55);
+
+  /* ── 2.3 文字四档 ─────────────────────────────────────────── */
+  --t0: #F1F5F9;
+  --t1: #CBD5E1;
+  --t2: #94A3B8;
+  --t3: #7C8AA0;
+
+  /* ── 2.4 品牌冷电色（取代 v2 的绿色 --accent） ─────────────── */
+  --brand:       #2D9DFF;
+  --brand-hover: #54B4FF;
+  --brand-press: #1E84E0;
+  --brand-bg:    rgba(45,157,255,0.12);
+  --brand-glow:  rgba(45,157,255,0.28);
+  --brand-2:     #7C6CF5;   /* 靛紫，仅装饰渐变，不参与状态判定 */
+
+  /* ── 2.5 语义状态色（与品牌色彻底分离） ────────────────────── */
+  --ok:      #34D399;  --ok-bg:   rgba(52,211,153,0.12);
+  --run:     #4C9BFF;
+  --pend:    #F5B544;  --pend-bg: rgba(245,181,68,0.12);
+  --fail:    #F0616D;  --fail-bg: rgba(240,97,109,0.12);
+  --deny:    #64748B;
+
+  /* ── 2.6 陪伴层暖色（专供陪伴锚点，不表达系统状态） ────────── */
+  --warm:       #FF8A5B;
+  --warm-hover: #FFA279;
+  --warm-bg:    rgba(255,138,91,0.12);
+  --warm-glow:  rgba(255,138,91,0.30);
+  --warm-line:  rgba(255,138,91,0.28);   /* 陪伴锚点描边（--warm 的 28% 档） */
+
+  /* ── 3. 排版：字体族 + 三档字号行高 + 三级标题 ─────────────── */
+  --font-ui:   "Inter","Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,sans-serif;
+  --font-mono: "JetBrains Mono","Fira Code","Cascadia Code","SF Mono",Consolas,monospace;
+
+  --fs-body: 13.5px; --lh-body: 1.65; --fw-body: 400;   /* 档一：正文 */
+  --fs-code: 12.5px; --lh-code: 1.6;                    /* 档二：代码 */
+  --fs-meta: 11.5px; --lh-meta: 1.4;  --fw-meta: 500;   /* 档三：元信息 */
+
+  --fs-h1: 15px;   --fw-h1: 700; --ls-h1: -0.02em;      /* 品牌名/弹窗标题 */
+  --fs-h2: 13px;   --fw-h2: 600;                        /* 区块标题 */
+  --fs-h3: 12.5px; --fw-h3: 600;                        /* 角色名/工具卡标题 */
+
+  /* ── 4. 间距 8pt 栅格 / 圆角分级 / 边框宽度 ────────────────── */
+  --s1:4px;  --s2:8px;  --s3:12px; --s4:16px;
+  --s5:20px; --s6:24px; --s8:32px; --s10:40px;
+
+  --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:12px; --r-pill:999px;
+
+  --bw-hairline:1px;
+  --bw-focus:2px;
+
+  /* ── 5. 阴影（仅浮动层使用） ───────────────────────────────── */
+  --shadow-flat:   none;
+  --shadow-raised: 0 1px 2px rgba(0,0,0,0.40);
+  --shadow-float:  0 12px 32px rgba(0,0,0,0.55);
+  --shadow-hover:  0 1px 2px rgba(0,0,0,0.30), 0 0 0 1px var(--line-strong);
+
+  /* ── 6. 动效（主体 ≤200ms，全部 ≤240ms） ───────────────────── */
+  --dur-fast:120ms; --dur-base:180ms; --dur-slow:240ms;
+  --ease:     cubic-bezier(0.4,0,0.2,1);
+  --ease-out: cubic-bezier(0.16,1,0.3,1);
+  --tf: var(--dur-fast) var(--ease);
+  --tn: var(--dur-base) var(--ease);
+  --ts: var(--dur-slow) var(--ease-out);
+
+  /* ── 7. 图标令牌 ───────────────────────────────────────────── */
+  --icon-stroke:1.75px;
+  --icon-sm:16px; --icon-md:20px; --icon-lg:24px;
+
+  /* ── 语法高亮子集（令牌文档未覆盖，沿用 v2 并向冷电校准）───── */
+  --sx-kw:#A78BFA; --sx-fn:#5CB0FF; --sx-str:#6EE7B7; --sx-num:#F5B544;
+  --sx-ty:#FCD34D; --sx-com:#5A6B85; --sx-pn:#94A3B8;
+
+  /* ── 尺寸骨架 ─────────────────────────────────────────────── */
+  --activity-w:48px;
+  --sidebar-w:242px;
+  --topbar-h:48px;
+  --statusbar-h:32px;
+}
+
+/* ==================================================================
+   基础
+   ================================================================== */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  height:100%;
+  font-family:var(--font-ui);
+  font-size:var(--fs-body); line-height:var(--lh-body); font-weight:var(--fw-body);
+  color:var(--t1); background:var(--bg);
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+}
+code,pre,.mono{font-family:var(--font-mono)}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea{font-family:inherit}
+::placeholder{color:var(--t3)}
+
+/* 聚焦环：永远冷电品牌色，绝不用绿/暖（令牌纪律 #3） */
+:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 var(--bw-focus) var(--bg), 0 0 0 calc(var(--bw-focus)*2) var(--line-focus);
+  border-radius:var(--r-sm);
+}
+::selection{background:var(--brand-bg);color:var(--t0)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,0.15);border-radius:4px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,0.28);background-clip:content-box}
+
+svg{flex-shrink:0}
+.ico{stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round;fill:none;stroke:currentColor}
+
+/* 动效降级（NF-03 / 优化目标 #5） */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+
+/* ==================================================================
+   总布局 — 三层导航骨架
+   row: 顶栏(全局层) / 主区 / 状态栏
+   col: 活动栏(视图层) / 侧栏 / 主区
+   ================================================================== */
+#app{
+  display:grid;
+  grid-template-rows:var(--topbar-h) 1fr var(--statusbar-h);
+  grid-template-columns:var(--activity-w) var(--sidebar-w) 1fr;
+  grid-template-areas:"topbar topbar topbar" "activity sidebar main" "status status status";
+  height:100vh;
+  transition:grid-template-columns var(--tn);
+}
+#topbar{grid-area:topbar;display:flex;align-items:center;gap:var(--s3);padding:0 var(--s4);background:var(--bg);border-bottom:var(--bw-hairline) solid var(--line-strong);z-index:10}
+#activitybar{grid-area:activity;display:flex;flex-direction:column;align-items:center;gap:2px;padding:var(--s2) 0;background:var(--bg);border-right:var(--bw-hairline) solid var(--line)}
+#sidebar{grid-area:sidebar;display:flex;flex-direction:column;background:var(--panel);border-right:var(--bw-hairline) solid var(--line);min-height:0;overflow:hidden}
+#main{grid-area:main;display:flex;min-width:0;min-height:0;background:var(--surface)}
+#statusbar{grid-area:status;display:flex;align-items:center;gap:var(--s2);padding:0 var(--s3);background:var(--bg);border-top:var(--bw-hairline) solid var(--line-strong);color:var(--t2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-meta);overflow:hidden}
+
+/* ==================================================================
+   ① 顶栏 — 导航第 1 层（全局：品牌 / provider / 全局动作）
+   ================================================================== */
+.tb-brand{display:flex;align-items:center;gap:var(--s2);padding-right:var(--s2)}
+/* logo 渐变 = 品牌冷电蓝 → 靛紫，--brand-2 仅在此类装饰处出现 */
+.tb-brand .logo{width:26px;height:26px;border-radius:var(--r-md);background:linear-gradient(135deg,var(--brand) 0%,var(--brand-2) 100%);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(45,157,255,0.22)}
+.tb-brand .name{font-size:var(--fs-h1);font-weight:var(--fw-h1);letter-spacing:var(--ls-h1);color:var(--t0)}
+.tb-brand .ver{font-size:9.5px;font-weight:600;color:var(--brand);background:var(--brand-bg);border-radius:var(--r-sm);padding:1px 4px;letter-spacing:.04em}
+.tb-divider{width:1px;height:18px;background:var(--line-strong)}
+.tb-spacer{flex:1}
+
+.tb-provider{display:flex;align-items:center;gap:var(--s2);padding:5px 10px;border-radius:var(--r-md);background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);color:var(--t1);font-size:12.5px;transition:border-color var(--tf),color var(--tf)}
+.tb-provider:hover{border-color:var(--line-focus);color:var(--t0)}
+.tb-provider .chev{opacity:.4}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:var(--r-md);background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);color:var(--t1);font-size:12.5px;font-weight:500;transition:background var(--tf),border-color var(--tf),color var(--tf)}
+.btn:hover{border-color:var(--line-focus);color:var(--t0);background:var(--elevated);box-shadow:var(--shadow-hover)}
+.btn:active{transform:translateY(.5px)}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:#04121F;font-weight:600}
+.btn-primary:hover{background:var(--brand-hover);border-color:var(--brand-hover);color:#04121F}
+.btn-primary:active{background:var(--brand-press);border-color:var(--brand-press)}
+.btn-pend{background:var(--pend);border-color:var(--pend);color:#241703;font-weight:600}
+.btn-pend:hover{background:#FFC65E;border-color:#FFC65E;color:#241703}
+.btn-quiet{background:transparent;border-color:var(--line-strong);color:var(--t2)}
+.btn-quiet:hover{background:var(--elevated);color:var(--t0);border-color:var(--line-strong)}
+.btn-sm{padding:4px 9px;font-size:var(--fs-meta)}
+
+.icon-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-md);color:var(--t2);transition:background var(--tf),color var(--tf)}
+.icon-btn:hover{background:var(--elevated);color:var(--t0)}
+.icon-btn svg{width:18px;height:18px}
+
+/* ==================================================================
+   ② 活动栏 — 导航第 2 层（唯一的视图切换入口）
+   ================================================================== */
+.ab-item{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-md);color:var(--t3);cursor:pointer;transition:background var(--tf),color var(--tf);position:relative}
+.ab-item:hover{color:var(--t1);background:var(--elevated)}
+.ab-item.active{color:var(--t0);background:var(--brand-bg)}
+/* 活动指示条：冷电品牌色（v2 是绿色） */
+.ab-item.active::before{content:'';position:absolute;left:-6px;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--brand)}
+.ab-item svg{width:var(--icon-md);height:var(--icon-md)}
+.ab-spacer{flex:1}
+.ab-badge{position:absolute;top:3px;right:2px;min-width:14px;height:14px;border-radius:7px;background:var(--brand);color:#04121F;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.ab-badge.run{background:var(--run)}
+
+/* ==================================================================
+   侧栏（资源管理器）
+   ================================================================== */
+.sb-header{display:flex;align-items:center;justify-content:space-between;padding:9px var(--s3);border-bottom:var(--bw-hairline) solid var(--line);flex-shrink:0}
+.sb-title{font-size:var(--fs-meta);text-transform:uppercase;letter-spacing:.09em;font-weight:600;color:var(--t3)}
+.sb-actions{display:flex;gap:1px}
+.sb-action{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-sm);color:var(--t3);cursor:pointer;transition:background var(--tf),color var(--tf)}
+.sb-action:hover{background:var(--elevated);color:var(--t0)}
+.sb-action svg{width:14px;height:14px}
+.sb-tree{flex:1;overflow:auto;padding:var(--s1) 0;font-size:13px;user-select:none}
+.node{display:flex;align-items:center;gap:2px;padding:3px var(--s3);cursor:pointer;white-space:nowrap;line-height:1.6;transition:background var(--tf)}
+.node:hover{background:rgba(148,163,184,0.05)}
+.node.sel{background:var(--brand-bg)}
+.node.sel .nm{color:var(--t0);font-weight:500}
+.node .indent{display:inline-block;width:13px;flex-shrink:0}
+.node .arrow{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;color:var(--t3)}
+.node .arrow svg{width:10px;height:10px}
+.node .ficon{width:17px;height:17px;display:inline-flex;align-items:center;justify-content:center;opacity:.55;flex-shrink:0}
+.node .ficon svg{width:15px;height:15px}
+.node .nm{overflow:hidden;text-overflow:ellipsis;color:var(--t1)}
+.node .tag{margin-left:auto;font-size:9.5px;font-weight:600;padding:0 4px;border-radius:var(--r-sm)}
+.node .tag.m{color:var(--pend);background:var(--pend-bg)}
+.node .tag.a{color:var(--ok);background:var(--ok-bg)}
+#app.nosidebar{grid-template-columns:var(--activity-w) 0 1fr}
+#app.nosidebar #sidebar{border-right:none}
+
+/* ==================================================================
+   主区：对话流 + 侧视图
+   ================================================================== */
+#center{display:flex;flex-direction:row;min-width:0;min-height:0;flex:1}
+#chatview{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+#sideview{flex:1.05;display:none;flex-direction:column;min-width:0;min-height:0;border-left:var(--bw-hairline) solid var(--line-strong);background:var(--surface)}
+#sideview.show{display:flex}
+
+/* ==================================================================
+   对话流（全宽行式，无气泡）
+   留白：v2 消息块间距 --s5 → v3 上调一档 --s6（优化目标 #4）
+   ================================================================== */
+#chat{flex:1;overflow-y:auto;scroll-behavior:smooth}
+.chat-inner{max-width:820px;margin:0 auto;padding:var(--s8) var(--s6) var(--s2);display:flex;flex-direction:column;gap:var(--s6)}
+
+.msg{display:flex;gap:var(--s3)}
+.msg-avatar{width:28px;height:28px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;flex-shrink:0;margin-top:1px}
+.msg.user .msg-avatar{background:var(--elevated);color:var(--t2);border:var(--bw-hairline) solid var(--line-strong)}
+.msg.assistant .msg-avatar{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff}
+.msg-body{flex:1;min-width:0}
+.msg-role{font-size:var(--fs-h3);font-weight:var(--fw-h3);color:var(--t0);margin-bottom:5px;display:flex;align-items:center;gap:var(--s2)}
+.msg-role .ts{font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:400;color:var(--t3)}
+.msg-content{font-size:var(--fs-body);line-height:var(--lh-body);color:var(--t1)}
+.msg-content p{margin:0 0 var(--s3)}
+.msg-content p:last-child{margin-bottom:0}
+.msg-content ol{margin:0 0 var(--s3);padding-left:var(--s5);display:flex;flex-direction:column;gap:6px}
+.msg-content li::marker{color:var(--t3)}
+.msg-content strong{color:var(--t0);font-weight:600}
+.msg-content code:not(pre code){font-size:12px;background:var(--elevated);border:var(--bw-hairline) solid var(--line);border-radius:var(--r-sm);padding:1px 5px;color:var(--t0)}
+.msg.user .msg-content{color:var(--t0)}
+.msg-content .lead{color:var(--brand)}
+
+/* 代码块 — 对话流一级元素 */
+.code-block{background:var(--deep);border:var(--bw-hairline) solid var(--line);border-radius:var(--r-lg);margin:var(--s3) 0;overflow:hidden}
+.code-head{display:flex;align-items:center;gap:var(--s2);padding:6px 12px;background:rgba(255,255,255,0.02);border-bottom:var(--bw-hairline) solid var(--line)}
+.code-head .label{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--t2);display:flex;align-items:center;gap:6px;flex:1}
+.code-head .label svg{width:13px;height:13px;color:var(--t3)}
+.code-head .lang{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:var(--r-sm);background:var(--elevated);color:var(--t2)}
+.code-head .copy{font-size:var(--fs-meta);color:var(--t3);cursor:pointer;padding:2px 7px;border-radius:var(--r-sm);transition:color var(--tf),background var(--tf)}
+.code-head .copy:hover{color:var(--t0);background:var(--elevated)}
+pre.code{padding:10px 13px;overflow-x:auto;font-size:var(--fs-code);line-height:var(--lh-code);margin:0}
+.tk-kw{color:var(--sx-kw)} .tk-fn{color:var(--sx-fn)} .tk-str{color:var(--sx-str)}
+.tk-num{color:var(--sx-num)} .tk-ty{color:var(--sx-ty)} .tk-com{color:var(--sx-com);font-style:italic} .tk-pn{color:var(--sx-pn)}
+
+/* 流式光标：用 --run（运行/流式语义），不是品牌色也不是绿色 */
+.caret{display:inline-block;width:6px;height:14px;background:var(--run);vertical-align:text-bottom;margin-left:2px;border-radius:1px;animation:blink 1s steps(2,start) infinite}
+.caret.off{display:none}
+@keyframes blink{50%{opacity:0}}
+
+/* ── Agent 执行时间线 ───────────────────────────────────────── */
+.timeline{display:flex;gap:var(--s3);position:relative}
+/* 时间线连接脊：仅在两个相邻工具节点之间出现，避免悬空线头 */
+.timeline::before{content:'';position:absolute;left:13px;top:30px;bottom:calc(var(--s6) * -1);width:1px;background:var(--line-strong);display:none}
+.timeline:has(+ .timeline)::before{display:block}
+.tl-icon{width:27px;height:27px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;flex-shrink:0;z-index:1;background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);color:var(--t3);transition:color var(--tn),border-color var(--tn),background var(--tn)}
+.tl-icon svg{width:14px;height:14px}
+.tl-icon.done{background:var(--ok-bg);border-color:rgba(52,211,153,0.45);color:var(--ok)}
+.tl-icon.run{background:rgba(76,155,255,0.12);border-color:rgba(76,155,255,0.45);color:var(--run)}
+.tl-icon.pend{background:var(--pend-bg);border-color:rgba(245,181,68,0.55);color:var(--pend);animation:pendPulse 1.6s var(--ease) infinite}
+.tl-icon.fail{background:var(--fail-bg);border-color:rgba(240,97,109,0.45);color:var(--fail)}
+.tl-icon.deny{background:var(--elevated);border-color:var(--line-strong);color:var(--deny)}
+.tl-body{flex:1;min-width:0;padding-bottom:2px}
+
+/* 常驻卡片靠边框分层，不靠阴影（--shadow-flat 即 none，显式声明纪律） */
+.tl-card{background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-flat);transition:border-color var(--tn)}
+.tl-card:hover{border-color:rgba(148,163,184,0.28)}
+.tl-card.is-pend{border-color:rgba(245,181,68,0.38);background:linear-gradient(0deg,var(--pend-bg),var(--pend-bg)),var(--panel)}
+.tl-head{display:flex;align-items:center;gap:var(--s2);padding:8px 11px;cursor:pointer;transition:background var(--tf)}
+.tl-head:hover{background:rgba(255,255,255,0.025)}
+.tl-name{color:var(--t0);font-weight:var(--fw-h3);font-size:var(--fs-h3);flex-shrink:0}
+.tl-arg{color:var(--t2);font-family:var(--font-mono);font-size:var(--fs-meta);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.tl-status{display:flex;align-items:center;gap:5px;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-meta);color:var(--t2);flex-shrink:0;padding:2px 8px;border-radius:var(--r-pill);background:var(--elevated)}
+.tl-status .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.tl-chev{width:14px;height:14px;color:var(--t3);transition:transform var(--tn);flex-shrink:0}
+.tl-card.open .tl-chev{transform:rotate(90deg)}
+/* 展开动画：grid 0fr→1fr，180ms，无 JS 测高 */
+.tl-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur-base) var(--ease)}
+.tl-card.open .tl-wrap{grid-template-rows:1fr}
+.tl-inner{overflow:hidden;min-height:0}
+.tl-result{white-space:pre;font-family:var(--font-mono);background:var(--deep);border-top:var(--bw-hairline) solid var(--line);padding:10px 13px;overflow-x:auto;color:var(--t1);font-size:var(--fs-code);line-height:var(--lh-code)}
+.tl-note{padding:8px 12px;border-top:var(--bw-hairline) solid var(--line);color:var(--t3);font-size:var(--fs-meta);line-height:var(--lh-meta)}
+
+/* ⑥ 待确认 — 界面级信号卡（对话流内） */
+.pend-card{
+  display:flex;align-items:flex-start;gap:var(--s3);
+  padding:var(--s3) var(--s4);
+  border:var(--bw-hairline) solid rgba(245,181,68,0.34);
+  border-radius:var(--r-lg);
+  background:var(--pend-bg);
+  transition:opacity var(--tn),border-color var(--tn);
+}
+.pend-card .pc-dot{width:8px;height:8px;border-radius:50%;background:var(--pend);margin-top:7px;flex-shrink:0;animation:pendPulse 1.6s var(--ease) infinite}
+.pend-card .pc-body{flex:1;min-width:0}
+/* H2 区块标题档：让"等待你的确认"具备界面级信号的分量（目标 #6） */
+.pend-card .pc-title{font-size:var(--fs-h2);font-weight:var(--fw-h2);color:var(--pend);margin-bottom:3px;letter-spacing:.01em}
+.pend-card .pc-desc{font-size:var(--fs-meta);line-height:1.6;color:var(--t2)}
+.pend-card .pc-desc code{font-family:var(--font-mono);color:var(--t0);font-size:11px}
+.pend-card .pc-actions{display:flex;gap:var(--s2);flex-shrink:0;align-self:center}
+.pend-card.resolved{display:none}
+@keyframes pendPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,181,68,0.34)}50%{box-shadow:0 0 0 4px rgba(245,181,68,0)}}
+
+/* ==================================================================
+   输入区（浮动卡片）+ 陪伴锚点回声
+   ================================================================== */
+#inputbar{padding:var(--s2) var(--s6) var(--s4);background:linear-gradient(to top,var(--surface) 62%,transparent);flex-shrink:0}
+.input-card{background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);border-radius:var(--r-xl);padding:var(--s2) var(--s3) var(--s2);max-width:820px;margin:0 auto;transition:border-color var(--tn),box-shadow var(--tn)}
+.input-card:focus-within{border-color:var(--line-focus);box-shadow:0 0 0 3px var(--brand-glow)}
+.input-card.s-pend{border-color:rgba(245,181,68,0.42)}
+.input-card.s-fail{border-color:rgba(240,97,109,0.45)}
+.input-card.shake{animation:shake var(--dur-slow) var(--ease)}
+@keyframes shake{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.input-area{width:100%;background:transparent;border:none;outline:none;color:var(--t0);resize:none;font-size:var(--fs-body);line-height:1.55;min-height:38px;max-height:180px;display:block;padding:4px 2px}
+.input-toolbar{display:flex;align-items:center;gap:var(--s3);padding-top:var(--s2);border-top:var(--bw-hairline) solid var(--line);margin-top:var(--s1)}
+.hint-grp{display:flex;gap:var(--s3);align-items:center;flex:1;min-width:0;overflow:hidden}
+.hint{font-size:10.5px;color:var(--t3);display:flex;align-items:center;gap:3px;white-space:nowrap}
+kbd{background:var(--elevated);border:var(--bw-hairline) solid var(--line-strong);border-radius:var(--r-sm);padding:1px 4px;font-family:var(--font-mono);font-size:9.5px;color:var(--t2)}
+.send-area{display:flex;align-items:center;gap:var(--s2);flex-shrink:0}
+.send-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-md);background:var(--brand);color:#04121F;transition:background var(--tf)}
+.send-btn:hover{background:var(--brand-hover)}
+.send-btn:active{background:var(--brand-press)}
+.send-btn svg{width:15px;height:15px}
+
+/* ① 陪伴锚点·输入卡回声（与状态栏胶囊同源，暖色 = 伙伴） */
+.echo{display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--warm);padding:2px 8px;border-radius:var(--r-pill);background:var(--warm-bg);white-space:nowrap;transition:color var(--tn),background var(--tn)}
+.echo .e-dot{width:5px;height:5px;border-radius:50%;background:var(--t3);flex-shrink:0;transition:background var(--tn)}
+.echo .e-txt{transition:opacity var(--tf)}
+.echo.pet-off{color:var(--t2);background:var(--elevated)}
+
+/* ==================================================================
+   ② 侧视图 — 导航第 3 层：一条统一的「内容标签」
+      （合并 v2 的 sv-tabs + ed-tabs + tv-tabs 三层为一层，
+        标签自带类型图标：文件 / 预览 / 终端）
+   ================================================================== */
+.ct-bar{display:flex;align-items:center;height:34px;background:var(--bg);border-bottom:var(--bw-hairline) solid var(--line-strong);flex-shrink:0;padding-right:var(--s1)}
+.ct-scroll{display:flex;align-items:stretch;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none}
+.ct-scroll::-webkit-scrollbar{display:none}
+.ct-tab{display:flex;align-items:center;gap:5px;padding:0 9px;height:34px;cursor:pointer;font-size:11.5px;color:var(--t3);border-right:var(--bw-hairline) solid var(--line);white-space:nowrap;transition:background var(--tf),color var(--tf);border-top:2px solid transparent;position:relative}
+.ct-tab:hover{color:var(--t1);background:var(--panel)}
+.ct-tab.active{color:var(--t0);background:var(--panel);border-top-color:var(--brand)}
+.ct-tab .k{width:13px;height:13px;opacity:.65;display:flex;align-items:center;justify-content:center}
+.ct-tab .k svg{width:13px;height:13px}
+.ct-tab.active .k{opacity:1}
+.ct-tab .dirty{width:6px;height:6px;border-radius:50%;background:var(--pend)}
+.ct-tab .rundot{width:6px;height:6px;border-radius:50%;background:var(--run);animation:softPulse 1.5s var(--ease) infinite}
+.ct-tab .x{width:15px;height:15px;display:flex;align-items:center;justify-content:center;border-radius:3px;opacity:.28;transition:opacity var(--tf),background var(--tf)}
+.ct-tab .x:hover{opacity:1;background:rgba(148,163,184,0.14)}
+.ct-tab .x svg{width:10px;height:10px}
+.ct-add{width:28px;height:34px;display:flex;align-items:center;justify-content:center;color:var(--t3);flex-shrink:0;transition:color var(--tf),background var(--tf)}
+.ct-add:hover{color:var(--t0);background:var(--panel)}
+.ct-add svg{width:13px;height:13px}
+.ct-tools{display:flex;align-items:center;gap:1px;flex-shrink:0;padding-left:var(--s1);border-left:var(--bw-hairline) solid var(--line)}
+.ct-tools .icon-btn{width:26px;height:26px}
+.ct-tools .icon-btn svg{width:14px;height:14px}
+@keyframes softPulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* 内容面板 */
+.pane{flex:1;display:none;flex-direction:column;min-height:0}
+.pane.show{display:flex}
+
+/* 编辑器面板 */
+.ed-path{display:flex;align-items:center;gap:6px;padding:5px var(--s3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--t3);border-bottom:var(--bw-hairline) solid var(--line);background:var(--panel);flex-shrink:0;font-family:var(--font-mono)}
+.ed-path .cur{color:var(--t1)}
+.ed-body{flex:1;display:flex;overflow:hidden;background:var(--surface)}
+.gutter{background:var(--bg);color:var(--t3);padding:8px 10px;text-align:right;font-family:var(--font-mono);font-size:var(--fs-code);line-height:var(--lh-code);user-select:none;border-right:var(--bw-hairline) solid var(--line);flex-shrink:0;overflow:hidden}
+.ed-content{flex:1;overflow:auto;padding:8px 13px;font-family:var(--font-mono);font-size:var(--fs-code);line-height:var(--lh-code);white-space:pre;color:var(--t1)}
+/* 高亮行：inline 背景（不用 display:block，避免 pre 中额外换行） */
+.ed-content .hl{background:rgba(45,157,255,0.08);border-radius:2px}
+
+/* 预览面板 */
+.pv-head{display:flex;align-items:center;gap:6px;padding:6px var(--s3);color:var(--t2);font-size:var(--fs-meta);line-height:var(--lh-meta);border-bottom:var(--bw-hairline) solid var(--line);background:var(--panel);flex-shrink:0}
+.pv-head svg{width:13px;height:13px;color:var(--t3)}
+.pv-head .p{color:var(--t0);font-family:var(--font-mono)}
+.pv-head .ro{margin-left:auto;padding:1px 7px;border-radius:var(--r-sm);background:var(--elevated);color:var(--t3);font-size:10px}
+.pv-body{flex:1;overflow:auto;padding:var(--s3) 0}
+
+/* 终端面板 */
+.tv-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 14px;background:var(--deep);font-family:var(--font-mono);font-size:var(--fs-code);line-height:var(--lh-code);color:var(--t2);white-space:pre-wrap;word-break:break-all}
+.tv-cmd{color:var(--t0)}
+.tv-cmd .prompt{color:var(--brand);margin-right:6px}   /* prompt 用品牌冷电，v2 是绿 */
+.tv-out{color:var(--t3)}
+.tv-err{color:var(--fail)}
+.tv-ok{color:var(--ok)}                                  /* 绿只表示成功 */
+.tv-inputline{display:flex;align-items:center;color:var(--t0)}
+.tv-inputline .prompt{color:var(--brand);margin-right:6px;flex-shrink:0}
+.tv-foot{display:flex;align-items:center;gap:var(--s2);padding:5px var(--s3);background:var(--bg);border-top:var(--bw-hairline) solid var(--line);font-size:10.5px;color:var(--t3);flex-shrink:0}
+.tv-foot .k{color:var(--t1)}
+.tv-foot .sep{color:var(--line-strong)}
+.tv-foot .run{color:var(--run)}
+.tv-foot .spacer{flex:1}
+.tv-act{padding:2px 8px;border-radius:var(--r-sm);background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);color:var(--t2);font-size:10.5px;transition:border-color var(--tf),color var(--tf)}
+.tv-act:hover{border-color:var(--line-focus);color:var(--t0)}
+.tv-act.danger:hover{border-color:var(--fail);color:var(--fail)}
+
+/* ==================================================================
+   ⑦ 状态栏 = 运行时仪表 + ① 陪伴锚点
+   ================================================================== */
+.sb-left,.sb-right{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.sb-spacer{flex:1}
+.sb-div{width:1px;height:14px;background:var(--line-strong);flex-shrink:0}
+
+.meter{display:flex;align-items:center;gap:5px;color:var(--t2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.meter .m-dim{color:var(--t3)}
+.meter .m-k{color:var(--t1)}
+.meter svg{width:13px;height:13px;color:var(--t3)}
+.meter-btn{padding:2px 7px;border-radius:var(--r-sm);transition:background var(--tf),color var(--tf)}
+.meter-btn:hover{background:var(--elevated);color:var(--t0)}
+.m-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--deny);transition:background var(--tn)}
+.m-dot.ok{background:var(--ok)}
+.m-dot.run{background:var(--run);animation:softPulse 1.5s var(--ease) infinite}
+.m-dot.pend{background:var(--pend);animation:softPulse 1.2s var(--ease) infinite}
+.m-dot.fail{background:var(--fail)}
+
+/* ── ① 陪伴锚点（Companion Anchor）─────────────────────────────
+   暖色底 + 暖色标识 = "伙伴在说话"；右侧语义色点 = "它现在在做什么"。
+   待确认 / 出错时整枚胶囊转为语义色，成为界面级信号（目标 #6）。
+   宠物关闭时（.pet-off）退暖为中性指示器，宽度不变、界面不塌陷。
+   —— 主 GUI 内不含任何宠物形象，宠物是独立置顶窗口。
+   ------------------------------------------------------------- */
+.companion{
+  display:flex;align-items:center;gap:6px;
+  height:22px;padding:0 9px 0 7px;
+  border-radius:var(--r-pill);
+  background:var(--warm-bg);
+  border:var(--bw-hairline) solid var(--warm-line);
+  font-size:var(--fs-meta);line-height:1;font-weight:var(--fw-meta);
+  transition:background var(--tn),border-color var(--tn),color var(--tn);
+  flex-shrink:0;
+}
+.companion:hover{background:rgba(255,138,91,0.18)}
+.companion:hover .cp-name,.companion:hover .cp-glyph{color:var(--warm-hover)}
+.companion .cp-glyph{width:15px;height:15px;color:var(--warm);display:flex;align-items:center;justify-content:center;position:relative;transition:color var(--tn)}
+.companion .cp-glyph svg{width:15px;height:15px;position:relative;z-index:1}
+/* 呼吸光晕：常驻低频，表示"伙伴在线"；reduced-motion 下自动关闭 */
+.companion .cp-glyph::after{content:'';position:absolute;inset:-4px;border-radius:50%;background:var(--warm-glow);opacity:0;filter:blur(2px);animation:breathe 2.8s var(--ease) infinite}
+@keyframes breathe{0%,100%{opacity:0;transform:scale(.7)}50%{opacity:.5;transform:scale(1)}}
+.companion .cp-name{color:var(--warm);font-weight:600;letter-spacing:.01em;transition:color var(--tn)}
+.companion .cp-sep{color:var(--warm-line)}
+.companion .cp-state{color:var(--t1);transition:opacity var(--tf)}
+.companion .cp-state.fade{opacity:0}
+.companion .cp-dot{width:6px;height:6px;border-radius:50%;background:var(--t3);margin-left:1px;transition:background var(--tn)}
+
+/* 五态：暖色身份不变，语义点表达状态 */
+.companion.st-idle  .cp-dot{background:var(--t3)}
+.companion.st-think .cp-dot{background:var(--run);animation:softPulse 1.1s var(--ease) infinite}
+.companion.st-tool  .cp-dot{background:var(--run);animation:softPulse 1.7s var(--ease) infinite}
+/* 待确认 / 出错：整枚胶囊升级为界面级信号 */
+.companion.st-pend{background:var(--pend-bg);border-color:rgba(245,181,68,0.5);animation:pendPulse 1.6s var(--ease) infinite}
+.companion.st-pend .cp-name,.companion.st-pend .cp-glyph{color:var(--pend)}
+.companion.st-pend .cp-sep{color:rgba(245,181,68,0.45)}
+.companion.st-pend .cp-state{color:var(--pend)}
+.companion.st-pend .cp-dot{background:var(--pend)}
+.companion.st-fail{background:var(--fail-bg);border-color:rgba(240,97,109,0.5)}
+.companion.st-fail .cp-name,.companion.st-fail .cp-glyph{color:var(--fail)}
+.companion.st-fail .cp-sep{color:rgba(240,97,109,0.45)}
+.companion.st-fail .cp-state{color:var(--fail)}
+.companion.st-fail .cp-dot{background:var(--fail)}
+
+/* 宠物关闭 → 优雅退化为纯状态指示器（保留全部状态可读性） */
+.companion.pet-off{background:var(--elevated);border-color:var(--line-strong);animation:none}
+.companion.pet-off:hover{background:rgba(28,38,64,0.9)}
+.companion.pet-off .cp-glyph{color:var(--t3)}
+.companion.pet-off .cp-glyph::after{animation:none;opacity:0}
+.companion.pet-off .cp-name{color:var(--t2);font-weight:500}
+.companion.pet-off .cp-sep{color:var(--line-strong)}
+.companion.pet-off .cp-state{color:var(--t1)}
+.companion.pet-off.st-pend .cp-state,.companion.pet-off.st-pend .cp-name{color:var(--pend)}
+.companion.pet-off.st-fail .cp-state,.companion.pet-off.st-fail .cp-name{color:var(--fail)}
+
+/* ==================================================================
+   浮动层：确认弹窗 / 命令面板
+   ================================================================== */
+#overlay{position:fixed;inset:0;background:rgba(6,10,20,0.70);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:50}
+#overlay.show{display:flex;animation:fadeIn var(--ts)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.modal{width:620px;max-width:calc(100vw - 48px);background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);border-radius:var(--r-xl);box-shadow:var(--shadow-float);overflow:hidden;animation:riseIn var(--ts)}
+@keyframes riseIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* ⑥ 弹窗顶部「待确认」状态条 —— 界面级信号第二落点 */
+.modal-signal{height:2px;background:var(--pend);animation:signalBreathe 1.6s var(--ease) infinite}
+@keyframes signalBreathe{0%,100%{opacity:1}50%{opacity:.45}}
+.modal-head{padding:12px var(--s5);border-bottom:var(--bw-hairline) solid var(--line);display:flex;align-items:center;gap:var(--s3)}
+/* ⑥ 弹窗内的大号待确认标记：--icon-lg 24px，界面级信号第二落点 */
+.modal-head .mh-mark{width:34px;height:34px;border-radius:var(--r-md);background:var(--pend-bg);border:var(--bw-hairline) solid rgba(245,181,68,0.35);color:var(--pend);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.modal-head .mh-mark svg{width:var(--icon-lg);height:var(--icon-lg)}
+.modal-head .title{font-size:var(--fs-h1);font-weight:var(--fw-h1);letter-spacing:var(--ls-h1);color:var(--t0);display:block}
+.modal-head .sub{display:block;margin-top:2px;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--pend);font-weight:var(--fw-meta)}
+.modal-head .sp{flex:1}
+.modal-body{padding:var(--s4) var(--s5);font-size:13px;color:var(--t2);line-height:1.6}
+.modal-body .path{color:var(--t0);font-family:var(--font-mono);background:var(--elevated);border:var(--bw-hairline) solid var(--line);padding:3px 8px;border-radius:var(--r-sm);margin:6px 0 var(--s3);display:inline-block;font-size:12px}
+.modal-body .strong{color:var(--t0);font-weight:600}
+.diff{background:var(--deep);border:var(--bw-hairline) solid var(--line);border-radius:var(--r-md);padding:var(--s2) 0;margin-top:var(--s2);font-family:var(--font-mono);font-size:var(--fs-code);overflow:auto;max-height:210px}
+.diff .line{padding:0 var(--s3);line-height:1.65;white-space:pre}
+.diff .add{background:var(--ok-bg);color:#8FE9C4}   /* 绿 = 新增（成功语义） */
+.diff .del{background:var(--fail-bg);color:#F5A0A8}
+.diff .ctx{color:var(--t3)}
+.modal-foot{padding:11px var(--s5);border-top:var(--bw-hairline) solid var(--line);display:flex;align-items:center;gap:var(--s2);background:var(--bg)}
+.modal-foot .note{flex:1;font-size:10.5px;color:var(--t3)}
+.modal-foot .dim{opacity:.5;margin-left:4px}
+
+#cmdpalette{position:fixed;top:88px;left:50%;transform:translateX(-50%);width:560px;max-width:calc(100vw - 48px);background:var(--panel);border:var(--bw-hairline) solid var(--line-strong);border-radius:var(--r-xl);box-shadow:var(--shadow-float);z-index:60;overflow:hidden;display:none}
+#cmdpalette.show{display:block;animation:riseIn var(--ts)}
+.cp-inputrow{display:flex;align-items:center;gap:var(--s2);padding:0 var(--s4);border-bottom:var(--bw-hairline) solid var(--line)}
+.cp-inputrow svg{width:16px;height:16px;color:var(--t3)}
+.cp-input{flex:1;background:transparent;border:none;outline:none;color:var(--t0);padding:13px 0;font-size:14px}
+.cp-esc{font-size:10px;color:var(--t3);border:var(--bw-hairline) solid var(--line-strong);border-radius:var(--r-sm);padding:1px 5px}
+.cp-list{max-height:340px;overflow-y:auto;padding:var(--s1)}
+.cp-group{font-size:9.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--t3);padding:7px 11px 4px;font-weight:600}
+.cp-item{display:flex;align-items:center;gap:var(--s2);padding:8px 11px;border-radius:var(--r-md);cursor:pointer;font-size:12.5px;transition:background var(--tf)}
+.cp-item .c-icon{width:18px;height:18px;opacity:.55;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.cp-item .c-icon svg{width:var(--icon-sm);height:var(--icon-sm)}
+.cp-item .c-label{flex:1;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-item .c-hint{color:var(--t3);font-size:var(--fs-meta);flex-shrink:0}
+.cp-item.sel{background:var(--brand-bg)}            /* 选中态 = 品牌冷电，非绿 */
+.cp-item.sel .c-icon{opacity:1;color:var(--brand)}
+.cp-item.sel .c-label{color:var(--t0)}
+.cp-empty{padding:var(--s10) var(--s5);text-align:center;color:var(--t3);font-size:12px}
+
+/* Toast（轻量反馈） */
+#toast{position:fixed;left:50%;bottom:56px;transform:translateX(-50%) translateY(6px);background:var(--elevated);border:var(--bw-hairline) solid var(--line-strong);color:var(--t0);font-size:12px;padding:7px 14px;border-radius:var(--r-pill);box-shadow:var(--shadow-raised);opacity:0;pointer-events:none;transition:opacity var(--tn),transform var(--tn);z-index:80}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ 导航第 1 层：顶栏（全局） ============ -->
+  <header id="topbar">
+    <div class="tb-brand">
+      <span class="logo">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      </span>
+      <span class="name">XGent</span>
+      <span class="ver">v3</span>
+    </div>
+    <div class="tb-divider"></div>
+    <button class="tb-provider" onclick="openPalette('provider')" title="切换 provider / 模型">
+      <span class="m-dot ok"></span>
+      <span>openai <span class="m-dim">/</span> gpt-4o-mini</span>
+      <svg class="chev ico" width="12" height="12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="tb-spacer"></div>
+    <button class="btn" onclick="newSession()">
+      <svg class="ico" width="14" height="14" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      新建会话
+    </button>
+    <button class="icon-btn" title="命令面板 (Ctrl+K)" onclick="openPalette('')">
+      <svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></svg>
+    </button>
+    <button class="icon-btn" title="设置 (Ctrl+,)" onclick="openPalette('设置')">
+      <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <!-- ============ 导航第 2 层：活动栏（视图切换唯一入口） ============ -->
+  <nav id="activitybar">
+    <div class="ab-item active" id="ab-files" title="资源管理器 (Ctrl+B)" onclick="focusView('files')">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <div class="ab-item" id="ab-search" title="搜索 (Ctrl+Shift+F)" onclick="focusView('search')">
+      <svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></svg>
+    </div>
+    <div class="ab-item" id="ab-editor" title="编辑器 (Ctrl+\)" onclick="focusView('editor')">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+    </div>
+    <div class="ab-item" id="ab-terminal" title="终端 (Ctrl+`)" onclick="focusView('terminal')">
+      <svg class="ico" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>
+      <span class="ab-badge run" id="abTermBadge">1</span>
+    </div>
+    <div class="ab-spacer"></div>
+    <div class="ab-item" title="设置 (Ctrl+,)" onclick="openPalette('设置')">
+      <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </div>
+  </nav>
+
+  <!-- ============ 侧栏：资源管理器 ============ -->
+  <aside id="sidebar">
+    <div class="sb-header">
+      <span class="sb-title" id="sbTitle">资源管理器</span>
+      <div class="sb-actions">
+        <div class="sb-action" title="新建文件"><svg class="ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg></div>
+        <div class="sb-action" title="刷新"><svg class="ico" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg></div>
+        <div class="sb-action" title="折叠侧栏 (Ctrl+B)" onclick="toggleSidebar()"><svg class="ico" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></div>
+      </div>
+    </div>
+    <div class="sb-tree" id="tree"></div>
+  </aside>
+
+  <!-- ============ 主区 ============ -->
+  <main id="main">
+    <div id="center">
+
+      <!-- ── 对话视图（无 viewtabs：会话元信息已上移至状态栏仪表）── -->
+      <section id="chatview">
+        <div id="chat">
+          <div class="chat-inner" id="chatInner">
+
+            <!-- 用户 -->
+            <div class="msg user">
+              <div class="msg-avatar">你</div>
+              <div class="msg-body">
+                <div class="msg-role">用户 <span class="ts">14:32</span></div>
+                <div class="msg-content">XGent 的 agent loop 是怎么处理流式期间的 steering 中断的？我看代码里有 race abort 逻辑，帮我理一下机制，顺便把结论记成一份笔记。</div>
+              </div>
+            </div>
+
+            <!-- 助手：开场 -->
+            <div class="msg assistant">
+              <div class="msg-avatar">✦</div>
+              <div class="msg-body">
+                <div class="msg-role">XGent <span class="ts">14:32</span></div>
+                <div class="msg-content">先读 <code>bridge.rs</code> 确认 steering race 的真实实现，再全仓检索一遍 <code>steering_rx</code> 的使用点，避免只看单文件下结论。</div>
+              </div>
+            </div>
+
+            <!-- 时间线 1：ReadFile 完成（默认展开） -->
+            <div class="timeline">
+              <div class="tl-icon done"><svg class="ico" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="tl-body">
+                <div class="tl-card open">
+                  <div class="tl-head" onclick="toggleTool(this)">
+                    <svg class="ico tl-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                    <span class="tl-name">ReadFile</span>
+                    <span class="tl-arg">crates/xgent_agent/src/bridge.rs</span>
+                    <span class="tl-status"><span class="dot" style="background:var(--ok)"></span>完成 · 142 行 · 0.4s</span>
+                  </div>
+                  <div class="tl-wrap"><div class="tl-inner">
+<div class="tl-result"><span class="tk-com">// 外层：follow-up 驱动；停止边界先 try_recv steering</span>
+<span class="tk-kw">while</span> <span class="tk-fn">run_agent_loop</span>(req, ctx, cancel, steering_rx.<span class="tk-fn">clone</span>()).<span class="tk-fn">await</span>? {
+    <span class="tk-kw">if let</span> <span class="tk-fn">Ok</span>(steer) = steering_rx.<span class="tk-fn">try_recv</span>() {
+        req.messages.<span class="tk-fn">push</span>(steer.<span class="tk-fn">into_message</span>());
+        <span class="tk-kw">continue</span>;
+    }
+    <span class="tk-kw">break</span>;
+}</div>
+                    <div class="tl-note">读取 142 行 · 命中 3 处 steering 相关分支 · 点击标题栏折叠</div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 时间线 2：Grep 完成（默认收起） -->
+            <div class="timeline">
+              <div class="tl-icon done"><svg class="ico" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="tl-body">
+                <div class="tl-card">
+                  <div class="tl-head" onclick="toggleTool(this)">
+                    <svg class="ico tl-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                    <span class="tl-name">Grep</span>
+                    <span class="tl-arg">pattern: steering_rx · glob: crates/**/*.rs</span>
+                    <span class="tl-status"><span class="dot" style="background:var(--ok)"></span>完成 · 6 处命中</span>
+                  </div>
+                  <div class="tl-wrap"><div class="tl-inner">
+<div class="tl-result">crates/xgent_agent/src/bridge.rs:88     steering_rx.clone()
+crates/xgent_agent/src/bridge.rs:141    steering_rx.try_recv()
+crates/xgent_agent/src/stream.rs:63     steering_rx.recv()
+crates/xgent_agent/src/stream.rs:97     pending_steering: Some(steer)
+crates/xgent_ui/src/conversation.rs:210 conv.push_user(steer.text)
+crates/xgent_daemon/src/session.rs:74   steering_tx.send(..)</div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 助手：主答复（含流式光标 + 模拟 streaming） -->
+            <div class="msg assistant">
+              <div class="msg-avatar">✦</div>
+              <div class="msg-body">
+                <div class="msg-role">XGent <span class="ts">14:33</span></div>
+                <div class="msg-content">
+                  <p>机制分两层，内层负责"即时打断"，外层负责"不丢消息"。</p>
+
+                  <div class="code-block">
+                    <div class="code-head">
+                      <span class="label"><svg class="ico" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>内层 stream_llm_response — 流式期即时中断</span>
+                      <span class="lang">rust</span>
+                      <span class="copy" onclick="toast('已复制代码')">复制</span>
+                    </div>
+<pre class="code"><span class="tk-kw">loop</span> {
+    <span class="tk-fn">tokio::select!</span> {
+        chunk = stream.<span class="tk-fn">next</span>() => { <span class="tk-com">// 正常累加 TextDelta</span> }
+        steer = steering_rx.<span class="tk-fn">recv</span>() => {
+            <span class="tk-com">// race 到 steering → 即时 cancel 当前流</span>
+            cancel.<span class="tk-fn">cancel</span>();
+            <span class="tk-kw">return</span> <span class="tk-fn">StreamOutcome</span> { pending_steering: <span class="tk-fn">Some</span>(steer), .. };
+        }
+    }
+}</pre>
+                  </div>
+
+                  <div class="code-block">
+                    <div class="code-head">
+                      <span class="label"><svg class="ico" viewBox="0 0 24 24"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>外层 run_agent_loop — 停止边界补偿轮询</span>
+                      <span class="lang">rust</span>
+                      <span class="copy" onclick="toast('已复制代码')">复制</span>
+                    </div>
+<pre class="code"><span class="tk-kw">if</span> outcome.tool_calls.<span class="tk-fn">is_empty</span>() {
+    <span class="tk-kw">if let</span> <span class="tk-fn">Ok</span>(steer) = steering_rx.<span class="tk-fn">try_recv</span>() {
+        req.messages.<span class="tk-fn">push</span>(steer.<span class="tk-fn">into_message</span>());
+        <span class="tk-kw">continue</span>;   <span class="tk-com">// 不 break，重新进入内层</span>
+    }
+    <span class="tk-kw">break</span>;
+}</pre>
+                  </div>
+
+                  <ol>
+                    <li><strong>流式期即时中断</strong> — <code>tokio::select!</code> 同时监听 SSE chunk 与 steering channel，steering 到达立即 cancel 当前流并返回 <code>pending_steering</code>。</li>
+                    <li><strong>停止边界补偿</strong> — 外层在每个 yield 点用 <code>try_recv</code> 复查一次，防止 steer 恰好落在"准备停止"的窗口里被丢弃。</li>
+                    <li><strong>ECS 同步</strong> — steering 期间 UI 侧 <code>conv.push_user</code> 即时上屏并持久化，语义对齐 omp 的 <code>streamAssistantResponse</code>。</li>
+                  </ol>
+
+                  <p><span id="streamTarget" data-full="结论：流式不阻塞 steering — steering 是打断，不是排队。我把这份分析写成笔记存档，需要你授权写盘。"></span><span class="caret" id="streamCaret"></span></p>
+                </div>
+              </div>
+            </div>
+
+            <!-- 时间线 3：Bash 运行中 -->
+            <div class="timeline">
+              <div class="tl-icon run"><svg class="ico" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></div>
+              <div class="tl-body">
+                <div class="tl-card">
+                  <div class="tl-head" onclick="toggleTool(this)">
+                    <svg class="ico tl-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                    <span class="tl-name">Bash</span>
+                    <span class="tl-arg">cargo test -p xgent_agent steering::</span>
+                    <span class="tl-status"><span class="dot" style="background:var(--run);animation:softPulse 1.5s infinite"></span>运行中 · 12s</span>
+                  </div>
+                  <div class="tl-wrap"><div class="tl-inner">
+<div class="tl-result">   Compiling xgent_agent v0.1.0
+running 4 tests
+test steering::race_abort_cancels_stream ... ok
+test steering::boundary_try_recv_no_loss ... ok</div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 时间线 4：WriteFile 待确认 -->
+            <div class="timeline last" id="tlWrite">
+              <div class="tl-icon pend" id="tlWriteIcon">
+                <svg class="ico" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1.2"/><rect x="14" y="4" width="4" height="16" rx="1.2"/></svg>
+              </div>
+              <div class="tl-body">
+                <div class="tl-card is-pend" id="tlWriteCard">
+                  <div class="tl-head" onclick="toggleTool(this)">
+                    <svg class="ico tl-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                    <span class="tl-name">WriteFile</span>
+                    <span class="tl-arg">doc/notes/steering-analysis.md</span>
+                    <span class="tl-status" id="tlWriteStatus"><span class="dot" style="background:var(--pend)"></span>待确认</span>
+                  </div>
+                  <div class="tl-wrap"><div class="tl-inner">
+                    <div class="tl-note">高危操作：写入工作区文件（+9 −1）。授权前不会落盘。</div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ⑥ 待确认 · 界面级信号卡（第一落点） -->
+            <div class="pend-card" id="pendCard">
+              <span class="pc-dot"></span>
+              <div class="pc-body">
+                <div class="pc-title">等待你的确认</div>
+                <div class="pc-desc">Agent 请求写入 <code>doc/notes/steering-analysis.md</code>（+9 −1）。授权后会继续执行队列中剩余 1 个工具调用；在此之前 agent 已暂停。</div>
+              </div>
+              <div class="pc-actions">
+                <button class="btn btn-quiet btn-sm" onclick="resolvePending(false)">拒绝</button>
+                <button class="btn btn-pend btn-sm" onclick="showConfirm()">查看差异并确认</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 输入卡（浮动） -->
+        <div id="inputbar">
+          <div class="input-card" id="inputCard">
+            <textarea class="input-area" id="input" rows="1" placeholder="问点什么…（Ctrl+Enter 发送 · Esc 中断 · @ 引用文件）" onkeydown="onInputKey(event)" oninput="autoGrow(this)"></textarea>
+            <div class="input-toolbar">
+              <!-- ① 陪伴锚点回声：与状态栏胶囊同一状态源 -->
+              <span class="echo" id="echo" title="agent 当前状态（与状态栏陪伴锚点同源）">
+                <span class="e-dot"></span><span class="e-txt">待命</span>
+              </span>
+              <div class="hint-grp">
+                <span class="hint"><kbd>Ctrl</kbd><kbd>↵</kbd> 发送</span>
+                <span class="hint"><kbd>Esc</kbd> 中断</span>
+                <span class="hint"><kbd>Ctrl</kbd><kbd>K</kbd> 命令</span>
+                <span class="hint"><kbd>Ctrl</kbd><kbd>\</kbd> 分屏</span>
+              </div>
+              <div class="send-area">
+                <button class="send-btn" onclick="send()" title="发送 (Ctrl+Enter)">
+                  <svg class="ico" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 侧视图：导航第 3 层 = 一条统一「内容标签」 ── -->
+      <section id="sideview">
+        <div class="ct-bar">
+          <div class="ct-scroll" id="ctScroll"><!-- JS 渲染 --></div>
+          <div class="ct-add" title="新建终端" onclick="addTerminalTab()"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div>
+          <div class="ct-tools">
+            <button class="icon-btn" title="清屏 / 重置" onclick="clearTerm()"><svg class="ico" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+            <button class="icon-btn" title="关闭分屏 (Ctrl+\)" onclick="closeSideView()"><svg class="ico" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+        </div>
+
+        <!-- 编辑器面板 -->
+        <div class="pane show" id="pane-editor">
+          <div class="ed-path">crates/xgent_agent/src/<span class="cur" id="edName">bridge.rs</span></div>
+          <div class="ed-body">
+            <div class="gutter" id="gutter"></div>
+            <div class="ed-content" id="edContent"></div>
+          </div>
+        </div>
+
+        <!-- 预览面板 -->
+        <div class="pane" id="pane-preview">
+          <div class="pv-head">
+            <svg class="ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span class="p" id="pvName">Cargo.toml</span>
+            <span class="ro">只读预览 · 480 B</span>
+          </div>
+          <div class="pv-body">
+<pre class="code" id="pvBody" style="padding:0 16px"><span class="tk-com"># Cargo.toml — workspace 根</span>
+[<span class="tk-ty">workspace</span>]
+resolver = <span class="tk-str">"2"</span>
+members = [
+    <span class="tk-str">"crates/xgent_core"</span>,
+    <span class="tk-str">"crates/xgent_provider"</span>,
+    <span class="tk-str">"crates/xgent_daemon"</span>,
+    <span class="tk-str">"crates/xgent_tools"</span>,
+    <span class="tk-str">"crates/xgent_agent"</span>,
+    <span class="tk-str">"crates/xui"</span>,
+    <span class="tk-str">"crates/xgent_ui"</span>,
+    <span class="tk-str">"crates/xgent_app"</span>,
+]
+
+[<span class="tk-ty">workspace.dependencies</span>]
+bevy   = { version = <span class="tk-str">"0.14"</span>, default-features = <span class="tk-num">false</span> }
+tokio  = { version = <span class="tk-str">"1"</span>, features = [<span class="tk-str">"full"</span>] }</pre>
+          </div>
+        </div>
+
+        <!-- 终端面板 -->
+        <div class="pane" id="pane-terminal">
+          <div class="tv-body" id="tvBody"><span class="tv-out">~/ws/bevy_ws/xgent on main</span>
+<span class="tv-cmd"><span class="prompt">❯</span>cargo build --release</span>
+<span class="tv-out">   Compiling xgent_core v0.1.0</span>
+<span class="tv-out">   Compiling xgent_agent v0.1.0</span>
+<span class="tv-out">   Compiling xui v0.1.0</span>
+<span class="tv-out">   Compiling xgent_app v0.1.0</span>
+<span class="tv-out">    Finished release [optimized] target(s) in 47.21s</span>
+<span class="tv-ok">✓ build 成功</span>
+<span class="tv-cmd"><span class="prompt">❯</span>cargo test -p xgent_agent steering::</span>
+<span class="tv-out">running 4 tests</span>
+<span class="tv-ok">test steering::race_abort_cancels_stream ... ok</span>
+<span class="tv-ok">test steering::boundary_try_recv_no_loss ... ok</span>
+<span class="tv-inputline"><span class="prompt">❯</span><span class="typed">test steering::ecs_push_user_sync ... </span><span class="caret"></span></span>
+          </div>
+          <div class="tv-foot">
+            <span class="m-dot run"></span><span class="run">cargo test 运行中</span>
+            <span class="sep">·</span><span>shell <span class="k">pwsh</span></span>
+            <span class="sep">·</span><span>cwd <span class="k">~/ws/bevy_ws/xgent</span></span>
+            <span class="sep">·</span><span>exit <span class="k">0</span></span>
+            <span class="spacer"></span>
+            <button class="tv-act" onclick="termInterrupt()">中断 Ctrl+C</button>
+            <button class="tv-act danger" onclick="termKill()">终止</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ============ ⑦ 状态栏 = 运行时仪表 + ① 陪伴锚点 ============ -->
+  <footer id="statusbar">
+    <div class="sb-left">
+      <!-- ① 陪伴锚点（常驻）：点击在五态间切换以演示 -->
+      <button class="companion st-idle" id="companion" onclick="cycleAgentState()"
+              title="陪伴锚点 · 点击切换 agent 状态（演示）&#10;idle → 思考中 → 执行工具中 → 待确认 → 出错">
+        <span class="cp-glyph" id="cpGlyph"></span>
+        <span class="cp-name">XGent</span>
+        <span class="cp-sep">·</span>
+        <span class="cp-state" id="cpState">待命</span>
+        <span class="cp-dot"></span>
+      </button>
+      <span class="sb-div"></span>
+      <span class="meter" title="当前 provider / 模型"><span class="m-dot ok"></span>openai <span class="m-dim">/</span> <span class="m-k">gpt-4o-mini</span></span>
+      <span class="sb-div"></span>
+      <span class="meter" title="本次会话 token 用量（输入 / 输出）">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg>
+        <span class="m-k">12.4k</span><span class="m-dim">↑</span> <span class="m-k">3.1k</span><span class="m-dim">↓</span>
+      </span>
+      <span class="meter" title="按当前定价预估成本">≈ <span class="m-k">$0.0182</span></span>
+      <span class="sb-div"></span>
+      <span class="meter" title="daemon 连接状态"><span class="m-dot ok" id="daemonDot"></span>daemon <span class="m-k">12ms</span></span>
+    </div>
+    <div class="sb-spacer"></div>
+    <div class="sb-right">
+      <!-- ⑦ 宠物开关态：同时驱动陪伴锚点的降级 -->
+      <button class="meter meter-btn" id="petToggle" onclick="togglePet()" title="宠物窗口开关（关闭后陪伴锚点退化为纯状态指示器）">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/><circle cx="12" cy="12" r="3.2"/></svg>
+        宠物 <span class="m-k" id="petState">开</span>
+      </button>
+      <span class="sb-div"></span>
+      <span class="meter">会话 <span class="m-k">#a3f9c1</span> <span class="m-dim">·</span> 3 轮</span>
+      <span class="sb-div"></span>
+      <span class="meter">UTF-8</span>
+      <span class="meter">LF</span>
+      <span class="meter">Rust</span>
+    </div>
+  </footer>
+</div>
+
+<!-- ============ 确认弹窗（⑥ 顶部待确认状态条） ============ -->
+<div id="overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mdTitle">
+    <div class="modal-signal"></div>
+    <div class="modal-head">
+      <span class="mh-mark">
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.4h.01"/></svg>
+      </span>
+      <span>
+        <span class="title" id="mdTitle">确认执行</span>
+        <span class="sub">待确认 · 高危写入 · agent 已暂停</span>
+      </span>
+      <span class="sp"></span>
+      <button class="icon-btn" onclick="resolvePending(false)" title="拒绝并关闭 (Esc)">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <span class="strong">WriteFile</span> 将写入工作区文件：
+      <div class="path">doc/notes/steering-analysis.md</div>
+      <div>差异预览 <span style="color:var(--ok)">+9</span> <span style="color:var(--fail)">−1</span>：</div>
+      <div class="diff">
+        <div class="line add">+ # XGent Steering 机制分析</div>
+        <div class="line add">+</div>
+        <div class="line add">+ ## 一、流式期即时中断</div>
+        <div class="line ctx">  stream_llm_response 用 tokio::select! 同时监听</div>
+        <div class="line ctx">  SSE chunk 与 steering channel。</div>
+        <div class="line del">- steering 到达后排队等待当前流完成。</div>
+        <div class="line add">+ steering 到达立即 cancel 当前流，返回 pending_steering。</div>
+        <div class="line ctx">  由 run_agent_loop 注入 req.messages 后重新流式。</div>
+        <div class="line add">+</div>
+        <div class="line add">+ ## 二、停止边界补偿轮询</div>
+        <div class="line add">+ 外层循环在每个 yield 点 try_recv 复查，防止 steer 丢失。</div>
+        <div class="line add">+</div>
+        <div class="line add">+ ## 三、ECS 同步</div>
+        <div class="line add">+ conv.push_user 即时上屏并持久化。</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="note">授权仅对本次调用生效；可在设置中为 WriteFile 配置自动放行规则。</span>
+      <button class="btn" onclick="resolvePending(false)">拒绝<span class="dim">Esc</span></button>
+      <button class="btn btn-primary" onclick="resolvePending(true)">允许执行<span class="dim">↵</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 命令面板 ============ -->
+<div id="cmdpalette">
+  <div class="cp-inputrow">
+    <svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></svg>
+    <input class="cp-input" id="cpInput" placeholder="输入命令、文件名或 >动作…" oninput="filterCmd(this.value)" autocomplete="off">
+    <span class="cp-esc">Esc</span>
+  </div>
+  <div class="cp-list" id="cpList"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ==================================================================
+   0. 工具
+   ================================================================== */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+const reduced = ()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let toastTimer=null;
+function toast(msg){
+  const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1600);
+}
+
+/* ==================================================================
+   1. 图标库（全部 1.75px 几何线性，令牌 --icon-stroke）
+   ================================================================== */
+const I = {
+  chevD:'<svg class="ico" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  chevR:'<svg class="ico" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>',
+  folderOpen:'<svg class="ico" viewBox="0 0 24 24"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6A2 2 0 0 1 18.45 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></svg>',
+  folder:'<svg class="ico" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  file:'<svg class="ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  eye:'<svg class="ico" viewBox="0 0 24 24"><path d="M1.8 12S5.6 4.8 12 4.8 22.2 12 22.2 12 18.4 19.2 12 19.2 1.8 12 1.8 12z"/><circle cx="12" cy="12" r="2.8"/></svg>',
+  term:'<svg class="ico" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>',
+  x:'<svg class="ico" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  gear:'<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  box:'<svg class="ico" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.27 6.96 8.73 5.05 8.73-5.05"/><path d="M12 22.08V12"/></svg>',
+  split:'<svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg>',
+  globe:'<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg>',
+  play:'<svg class="ico" viewBox="0 0 24 24"><path d="M6 4.5v15l13-7.5z"/></svg>',
+  plus:'<svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+
+  /* 陪伴锚点五态字形 —— 抽象几何信号，非宠物形象（硬约束） */
+  cpIdle :'<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2" opacity=".55"/></svg>',
+  cpThink:'<svg class="ico" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/><path d="M3 6.5a10 10 0 0 1 18 0M3 17.5a10 10 0 0 0 18 0" opacity=".45"/></svg>',
+  cpTool :'<svg class="ico" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5.3 5.3L21 10l-7 7-3-3 7-7z"/><path d="m9 15-5.5 5.5"/></svg>',
+  cpPend :'<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.4h.01"/></svg>',
+  cpFail :'<svg class="ico" viewBox="0 0 24 24"><path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  cpOff  :'<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" opacity=".8"/><circle cx="12" cy="12" r="2.6"/></svg>'
+};
+
+/* ==================================================================
+   2. ① 陪伴锚点状态机（五态）
+      —— 暖色 = 陪伴身份；语义色点 = 系统状态；两套色系互不越界。
+      —— 状态同时驱动：状态栏胶囊 / 输入卡回声 / 输入卡边框 / 活动栏徽章
+   ================================================================== */
+const AGENT_STATES = ['idle','think','tool','pend','fail'];
+const STATE_META = {
+  idle : {cls:'st-idle',  label:'待命',      echo:'待命',     glyph:I.cpIdle },
+  think: {cls:'st-think', label:'思考中',    echo:'思考中',   glyph:I.cpThink},
+  tool : {cls:'st-tool',  label:'执行工具中', echo:'执行工具中', glyph:I.cpTool },
+  pend : {cls:'st-pend',  label:'待确认',    echo:'待确认',   glyph:I.cpPend },
+  fail : {cls:'st-fail',  label:'出错',      echo:'出错',     glyph:I.cpFail }
+};
+let agentState='idle';
+let petOn=true;
+
+function setAgentState(s){
+  if(!STATE_META[s]) return;
+  agentState=s;
+  const m=STATE_META[s];
+  const anchor=$('#companion');
+  const stateEl=$('#cpState');
+
+  // 状态文字淡入淡出（120ms，优化目标 #5「状态过渡淡入」）
+  stateEl.classList.add('fade');
+  setTimeout(()=>{
+    stateEl.textContent=m.label;
+    stateEl.classList.remove('fade');
+  }, reduced()?0:90);
+
+  AGENT_STATES.forEach(k=>anchor.classList.remove(STATE_META[k].cls));
+  anchor.classList.add(m.cls);
+  $('#cpGlyph').innerHTML = petOn ? m.glyph : I.cpOff;
+
+  // 输入卡回声
+  const echo=$('#echo');
+  echo.querySelector('.e-txt').textContent=m.echo;
+  const dot=echo.querySelector('.e-dot');
+  dot.style.background = ({idle:'var(--t3)',think:'var(--run)',tool:'var(--run)',pend:'var(--pend)',fail:'var(--fail)'})[s];
+
+  // 输入卡边框随高优先状态微调（不抢聚焦环）
+  const card=$('#inputCard');
+  card.classList.toggle('s-pend', s==='pend');
+  card.classList.toggle('s-fail', s==='fail');
+}
+
+/** 点击陪伴锚点循环五态（演示用） */
+function cycleAgentState(){
+  const i=AGENT_STATES.indexOf(agentState);
+  setAgentState(AGENT_STATES[(i+1)%AGENT_STATES.length]);
+}
+
+/** ⑦ 宠物开关 → ① 陪伴锚点优雅降级（宽度不变，状态可读性保留） */
+function togglePet(){
+  petOn=!petOn;
+  $('#companion').classList.toggle('pet-off',!petOn);
+  $('#echo').classList.toggle('pet-off',!petOn);
+  $('#petState').textContent = petOn?'开':'关';
+  $('#cpGlyph').innerHTML = petOn ? STATE_META[agentState].glyph : I.cpOff;
+  toast(petOn ? '宠物窗口已开启 · 陪伴锚点恢复暖色' : '宠物窗口已关闭 · 陪伴锚点退化为状态指示器');
+}
+
+/* ==================================================================
+   3. ⑤ 微交互：工具卡展开 / 模拟流式输出
+   ================================================================== */
+function toggleTool(head){ head.closest('.tl-card').classList.toggle('open'); }
+
+let streamTimer=null;
+function replayStream(){
+  const el=$('#streamTarget'), caret=$('#streamCaret');
+  if(!el) return;
+  const full=el.dataset.full;
+  clearInterval(streamTimer);
+  caret.classList.remove('off');
+  if(reduced()){ el.textContent=full; setAgentState('pend'); return; }
+  el.textContent=''; setAgentState('think');
+  let i=0;
+  streamTimer=setInterval(()=>{
+    el.textContent=full.slice(0,++i);
+    if(i>=full.length){
+      clearInterval(streamTimer);
+      // 流式结束 → 队列里的 WriteFile 需要授权 → 进入界面级待确认
+      setAgentState('pend');
+    }
+  },22);
+}
+
+/* ==================================================================
+   4. ⑥ 待确认：弹窗 + 时间线节点 + 界面级信号卡三处联动
+   ================================================================== */
+function showConfirm(){ $('#overlay').classList.add('show'); setAgentState('pend'); }
+function hideConfirm(){ $('#overlay').classList.remove('show'); }
+
+/** approved=true 允许执行；false 拒绝 */
+function resolvePending(approved){
+  hideConfirm();
+  const icon=$('#tlWriteIcon'), card=$('#tlWriteCard'), status=$('#tlWriteStatus');
+  card.classList.remove('is-pend');
+  icon.classList.remove('pend');
+  if(approved){
+    icon.classList.add('done');
+    icon.innerHTML='<svg class="ico" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>';
+    status.innerHTML='<span class="dot" style="background:var(--ok)"></span>完成 · 写入 10 行';
+    setAgentState('tool');
+    toast('已授权 · WriteFile 执行完成');
+    setTimeout(()=>setAgentState('idle'), 1400);
+  }else{
+    icon.classList.add('deny');
+    icon.innerHTML='<svg class="ico" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    status.innerHTML='<span class="dot" style="background:var(--deny)"></span>已拒绝';
+    setAgentState('idle');
+    toast('已拒绝 · 文件未写入');
+  }
+  $('#pendCard').classList.add('resolved');
+}
+
+/* ==================================================================
+   5. ② 导航：活动栏（视图层） + 侧视图内容标签（第 3 层）
+   ================================================================== */
+/* 内容标签 = 编辑器文件 / 只读预览 / 终端会话，三类合一，替代 v2 的三层标签 */
+let tabs=[
+  {id:'t1', kind:'file',    name:'bridge.rs',    dirty:true },
+  {id:'t2', kind:'file',    name:'events.rs'                },
+  {id:'t3', kind:'preview', name:'Cargo.toml'               },
+  {id:'t4', kind:'term',    name:'cargo test',   running:true},
+  {id:'t5', kind:'term',    name:'xgent-app'                }
+];
+let activeTab='t1';
+let termSeq=1;
+
+function renderTabs(){
+  $('#ctScroll').innerHTML = tabs.map(t=>{
+    const kIcon = t.kind==='term' ? I.term : (t.kind==='preview' ? I.eye : I.file);
+    const mark  = t.running ? '<span class="rundot"></span>' : (t.dirty ? '<span class="dirty"></span>' : '');
+    return `<div class="ct-tab${t.id===activeTab?' active':''}" data-id="${t.id}" onclick="activateTab('${t.id}')">
+      <span class="k">${kIcon}</span><span>${t.name}</span>${mark}
+      <span class="x" onclick="closeTab(event,'${t.id}')">${I.x}</span>
+    </div>`;
+  }).join('');
+  const running = tabs.filter(t=>t.running).length;
+  const badge=$('#abTermBadge');
+  badge.textContent = tabs.filter(t=>t.kind==='term').length;
+  badge.classList.toggle('run', running>0);
+}
+
+function activateTab(id){
+  const t=tabs.find(x=>x.id===id); if(!t) return;
+  activeTab=id;
+  $('#sideview').classList.add('show');
+  $$('.pane').forEach(p=>p.classList.remove('show'));
+  if(t.kind==='term'){ $('#pane-terminal').classList.add('show'); scrollTerm(); }
+  else if(t.kind==='preview'){ $('#pane-preview').classList.add('show'); $('#pvName').textContent=t.name; }
+  else { $('#pane-editor').classList.add('show'); $('#edName').textContent=t.name; }
+  renderTabs();
+  syncActivityBar();
+}
+
+function closeTab(e,id){
+  e.stopPropagation();
+  const i=tabs.findIndex(t=>t.id===id); if(i<0) return;
+  tabs.splice(i,1);
+  if(!tabs.length){ closeSideView(); renderTabs(); return; }
+  if(activeTab===id) activateTab((tabs[i]||tabs[i-1]).id);
+  else renderTabs();
+}
+
+function openInTab(name){
+  const isCode=/\.(rs|toml|md|ts|js|go|py|c|h|css|html|json|ya?ml|sh|lock)$/i.test(name);
+  const kind = /\.(md|toml|lock|json|ya?ml)$/i.test(name) ? 'preview' : (isCode?'file':'preview');
+  let t=tabs.find(x=>x.name===name && x.kind!=='term');
+  if(!t){ t={id:'t'+Date.now(), kind, name}; tabs.push(t); }
+  activateTab(t.id);
+}
+
+function addTerminalTab(){
+  const t={id:'t'+Date.now(), kind:'term', name:`shell #${++termSeq}`};
+  tabs.push(t); activateTab(t.id);
+}
+
+function closeSideView(){
+  $('#sideview').classList.remove('show');
+  syncActivityBar();
+}
+
+/** 活动栏 = 视图层：只负责"哪个视图在前台" */
+function focusView(v){
+  if(v==='files' || v==='search'){
+    if(v==='search'){ openPalette(''); return; }
+    toggleSidebar();
+  }else if(v==='editor'){
+    const side=$('#sideview');
+    const cur=tabs.find(t=>t.id===activeTab);
+    if(side.classList.contains('show') && cur && cur.kind!=='term'){ closeSideView(); return; }
+    const t=tabs.find(x=>x.kind==='file')||tabs.find(x=>x.kind==='preview');
+    t ? activateTab(t.id) : openInTab('bridge.rs');
+  }else if(v==='terminal'){
+    const side=$('#sideview');
+    const cur=tabs.find(t=>t.id===activeTab);
+    if(side.classList.contains('show') && cur && cur.kind==='term'){ closeSideView(); return; }
+    const t=tabs.find(x=>x.kind==='term');
+    t ? activateTab(t.id) : addTerminalTab();
+  }
+  syncActivityBar();
+}
+
+function syncActivityBar(){
+  const shown=$('#sideview').classList.contains('show');
+  const cur=tabs.find(t=>t.id===activeTab);
+  $$('.ab-item').forEach(i=>i.classList.remove('active'));
+  if(shown && cur && cur.kind==='term') $('#ab-terminal').classList.add('active');
+  else if(shown) $('#ab-editor').classList.add('active');
+  if(!$('#app').classList.contains('nosidebar')) $('#ab-files').classList.add('active');
+}
+
+function toggleSidebar(){
+  $('#app').classList.toggle('nosidebar');
+  syncActivityBar();
+}
+
+/* ==================================================================
+   6. 文件树
+   ================================================================== */
+const tree=[
+  {n:'crates',t:'dir',open:true,c:[
+    {n:'xgent_agent',t:'dir',open:true,c:[
+      {n:'src',t:'dir',open:true,c:[
+        {n:'bridge.rs',t:'file',sel:true,tag:'m'},
+        {n:'stream.rs',t:'file',tag:'m'},
+        {n:'conversation.rs',t:'file'},
+        {n:'session_store.rs',t:'file'},
+        {n:'events.rs',t:'file'}
+      ]},
+      {n:'Cargo.toml',t:'file'}
+    ]},
+    {n:'xui',t:'dir',c:[]},
+    {n:'xgent_core',t:'dir',c:[]},
+    {n:'xgent_ui',t:'dir',c:[]}
+  ]},
+  {n:'doc',t:'dir',open:true,c:[
+    {n:'design',t:'dir',open:true,c:[
+      {n:'ui-v3-requirements-brief.md',t:'file'},
+      {n:'ui-v3-design-tokens.md',t:'file'},
+      {n:'architecture.md',t:'file'}
+    ]},
+    {n:'notes',t:'dir',open:true,c:[
+      {n:'steering-analysis.md',t:'file',tag:'a'}
+    ]}
+  ]},
+  {n:'Cargo.toml',t:'file'},
+  {n:'AGENTS.md',t:'file'}
+];
+
+function renderTree(nodes,depth=0){
+  let h='';
+  for(const nd of nodes){
+    const ind='<span class="indent"></span>'.repeat(depth);
+    const arrow = nd.t==='dir' ? `<span class="arrow">${nd.open?I.chevD:I.chevR}</span>` : '<span class="arrow"></span>';
+    const icon  = nd.t==='dir' ? `<span class="ficon">${nd.open?I.folderOpen:I.folder}</span>` : `<span class="ficon">${I.file}</span>`;
+    const tag   = nd.tag ? `<span class="tag ${nd.tag}">${nd.tag==='m'?'M':'A'}</span>` : '';
+    h+=`<div class="node${nd.sel?' sel':''}" data-t="${nd.t}" data-n="${nd.n}" onclick="nodeClick(event,this)">${ind}${arrow}${icon}<span class="nm">${nd.n}</span>${tag}</div>`;
+    if(nd.t==='dir'&&nd.open&&nd.c) h+=renderTree(nd.c,depth+1);
+  }
+  return h;
+}
+function findNode(nodes,name){
+  for(const nd of nodes){ if(nd.n===name) return nd; if(nd.c){const r=findNode(nd.c,name); if(r) return r;} }
+  return null;
+}
+function nodeClick(e,el){
+  e.stopPropagation();
+  const name=el.dataset.n;
+  if(el.dataset.t==='dir'){
+    const nd=findNode(tree,name); if(nd){ nd.open=!nd.open; $('#tree').innerHTML=renderTree(tree); }
+    return;
+  }
+  $$('.node.sel').forEach(n=>n.classList.remove('sel'));
+  el.classList.add('sel');
+  openInTab(name);
+}
+
+/* ==================================================================
+   7. 编辑器内容
+   ================================================================== */
+function renderEditor(){
+  const lines=[
+    '<span class="tk-com">// crates/xgent_agent/src/bridge.rs</span>',
+    '<span class="tk-kw">use</span> <span class="tk-ty">tokio</span>::sync::mpsc;',
+    '',
+    '<span class="tk-com">/// 外层：follow-up 驱动；停止边界先 try_recv steering</span>',
+    '<span class="tk-kw">pub async fn</span> <span class="tk-fn">run_agent_loop</span><span class="tk-pn">(</span>',
+    '    req: <span class="tk-ty">ChatRequest</span><span class="tk-pn">,</span>',
+    '    cancel: <span class="tk-ty">CancellationToken</span><span class="tk-pn">,</span>',
+    '    steering_rx: <span class="tk-ty">mpsc::Receiver</span><span class="tk-pn">&lt;</span><span class="tk-ty">Steering</span><span class="tk-pn">&gt;,</span>',
+    '<span class="tk-pn">) -&gt; </span><span class="tk-ty">Result</span><span class="tk-pn">&lt;</span><span class="tk-ty">bool</span><span class="tk-pn">&gt; {</span>',
+    '    <span class="tk-kw">loop</span> <span class="tk-pn">{</span>',
+    '        <span class="tk-kw">let</span> outcome = <span class="tk-fn">stream_with_retry</span><span class="tk-pn">(</span>',
+    '            cancel.<span class="tk-fn">clone</span><span class="tk-pn">(),</span> steering_rx.<span class="tk-fn">clone</span><span class="tk-pn">()).</span><span class="tk-kw">await</span><span class="tk-pn">?;</span>',
+    '        <span class="tk-kw">if</span> outcome.tool_calls.<span class="tk-fn">is_empty</span><span class="tk-pn">() {</span>',
+    'HL            <span class="tk-com">// 停止边界补偿轮询：防止 steer 丢失</span>',
+    'HL            <span class="tk-kw">if let</span> <span class="tk-fn">Ok</span><span class="tk-pn">(</span>steer<span class="tk-pn">) =</span> steering_rx.<span class="tk-fn">try_recv</span><span class="tk-pn">() {</span>',
+    'HL                req.messages.<span class="tk-fn">push</span><span class="tk-pn">(</span>steer.<span class="tk-fn">into_message</span><span class="tk-pn">());</span>',
+    'HL                <span class="tk-kw">continue</span><span class="tk-pn">;</span>',
+    'HL            <span class="tk-pn">}</span>',
+    '            <span class="tk-kw">break</span><span class="tk-pn">;</span>',
+    '        <span class="tk-pn">}</span>',
+    '        <span class="tk-com">// 内层：tool-call 循环（含高危操作确认闸门）</span>',
+    '        <span class="tk-kw">for</span> tc <span class="tk-kw">in</span> outcome.tool_calls <span class="tk-pn">{</span> <span class="tk-fn">dispatch</span><span class="tk-pn">(</span>tc<span class="tk-pn">).</span><span class="tk-kw">await</span><span class="tk-pn">?; }</span>',
+    '    <span class="tk-pn">}</span>',
+    '    <span class="tk-fn">Ok</span><span class="tk-pn">(</span><span class="tk-kw">true</span><span class="tk-pn">)</span>',
+    '<span class="tk-pn">}</span>'
+  ];
+  $('#gutter').innerHTML=lines.map((_,i)=>i+1).join('<br>');
+  $('#edContent').innerHTML=lines
+    .map(l=>l.startsWith('HL') ? `<span class="hl">${l.slice(2)}</span>` : l)
+    .join('\n');
+
+  /* 行号栏跟随代码区滚动：.gutter 为 overflow:hidden，由此同步 scrollTop，
+     避免窗口较矮 / 代码超长时行号与代码错位。仅绑定一次。 */
+  const gut=$('#gutter'), edc=$('#edContent');
+  if(gut && edc && !edc.dataset.gutterSync){
+    edc.dataset.gutterSync='1';
+    edc.addEventListener('scroll',()=>{ gut.scrollTop=edc.scrollTop; },{passive:true});
+  }
+  if(gut && edc) gut.scrollTop=edc.scrollTop;
+}
+
+/* ==================================================================
+   8. 终端
+   ================================================================== */
+function scrollTerm(){ const b=$('#tvBody'); if(b) b.scrollTop=b.scrollHeight; }
+function clearTerm(){ $('#tvBody').innerHTML='<span class="tv-out">~ 已清屏</span>\n'; }
+function termInterrupt(){
+  $('#tvBody').insertAdjacentHTML('beforeend','\n<span class="tv-err">^C 已中断</span>');
+  tabs.filter(t=>t.running).forEach(t=>t.running=false);
+  renderTabs(); scrollTerm(); toast('已发送 SIGINT');
+}
+function termKill(){
+  $('#tvBody').insertAdjacentHTML('beforeend','\n<span class="tv-err">[process terminated]</span>');
+  tabs.filter(t=>t.running).forEach(t=>t.running=false);
+  renderTabs(); scrollTerm();
+}
+
+/* ==================================================================
+   9. 输入区
+   ================================================================== */
+function autoGrow(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,180)+'px'; }
+function onInputKey(e){
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); send(); }
+  // Esc 交给全局处理器统一执行 abort()，此处只阻止默认行为，避免重复触发
+  if(e.key==='Escape'){ e.preventDefault(); }
+}
+function send(){
+  const box=$('#input'), v=box.value.trim();
+  if(!v){
+    const c=$('#inputCard'); c.classList.add('shake');
+    setTimeout(()=>c.classList.remove('shake'),240);
+    return;
+  }
+  $('#chatInner').insertAdjacentHTML('beforeend',
+    `<div class="msg user"><div class="msg-avatar">你</div><div class="msg-body">
+      <div class="msg-role">用户 <span class="ts">刚刚</span></div>
+      <div class="msg-content">${v.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</div>
+    </div></div>`);
+  box.value=''; autoGrow(box);
+  $('#chat').scrollTop=$('#chat').scrollHeight;
+  setAgentState('think');
+  setTimeout(()=>setAgentState('tool'),900);
+  setTimeout(()=>setAgentState('idle'),2200);
+}
+function abort(){ setAgentState('idle'); toast('已中断当前生成'); }
+
+function newSession(){ toast('已新建会话 · 上下文已重置'); setAgentState('idle'); }
+
+/* ==================================================================
+   10. 命令面板（↑↓ 选择 · Enter 执行 · Esc 关闭）
+   ================================================================== */
+const commands=[
+  {g:'会话', i:I.plus,  l:'新建会话',            h:'Ctrl+N',      run:newSession},
+  {g:'会话', i:I.box,   l:'切换 provider：openai', h:'gpt-4o-mini', run:()=>toast('已切换至 openai / gpt-4o-mini')},
+  {g:'会话', i:I.box,   l:'切换 provider：ollama', h:'qwen2.5-coder',run:()=>toast('已切换至 ollama / qwen2.5-coder')},
+  {g:'视图', i:I.split, l:'切换编辑器分屏',       h:'Ctrl+\\',     run:()=>focusView('editor')},
+  {g:'视图', i:I.term,  l:'切换终端面板',         h:'Ctrl+`',      run:()=>focusView('terminal')},
+  {g:'视图', i:I.folder,l:'折叠 / 展开资源管理器', h:'Ctrl+B',      run:toggleSidebar},
+  {g:'演示', i:I.play,  l:'重播流式输出',         h:'streaming',   run:replayStream},
+  {g:'演示', i:I.cpPend,l:'打开待确认弹窗',       h:'pending',     run:showConfirm},
+  {g:'演示', i:I.cpIdle,l:'切换陪伴锚点状态',     h:'5 态循环',    run:cycleAgentState},
+  {g:'演示', i:I.cpOff, l:'开关宠物窗口',         h:'降级演示',    run:togglePet},
+  {g:'设置', i:I.gear,  l:'打开设置',             h:'Ctrl+,',      run:()=>toast('设置面板（原型未实现）')},
+  {g:'设置', i:I.globe, l:'切换语言 / Switch to English', h:'i18n', run:()=>toast('语言切换（原型未实现）')}
+];
+let cpItems=[], cpIndex=0;
+
+function openPalette(prefill){
+  $('#cmdpalette').classList.add('show');
+  const inp=$('#cpInput');
+  inp.value=prefill||'';
+  filterCmd(inp.value);
+  inp.focus(); inp.select();
+}
+function closePalette(){ $('#cmdpalette').classList.remove('show'); }
+function filterCmd(q){
+  const ql=(q||'').toLowerCase().trim();
+  cpItems=commands.filter(c=>!ql||c.l.toLowerCase().includes(ql)||c.h.toLowerCase().includes(ql)||c.g.includes(ql));
+  cpIndex=0;
+  const list=$('#cpList');
+  if(!cpItems.length){ list.innerHTML='<div class="cp-empty">没有匹配的命令</div>'; return; }
+  let html='', lastG=null;
+  cpItems.forEach((c,i)=>{
+    if(c.g!==lastG){ html+=`<div class="cp-group">${c.g}</div>`; lastG=c.g; }
+    html+=`<div class="cp-item${i===0?' sel':''}" data-i="${i}" onmousemove="cpHover(${i})" onclick="cpRun(${i})">
+      <span class="c-icon">${c.i}</span><span class="c-label">${c.l}</span><span class="c-hint">${c.h}</span></div>`;
+  });
+  list.innerHTML=html;
+}
+function cpHover(i){ cpIndex=i; cpPaint(); }
+function cpPaint(){
+  $$('.cp-item').forEach(el=>el.classList.toggle('sel', +el.dataset.i===cpIndex));
+  const el=$(`.cp-item[data-i="${cpIndex}"]`);
+  if(el) el.scrollIntoView({block:'nearest'});
+}
+function cpMove(d){
+  if(!cpItems.length) return;
+  cpIndex=(cpIndex+d+cpItems.length)%cpItems.length;
+  cpPaint();
+}
+function cpRun(i){
+  const c=cpItems[i??cpIndex]; closePalette();
+  if(c&&c.run) setTimeout(c.run,60);
+}
+
+/* ==================================================================
+   11. 全局快捷键
+   ================================================================== */
+document.addEventListener('keydown',e=>{
+  const mod=e.ctrlKey||e.metaKey;
+  const paletteOpen=$('#cmdpalette').classList.contains('show');
+  const modalOpen=$('#overlay').classList.contains('show');
+
+  if(mod&&!e.shiftKey&&e.key.toLowerCase()==='k'){ e.preventDefault(); openPalette(''); return; }
+  if(mod&&e.shiftKey&&e.key.toLowerCase()==='p'){ e.preventDefault(); openPalette(''); return; }
+  if(mod&&e.key===','){ e.preventDefault(); openPalette('设置'); return; }
+  if(mod&&e.key.toLowerCase()==='b'){ e.preventDefault(); toggleSidebar(); return; }
+  if(mod&&e.key==='\\'){ e.preventDefault(); focusView('editor'); return; }
+  if(mod&&e.key==='`'){ e.preventDefault(); focusView('terminal'); return; }
+
+  if(paletteOpen){
+    if(e.key==='ArrowDown'){ e.preventDefault(); cpMove(1); return; }
+    if(e.key==='ArrowUp'){ e.preventDefault(); cpMove(-1); return; }
+    if(e.key==='Enter'){ e.preventDefault(); cpRun(); return; }
+    if(e.key==='Escape'){ e.preventDefault(); closePalette(); return; }
+    return;
+  }
+  if(modalOpen){
+    if(e.key==='Escape'){ e.preventDefault(); resolvePending(false); return; }
+    if(e.key==='Enter'){ e.preventDefault(); resolvePending(true); return; }
+    return;
+  }
+  if(e.key==='Escape'){ abort(); }
+});
+
+/* ==================================================================
+   12. 初始化
+   ================================================================== */
+renderTabs();
+renderEditor();
+$('#tree').innerHTML=renderTree(tree);
+$('#sideview').classList.add('show');
+activateTab('t1');
+setAgentState('idle');
+$('#chat').scrollTop=$('#chat').scrollHeight;
+
+// 一次性流式演示：进场 → 思考中 → 待确认（展示 ①⑤⑥ 三条改动的联动）
+setTimeout(()=>{
+  replayStream();
+  setTimeout(()=>{ $('#chat').scrollTop=$('#chat').scrollHeight; },80);
+},650);
+</script>
+</body>
+</html>
