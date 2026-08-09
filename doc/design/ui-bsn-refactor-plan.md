@@ -20,6 +20,23 @@
 > - **P1-4**: build.rs 补逐文件 `rerun-if-changed`
 > - **P1-5**: Markdown 解析器改用 `pulldown-cmark`
 > - **P1-6**: `bevy_resvg` 设为 `xui` 的 feature flag（`default = ["icons"]`）
+>
+> **v2.2 Review 修正**（对照 `ui-bsn-refactor-review-r3.md` + `ui-bsn-refactor-review-r4.md`）：
+> - **C-1**: `ThemedText(text)` → `InheritableThemedText(text)`（XButton / XPill 中单元结构体不接受参数）
+> - **C-2**: `UiRoot` → 自定义 `XgentUiRoot` 标记组件（bevy_ui 无 UiRoot）
+> - **C-3**: `Box::new(())` → `Box::new(bsn_list!())`（() 不实现 SceneList）
+> - **C-4**: `props.state` → `template_value(props.state)`（BSN 裸标识符解析为类型名）
+> - **C-5**: 观察者 Query 移除 `Changed<>` 过滤器（同帧 change tick 未更新导致匹配失败）
+> - **C-6**: `smol_str = "1"` → `smol_str = "0.2"`（与 bevy 0.19 一致）
+> - **C-7**: 补全 `on_insert_themed_border` 实现（原仅注释「同理...」）
+> - **C-8**: `Button` 改用 `bevy_ui_widgets::Button`（headless 控件 + Activate 事件 + Pressed 状态 + 无障碍）
+> - **C-9**: `update_theme_colors` / `update_icon_tints` 从 `Update` → `PostUpdate`（与 HierarchyPropagatePlugin 同 schedule）
+> - **C-10**: XButton/XPill 子 Text 需加 `ThemedText` 标记（文档化）
+> - **C-13**: 注册 `bevy_ui_widgets::ButtonPlugin`（Button 观察者需插件注册）
+> - **A-3**: 新增 Z-Index 分层常量（`z_index::DRAWER/DROPDOWN/TOOLTIP/TOAST/MODAL`）
+> - **A-4**: 新增 `update_xbutton_styles` 系统（hover/press/disabled 状态 → 颜色令牌切换）
+> - **A-2**: 新增 §6.5 动态内容插入模式（marker → Query → with_children）
+> - **A-10**: build.rs 路径可移植性说明
 
 ---
 
@@ -291,7 +308,7 @@ pub fn update_theme_colors(
 /// 新实体插入 ThemedBg 时立即解析
 pub fn on_insert_themed_bg(
     insert: On<Insert, ThemedBg>,
-    mut q: Query<(&mut BackgroundColor, &ThemedBg), Changed<ThemedBg>>,
+    mut q: Query<(&mut BackgroundColor, &ThemedBg)>,
     theme: Res<XuiTheme>,
 ) {
     if let Ok((mut bg, themed)) = q.get_mut(insert.entity) {
@@ -300,6 +317,16 @@ pub fn on_insert_themed_bg(
 }
 
 // on_insert_themed_border 同理...
+/// ThemedBorder 插入时 → 解析令牌 → 设置 BorderColor
+pub fn on_insert_themed_border(
+    insert: On<Insert, ThemedBorder>,
+    mut q: Query<(&mut BorderColor, &ThemedBorder)>,
+    theme: Res<XuiTheme>,
+) {
+    if let Ok((mut border, themed)) = q.get_mut(insert.entity) {
+        border.set_all(theme.color(&themed.0));
+    }
+}
 
 /// InheritableThemedText 插入时 → 解析令牌 → 插入 Propagate(TextColor)
 pub fn on_insert_inheritable_text(
@@ -630,6 +657,8 @@ fn main() {
 ```
 
 > **注意**：此 build.rs 仅做文本替换（~5 行逻辑），不做光栅化。SVG 光栅化由 bevy_resvg 在应用启动时完成（一次性，缓存为纹理）。build.rs 不依赖 resvg/usvg/tiny-skia。
+>
+> **路径可移植性**：build.rs 从 `../../doc/design/icons` 读取源 SVG（相对于 `crates/xui/`）。如果 xui 被其他项目作为依赖使用，此路径不存在。建议同时将 SVG 源文件复制到 `xui/assets/icons/` 作为 fallback——build.rs 检测 `../../doc/design/icons` 是否存在，存在则预处理，不存在则跳过（使用已预置的 `assets/icons/`）。
 
 ### 4.6 图标路径常量
 
@@ -723,13 +752,13 @@ icons = ["dep:bevy_resvg"]
 
 [dependencies]
 bevy_resvg = { version = "2.5", optional = true }
-smol_str = "1"  # ThemeToken 用
+smol_str = "0.2"  # 与 bevy 0.19 一致（bevy_text 依赖 smol_str 0.2）
 ```
 
 ```toml
 # Cargo.toml [workspace.dependencies] 新增
 bevy_resvg = "2.5"
-smol_str = "1"
+smol_str = "0.2"  # 与 bevy 0.19 一致
 ```
 
 > bevy_resvg 2.5 的 MSRV 为 1.95（与 Bevy MSRV 一致）。bevy_resvg 重导出了 `resvg` crate，无需单独添加。
@@ -745,6 +774,7 @@ use bevy_text::TextColor;
 use bevy_ecs::query::With;
 #[cfg(feature = "icons")]
 use bevy_resvg::prelude::SvgPlugin;
+use bevy_ui_widgets::ButtonPlugin;  // headless Button 控件（Activate 事件 + Pressed 状态 + 无障碍）
 use crate::theme::*;
 
 pub struct XuiPlugin;
@@ -752,6 +782,8 @@ pub struct XuiPlugin;
 impl Plugin for XuiPlugin {
     fn build(&self, app: &mut App) {
         app
+            // bevy_ui_widgets — headless 控件（Button 的 press/activate/cancel 观察者）
+            .add_plugins(ButtonPlugin)
             // bevy_resvg SVG 管线（feature gate）
             #[cfg(feature = "icons")]
             .add_plugins(SvgPlugin)
@@ -763,12 +795,14 @@ impl Plugin for XuiPlugin {
             )
             // 主题系统（默认暗色）
             .insert_resource(dark_theme())
-            // 令牌解析系统
-            .add_systems(Update, (
+            // 令牌解析系统 — 在 PostUpdate 中运行，与 HierarchyPropagatePlugin 同 schedule
+            .add_systems(PostUpdate, (
                 update_theme_colors,
                 #[cfg(feature = "icons")]
                 update_icon_tints,
             ))
+            // 按钮样式更新系统 — hover/press/disabled 状态变化时更新颜色令牌
+            .add_systems(PreUpdate, update_xbutton_styles.in_set(bevy_picking::PickingSystems::Last))
             // On<Insert> 观察者
             .add_observer(on_insert_themed_bg)
             .add_observer(on_insert_themed_border)
@@ -800,7 +834,7 @@ impl Plugin for XuiPlugin {
 ### 5.1 设计原则
 
 - 每个组件 = `#[derive(SceneComponent)]` + `#[scene(Props)]` + `fn scene(props) -> impl Scene`
-- 颜色全部走 `ThemedBg(token)` / `ThemedText(token)` / `ThemedBorder(token)`
+- 颜色全部走 `ThemedBg(token)` / `InheritableThemedText(token)` / `ThemedBorder(token)`
 - 图标走 `icon(path, size)` + `ThemedIcon(token)`
 - 尺寸走 `constants::size` / `space` 常量
 - 子层级通过 `Children [ ... ]` 或 `SceneList` 参数传入
@@ -825,6 +859,7 @@ impl Plugin for XuiPlugin {
 // xui/src/components/button.rs
 use bevy_scene::prelude::*;
 use bevy_ui::prelude::*;
+use bevy_ui_widgets::Button;  // headless Button（Activate 事件 + Pressed 状态 + 无障碍）
 use bevy_picking::hover::Hovered;
 use bevy_input_focus::tab_navigation::TabIndex;
 use crate::{theme::*, tokens::*, constants};
@@ -854,7 +889,7 @@ impl Default for XButtonProps {
     fn default() -> Self {
         Self {
             variant: ButtonVariant::Normal,
-            children: Box::new(()),
+            children: Box::new(bsn_list!()),
             corners: 8.0,
         }
     }
@@ -881,19 +916,76 @@ impl XButton {
             Hovered
             TabIndex(0)
             ThemedBg(bg)
-            ThemedText(text)
+            InheritableThemedText(text)
+            template_value(props.variant)
             {props.children}
         }
     }
 }
 ```
 
-### 5.4 示例：XIconButton（含图标）
+### 5.3.1 按钮 hover/press/disabled 样式系统
+
+`bevy_ui_widgets::Button` 通过观察者管理 `Pressed` / `InteractionDisabled` 状态。需实现样式更新系统，在状态变化时切换颜色令牌：
+
+```rust
+// xui/src/components/button.rs
+use bevy_ecs::query::Or;
+use bevy_ui::{InteractionDisabled, Pressed};
+
+/// hover/press/disabled 变化时更新按钮颜色令牌
+/// 对齐 bevy_feathers::update_button_styles 模式
+pub fn update_xbutton_styles(
+    q_buttons: Query<
+        (Entity, &ButtonVariant, Has<InteractionDisabled>, Has<Pressed>, &Hovered),
+        Or<(
+            Changed<Hovered>,
+            Changed<ButtonVariant>,
+            Changed<Pressed>,
+            Changed<InteractionDisabled>,
+        )>,
+    >,
+    mut commands: Commands,
+) {
+    for (entity, variant, disabled, pressed, hovered) in &q_buttons {
+        let (bg, text) = match (variant, disabled, pressed, hovered) {
+            // Primary
+            (ButtonVariant::Primary, true, _, _)       => (BG_ELEVATED, T3),
+            (ButtonVariant::Primary, false, true, _)   => (ACCENT_HOVER, T0),
+            (ButtonVariant::Primary, false, false, h)  => (if h.0 { ACCENT_HOVER } else { ACCENT }, T0),
+            // Normal
+            (ButtonVariant::Normal, true, _, _)        => (BG_ELEVATED, T3),
+            (ButtonVariant::Normal, false, true, _)    => (BORDER_STRONG, T1),
+            (ButtonVariant::Normal, false, false, h)   => (if h.0 { BORDER_LIGHT } else { BG_ELEVATED }, T1),
+            // Plain
+            (ButtonVariant::Plain, true, _, _)         => (BG_SURFACE, T3),
+            (ButtonVariant::Plain, false, true, _)     => (BORDER_LIGHT, T1),
+            (ButtonVariant::Plain, false, false, h)    => (if h.0 { BORDER_LIGHT } else { BG_SURFACE }, T1),
+            // Ghost
+            (ButtonVariant::Ghost, true, _, _)         => (BG_CANVAS, T3),
+            (ButtonVariant::Ghost, false, true, _)     => (BORDER_LIGHT, T2),
+            (ButtonVariant::Ghost, false, false, h)    => (if h.0 { BORDER_LIGHT } else { BG_CANVAS }, T2),
+        };
+        commands.entity(entity)
+            .insert(ThemedBg(bg))
+            .insert(InheritableThemedText(text));
+    }
+}
+```
+
+> **注意**：调用方在 XButton 的 children 中的 `Text` 实体需加 `ThemedText` 标记才能继承 `InheritableThemedText` 传播的颜色：
+> ```rust
+> @XButton(XButtonProps {
+>     children: bsn_list!(Text("确定"), ThemedText),  // ← ThemedText 标记
+>     ..default()
+> })
+> ```
 
 ```rust
 // xui/src/components/icon_button.rs
 use bevy_scene::prelude::*;
 use bevy_ui::prelude::*;
+use bevy_ui_widgets::Button;  // headless Button
 use bevy_picking::hover::Hovered;
 use bevy_input_focus::tab_navigation::TabIndex;
 use crate::{theme::*, tokens::*, icon, constants};
@@ -976,7 +1068,7 @@ pub struct XPillProps {
 impl Default for XPillProps {
     fn default() -> Self {
         Self {
-            label: Box::new(()),
+            label: Box::new(bsn_list!()),
             state: PillState::Ready,
         }
     }
@@ -999,8 +1091,8 @@ impl XPill {
                 align_items: AlignItems::Center,
             }
             ThemedBg(bg)
-            ThemedText(text)
-            props.state   // 组件标记，供脉冲动画系统查询
+            InheritableThemedText(text)
+            template_value(props.state)   // PillState 作为独立组件插入，供脉冲动画系统查询
             Children [
                 // 状态点
                 Node {
@@ -1037,7 +1129,7 @@ v6 原型使用 CSS Grid 三行三列：
 Bevy 无 CSS Grid，用嵌套 flexbox 等价映射：
 
 ```
-UiRoot (column, 100%×100%)
+XgentUiRoot (column, 100%×100%)
 ├── TopBar (row, 100%×52px, flex_shrink:0)         ← grid-area: topbar
 ├── MainRow (row, 100%×flex_grow:1)                 ← grid-area: rail+main+context
 │   ├── Rail (column, 52px×100%, flex_shrink:0)    ← grid-area: rail
@@ -1052,7 +1144,14 @@ UiRoot (column, 100%×100%)
 // xgent_ui/src/layout.rs
 use bevy_scene::prelude::*;
 use bevy_ui::prelude::*;
+use bevy_ecs::Component;
+use bevy_reflect::Reflect;
 use xui::{theme::*, tokens::*, constants};
+
+/// 根 UI 节点标记 — 用于 Query 定位根布局实体
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
+pub struct XgentUiRoot;
 
 /// 根布局 — 三行两列嵌套 flexbox
 pub fn root_layout() -> impl Scene {
@@ -1062,7 +1161,9 @@ pub fn root_layout() -> impl Scene {
             height: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
         }
-        UiRoot
+        // 根节点无需特殊标记组件；通过 With<Node>, Without<ChildOf> 查询识别根节点
+        // 如需 Query 定位根节点，可自定义标记：
+        XgentUiRoot
         Children [
             // ===== 顶栏 =====
             Node {
@@ -1168,6 +1269,17 @@ pub mod text {
     pub const XL: f32 = 20.0;   // 大标题
     pub const CODE: f32 = 13.0; // 代码
 }
+
+/// 全局 Z-Index 分层 — 浮层渲染顺序管理
+/// GlobalZIndex 让节点脱离布局树层级，按值全局排序
+pub mod z_index {
+    pub const BASE: i32 = 0;        // 普通布局（默认，无需显式设置）
+    pub const DRAWER: i32 = 100;    // 滑出抽屉 + 遮罩
+    pub const DROPDOWN: i32 = 200;  // 下拉菜单
+    pub const TOOLTIP: i32 = 300;   // 悬浮提示
+    pub const TOAST: i32 = 400;     // Toast 通知
+    pub const MODAL: i32 = 500;     // 命令面板 / 确认弹窗
+}
 ```
 
 ### 6.4 上下文面板折叠
@@ -1187,6 +1299,63 @@ fn toggle_context_panel(
     }
 }
 ```
+
+### 6.5 动态内容插入模式
+
+BSN 场景在 spawn 时一次性创建子层级。对于需要运行时动态追加内容的容器（消息流、文件树、终端输出等），使用标准 ECS 层级 API：
+
+```rust
+// 1. Spawn 根布局（一次性，启动时）
+fn spawn_root_layout(mut commands: Commands) {
+    commands.spawn_scene(root_layout());
+}
+
+// 2. 查询容器实体，挂载初始内容
+fn spawn_initial_content(
+    q_rail: Query<Entity, With<RailMarker>>,
+    q_conversation: Query<Entity, With<ConversationMarker>>,
+    mut commands: Commands,
+) {
+    // 活动栏按钮 — 用 with_children 挂载
+    let rail = q_rail.single();
+    commands.entity(rail).with_children(|parent| {
+        parent.spawn(bsn! {
+            Node { width: px(52.0), height: px(52.0) }
+            XIconButton(XIconButtonProps { icon: icons::CHAT, ..default() })
+        });
+    });
+
+    // 欢迎仪表盘 — 初始内容
+    let conv = q_conversation.single();
+    commands.entity(conv).with_children(|parent| {
+        parent.spawn(bsn! { /* welcome dashboard scene */ });
+    });
+}
+
+// 3. 运行时追加消息（对话流）
+fn append_message(
+    mut commands: Commands,
+    q_conversation: Query<Entity, With<ConversationMarker>>,
+    mut events: EventReader<NewMessageEvent>,
+) {
+    if events.is_empty() { return; }
+    let conv = q_conversation.single();
+    commands.entity(conv).with_children(|parent| {
+        for event in events.read() {
+            parent.spawn(bsn! {
+                Node { /* message container */ }
+                // ... 消息场景
+            });
+        }
+    });
+}
+```
+
+**关键模式**：
+- BSN 场景用 `marker` 组件（`RailMarker`、`ConversationMarker` 等）标识容器实体
+- 初始内容用 `commands.entity(container).with_children(|parent| { ... })` 挂载
+- 动态追加用同样的 `with_children` 或 `commands.entity(container).add_child(child_entity)`
+- BSN `#name` 语法可在 spawn 时捕获实体引用（用于需要直接持有 Entity 的场景）
 
 ---
 
@@ -1408,8 +1577,12 @@ ToolCard (border + radius, hover shadow)
 
 ### 8.4 流式渲染
 
-- 流式期间（`accumulate_delta`）：只渲染纯段落 `Text`，末尾追加闪烁光标 `▋`
-- `DoneMessage` 后：整体解析 markdown → 重建 `MsgBody` 子层级（despawn 旧 → spawn 新，单帧完成避免闪烁）
+- 流式期间（`accumulate_delta`）：只渲染纯段落 `Text`，末尾追加闪烁光标 `▋`，append-only 不重建
+- `DoneMessage` 后：**增量渲染**而非整体重建——遍历 markdown chunks，逐 chunk 检查是否已有对应 UI 节点：
+  - 新增 chunk → spawn 新节点追加到 MsgBody
+  - 内容变化的 chunk → 替换该节点
+  - 不变的 chunk → 跳过
+- 避免整体 despawn + respawn 导致的帧卡顿和闪烁
 
 ---
 
@@ -1440,7 +1613,7 @@ pub struct ThemedIcon(pub ThemeToken);
 /// 新图标插入时立即解析令牌 → 写入 SvgColor
 pub fn on_insert_themed_icon(
     insert: On<Insert, ThemedIcon>,
-    mut q: Query<(&mut SvgColor, &ThemedIcon), Changed<ThemedIcon>>,
+    mut q: Query<(&mut SvgColor, &ThemedIcon)>,
     theme: Res<XuiTheme>,
 ) {
     if let Ok((mut svg_color, themed)) = q.get_mut(insert.entity) {
@@ -1758,7 +1931,7 @@ bevy_ui 无原生 hover 事件组件。方案：
 | `ThemedIcon` → `SvgColor` 联动 | 图标颜色不随主题切换 | `update_icon_tints` 系统监听 `theme.is_changed()`，全量刷新 |
 | 亮色主题视觉校准 | 对比度/可读性差 | 逐面板亮色验证，参考 v6 原型 `:root` 值 |
 | 动画帧插值性能 | 大量动画系统开销 | 所有动画系统加 `Changed<>` guard，只在状态变化时计算 |
-| 消息 markdown 重建闪烁 | Done 后子层级重建闪屏 | 先 spawn 新子层级再 despawn 旧，单帧完成 |
+| 消息 markdown 重建闪烁 | Done 后子层级重建闪屏 | 增量渲染：逐 chunk 检查已有节点，只新增/替换变化的 chunk |
 | bevy_resvg 启动光栅化开销 | 首次加载 31 SVG 延迟 | 实测 <50ms，可接受；如需优化可 lazy load |
 
 ---
@@ -1778,12 +1951,13 @@ bevy_ui 无原生 hover 事件组件。方案：
 - `editor/`（编辑器业务逻辑，仅 render 层适配新主题）
 - `terminal/`（终端业务逻辑，仅 view 层适配新主题）
 
-### 14.2 渐进迁移
+### 14.2 一次性迁移策略
 
 - Phase 0-1 完成后，xui 有令牌 + 主题系统 + 图标 + 基础组件
-- Phase 2 开始 xgent_ui 逐面板迁移
+- **Phase 2.1 立即删除旧 `xgent_ui::theme::Theme`**，不允许新旧 Theme 共存（双主题系统会导致视觉不一致）
+- 每个面板迁移时一次性切换到 `XuiTheme` 令牌
 - 每个面板迁移后 `cargo check` + `cargo run` 验证
-- 新旧代码可共存（旧用 `Theme` Resource，新用 `XuiTheme` Resource），最后统一清理（Phase 9.7）
+- 可按面板分 PR，但每个 PR 内必须完全切换（不允许同一面板内新旧令牌混用）
 
 ### 14.3 i18n key 补充
 
