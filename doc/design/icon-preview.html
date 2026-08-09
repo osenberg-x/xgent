@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XGent 图标预览 — v6</title>
+<style>
+:root{
+  --bg:#FAFAF9;--surface:#FFFFFF;--elevated:#F5F5F4;
+  --border:#E7E5E4;--border-strong:#D6D3D1;
+  --t0:#1C1917;--t1:#44403C;--t2:#78716C;--t3:#A8A29E;
+  --accent:#7C3AED;--accent-light:#F3F0FF;
+  --r:8px;--r-lg:12px;
+}
+[data-theme="dark"]{
+  --bg:#1C1917;--surface:#292524;--elevated:#44403C;
+  --border:#44403C;--border-strong:#57534E;
+  --t0:#FAFAF9;--t1:#D6D3D1;--t2:#A8A29E;--t3:#78716C;
+  --accent:#A78BFA;--accent-light:#2E1065;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--t0);min-height:100vh;padding:32px}
+h1{font-size:22px;font-weight:700;margin-bottom:4px}
+.sub{color:var(--t2);font-size:13px;margin-bottom:24px}
+.toolbar{display:flex;gap:8px;margin-bottom:24px;align-items:center}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--t1);font-size:13px;cursor:pointer;transition:all .15s}
+.btn:hover{border-color:var(--border-strong);background:var(--elevated)}
+.btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.count{color:var(--t3);font-size:12px;margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px 12px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;transition:all .2s}
+.card:hover{border-color:var(--accent);box-shadow:0 4px 12px rgba(124,58,237,0.08);transform:translateY(-2px)}
+.card svg{width:28px;height:28px;color:var(--t1)}
+.card:hover svg{color:var(--accent)}
+.card .name{font-size:11px;color:var(--t2);font-family:monospace;text-align:center;word-break:break-all}
+.card .fill-badge{font-size:9px;padding:1px 5px;border-radius:3px;background:var(--accent-light);color:var(--accent);font-weight:600;text-transform:uppercase}
+</style>
+</head>
+<body>
+<h1>XGent UI 图标集</h1>
+<p class="sub">从 ui-prototype-v6.html 提取 · 31 个 SVG 矢量图标 · 24×24 viewBox · currentColor</p>
+<div class="toolbar">
+  <button class="btn active" onclick="setTheme('light',this)">亮色</button>
+  <button class="btn" onclick="setTheme('dark',this)">暗色</button>
+  <span class="count" id="count"></span>
+</div>
+<div class="grid" id="grid"></div>
+<script>
+const icons = [
+  {f:"chat",n:"对话",fill:false},
+  {f:"folder",n:"文件夹",fill:false},
+  {f:"file",n:"文件",fill:false},
+  {f:"search",n:"搜索",fill:false},
+  {f:"git",n:"Git",fill:false},
+  {f:"clock",n:"历史",fill:false},
+  {f:"terminal",n:"终端",fill:false},
+  {f:"puzzle",n:"插件",fill:false},
+  {f:"command",n:"命令面板",fill:false},
+  {f:"plus",n:"加号",fill:false},
+  {f:"x",n:"关闭",fill:false},
+  {f:"chevron-down",n:"下箭头",fill:false},
+  {f:"sun",n:"太阳",fill:false},
+  {f:"moon",n:"月亮",fill:false},
+  {f:"star",n:"星星",fill:true},
+  {f:"panel-right",n:"面板",fill:false},
+  {f:"info",n:"信息",fill:false},
+  {f:"code",n:"代码",fill:false},
+  {f:"flask",n:"测试",fill:false},
+  {f:"wrench",n:"修复",fill:false},
+  {f:"check-circle",n:"审查",fill:false},
+  {f:"check",n:"对勾",fill:false},
+  {f:"copy",n:"复制",fill:false},
+  {f:"refresh",n:"重新生成",fill:false},
+  {f:"retry",n:"重试",fill:false},
+  {f:"diff",n:"差异",fill:false},
+  {f:"send",n:"发送",fill:false},
+  {f:"mic",n:"麦克风",fill:false},
+  {f:"shield",n:"盾牌",fill:false},
+  {f:"shield-alert",n:"盾牌警告",fill:false},
+  {f:"dollar",n:"成本",fill:false},
+];
+const grid = document.getElementById("grid");
+fetch("icons/").then(r=>r.text()).catch(()=>"");
+icons.forEach(ic=>{
+  fetch(`icons/${ic.f}.svg`).then(r=>r.text()).then(svg=>{
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = svg + `<span class="name">${ic.f}.svg</span>` + (ic.fill?'<span class="fill-badge">fill</span>':'');
+    grid.appendChild(div);
+  });
+});
+document.getElementById("count").textContent = `共 ${icons.length} 个图标`;
+function setTheme(t,btn){
+  document.documentElement.dataset.theme = t;
+  document.querySelectorAll(".btn").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+}
+</script>
+</body>
+</html>

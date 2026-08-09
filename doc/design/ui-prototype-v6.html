@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XGent UI v6.1 — Conversation Canvas</title>
+<style>
+/* XGent UI v6.1 — 对话画布（优化版）
+   v6 基础上的优化：
+   1. SVG 图标统一 — 移除所有 emoji，全面使用矢量图标
+   2. 消息交互 — agent 消息悬停显示操作栏（复制/重新生成/重试）
+   3. 代码块复制 — 对话中的代码块和工具预览带复制按钮
+   4. 顶栏增强 — 新建会话按钮 + 项目切换下拉
+   5. 欢迎仪表盘 — 可切换的空状态页面
+   6. 输入区打磨 — Shift+Enter 提示 + token 计数
+   7. 上下文面板 — 折叠/展开切换 + 终端输入行
+   8. 滚动到底部 — 对话区滚动时浮现回到底部按钮
+   9. 状态栏可点击 — 各项可点击触发对应操作
+   10. 命令面板执行 — 命令项实际执行操作
+   11. Git 抽屉 — 暂存/取消暂存按钮 + 提交成功状态
+   12. 搜索抽屉 — 过滤选项（大小写/正则/全词）
+   13. 无障碍 — ARIA 标签 + focus-visible */
+
+:root{
+  --bg-canvas:#FAFAF9;--bg-surface:#FFFFFF;--bg-elevated:#F5F5F4;--bg-rail:#F5F5F4;--bg-input:#FFFFFF;--bg-code:#1E1E2E;
+  --border:#E7E5E4;--border-light:#F5F5F4;--border-strong:#D6D3D1;
+  --t0:#1C1917;--t1:#44403C;--t2:#78716C;--t3:#A8A29E;--t4:#D6D3D1;
+  --accent:#7C3AED;--accent-hover:#6D28D9;--accent-light:#F3F0FF;--accent-glow:rgba(124,58,237,0.10);--accent-text:#FFFFFF;
+  --success:#059669;--success-bg:#ECFDF5;--warning:#D97706;--warning-bg:#FFFBEB;--error:#DC2626;--error-bg:#FEF2F2;--info:#2563EB;--info-bg:#EFF6FF;
+  --warm:#F59E0B;--warm-light:#FEF3C7;
+  --code-text:#CDD6F4;--kw:#CBA6F7;--fn:#89B4FA;--str:#A6E3A1;--num:#FAB387;--ty:#F9E2AF;--com:#6C7086;--pn:#BAC2DE;
+  --s0:2px;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s8:32px;--s10:40px;--s12:48px;
+  --r1:4px;--r2:6px;--r3:8px;--r4:12px;--r5:16px;--r6:20px;
+  --ease:cubic-bezier(0.4,0,0.2,1);--ease-out:cubic-bezier(0.16,1,0.3,1);--tf:120ms var(--ease);--tn:200ms var(--ease);--ts:350ms var(--ease-out);
+  --shadow-xs:0 1px 2px rgba(0,0,0,0.03);--shadow-sm:0 1px 3px rgba(0,0,0,0.04),0 1px 2px rgba(0,0,0,0.02);--shadow-md:0 4px 6px -1px rgba(0,0,0,0.06),0 2px 4px -2px rgba(0,0,0,0.03);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.08),0 4px 6px -4px rgba(0,0,0,0.04);--shadow-xl:0 20px 25px -5px rgba(0,0,0,0.10),0 8px 10px -6px rgba(0,0,0,0.05);
+  --rail-w:52px;--topbar-h:52px;--statusbar-h:32px;--drawer-w:320px;--context-w:360px;
+}
+[data-theme="dark"]{
+  --bg-canvas:#1C1917;--bg-surface:#292524;--bg-elevated:#44403C;--bg-rail:#292524;--bg-input:#292524;--bg-code:#11111B;
+  --border:#44403C;--border-light:#292524;--border-strong:#57534E;
+  --t0:#FAFAF9;--t1:#D6D3D1;--t2:#A8A29E;--t3:#78716C;--t4:#57534E;
+  --accent:#A78BFA;--accent-hover:#C4B5FD;--accent-light:#2E1065;--accent-glow:rgba(167,139,250,0.15);--accent-text:#1C1917;
+  --success:#34D399;--success-bg:#064E3B;--warning:#FBBF24;--warning-bg:#78350F;--error:#F87171;--error-bg:#7F1D1D;--info:#60A5FA;--info-bg:#1E3A8A;
+  --warm:#FBBF24;--warm-light:#78350F;--code-text:#CDD6F4;
+  --shadow-xs:0 1px 2px rgba(0,0,0,0.2);--shadow-sm:0 1px 3px rgba(0,0,0,0.3),0 1px 2px rgba(0,0,0,0.2);--shadow-md:0 4px 6px -1px rgba(0,0,0,0.3),0 2px 4px -2px rgba(0,0,0,0.2);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.35),0 4px 6px -4px rgba(0,0,0,0.2);--shadow-xl:0 20px 25px -5px rgba(0,0,0,0.4),0 8px 10px -6px rgba(0,0,0,0.25);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.6;color:var(--t0);background:var(--bg-canvas);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea{font-family:inherit;font-size:inherit;color:inherit}
+::selection{background:var(--accent-glow)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r1)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--t4);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--t3)}
+
+.app{display:grid;grid-template-rows:var(--topbar-h) 1fr var(--statusbar-h);grid-template-columns:var(--rail-w) 1fr var(--context-w);grid-template-areas:"topbar topbar topbar" "rail main context" "status status status";height:100vh;width:100vw;transition:grid-template-columns var(--ts)}
+.app.context-collapsed{grid-template-columns:var(--rail-w) 1fr 0px}
+.app.context-collapsed .context-panel{border-left:none;overflow:hidden}
+
+/* topbar */
+.topbar{grid-area:topbar;display:flex;align-items:center;gap:var(--s3);padding:0 var(--s4);background:var(--bg-surface);border-bottom:1px solid var(--border);z-index:100}
+.brand{display:flex;align-items:center;gap:var(--s2);font-weight:700;font-size:15px;letter-spacing:-0.02em;color:var(--t0);margin-right:var(--s1)}
+.brand-mark{width:28px;height:28px;border-radius:var(--r2);background:linear-gradient(135deg,var(--accent),#9333EA);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:800;box-shadow:0 2px 8px var(--accent-glow)}
+.project-crumb{display:flex;align-items:center;gap:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r3);color:var(--t2);font-size:13px;cursor:pointer;transition:all var(--tf)}
+.project-crumb:hover{background:var(--bg-elevated);color:var(--t1)}
+.project-crumb .chev{opacity:0.5;font-size:10px}
+.btn-new-session{display:flex;align-items:center;gap:var(--s1);padding:5px var(--s3);border-radius:var(--r3);background:var(--accent-light);color:var(--accent);font-size:12.5px;font-weight:600;transition:all var(--tf);border:1px solid transparent}
+.btn-new-session:hover{background:var(--accent);color:var(--accent-text);box-shadow:var(--shadow-sm)}
+.btn-new-session svg{width:14px;height:14px}
+.topbar-spacer{flex:1}
+
+.agent-pill{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s3) var(--s1) var(--s2);border-radius:var(--r5);background:var(--bg-elevated);border:1px solid var(--border);font-size:12.5px;font-weight:500;color:var(--t1);transition:all var(--tn);cursor:default}
+.agent-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--t3);flex-shrink:0}
+.agent-pill[data-state="ready"] .dot{background:var(--success)}
+.agent-pill[data-state="thinking"]{background:var(--accent-light);border-color:var(--accent);color:var(--accent)}
+.agent-pill[data-state="thinking"] .dot{background:var(--accent);animation:pulse 1.2s var(--ease) infinite}
+.agent-pill[data-state="generating"]{background:var(--accent-light);border-color:var(--accent);color:var(--accent)}
+.agent-pill[data-state="generating"] .dot{background:var(--accent);animation:pulse-fast 0.8s var(--ease) infinite}
+.agent-pill[data-state="tool"]{background:var(--warning-bg);border-color:var(--warning);color:var(--warning)}
+.agent-pill[data-state="tool"] .dot{background:var(--warning)}
+.agent-pill[data-state="confirm"]{background:var(--warning-bg);border-color:var(--warning);color:var(--warning)}
+.agent-pill[data-state="error"]{background:var(--error-bg);border-color:var(--error);color:var(--error)}
+.agent-pill[data-state="error"] .dot{background:var(--error)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.85)}}
+@keyframes pulse-fast{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.7)}}
+
+.model-sel{display:flex;align-items:center;gap:var(--s1);padding:var(--s1) var(--s2) var(--s1) var(--s3);border-radius:var(--r3);background:var(--bg-elevated);border:1px solid var(--border);font-size:12.5px;font-weight:500;color:var(--t1);cursor:pointer;transition:all var(--tf)}
+.model-sel:hover{border-color:var(--border-strong);background:var(--bg-surface)}
+.model-sel .model-icon{width:16px;height:16px;border-radius:var(--r1);background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700}
+.icon-btn{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:var(--r3);color:var(--t2);transition:all var(--tf)}
+.icon-btn:hover{background:var(--bg-elevated);color:var(--t0)}
+.icon-btn svg{width:18px;height:18px}
+
+/* rail */
+.rail{grid-area:rail;display:flex;flex-direction:column;align-items:center;padding:var(--s3) 0;gap:var(--s1);background:var(--bg-rail);border-right:1px solid var(--border)}
+.rail-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r3);color:var(--t2);transition:all var(--tf);position:relative}
+.rail-btn:hover{background:var(--bg-elevated);color:var(--t0)}
+.rail-btn.active{background:var(--accent-light);color:var(--accent)}
+.rail-btn.active::before{content:'';position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:20px;border-radius:0 2px 2px 0;background:var(--accent)}
+.rail-btn svg{width:20px;height:20px}
+.rail-btn .badge{position:absolute;top:4px;right:4px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.rail-tooltip{position:absolute;left:48px;top:50%;transform:translateY(-50%);padding:var(--s1) var(--s2);background:var(--t0);color:var(--bg-canvas);font-size:11px;font-weight:500;border-radius:var(--r2);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity var(--tf);z-index:200}
+.rail-btn:hover .rail-tooltip{opacity:1}
+.rail-tooltip kbd{display:inline-block;margin-left:var(--s1);padding:0 4px;border-radius:3px;background:rgba(255,255,255,0.15);font-size:10px;font-family:monospace}
+.rail-divider{width:24px;height:1px;background:var(--border);margin:var(--s2) 0}
+.rail-spacer{flex:1}
+.companion-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,var(--warm),#FB923C);color:#fff;transition:all var(--tn);position:relative;box-shadow:0 2px 8px rgba(245,158,11,0.3)}
+.companion-btn:hover{transform:scale(1.08)}
+.companion-btn.active{box-shadow:0 0 0 3px var(--warm-light),0 2px 12px rgba(245,158,11,0.4)}
+.companion-btn svg{width:22px;height:22px}
+.companion-btn::after{content:'';position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--warm);opacity:0;animation:none}
+.companion-btn.active::after{opacity:0.4;animation:companion-ring 2s var(--ease) infinite}
+@keyframes companion-ring{0%{transform:scale(1);opacity:0.4}100%{transform:scale(1.3);opacity:0}}
+.context-expand{display:none;width:40px;height:40px;align-items:center;justify-content:center;border-radius:var(--r3);color:var(--t2);cursor:pointer;transition:all var(--tf);margin-top:var(--s1)}
+.context-expand:hover{background:var(--bg-elevated);color:var(--t0)}
+.context-expand svg{width:20px;height:20px}
+.app.context-collapsed .context-expand{display:flex}
+
+/* main */
+.main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;background:var(--bg-canvas);position:relative}
+.context-scope{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s5);border-bottom:1px solid var(--border-light);background:var(--bg-surface);flex-shrink:0;overflow-x:auto;scrollbar-width:none}
+.context-scope::-webkit-scrollbar{display:none}
+.context-scope-label{font-size:11px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:0.05em;margin-right:var(--s1);white-space:nowrap}
+.ctx-chip{display:inline-flex;align-items:center;gap:var(--s1);padding:3px var(--s2);border-radius:var(--r2);background:var(--bg-elevated);border:1px solid var(--border);font-size:12px;color:var(--t1);transition:all var(--tf);white-space:nowrap}
+.ctx-chip:hover{border-color:var(--border-strong)}
+.ctx-chip .ctx-x{opacity:0.4;cursor:pointer;width:14px;height:14px;display:flex;align-items:center;justify-content:center;border-radius:3px}
+.ctx-chip .ctx-x:hover{opacity:1;background:var(--bg-surface)}
+.ctx-chip .ctx-icon{display:flex;align-items:center;color:var(--t3)}
+.ctx-chip .ctx-icon svg{width:13px;height:13px}
+.ctx-chip .ctx-icon.rs{color:var(--warning)}
+.ctx-chip .ctx-icon.folder{color:var(--accent)}
+.ctx-add{display:inline-flex;align-items:center;gap:var(--s1);padding:3px var(--s2);border-radius:var(--r2);border:1px dashed var(--border-strong);font-size:12px;color:var(--t2);cursor:pointer;transition:all var(--tf);white-space:nowrap}
+.ctx-add:hover{border-color:var(--accent);color:var(--accent)}
+.ctx-add svg{width:12px;height:12px}
+
+.conversation{flex:1;overflow-y:auto;padding:var(--s6) var(--s8);scroll-behavior:smooth}
+.scroll-bottom-btn{position:absolute;bottom:140px;left:50%;transform:translateX(-50%) translateY(20px);width:36px;height:36px;border-radius:50%;background:var(--bg-surface);border:1px solid var(--border);box-shadow:var(--shadow-md);display:flex;align-items:center;justify-content:center;color:var(--t2);cursor:pointer;opacity:0;pointer-events:none;transition:all var(--tn);z-index:50}
+.scroll-bottom-btn.visible{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+.scroll-bottom-btn:hover{color:var(--accent);border-color:var(--accent)}
+.scroll-bottom-btn svg{width:18px;height:18px}
+
+/* welcome */
+.welcome{max-width:680px;margin:0 auto;padding:var(--s8) 0;text-align:center}
+.welcome.hidden{display:none}
+.welcome-mark{width:64px;height:64px;margin:0 auto var(--s5);border-radius:var(--r5);background:linear-gradient(135deg,var(--accent),#9333EA);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:800;box-shadow:0 8px 24px var(--accent-glow)}
+.welcome h1{font-size:24px;font-weight:700;letter-spacing:-0.02em;color:var(--t0);margin-bottom:var(--s2)}
+.welcome-sub{font-size:14px;color:var(--t2);margin-bottom:var(--s6)}
+.welcome-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3);margin-bottom:var(--s6)}
+.welcome-card{padding:var(--s4);border-radius:var(--r4);background:var(--bg-surface);border:1px solid var(--border);text-align:left;cursor:pointer;transition:all var(--tn)}
+.welcome-card:hover{border-color:var(--accent);box-shadow:var(--shadow-md);transform:translateY(-2px)}
+.welcome-card .wc-icon{width:32px;height:32px;border-radius:var(--r3);display:flex;align-items:center;justify-content:center;margin-bottom:var(--s2)}
+.welcome-card .wc-icon svg{width:18px;height:18px}
+.welcome-card h3{font-size:13px;font-weight:600;color:var(--t0);margin-bottom:2px}
+.welcome-card p{font-size:11.5px;color:var(--t3);margin:0}
+.welcome-sessions{text-align:left;margin-top:var(--s6)}
+.welcome-sessions h4{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--t3);margin-bottom:var(--s2)}
+.welcome-session{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s3);border-radius:var(--r3);cursor:pointer;transition:background var(--tf)}
+.welcome-session:hover{background:var(--bg-elevated)}
+.welcome-session .ws-title{flex:1;font-size:13px;color:var(--t1)}
+.welcome-session .ws-meta{font-size:11px;color:var(--t3)}
+
+/* messages */
+.msg-group{max-width:820px;margin:0 auto var(--s6)}
+.msg{margin-bottom:var(--s5);position:relative}
+.msg-head{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s2)}
+.msg-avatar{width:28px;height:28px;border-radius:var(--r3);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.msg-avatar.user{background:var(--bg-elevated);color:var(--t1)}
+.msg-avatar.agent{background:linear-gradient(135deg,var(--accent),#9333EA);color:#fff;box-shadow:0 2px 8px var(--accent-glow)}
+.msg-role{font-size:13px;font-weight:600;color:var(--t0)}
+.msg-time{font-size:11px;color:var(--t3)}
+.msg-body{padding-left:36px;font-size:14px;line-height:1.7;color:var(--t1)}
+.msg-body p{margin-bottom:var(--s2)}.msg-body p:last-child{margin-bottom:0}
+.msg-body strong{color:var(--t0);font-weight:600}
+.msg-body code{font-family:'SF Mono','JetBrains Mono',monospace;font-size:12.5px;padding:1px 5px;border-radius:var(--r1);background:var(--bg-elevated);color:var(--accent)}
+.msg-body pre{margin:var(--s3) 0;border-radius:var(--r3);background:var(--bg-code);overflow:hidden}
+.msg-body pre code{background:none;color:var(--code-text);padding:0;font-size:12.5px;line-height:1.5}
+.msg-body ul,.msg-body ol{margin:var(--s2) 0 var(--s2) var(--s5)}
+.msg-body li{margin-bottom:var(--s1)}
+
+/* message hover actions */
+.msg-actions{position:absolute;top:0;right:0;display:flex;gap:2px;padding:3px;border-radius:var(--r3);background:var(--bg-surface);border:1px solid var(--border);box-shadow:var(--shadow-sm);opacity:0;pointer-events:none;transition:opacity var(--tf);z-index:10}
+.msg:hover .msg-actions{opacity:1;pointer-events:auto}
+.msg-action{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:var(--r2);color:var(--t2);transition:all var(--tf)}
+.msg-action:hover{background:var(--bg-elevated);color:var(--t0)}
+.msg-action svg{width:14px;height:14px}
+
+.syn-kw{color:var(--kw)}.syn-fn{color:var(--fn)}.syn-str{color:var(--str)}.syn-num{color:var(--num)}.syn-ty{color:var(--ty)}.syn-com{color:var(--com);font-style:italic}
+
+/* tool cards */
+.tool-card{margin:var(--s3) 0;border-radius:var(--r4);background:var(--bg-surface);border:1px solid var(--border);overflow:hidden;transition:all var(--tn)}
+.tool-card:hover{box-shadow:var(--shadow-sm)}
+.tool-card-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);background:var(--bg-elevated);border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+.tool-card-head:hover{background:var(--bg-surface)}
+.tool-icon{width:24px;height:24px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tool-icon svg{width:14px;height:14px}
+.tool-icon.read{background:var(--info-bg);color:var(--info)}.tool-icon.write{background:var(--warning-bg);color:var(--warning)}.tool-icon.search{background:var(--accent-light);color:var(--accent)}.tool-icon.exec{background:var(--error-bg);color:var(--error)}
+.tool-name{font-size:12.5px;font-weight:600;color:var(--t0)}
+.tool-args{font-size:12px;color:var(--t2);font-family:'SF Mono',monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-status{display:flex;align-items:center;gap:var(--s1);font-size:11.5px;font-weight:500;color:var(--t3)}
+.tool-status .ts-icon{width:14px;height:14px}
+.tool-status.ok{color:var(--success)}.tool-status.pending{color:var(--warning)}.tool-status.fail{color:var(--error)}
+.tool-chevron{color:var(--t3);transition:transform var(--tf);margin-left:var(--s1);font-size:10px}
+.tool-card.expanded .tool-chevron{transform:rotate(90deg)}
+.tool-card-body{max-height:0;overflow:hidden;transition:max-height var(--ts)}
+.tool-card.expanded .tool-card-body{max-height:600px}
+.tool-card-content{padding:var(--s3);font-size:12.5px;line-height:1.6}
+.tool-preview{background:var(--bg-code);border-radius:var(--r3);padding:var(--s3);font-family:'SF Mono',monospace;font-size:12px;line-height:1.5;color:var(--code-text);overflow-x:auto;max-height:300px;overflow-y:auto;position:relative}
+.tp-copy{position:absolute;top:var(--s1);right:var(--s1);padding:3px var(--s1);border-radius:var(--r1);background:rgba(255,255,255,0.08);color:var(--t3);cursor:pointer;transition:all var(--tf);display:flex;align-items:center;opacity:0}
+.tool-preview:hover .tp-copy{opacity:1}
+.tp-copy:hover{color:var(--code-text);background:rgba(255,255,255,0.15)}
+.tp-copy svg{width:12px;height:12px}
+.tool-preview .line-num{display:inline-block;width:28px;color:var(--com);user-select:none;text-align:right;margin-right:var(--s2)}
+.tool-result{margin-top:var(--s2);padding:var(--s2) var(--s3);border-radius:var(--r2);font-size:12px;display:flex;align-items:center;gap:var(--s2)}
+.tool-result.ok{background:var(--success-bg);color:var(--success)}.tool-result.fail{background:var(--error-bg);color:var(--error)}
+
+.streaming-cursor{display:inline-block;width:8px;height:16px;background:var(--accent);border-radius:1px;vertical-align:text-bottom;animation:blink 0.8s steps(2) infinite;margin-left:2px}
+@keyframes blink{50%{opacity:0}}
+
+/* input */
+.input-zone{flex-shrink:0;padding:var(--s3) var(--s8) var(--s4);background:var(--bg-canvas)}
+.input-container{max-width:820px;margin:0 auto}
+.quick-actions{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s2);flex-wrap:wrap}
+.qa-chip{display:inline-flex;align-items:center;gap:var(--s1);padding:5px var(--s3);border-radius:var(--r5);background:var(--bg-surface);border:1px solid var(--border);font-size:12px;font-weight:500;color:var(--t2);cursor:pointer;transition:all var(--tf)}
+.qa-chip:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+.qa-chip svg{width:13px;height:13px}
+.input-box{background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r5);padding:var(--s3);box-shadow:var(--shadow-sm);transition:all var(--tn)}
+.input-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow),var(--shadow-sm)}
+.input-textarea{width:100%;border:none;outline:none;resize:none;background:transparent;font-size:14px;line-height:1.6;color:var(--t0);min-height:44px;max-height:200px}
+.input-textarea::placeholder{color:var(--t3)}
+.input-toolbar{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s2)}
+.input-mode{display:flex;align-items:center;gap:var(--s1);padding:4px var(--s2);border-radius:var(--r3);background:var(--bg-elevated);font-size:12px;font-weight:500;color:var(--t1);cursor:pointer;transition:all var(--tf)}
+.input-mode:hover{background:var(--bg-surface)}
+.input-mode svg{width:14px;height:14px;color:var(--accent)}
+.input-safety{display:flex;align-items:center;gap:var(--s1);font-size:11.5px;color:var(--warning)}
+.input-safety svg{width:13px;height:13px}
+.input-hint{font-size:11px;color:var(--t3);display:flex;align-items:center;gap:var(--s1)}
+.input-hint kbd{padding:1px 5px;border-radius:3px;background:var(--bg-elevated);border:1px solid var(--border);font-size:10px;font-family:monospace}
+.input-spacer{flex:1}
+.input-counter{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums}
+.input-send{display:flex;align-items:center;gap:var(--s1);padding:var(--s1) var(--s3) var(--s1) var(--s2);border-radius:var(--r4);background:var(--accent);color:var(--accent-text);font-size:13px;font-weight:600;transition:all var(--tf)}
+.input-send:hover{background:var(--accent-hover);transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.input-send svg{width:16px;height:16px}
+.input-send.abort{background:var(--error);color:#fff}
+.input-send.abort:hover{background:#B91C1C}
+
+/* context panel */
+.context-panel{grid-area:context;display:flex;flex-direction:column;background:var(--bg-surface);border-left:1px solid var(--border);overflow:hidden;transition:all var(--ts)}
+.context-tabs{display:flex;align-items:center;gap:0;padding:0 var(--s2);border-bottom:1px solid var(--border);flex-shrink:0;height:38px}
+.ctx-tab{padding:0 var(--s3);height:100%;display:flex;align-items:center;gap:var(--s1);font-size:12px;font-weight:500;color:var(--t3);border-bottom:2px solid transparent;transition:all var(--tf)}
+.ctx-tab:hover{color:var(--t1)}
+.ctx-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.ctx-tab svg{width:14px;height:14px}
+.ctx-tab-spacer{flex:1}
+.ctx-collapse{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:var(--r2);color:var(--t3);transition:all var(--tf)}
+.ctx-collapse:hover{background:var(--bg-elevated);color:var(--t0)}
+.ctx-collapse svg{width:14px;height:14px}
+.context-content{flex:1;overflow-y:auto;padding:var(--s3)}
+.file-preview-head{display:flex;align-items:center;gap:var(--s2);padding-bottom:var(--s2);margin-bottom:var(--s2);border-bottom:1px solid var(--border-light)}
+.file-preview-icon{width:28px;height:28px;border-radius:var(--r2);background:var(--accent-light);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}
+.file-preview-name{font-size:13px;font-weight:600;color:var(--t0)}
+.file-preview-path{font-size:11px;color:var(--t3)}
+.file-preview-actions{margin-left:auto;display:flex;gap:var(--s1)}
+.fpa-btn{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:var(--r1);color:var(--t3);transition:all var(--tf)}
+.fpa-btn:hover{background:var(--bg-elevated);color:var(--t0)}
+.fpa-btn svg{width:13px;height:13px}
+.file-code{font-family:'SF Mono',monospace;font-size:12px;line-height:1.6;color:var(--t1)}
+.file-code .ln{display:inline-block;width:24px;color:var(--t4);user-select:none;text-align:right;margin-right:var(--s2)}
+.file-code .ln.highlight{color:var(--accent);font-weight:600}
+.diff-stats{display:flex;gap:var(--s2);margin-bottom:var(--s2)}
+.diff-stat{display:flex;align-items:center;gap:var(--s1);font-size:11.5px;font-weight:600;padding:2px var(--s2);border-radius:var(--r2)}
+.diff-stat.add{background:var(--success-bg);color:var(--success)}.diff-stat.del{background:var(--error-bg);color:var(--error)}
+.term-view{background:#0C0C0F;border-radius:var(--r3);padding:var(--s3);font-family:'SF Mono',monospace;font-size:12px;line-height:1.6;color:#A1A1AA;height:100%;overflow-y:auto;display:flex;flex-direction:column}
+.term-view .prompt{color:var(--success)}.term-view .cmd{color:#E4E4E7}
+.term-input-line{margin-top:auto;display:flex;align-items:center;gap:var(--s1);padding-top:var(--s2)}
+.term-input-line .prompt{color:var(--success);white-space:nowrap}
+.term-input{flex:1;background:none;border:none;outline:none;color:#E4E4E7;font-family:'SF Mono',monospace;font-size:12px}
+
+/* drawer */
+.drawer-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);opacity:0;pointer-events:none;transition:opacity var(--tn);z-index:200}
+.drawer-overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;left:0;bottom:0;width:var(--drawer-w);background:var(--bg-surface);border-right:1px solid var(--border);box-shadow:var(--shadow-xl);transform:translateX(-100%);transition:transform var(--ts);z-index:201;display:flex;flex-direction:column}
+.drawer.open{transform:translateX(0)}
+.drawer-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);border-bottom:1px solid var(--border);height:var(--topbar-h);flex-shrink:0}
+.drawer-head h3{flex:1;font-size:14px;font-weight:600;color:var(--t0)}
+.drawer-close{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:var(--r2);color:var(--t3);transition:all var(--tf)}
+.drawer-close:hover{background:var(--bg-elevated);color:var(--t0)}
+.drawer-close svg{width:16px;height:16px}
+.drawer-body{flex:1;overflow-y:auto;padding:var(--s2)}
+
+/* file tree */
+.ft-item{display:flex;align-items:center;gap:var(--s1);padding:3px var(--s2);border-radius:var(--r2);cursor:pointer;transition:background var(--tf);color:var(--t1);user-select:none}
+.ft-item:hover{background:var(--bg-elevated)}.ft-item.active{background:var(--accent-light);color:var(--accent)}
+.ft-chevron{width:14px;height:14px;display:flex;align-items:center;justify-content:center;color:var(--t3);transition:transform var(--tf);flex-shrink:0;font-size:9px}
+.ft-chevron.open{transform:rotate(90deg)}
+.ft-icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ft-icon svg{width:14px;height:14px}
+.ft-icon.folder{color:var(--accent)}.ft-icon.rs{color:var(--warning)}.ft-icon.toml{color:var(--t2)}.ft-icon.md{color:var(--info)}
+.ft-name{flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ft-badge{font-size:10px;font-weight:600;padding:0 4px;border-radius:3px}
+.ft-badge.M{background:var(--warning-bg);color:var(--warning)}.ft-badge.A{background:var(--success-bg);color:var(--success)}.ft-badge.U{background:var(--error-bg);color:var(--error)}
+.ft-children{margin-left:16px;display:block}.ft-children.collapsed{display:none}
+
+/* search */
+.search-input-wrap{padding:var(--s2) var(--s3);border-bottom:1px solid var(--border)}
+.search-input{flex:1;width:100%;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--r3);background:var(--bg-canvas);font-size:13px;color:var(--t0);outline:none;transition:border var(--tf)}
+.search-input:focus{border-color:var(--accent)}
+.search-filters{display:flex;gap:var(--s1);padding:var(--s1) var(--s3) var(--s2)}
+.search-filter{display:flex;align-items:center;gap:var(--s1);padding:3px var(--s2);border-radius:var(--r2);background:var(--bg-elevated);font-size:11px;font-weight:500;color:var(--t3);cursor:pointer;transition:all var(--tf)}
+.search-filter.active{background:var(--accent-light);color:var(--accent)}
+.search-results{padding:var(--s2)}
+.search-result{padding:var(--s2) var(--s3);border-radius:var(--r3);cursor:pointer;transition:background var(--tf);margin-bottom:var(--s1)}
+.search-result:hover{background:var(--bg-elevated)}
+.search-result .sr-file{font-size:12px;font-weight:600;color:var(--t0)}
+.search-result .sr-line{font-size:11px;color:var(--t3);margin-top:2px}
+.search-result .sr-match{font-size:11.5px;color:var(--t2);margin-top:2px;font-family:monospace}
+.search-result mark{background:var(--warm-light);color:var(--warning);border-radius:2px;padding:0 2px}
+
+/* git */
+.git-section{margin-bottom:var(--s4)}
+.git-section-head{display:flex;align-items:center;gap:var(--s2);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--t3);margin-bottom:var(--s2);padding:0 var(--s2)}
+.git-section-head .count{padding:0 6px;border-radius:8px;background:var(--bg-elevated);color:var(--t2);font-size:10px}
+.git-file{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s2);border-radius:var(--r2);cursor:pointer;transition:background var(--tf)}
+.git-file:hover{background:var(--bg-elevated)}
+.git-file .gf-status{width:18px;height:18px;border-radius:var(--r1);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}
+.git-file .gf-status.M{background:var(--warning-bg);color:var(--warning)}.git-file .gf-status.A{background:var(--success-bg);color:var(--success)}.git-file .gf-status.U{background:var(--error-bg);color:var(--error)}
+.git-file .gf-name{flex:1;font-size:12.5px;color:var(--t1)}
+.gf-action{width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:var(--r1);color:var(--t3);opacity:0;transition:all var(--tf)}
+.git-file:hover .gf-action{opacity:1}
+.gf-action:hover{background:var(--bg-surface);color:var(--accent)}
+.gf-action svg{width:12px;height:12px}
+.git-commit{margin-top:var(--s3);padding:var(--s2)}
+.git-commit input{width:100%;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--r3);background:var(--bg-canvas);font-size:12.5px;margin-bottom:var(--s2);outline:none}
+.git-commit input:focus{border-color:var(--accent)}
+.git-commit button{width:100%;padding:var(--s2);border-radius:var(--r3);background:var(--accent);color:var(--accent-text);font-size:12.5px;font-weight:600;transition:all var(--tf)}
+.git-commit button:hover{background:var(--accent-hover)}
+.git-commit-success{display:none;align-items:center;justify-content:center;gap:var(--s2);padding:var(--s3);border-radius:var(--r3);background:var(--success-bg);color:var(--success);font-size:12.5px;font-weight:600}
+.git-commit-success.show{display:flex}
+.git-commit-success svg{width:16px;height:16px}
+
+/* history */
+.history-item{display:flex;flex-direction:column;gap:2px;padding:var(--s2) var(--s3);border-radius:var(--r3);cursor:pointer;transition:background var(--tf);margin-bottom:var(--s1);border:1px solid transparent}
+.history-item:hover{background:var(--bg-elevated)}
+.history-item.active{background:var(--accent-light);border-color:var(--accent)}
+.history-item .hi-title{font-size:13px;font-weight:500;color:var(--t0)}
+.history-item .hi-meta{font-size:11px;color:var(--t3);display:flex;gap:var(--s2)}
+
+/* statusbar */
+.statusbar{grid-area:status;display:flex;align-items:center;gap:0;padding:0 var(--s4);background:var(--bg-surface);border-top:1px solid var(--border);font-size:11.5px;color:var(--t3)}
+.status-item{display:flex;align-items:center;gap:var(--s1);padding:0 var(--s3);height:100%;border-right:1px solid var(--border-light)}
+.status-item:last-child{border-right:none}
+.status-item .si-dot{width:6px;height:6px;border-radius:50%}
+.status-item .si-dot.ok{background:var(--success)}.status-item .si-dot.err{background:var(--error)}.status-item .si-dot.warn{background:var(--warning)}
+.status-spacer{flex:1;border-right:none}
+.status-item.clickable{cursor:pointer;transition:color var(--tf)}
+.status-item.clickable:hover{color:var(--t1);background:var(--bg-elevated)}
+
+/* modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity var(--tn);z-index:300}
+.modal-overlay.open{opacity:1;pointer-events:auto}
+.modal{width:560px;max-height:80vh;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r5);box-shadow:var(--shadow-xl);display:flex;flex-direction:column;transform:scale(0.95);transition:transform var(--tn)}
+.modal-overlay.open .modal{transform:scale(1)}
+.modal-head{display:flex;align-items:center;gap:var(--s2);padding:var(--s4);border-bottom:1px solid var(--border)}
+.modal-icon{width:36px;height:36px;border-radius:var(--r3);background:var(--warning-bg);color:var(--warning);display:flex;align-items:center;justify-content:center}
+.modal-icon svg{width:20px;height:20px}
+.modal-head h3{flex:1;font-size:15px;font-weight:600}
+.modal-body{padding:var(--s4);overflow-y:auto;flex:1}
+.modal-body p{font-size:13px;color:var(--t1);margin-bottom:var(--s3)}
+.modal-diff{background:var(--bg-code);border-radius:var(--r3);padding:var(--s3);font-family:monospace;font-size:12px;line-height:1.6;color:var(--code-text);max-height:300px;overflow-y:auto}
+.modal-diff .diff-add{color:var(--str)}.modal-diff .diff-del{color:#F38BA8}.modal-diff .diff-meta{color:var(--com)}
+.modal-foot{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.modal-foot .spacer{flex:1}
+.btn{padding:var(--s2) var(--s4);border-radius:var(--r3);font-size:13px;font-weight:600;transition:all var(--tf)}
+.btn-ghost{color:var(--t2)}.btn-ghost:hover{background:var(--bg-elevated);color:var(--t0)}
+.btn-primary{background:var(--accent);color:var(--accent-text)}.btn-primary:hover{background:var(--accent-hover)}
+
+/* palette */
+.palette-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.25);display:flex;align-items:flex-start;justify-content:center;padding-top:120px;opacity:0;pointer-events:none;transition:opacity var(--tn);z-index:300}
+.palette-overlay.open{opacity:1;pointer-events:auto}
+.palette{width:560px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r5);box-shadow:var(--shadow-xl);overflow:hidden;transform:translateY(-10px);transition:transform var(--tn)}
+.palette-overlay.open .palette{transform:translateY(0)}
+.palette-input{width:100%;padding:var(--s3) var(--s4);border:none;outline:none;background:transparent;font-size:15px;color:var(--t0);border-bottom:1px solid var(--border)}
+.palette-input::placeholder{color:var(--t3)}
+.palette-results{max-height:360px;overflow-y:auto;padding:var(--s1)}
+.palette-item{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s3);border-radius:var(--r3);cursor:pointer;transition:background var(--tf)}
+.palette-item:hover,.palette-item.active{background:var(--accent-light)}
+.palette-item .pi-icon{width:28px;height:28px;border-radius:var(--r2);background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;color:var(--t2)}
+.palette-item .pi-icon svg{width:14px;height:14px}
+.palette-item .pi-text{flex:1}
+.palette-item .pi-title{font-size:13px;font-weight:500;color:var(--t0)}
+.palette-item .pi-desc{font-size:11px;color:var(--t3)}
+.palette-item .pi-kbd{display:flex;gap:var(--s1)}
+.palette-item kbd{padding:2px 6px;border-radius:var(--r1);background:var(--bg-elevated);border:1px solid var(--border);font-size:10px;font-family:monospace;color:var(--t2)}
+.palette-section{padding:var(--s2) var(--s3) var(--s1);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--t3)}
+
+/* dropdown */
+.dropdown{position:fixed;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r4);box-shadow:var(--shadow-lg);padding:var(--s1);z-index:250;min-width:240px;opacity:0;pointer-events:none;transform:translateY(-4px);transition:all var(--tf)}
+.dropdown.open{opacity:1;pointer-events:auto;transform:translateY(0)}
+.dropdown-section{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--t3);padding:var(--s2) var(--s2) var(--s1)}
+.dropdown-item{display:flex;align-items:center;gap:var(--s2);padding:var(--s2);border-radius:var(--r2);cursor:pointer;transition:background var(--tf)}
+.dropdown-item:hover{background:var(--bg-elevated)}.dropdown-item.active{background:var(--accent-light)}
+.dropdown-item .di-icon{width:20px;height:20px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+.dropdown-item .di-name{flex:1;font-size:12.5px;font-weight:500;color:var(--t0)}
+.dropdown-item .di-check{color:var(--accent);font-size:14px}
+
+/* toast */
+.toast{position:fixed;bottom:50px;left:50%;transform:translateX(-50%) translateY(20px);padding:var(--s2) var(--s4);border-radius:var(--r4);background:var(--t0);color:var(--bg-canvas);font-size:13px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:all var(--tn);z-index:400;display:flex;align-items:center;gap:var(--s2)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast svg{width:16px;height:16px}
+
+.hidden{display:none!important}
+
+@media(max-width:1100px){
+  .app{grid-template-columns:var(--rail-w) 1fr;grid-template-areas:"topbar topbar" "rail main" "status status"}
+  .context-panel{display:none}.context-expand{display:none!important}
+}
+@media(max-width:700px){
+  .app{grid-template-columns:var(--rail-w) 1fr}
+  .conversation{padding:var(--s4)}
+  .input-zone{padding:var(--s2) var(--s4) var(--s3)}
+  .quick-actions{gap:var(--s1)}.qa-chip{padding:4px var(--s2);font-size:11px}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark">X</div><span>XGent</span></div>
+    <div class="project-crumb" onclick="toggleProjectMenu(event)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>xgent</span><span class="chev">▼</span>
+    </div>
+    <button class="btn-new-session" onclick="newSession()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建会话
+    </button>
+    <div class="topbar-spacer"></div>
+    <div class="agent-pill" data-state="ready" id="agentPill" aria-live="polite">
+      <span class="dot"></span><span id="agentStateText">就绪</span>
+    </div>
+    <div class="model-sel" onclick="toggleModelDropdown(event)" role="button" tabindex="0" aria-label="选择模型">
+      <div class="model-icon">G</div><span id="modelLabel">GPT-4o</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="icon-btn" onclick="toggleTheme()" title="切换主题" role="button" tabindex="0" aria-label="切换主题">
+      <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </div>
+    <div class="icon-btn" onclick="openPalette()" title="命令面板" role="button" tabindex="0" aria-label="命令面板">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l4-4 4 4M7 3v18M21 17l-4 4-4-4M17 21V3"/></svg>
+    </div>
+  </header>
+
+  <!-- 图标轨 -->
+  <nav class="rail" role="navigation" aria-label="主导航">
+    <button class="rail-btn active" data-view="chat" onclick="railAction('chat')" aria-label="对话">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span class="rail-tooltip">对话<kbd>Ctrl+1</kbd></span>
+    </button>
+    <button class="rail-btn" data-view="files" onclick="railAction('files')" aria-label="文件">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span class="rail-tooltip">文件<kbd>Ctrl+2</kbd></span>
+    </button>
+    <button class="rail-btn" data-view="search" onclick="railAction('search')" aria-label="搜索">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <span class="rail-tooltip">搜索<kbd>Ctrl+Shift+F</kbd></span>
+    </button>
+    <button class="rail-btn" data-view="git" onclick="railAction('git')" aria-label="Git">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M8.5 18h7M6 15.5c0-3 3-5 5-5"/></svg>
+      <span class="rail-tooltip">Git<kbd>Ctrl+Shift+G</kbd></span>
+    </button>
+    <button class="rail-btn" data-view="history" onclick="railAction('history')" aria-label="历史">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span class="rail-tooltip">历史<kbd>Ctrl+H</kbd></span>
+    </button>
+    <div class="rail-divider"></div>
+    <button class="rail-btn" data-view="terminal" onclick="railAction('terminal')" aria-label="终端">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
+      <span class="rail-tooltip">终端<kbd>Ctrl+`</kbd></span>
+    </button>
+    <button class="rail-btn" data-view="plugins" aria-label="插件">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4v4h-4V4H8v6h8V4z M9 14v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4h6z M21 14v4a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-4h6z"/></svg>
+      <span class="rail-tooltip">插件<kbd>Ctrl+Shift+P</kbd></span>
+    </button>
+    <button class="context-expand" onclick="toggleContextPanel()" aria-label="展开面板">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>
+      <span class="rail-tooltip">展开面板</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <button class="companion-btn active" onclick="toggleCompanion()" title="陪伴开关" aria-label="陪伴开关">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8 5.8 21.3l2.4-7.4L2 9.4h7.6z"/></svg>
+    </button>
+  </nav>
+
+  <!-- 主区域 -->
+  <main class="main">
+    <div class="context-scope" id="contextScope">
+      <span class="context-scope-label">上下文</span>
+      <span class="ctx-chip"><span class="ctx-icon rs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span><span>src/main.rs</span><span class="ctx-x" onclick="this.parentElement.remove()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></span></span>
+      <span class="ctx-chip"><span class="ctx-icon rs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span><span>crates/xgent_core/lib.rs</span><span class="ctx-x" onclick="this.parentElement.remove()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></span></span>
+      <span class="ctx-chip"><span class="ctx-icon folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span>crates/xgent_agent/</span><span class="ctx-x" onclick="this.parentElement.remove()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></span></span>
+      <span class="ctx-add" onclick="showToast('打开文件选择器')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>添加上下文</span>
+    </div>
+
+    <button class="scroll-bottom-btn" id="scrollBottomBtn" onclick="scrollToBottom()" aria-label="滚动到底部">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+
+    <div class="conversation" id="conversation" onscroll="checkScroll()">
+      <!-- Welcome dashboard -->
+      <div class="welcome hidden" id="welcomeDashboard">
+        <div class="welcome-mark">X</div>
+        <h1>开始新会话</h1>
+        <p class="welcome-sub">输入问题，或从下方快捷操作开始</p>
+        <div class="welcome-grid">
+          <div class="welcome-card" onclick="quickAction('explain')">
+            <div class="wc-icon" style="background:var(--info-bg);color:var(--info)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
+            <h3>解释代码</h3><p>分析选中文件的逻辑和设计</p>
+          </div>
+          <div class="welcome-card" onclick="quickAction('refactor')">
+            <div class="wc-icon" style="background:var(--accent-light);color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-6 6M4 20l6-6"/></svg></div>
+            <h3>重构代码</h3><p>改善代码结构和可读性</p>
+          </div>
+          <div class="welcome-card" onclick="quickAction('test')">
+            <div class="wc-icon" style="background:var(--success-bg);color:var(--success)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V2M9 2h6"/></svg></div>
+            <h3>生成测试</h3><p>为当前上下文生成单元测试</p>
+          </div>
+        </div>
+        <div class="welcome-sessions">
+          <h4>最近会话</h4>
+          <div class="welcome-session" onclick="loadSession('重构 Agent 错误处理')"><span class="ws-title">重构 Agent 错误处理</span><span class="ws-meta">8 轮 · 2.3k tokens · 今天</span></div>
+          <div class="welcome-session" onclick="loadSession('实现 Provider 池化管理')"><span class="ws-title">实现 Provider 池化管理</span><span class="ws-meta">15 轮 · 5.1k tokens · 昨天</span></div>
+          <div class="welcome-session" onclick="loadSession('修复 SQLite 内存暴涨')"><span class="ws-title">修复 SQLite 内存暴涨</span><span class="ws-meta">22 轮 · 8.7k tokens · 3天前</span></div>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="msg-group" id="msgGroup">
+        <div class="msg">
+          <div class="msg-head"><div class="msg-avatar user">你</div><span class="msg-role">You</span><span class="msg-time">14:32</span></div>
+          <div class="msg-body"><p>帮我重构 <code>xgent_agent</code> 中的错误处理逻辑。当前用了大量的 <code>unwrap()</code>，我想改用统一的 <code>thiserror</code> 错误类型，并在关键路径上做好错误传播。</p></div>
+        </div>
+        <div class="msg">
+          <div class="msg-head"><div class="msg-avatar agent">X</div><span class="msg-role">XGent</span><span class="msg-time">14:32</span></div>
+          <div class="msg-actions">
+            <button class="msg-action" onclick="copyMessage(this)" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="msg-action" onclick="regenerateMessage(this)" title="重新生成"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+            <button class="msg-action" onclick="retryMessage(this)" title="重试"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+          </div>
+          <div class="msg-body">
+            <p>好的，我先分析一下当前的错误处理情况，然后制定重构方案。</p>
+            <div class="tool-card expanded">
+              <div class="tool-card-head" onclick="this.parentElement.classList.toggle('expanded')">
+                <div class="tool-icon read"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></div>
+                <span class="tool-name">读取文件</span><span class="tool-args">crates/xgent_agent/src/loop.rs</span>
+                <span class="tool-status ok"><svg class="ts-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>0.3s · 128 行</span>
+                <span class="tool-chevron">▶</span>
+              </div>
+              <div class="tool-card-body"><div class="tool-card-content">
+                <div class="tool-preview">
+                  <div class="tp-copy" onclick="copyToClipboard(this.closest('.tool-preview').textContent)" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div>
+<span class="line-num">1</span><span class="syn-kw">use</span> std::sync::Arc;
+<span class="line-num">2</span><span class="syn-kw">use</span> tokio::sync::mpsc;
+<span class="line-num">3</span><span class="syn-kw">use</span> bevy::prelude::*;
+<span class="line-num">4</span>
+<span class="line-num">5</span><span class="syn-com">/// Agent 主循环 — 桥接 ECS 与异步 tokio</span>
+<span class="line-num">6</span><span class="syn-kw">pub struct</span> <span class="syn-ty">AgentLoop</span> {
+<span class="line-num">7</span>    runtime: <span class="syn-ty">Arc</span>&lt;tokio::runtime::Runtime&gt;,
+<span class="line-num">8</span>    tx: <span class="syn-ty">Option</span>&lt;mpsc::Sender&lt;<span class="syn-ty">AgentEvent</span>&gt;&gt;,
+<span class="line-num">9</span>}
+<span class="line-num">10</span>
+<span class="line-num">11</span><span class="syn-kw">impl</span> <span class="syn-ty">AgentLoop</span> {
+<span class="line-num">12</span>    <span class="syn-kw">pub fn</span> <span class="syn-fn">new</span>(runtime: <span class="syn-ty">Arc</span>&lt;tokio::runtime::Runtime&gt;) -&gt; <span class="syn-ty">Self</span> {
+<span class="line-num">13</span>        <span class="syn-ty">Self</span> { runtime, tx: <span class="syn-ty">None</span> }
+<span class="line-num">14</span>    }
+<span class="line-num">15</span>
+<span class="line-num">16</span>    <span class="syn-kw">pub fn</span> <span class="syn-fn">start</span>(&amp;<span class="syn-kw">mut self</span>, world: &amp;<span class="syn-kw">mut</span> <span class="syn-ty">World</span>) {
+<span class="line-num">17</span>        <span class="syn-kw">let</span> (tx, <span class="syn-kw">mut</span> rx) = mpsc::channel(<span class="syn-num">128</span>);
+<span class="line-num">18</span>        <span class="syn-kw">self</span>.tx = <span class="syn-ty">Some</span>(tx);
+<span class="line-num">19</span>
+<span class="line-num">20</span>        <span class="syn-kw">let</span> provider = world.resource::&lt;<span class="syn-ty">LlmProviderHandle</span>&gt;().clone();
+<span class="line-num">21</span>        <span class="syn-kw">let</span> settings = world.resource::&lt;<span class="syn-ty">Settings</span>&gt;().clone();
+<span class="line-num">22</span>
+<span class="line-num">23</span>        <span class="syn-kw">self</span>.runtime.spawn(<span class="syn-kw">async move</span> {
+<span class="line-num">24</span>            <span class="syn-com">// ⚠️ unwrap() 风险点 #1</span>
+<span class="line-num">25</span>            <span class="syn-kw">let</span> resp = provider.send().<span class="syn-fn">await</span>.<span class="syn-fn">unwrap</span>();
+<span class="line-num">26</span>            <span class="syn-kw">while let Some</span>(event) = rx.recv().<span class="syn-fn">await</span> {
+<span class="line-num">27</span>                <span class="syn-com">// 处理事件...</span>
+<span class="line-num">28</span>            }
+<span class="line-num">29</span>        });
+<span class="line-num">30</span>    }
+<span class="line-num">31</span>}
+                </div>
+                <div class="tool-result ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>成功读取 128 行，发现 7 处 unwrap() 调用</div>
+              </div></div>
+            </div>
+            <div class="tool-card">
+              <div class="tool-card-head" onclick="this.parentElement.classList.toggle('expanded')">
+                <div class="tool-icon search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+                <span class="tool-name">搜索代码</span><span class="tool-args">"unwrap()" in crates/xgent_agent/</span>
+                <span class="tool-status ok"><svg class="ts-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>0.1s · 7 个匹配</span>
+                <span class="tool-chevron">▶</span>
+              </div>
+              <div class="tool-card-body"><div class="tool-card-content">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <div style="font-family:monospace;font-size:12px;color:var(--t2)"><strong style="color:var(--t0)">loop.rs:25</strong> — <span style="color:var(--error)">.unwrap()</span> on provider.send()</div>
+                  <div style="font-family:monospace;font-size:12px;color:var(--t2)"><strong style="color:var(--t0)">loop.rs:42</strong> — <span style="color:var(--error)">.unwrap()</span> on channel.send()</div>
+                  <div style="font-family:monospace;font-size:12px;color:var(--t2)"><strong style="color:var(--t0)">context.rs:18</strong> — <span style="color:var(--error)">.unwrap()</span> on file.read_to_string()</div>
+                  <div style="font-family:monospace;font-size:12px;color:var(--t2)"><strong style="color:var(--t0)">context.rs:33</strong> — <span style="color:var(--error)">.unwrap()</span> on path.canonicalize()</div>
+                  <div style="font-size:11px;color:var(--t3);margin-top:4px">还有 3 处…</div>
+                </div>
+              </div></div>
+            </div>
+            <p>分析完成。当前 <code>xgent_agent</code> 中共有 <strong>7 处 <code>unwrap()</code></strong> 调用，集中在以下文件：</p>
+            <ul><li><code>loop.rs</code> — 3 处（provider 调用、channel 发送、runtime spawn）</li><li><code>context.rs</code> — 4 处（文件读取、路径处理、JSON 解析）</li></ul>
+            <p>重构方案如下：</p>
+            <ol><li>在 <code>xgent_core</code> 中定义统一的 <code>AgentError</code> 枚举，使用 <code>thiserror</code> 派生</li><li>将所有 <code>unwrap()</code> 替换为 <code>?</code> 操作符，函数返回 <code>Result&lt;T, AgentError&gt;</code></li><li>在 ECS 桥接层将 <code>AgentError</code> 转为 <code>AgentEvent::Error</code> 事件</li><li>对不可恢复的错误保留 <code>expect()</code> 并附说明</li></ol>
+            <p>需要我创建 <code>AgentError</code> 类型并开始重构吗？<span class="streaming-cursor"></span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input zone -->
+    <div class="input-zone"><div class="input-container">
+      <div class="quick-actions">
+        <button class="qa-chip" onclick="quickAction('explain')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>解释代码</button>
+        <button class="qa-chip" onclick="quickAction('refactor')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-6 6M4 20l6-6"/></svg>重构</button>
+        <button class="qa-chip" onclick="quickAction('test')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V2M9 2h6"/></svg>生成测试</button>
+        <button class="qa-chip" onclick="quickAction('fix')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2l8 8-12 12H2v-8z"/><path d="M14 2l8 8M10 14l2 2"/></svg>修复问题</button>
+        <button class="qa-chip" onclick="quickAction('review')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>代码审查</button>
+      </div>
+      <div class="input-box">
+        <textarea class="input-textarea" id="chatInput" placeholder="输入你的问题，或按 Enter 发送…" rows="1" oninput="onInputChange(this)" onkeydown="handleInputKey(event)" aria-label="消息输入"></textarea>
+        <div class="input-toolbar">
+          <button class="input-mode" onclick="cycleMode()" aria-label="切换模式"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v3a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z M6 12a6 6 0 0 0 12 0M12 18v4M8 22h8"/></svg><span id="modeLabel">Agent 模式</span></button>
+          <div class="input-safety"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L3 7v5a10 10 0 0 0 9 10 10 10 0 0 0 9-10V7z"/></svg>工具调用需确认</div>
+          <div class="input-spacer"></div>
+          <div class="input-hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</div>
+          <div class="input-counter" id="inputCounter">0 tokens</div>
+          <button class="input-send" id="sendBtn" onclick="sendMessage()" aria-label="发送"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>发送</button>
+        </div>
+      </div>
+    </div></div>
+  </main>
+
+  <!-- 上下文面板 -->
+  <aside class="context-panel" id="contextPanel">
+    <div class="context-tabs">
+      <button class="ctx-tab active" data-ct="preview" onclick="switchContextTab('preview')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>预览</button>
+      <button class="ctx-tab" data-ct="diff" onclick="switchContextTab('diff')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>差异</button>
+      <button class="ctx-tab" data-ct="terminal" onclick="switchContextTab('terminal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>终端</button>
+      <div class="ctx-tab-spacer"></div>
+      <button class="ctx-collapse" onclick="toggleContextPanel()" title="折叠面板" aria-label="折叠面板"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg></button>
+    </div>
+    <div class="context-content" id="contextContent">
+      <div id="ct-preview">
+        <div class="file-preview-head">
+          <div class="file-preview-icon">RS</div>
+          <div><div class="file-preview-name">loop.rs</div><div class="file-preview-path">crates/xgent_agent/src/</div></div>
+          <div class="file-preview-actions">
+            <button class="fpa-btn" onclick="showToast('已复制文件内容')" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button class="fpa-btn" onclick="switchContextTab('diff')" title="查看差异"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button>
+          </div>
+        </div>
+        <div class="file-code">
+<span class="ln">1</span><span class="syn-kw" style="color:#C77DFF">use</span> std::sync::Arc;
+<span class="ln">2</span><span class="syn-kw" style="color:#C77DFF">use</span> tokio::sync::mpsc;
+<span class="ln">3</span><span class="syn-kw" style="color:#C77DFF">use</span> bevy::prelude::*;
+<span class="ln">4</span>
+<span class="ln">5</span><span class="syn-com" style="color:#6C7086">/// Agent 主循环</span>
+<span class="ln highlight">6</span><span class="syn-kw" style="color:#C77DFF">pub struct</span> <span class="syn-ty" style="color:#F9E2AF">AgentLoop</span> {
+<span class="ln">7</span>    runtime: <span class="syn-ty" style="color:#F9E2AF">Arc</span>&lt;Runtime&gt;,
+<span class="ln">8</span>    tx: <span class="syn-ty" style="color:#F9E2AF">Option</span>&lt;Sender&gt;,
+<span class="ln">9</span>}
+<span class="ln">10</span>
+<span class="ln">11</span><span class="syn-kw" style="color:#C77DFF">impl</span> <span class="syn-ty" style="color:#F9E2AF">AgentLoop</span> {
+<span class="ln">12</span>    <span class="syn-kw" style="color:#C77DFF">pub fn</span> <span class="syn-fn" style="color:#89B4FA">new</span>(r: Arc&lt;Runtime&gt;) -&gt; Self {
+<span class="ln">13</span>        Self { runtime: r, tx: None }
+<span class="ln">14</span>    }
+<span class="ln">15</span>
+<span class="ln highlight">16</span>    <span class="syn-kw" style="color:#C77DFF">pub fn</span> <span class="syn-fn" style="color:#89B4FA">start</span>(&amp;mut self, w: &amp;mut World) {
+<span class="ln">17</span>        <span class="syn-kw" style="color:#C77DFF">let</span> (tx, rx) = mpsc::channel(128);
+<span class="ln">18</span>        self.tx = Some(tx);
+<span class="ln">19</span>        <span class="syn-com" style="color:#6C7086">// ...</span>
+<span class="ln">20</span>    }
+<span class="ln">21</span>}
+        </div>
+      </div>
+      <div id="ct-diff" class="hidden">
+        <div class="diff-stats"><span class="diff-stat add">+18 行</span><span class="diff-stat del">-7 行</span></div>
+        <div class="file-code">
+<span class="ln">1</span><span class="syn-kw" style="color:#C77DFF">use</span> thiserror::Error;
+<span class="ln">2</span>
+<span class="ln">3</span><span class="syn-com" style="color:#6C7086">/// 统一 Agent 错误类型</span>
+<span class="ln">4</span><span class="syn-kw" style="color:#C77DFF">#[derive(Debug, Error)]</span>
+<span class="ln">5</span><span class="syn-kw" style="color:#C77DFF">pub enum</span> <span class="syn-ty" style="color:#F9E2AF">AgentError</span> {
+<span class="ln">6</span>    <span class="syn-kw" style="color:#C77DFF">#[error</span>(<span class="syn-str" style="color:#A6E3A1">"LLM 调用失败: {0}"</span>)]
+<span class="ln">7</span>    Llm(<span class="syn-kw" style="color:#C77DFF">#[from]</span> ProviderError),
+<span class="ln">8</span>
+<span class="ln">9</span>    <span class="syn-kw" style="color:#C77DFF">#[error</span>(<span class="syn-str" style="color:#A6E3A1">"通道发送失败: {0}"</span>)]
+<span class="ln">10</span>    Channel(String),
+<span class="ln">11</span>
+<span class="ln">12</span>    <span class="syn-kw" style="color:#C77DFF">#[error</span>(<span class="syn-str" style="color:#A6E3A1">"文件读取失败: {0}"</span>)]
+<span class="ln">13</span>    Io(<span class="syn-kw" style="color:#C77DFF">#[from]</span> std::io::Error),
+<span class="ln">14</span>}
+        </div>
+      </div>
+      <div id="ct-terminal" class="hidden" style="height:100%">
+        <div class="term-view">
+<span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <span class="cmd">cargo check -p xgent_agent</span>
+    <span style="color:#A6E3A1">Finished</span> dev [unoptimized + debuginfo] target(s) in 0.42s
+<span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <span class="cmd">cargo test -p xgent_agent</span>
+running 3 tests
+test agent_loop::tests::test_start ... <span style="color:#A6E3A1">ok</span>
+test agent_loop::tests::test_channel ... <span style="color:#A6E3A1">ok</span>
+test agent_loop::tests::test_error_prop ... <span style="color:#A6E3A1">ok</span>
+test result: <span style="color:#A6E3A1">OK</span>. 3 passed; 0 failed
+          <div class="term-input-line">
+            <span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <input class="term-input" placeholder="输入命令…" onkeydown="handleTermKey(event)">
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 状态栏 -->
+  <footer class="statusbar">
+    <div class="status-item"><span class="si-dot ok"></span><span>Daemon 已连接</span></div>
+    <div class="status-item clickable" onclick="toggleModelDropdown(event)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v3a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z M6 12a6 6 0 0 0 12 0"/></svg><span id="statusModel">GPT-4o · 2,341 tokens</span></div>
+    <div class="status-item clickable" onclick="showToast('成本统计：$0.04（本次会话）')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg><span>$0.04</span></div>
+    <div class="status-spacer"></div>
+    <div class="status-item clickable" onclick="toggleCompanion()"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8 5.8 21.3l2.4-7.4L2 9.4h7.6z"/></svg><span id="companionStatus">陪伴已开启</span></div>
+    <div class="status-item"><span>会话 #a3f2</span></div>
+  </footer>
+</div>
+
+<!-- 滑出抽屉 -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer-files">
+  <div class="drawer-head"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><h3>文件浏览器</h3><button class="drawer-close" onclick="closeDrawer()" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="drawer-body"><div class="file-tree" id="fileTree"></div></div>
+</div>
+<div class="drawer" id="drawer-search">
+  <div class="drawer-head"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><h3>搜索</h3><button class="drawer-close" onclick="closeDrawer()" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="search-input-wrap">
+    <input class="search-input" placeholder="搜索文件内容…" value="unwrap()">
+    <div class="search-filters">
+      <div class="search-filter" onclick="this.classList.toggle('active')">Aa 大小写</div>
+      <div class="search-filter" onclick="this.classList.toggle('active')">.* 正则</div>
+      <div class="search-filter" onclick="this.classList.toggle('active')">"全词"</div>
+    </div>
+  </div>
+  <div class="drawer-body" style="padding:0"><div class="search-results">
+    <div class="search-result"><div class="sr-file">crates/xgent_agent/src/loop.rs</div><div class="sr-line">第 25 行</div><div class="sr-match">let resp = provider.send().await.<mark>unwrap()</mark>;</div></div>
+    <div class="search-result"><div class="sr-file">crates/xgent_agent/src/loop.rs</div><div class="sr-line">第 42 行</div><div class="sr-match">tx.send(event).<mark>unwrap()</mark>;</div></div>
+    <div class="search-result"><div class="sr-file">crates/xgent_agent/src/context.rs</div><div class="sr-line">第 18 行</div><div class="sr-match">fs::read_to_string(&amp;path).<mark>unwrap()</mark>()</div></div>
+    <div class="search-result"><div class="sr-file">crates/xgent_agent/src/context.rs</div><div class="sr-line">第 33 行</div><div class="sr-match">path.canonicalize().<mark>unwrap()</mark>()</div></div>
+    <div class="search-result"><div class="sr-file">crates/xgent_agent/src/context.rs</div><div class="sr-line">第 51 行</div><div class="sr-match">serde_json::from_str(&amp;s).<mark>unwrap()</mark>()</div></div>
+  </div></div>
+</div>
+<div class="drawer" id="drawer-git">
+  <div class="drawer-head"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7M8.5 18h7M6 15.5c0-3 3-5 5-5"/></svg><h3>Git 更改</h3><button class="drawer-close" onclick="closeDrawer()" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="drawer-body">
+    <div class="git-section"><div class="git-section-head">暂存的更改 <span class="count">2</span></div>
+      <div class="git-file"><span class="gf-status M">M</span><span class="gf-name">crates/xgent_agent/src/loop.rs</span><button class="gf-action" onclick="unstageFile(this)" title="取消暂存"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+      <div class="git-file"><span class="gf-status A">A</span><span class="gf-name">crates/xgent_core/src/error.rs</span><button class="gf-action" onclick="unstageFile(this)" title="取消暂存"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    </div>
+    <div class="git-section"><div class="git-section-head">更改 <span class="count">3</span></div>
+      <div class="git-file"><span class="gf-status M">M</span><span class="gf-name">crates/xgent_agent/src/context.rs</span><button class="gf-action" onclick="stageFile(this)" title="暂存"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button></div>
+      <div class="git-file"><span class="gf-status M">M</span><span class="gf-name">Cargo.toml</span><button class="gf-action" onclick="stageFile(this)" title="暂存"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button></div>
+      <div class="git-file"><span class="gf-status U">?</span><span class="gf-name">crates/xgent_agent/tests/error_test.rs</span><button class="gf-action" onclick="stageFile(this)" title="暂存"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button></div>
+    </div>
+    <div class="git-commit" id="gitCommitArea"><input placeholder="提交信息…" value="refactor: 统一 AgentError 错误类型" id="commitMsg"><button onclick="gitCommit()">提交更改</button></div>
+    <div class="git-commit-success" id="gitCommitSuccess"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>提交成功！</div>
+  </div>
+</div>
+<div class="drawer" id="drawer-history">
+  <div class="drawer-head"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><h3>会话历史</h3><button class="drawer-close" onclick="closeDrawer()" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="drawer-body">
+    <div class="history-item active"><div class="hi-title">重构 Agent 错误处理</div><div class="hi-meta"><span>#a3f2</span><span>14:32</span><span>8 轮</span><span>2.3k tokens</span></div></div>
+    <div class="history-item" onclick="loadSession('实现 Provider 池化管理')"><div class="hi-title">实现 Provider 池化管理</div><div class="hi-meta"><span>#b7e1</span><span>昨天</span><span>15 轮</span><span>5.1k tokens</span></div></div>
+    <div class="history-item" onclick="loadSession('修复 SQLite 内存暴涨')"><div class="hi-title">修复 SQLite 内存暴涨问题</div><div class="hi-meta"><span>#c2d4</span><span>3天前</span><span>22 轮</span><span>8.7k tokens</span></div></div>
+    <div class="history-item" onclick="loadSession('Qt 进程通信重构')"><div class="hi-title">Qt 进程通信重构为 QLocalServer</div><div class="hi-meta"><span>#d9f8</span><span>1周前</span><span>11 轮</span><span>3.4k tokens</span></div></div>
+    <div class="history-item" onclick="loadSession('清理 DBHelper 死代码')"><div class="hi-title">清理 DBHelper 死代码</div><div class="hi-meta"><span>#e1a3</span><span>1周前</span><span>6 轮</span><span>1.8k tokens</span></div></div>
+  </div>
+</div>
+<div class="drawer" id="drawer-terminal">
+  <div class="drawer-head"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M7 9l3 3-3 3M13 15h4"/></svg><h3>终端</h3><button class="drawer-close" onclick="closeDrawer()" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="drawer-body" style="padding:0;background:#0C0C0F">
+    <div class="term-view" style="height:100%;border-radius:0">
+<span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <span class="cmd">cargo check --workspace</span>
+    <span style="color:#A6E3A1">Finished</span> dev [unoptimized + debuginfo] target(s) in 0.42s
+<span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <span class="cmd">cargo test -p xgent_agent</span>
+running 3 tests
+test agent_loop::tests::test_start ... <span style="color:#A6E3A1">ok</span>
+test agent_loop::tests::test_channel ... <span style="color:#A6E3A1">ok</span>
+test agent_loop::tests::test_error_prop ... <span style="color:#A6E3A1">ok</span>
+test result: <span style="color:#A6E3A1">OK</span>. 3 passed
+      <div class="term-input-line"><span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <input class="term-input" placeholder="输入命令…" onkeydown="handleTermKey(event)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 确认弹窗 -->
+<div class="modal-overlay" id="confirmModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L3 7v5a10 10 0 0 0 9 10 10 10 0 0 0 9-10V7z"/><path d="M12 8v4M12 16h.01"/></svg></div><h3>确认写入文件</h3></div>
+    <div class="modal-body">
+      <p>XGent 请求写入以下文件：</p>
+      <p style="font-family:monospace;font-size:13px;color:var(--accent);font-weight:600">crates/xgent_core/src/error.rs</p>
+      <p>这是新建文件操作，将创建统一的 <code>AgentError</code> 枚举类型。</p>
+      <div class="modal-diff">
+<span class="diff-meta">--- /dev/null</span>
+<span class="diff-meta">+++ crates/xgent_core/src/error.rs</span>
+<span class="diff-add">+use thiserror::Error;</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+/// 统一 Agent 错误类型</span>
+<span class="diff-add">+#[derive(Debug, Error)]</span>
+<span class="diff-add">+pub enum AgentError {</span>
+<span class="diff-add">+    #[error("LLM 调用失败: {0}")]</span>
+<span class="diff-add">+    Llm(#[from] ProviderError),</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+    #[error("通道发送失败: {0}")]</span>
+<span class="diff-add">+    Channel(String),</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+    #[error("文件读取失败: {0}")]</span>
+<span class="diff-add">+    Io(#[from] std::io::Error),</span>
+<span class="diff-add">+}</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">拒绝 (Esc)</button>
+      <button class="btn btn-ghost" onclick="closeModal()">仅本次允许</button>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" onclick="closeModal();showToast('操作已执行')">确认执行 (Enter)</button>
+    </div>
+  </div>
+</div>
+
+<!-- 命令面板 -->
+<div class="palette-overlay" id="paletteOverlay" onclick="closePalette(event)">
+  <div class="palette" onclick="event.stopPropagation()">
+    <input class="palette-input" id="paletteInput" placeholder="输入命令或搜索…" oninput="filterPalette()" aria-label="搜索命令">
+    <div class="palette-results" id="paletteResults">
+      <div class="palette-section">会话</div>
+      <div class="palette-item active" data-action="new-session"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div><div class="pi-text"><div class="pi-title">新建会话</div><div class="pi-desc">开始一个新的对话</div></div><div class="pi-kbd"><kbd>Ctrl+N</kbd></div></div>
+      <div class="palette-item" data-action="history"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div class="pi-text"><div class="pi-title">查看历史会话</div><div class="pi-desc">浏览和恢复之前的对话</div></div><div class="pi-kbd"><kbd>Ctrl+H</kbd></div></div>
+      <div class="palette-section">文件</div>
+      <div class="palette-item" data-action="files"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div><div class="pi-text"><div class="pi-title">打开文件浏览器</div><div class="pi-desc">浏览项目文件树</div></div><div class="pi-kbd"><kbd>Ctrl+2</kbd></div></div>
+      <div class="palette-item" data-action="search"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div><div class="pi-text"><div class="pi-title">搜索文件内容</div><div class="pi-desc">在项目中全局搜索</div></div><div class="pi-kbd"><kbd>Ctrl+Shift+F</kbd></div></div>
+      <div class="palette-section">工具</div>
+      <div class="palette-item" data-action="qa-refactor"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-6 6M4 20l6-6"/></svg></div><div class="pi-text"><div class="pi-title">重构代码</div><div class="pi-desc">AI 辅助代码重构</div></div></div>
+      <div class="palette-item" data-action="qa-test"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V2M9 2h6"/></svg></div><div class="pi-text"><div class="pi-title">生成测试</div><div class="pi-desc">为当前文件生成单元测试</div></div></div>
+      <div class="palette-section">视图</div>
+      <div class="palette-item" data-action="theme"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div><div class="pi-text"><div class="pi-title">切换主题</div><div class="pi-desc">在亮色和暗色之间切换</div></div><div class="pi-kbd"><kbd>Ctrl+Shift+T</kbd></div></div>
+      <div class="palette-item" data-action="toggle-panel"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg></div><div class="pi-text"><div class="pi-title">折叠/展开面板</div><div class="pi-desc">切换右侧上下文面板</div></div></div>
+      <div class="palette-item" data-action="companion"><div class="pi-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8 5.8 21.3l2.4-7.4L2 9.4h7.6z"/></svg></div><div class="pi-text"><div class="pi-title">切换陪伴模式</div><div class="pi-desc">开启或关闭桌面宠物</div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 下拉菜单 -->
+<div class="dropdown" id="modelDropdown" style="right:120px;top:48px">
+  <div class="dropdown-section">云端模型</div>
+  <div class="dropdown-item active" onclick="selectModel('GPT-4o','G')"><div class="di-icon" style="background:#10A37F;color:#fff">G</div><span class="di-name">GPT-4o</span><span class="di-check">✓</span></div>
+  <div class="dropdown-item" onclick="selectModel('Claude 3.5','C')"><div class="di-icon" style="background:#D97757;color:#fff">C</div><span class="di-name">Claude 3.5 Sonnet</span></div>
+  <div class="dropdown-item" onclick="selectModel('Gemini 1.5','G')"><div class="di-icon" style="background:#4285F4;color:#fff">G</div><span class="di-name">Gemini 1.5 Pro</span></div>
+  <div class="dropdown-section">本地模型</div>
+  <div class="dropdown-item" onclick="selectModel('Llama 3.1','L')"><div class="di-icon" style="background:var(--bg-elevated);color:var(--t1)">L</div><span class="di-name">Llama 3.1 70B (Ollama)</span></div>
+  <div class="dropdown-item" onclick="selectModel('Qwen 2.5','Q')"><div class="di-icon" style="background:var(--bg-elevated);color:var(--t1)">Q</div><span class="di-name">Qwen 2.5 72B (Ollama)</span></div>
+  <div class="dropdown-section">自定义</div>
+  <div class="dropdown-item" onclick="showToast('打开自定义 API 配置')"><div class="di-icon" style="background:var(--accent-light);color:var(--accent)">+</div><span class="di-name">添加自定义 API…</span></div>
+</div>
+<div class="dropdown" id="projectDropdown" style="left:120px;top:48px;min-width:280px">
+  <div class="dropdown-section">当前项目</div>
+  <div class="dropdown-item active"><div class="di-icon" style="background:var(--accent);color:#fff">X</div><span class="di-name">xgent</span><span class="di-check">✓</span></div>
+  <div class="dropdown-section">最近项目</div>
+  <div class="dropdown-item" onclick="showToast('切换到 SXSecurityEngine')"><div class="di-icon" style="background:#059669;color:#fff">S</div><span class="di-name">SXSecurityEngine</span></div>
+  <div class="dropdown-item" onclick="showToast('切换到 SXClient')"><div class="di-icon" style="background:#D97706;color:#fff">S</div><span class="di-name">SXClient</span></div>
+  <div class="dropdown-item" onclick="showToast('切换到 bevy')"><div class="di-icon" style="background:#A21CAF;color:#fff">B</div><span class="di-name">bevy</span></div>
+  <div class="dropdown-section"></div>
+  <div class="dropdown-item" onclick="showToast('打开项目选择器')"><div class="di-icon" style="background:var(--accent-light);color:var(--accent)">+</div><span class="di-name">打开其他项目…</span></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span id="toastText">操作成功</span></div>
+
+<script>
+"use strict";
+
+/* ===== 状态 ===== */
+let isStreaming = false;
+let streamTimer = null;
+let currentMode = 0;
+const modes = ["Agent 模式", "聊天模式", "仅问答"];
+const railViews = { chat: null, files: "drawer-files", search: "drawer-search", git: "drawer-git", history: "drawer-history", terminal: "drawer-terminal" };
+
+/* ===== 工具函数 ===== */
+function $(id) { return document.getElementById(id); }
+function qa(sel, el) { return (el || document).querySelector(sel); }
+
+function showToast(msg) {
+  const t = $("toast");
+  $("toastText").textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function copyToClipboard(text) {
+  text = text.replace(/\u00a0/g, " ").trim();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => showToast("已复制到剪贴板"));
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); showToast("已复制到剪贴板"); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+}
+
+/* ===== 主题切换 ===== */
+function toggleTheme() {
+  const html = document.documentElement;
+  const dark = html.dataset.theme === "dark";
+  html.dataset.theme = dark ? "light" : "dark";
+  const icon = $("themeIcon");
+  if (dark) {
+    icon.innerHTML = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
+  } else {
+    icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  }
+  showToast(dark ? "已切换到亮色主题" : "已切换到暗色主题");
+}
+
+/* ===== 陪伴开关 ===== */
+function toggleCompanion() {
+  const btn = qa(".companion-btn");
+  btn.classList.toggle("active");
+  const on = btn.classList.contains("active");
+  $("companionStatus").textContent = on ? "陪伴已开启" : "陪伴已关闭";
+  showToast(on ? "陪伴模式已开启" : "陪伴模式已关闭");
+}
+
+/* ===== 上下文面板折叠 ===== */
+function toggleContextPanel() {
+  const app = $("app");
+  app.classList.toggle("context-collapsed");
+  const collapsed = app.classList.contains("context-collapsed");
+  showToast(collapsed ? "面板已折叠" : "面板已展开");
+}
+
+/* ===== 会话管理 ===== */
+function newSession() {
+  const welcome = $("welcomeDashboard");
+  const msgGroup = $("msgGroup");
+  welcome.classList.remove("hidden");
+  msgGroup.classList.add("hidden");
+  closeDrawer();
+  showToast("已创建新会话");
+}
+
+function loadSession(title) {
+  const welcome = $("welcomeDashboard");
+  const msgGroup = $("msgGroup");
+  welcome.classList.add("hidden");
+  msgGroup.classList.remove("hidden");
+  closeDrawer();
+  showToast("已加载会话：" + title);
+}
+
+/* ===== 图标轨 ===== */
+function railAction(view) {
+  // 切换 active 状态
+  document.querySelectorAll(".rail-btn").forEach(b => b.classList.remove("active"));
+  const btn = qa('.rail-btn[data-view="' + view + '"]');
+  if (btn) btn.classList.add("active");
+
+  if (view === "chat") {
+    closeDrawer();
+    return;
+  }
+  const drawerId = railViews[view];
+  if (drawerId) openDrawer(drawerId);
+}
+
+/* ===== 抽屉 ===== */
+function openDrawer(id) {
+  closeDrawer();
+  const drawer = typeof id === "string" ? $(id) : id;
+  if (!drawer) return;
+  drawer.classList.add("open");
+  $("drawerOverlay").classList.add("open");
+}
+
+function closeDrawer() {
+  document.querySelectorAll(".drawer.open").forEach(d => d.classList.remove("open"));
+  $("drawerOverlay").classList.remove("open");
+  // 恢复 chat 为 active
+  document.querySelectorAll(".rail-btn").forEach(b => b.classList.remove("active"));
+  const chatBtn = qa('.rail-btn[data-view="chat"]');
+  if (chatBtn) chatBtn.classList.add("active");
+}
+
+/* ===== 上下文面板标签 ===== */
+function switchContextTab(tab) {
+  document.querySelectorAll(".ctx-tab").forEach(t => t.classList.remove("active"));
+  const btn = qa('.ctx-tab[data-ct="' + tab + '"]');
+  if (btn) btn.classList.add("active");
+  ["preview", "diff", "terminal"].forEach(t => {
+    const el = $("ct-" + t);
+    if (el) el.classList.toggle("hidden", t !== tab);
+  });
+}
+
+/* ===== 下拉菜单 ===== */
+function toggleModelDropdown(event) {
+  event.stopPropagation();
+  closeDropdowns();
+  $("modelDropdown").classList.toggle("open");
+}
+
+function selectModel(name, icon) {
+  $("modelLabel").textContent = name;
+  const modelIcon = qa(".model-sel .model-icon");
+  if (modelIcon) modelIcon.textContent = icon;
+  $("statusModel").textContent = name + " · 0 tokens";
+  closeDropdowns();
+  showToast("已切换到 " + name);
+}
+
+function toggleProjectMenu(event) {
+  event.stopPropagation();
+  closeDropdowns();
+  $("projectDropdown").classList.toggle("open");
+}
+
+function closeDropdowns() {
+  document.querySelectorAll(".dropdown.open").forEach(d => d.classList.remove("open"));
+}
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".model-sel") && !e.target.closest(".project-crumb") && !e.target.closest(".dropdown")) {
+    closeDropdowns();
+  }
+});
+
+/* ===== 输入区 ===== */
+function onInputChange(el) {
+  // 自动高度
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  // token 估算（粗略：每 4 字符约 1 token）
+  const tokens = Math.ceil(el.value.length / 4);
+  $("inputCounter").textContent = tokens + " tokens";
+}
+
+function handleInputKey(event) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
+  }
+}
+
+function sendMessage() {
+  const input = $("chatInput");
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (isStreaming) {
+    abortStream();
+    return;
+  }
+
+  // 隐藏欢迎页，显示消息
+  $("welcomeDashboard").classList.add("hidden");
+  $("msgGroup").classList.remove("hidden");
+
+  // 添加用户消息
+  addMessage("user", text);
+
+  // 清空输入
+  input.value = "";
+  input.style.height = "auto";
+  $("inputCounter").textContent = "0 tokens";
+
+  // 模拟 agent 响应
+  simulateAgentResponse();
+}
+
+function addMessage(role, content) {
+  const group = $("msgGroup");
+  const now = new Date();
+  const time = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+
+  const msg = document.createElement("div");
+  msg.className = "msg";
+
+  const avatarClass = role === "user" ? "user" : "agent";
+  const avatarText = role === "user" ? "你" : "X";
+  const roleName = role === "user" ? "You" : "XGent";
+
+  let actionsHtml = "";
+  if (role === "agent") {
+    actionsHtml = '<div class="msg-actions">' +
+      '<button class="msg-action" onclick="copyMessage(this)" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>' +
+      '<button class="msg-action" onclick="regenerateMessage(this)" title="重新生成"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>' +
+      '<button class="msg-action" onclick="retryMessage(this)" title="重试"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>' +
+      "</div>";
+  }
+
+  msg.innerHTML =
+    '<div class="msg-head"><div class="msg-avatar ' + avatarClass + '">' + avatarText + '</div>' +
+    '<span class="msg-role">' + roleName + '</span><span class="msg-time">' + time + "</span></div>" +
+    actionsHtml +
+    '<div class="msg-body"><p>' + escapeHtml(content) + "</p></div>";
+
+  group.appendChild(msg);
+  scrollToBottom();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function simulateAgentResponse() {
+  isStreaming = true;
+  setAgentState("thinking");
+  const sendBtn = $("sendBtn");
+  sendBtn.classList.add("abort");
+  sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>停止';
+
+  const group = $("msgGroup");
+  const now = new Date();
+  const time = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  const msg = document.createElement("div");
+  msg.className = "msg";
+  msg.innerHTML =
+    '<div class="msg-head"><div class="msg-avatar agent">X</div><span class="msg-role">XGent</span><span class="msg-time">' + time + "</span></div>" +
+    '<div class="msg-actions">' +
+    '<button class="msg-action" onclick="copyMessage(this)" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>' +
+    '<button class="msg-action" onclick="regenerateMessage(this)" title="重新生成"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>' +
+    '<button class="msg-action" onclick="retryMessage(this)" title="重试"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>' +
+    "</div>" +
+    '<div class="msg-body"><p><span class="streaming-cursor"></span></p></div>';
+  group.appendChild(msg);
+  scrollToBottom();
+
+  setTimeout(() => {
+    setAgentState("generating");
+    const body = msg.querySelector(".msg-body p");
+    const fullText = "正在分析你的请求，请稍候…\n\n我会在上下文中查找相关代码，然后制定执行方案。";
+    let idx = 0;
+    streamTimer = setInterval(() => {
+      if (idx < fullText.length) {
+        body.innerHTML = escapeHtml(fullText.slice(0, idx + 1)) + '<span class="streaming-cursor"></span>';
+        idx++;
+        scrollToBottom();
+      } else {
+        clearInterval(streamTimer);
+        streamTimer = null;
+        body.innerHTML = escapeHtml(fullText);
+        setAgentState("ready");
+        isStreaming = false;
+        sendBtn.classList.remove("abort");
+        sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>发送';
+      }
+    }, 30);
+  }, 800);
+}
+
+function abortStream() {
+  if (streamTimer) {
+    clearInterval(streamTimer);
+    streamTimer = null;
+  }
+  isStreaming = false;
+  setAgentState("ready");
+  const sendBtn = $("sendBtn");
+  sendBtn.classList.remove("abort");
+  sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>发送';
+  showToast("已停止生成");
+}
+
+function setAgentState(state) {
+  const pill = $("agentPill");
+  pill.dataset.state = state;
+  const labels = {
+    ready: "就绪",
+    thinking: "思考中…",
+    generating: "生成中…",
+    tool: "执行工具…",
+    confirm: "等待确认",
+    error: "出错"
+  };
+  $("agentStateText").textContent = labels[state] || state;
+}
+
+/* ===== 快捷操作 ===== */
+function quickAction(action) {
+  const actions = {
+    explain: "请解释以下代码的逻辑和设计：",
+    refactor: "请重构以下代码，改善结构和可读性：",
+    test: "请为当前上下文中的代码生成单元测试：",
+    fix: "请分析并修复以下问题：",
+    review: "请对当前上下文中的代码进行审查："
+  };
+  const input = $("chatInput");
+  input.value = actions[action] || "";
+  onInputChange(input);
+  input.focus();
+  $("welcomeDashboard").classList.add("hidden");
+  $("msgGroup").classList.remove("hidden");
+}
+
+/* ===== 模式切换 ===== */
+function cycleMode() {
+  currentMode = (currentMode + 1) % modes.length;
+  $("modeLabel").textContent = modes[currentMode];
+  showToast("已切换到" + modes[currentMode]);
+}
+
+/* ===== 弹窗 ===== */
+function openModal() {
+  $("confirmModal").classList.add("open");
+}
+function closeModal() {
+  $("confirmModal").classList.remove("open");
+}
+
+/* ===== 命令面板 ===== */
+function openPalette() {
+  $("paletteOverlay").classList.add("open");
+  const input = $("paletteInput");
+  input.value = "";
+  input.focus();
+  filterPalette();
+}
+
+function closePalette(event) {
+  if (event && event.target !== $("paletteOverlay")) return;
+  $("paletteOverlay").classList.remove("open");
+}
+
+function filterPalette() {
+  const q = $("paletteInput").value.toLowerCase();
+  const items = document.querySelectorAll(".palette-item");
+  let firstActive = false;
+  items.forEach(item => {
+    const text = item.textContent.toLowerCase();
+    const match = !q || text.includes(q);
+    item.style.display = match ? "" : "none";
+    if (match && !firstActive) {
+      item.classList.add("active");
+      firstActive = true;
+    } else {
+      item.classList.remove("active");
+    }
+  });
+  // 隐藏空 section
+  document.querySelectorAll(".palette-section").forEach(s => {
+    let hasVisible = false;
+    let next = s.nextElementSibling;
+    while (next && !next.classList.contains("palette-section")) {
+      if (next.classList.contains("palette-item") && next.style.display !== "none") {
+        hasVisible = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    s.style.display = hasVisible ? "" : "none";
+  });
+}
+
+function executePaletteAction(action) {
+  closePalette();
+  switch (action) {
+    case "new-session": newSession(); break;
+    case "history": railAction("history"); break;
+    case "files": railAction("files"); break;
+    case "search": railAction("search"); break;
+    case "qa-refactor": quickAction("refactor"); break;
+    case "qa-test": quickAction("test"); break;
+    case "theme": toggleTheme(); break;
+    case "toggle-panel": toggleContextPanel(); break;
+    case "companion": toggleCompanion(); break;
+    default: showToast("执行：" + action);
+  }
+}
+
+/* ===== 消息操作 ===== */
+function copyMessage(btn) {
+  const msg = btn.closest(".msg");
+  const body = msg.querySelector(".msg-body");
+  copyToClipboard(body.textContent);
+}
+
+function regenerateMessage(btn) {
+  showToast("正在重新生成…");
+  setAgentState("thinking");
+  setTimeout(() => setAgentState("ready"), 1500);
+}
+
+function retryMessage(btn) {
+  showToast("正在重试…");
+  setAgentState("thinking");
+  setTimeout(() => setAgentState("ready"), 1500);
+}
+
+/* ===== 滚动 ===== */
+function scrollToBottom() {
+  const conv = $("conversation");
+  conv.scrollTop = conv.scrollHeight;
+  $("scrollBottomBtn").classList.remove("visible");
+}
+
+function checkScroll() {
+  const conv = $("conversation");
+  const dist = conv.scrollHeight - conv.scrollTop - conv.clientHeight;
+  if (dist > 200) {
+    $("scrollBottomBtn").classList.add("visible");
+  } else {
+    $("scrollBottomBtn").classList.remove("visible");
+  }
+}
+
+/* ===== 终端 ===== */
+function handleTermKey(event) {
+  if (event.key === "Enter") {
+    const input = event.target;
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    const termView = input.closest(".term-view");
+    const line = document.createElement("div");
+    line.innerHTML = '<span class="prompt">xgent@dev</span> <span style="color:#6C7086">~/ws/xgent</span> $ <span class="cmd">' + escapeHtml(cmd) + "</span>";
+    input.parentElement.insertBefore(line, input.parentElement.lastElementChild);
+    input.value = "";
+    termView.scrollTop = termView.scrollHeight;
+  }
+}
+
+/* ===== Git ===== */
+function stageFile(btn) {
+  const file = btn.closest(".git-file");
+  const name = file.querySelector(".gf-name").textContent;
+  const status = file.querySelector(".gf-status");
+  const stagedSection = document.querySelectorAll(".git-section")[0];
+  const stagedBody = stagedSection;
+  // 简单动画：移到暂存区
+  status.className = "gf-status M";
+  status.textContent = "M";
+  btn.onclick = unstageFile;
+  btn.onclick = function() { unstageFile(this); };
+  btn.setAttribute("title", "取消暂存");
+  btn.querySelector("svg").innerHTML = '<path d="M18 6L6 18M6 6l12 12"/>';
+  stagedBody.appendChild(file);
+  // 更新计数
+  updateGitCounts();
+  showToast("已暂存：" + name);
+}
+
+function unstageFile(btn) {
+  const file = btn.closest(".git-file");
+  const name = file.querySelector(".gf-name").textContent;
+  const unstagedSection = document.querySelectorAll(".git-section")[1];
+  const status = file.querySelector(".gf-status");
+  status.className = "gf-status M";
+  status.textContent = "M";
+  btn.onclick = function() { stageFile(this); };
+  btn.setAttribute("title", "暂存");
+  btn.querySelector("svg").innerHTML = '<path d="M12 5v14M5 12h14"/>';
+  unstagedSection.appendChild(file);
+  updateGitCounts();
+  showToast("已取消暂存：" + name);
+}
+
+function updateGitCounts() {
+  const sections = document.querySelectorAll(".git-section");
+  const stagedCount = sections[0].querySelectorAll(".git-file").length;
+  const unstagedCount = sections[1].querySelectorAll(".git-file").length;
+  const heads = document.querySelectorAll(".git-section-head .count");
+  if (heads[0]) heads[0].textContent = stagedCount;
+  if (heads[1]) heads[1].textContent = unstagedCount;
+}
+
+function gitCommit() {
+  const msg = $("commitMsg").value.trim();
+  if (!msg) {
+    showToast("请输入提交信息");
+    return;
+  }
+  $("gitCommitArea").style.display = "none";
+  $("gitCommitSuccess").classList.add("show");
+  showToast("提交成功：" + msg);
+  setTimeout(() => {
+    $("gitCommitSuccess").classList.remove("show");
+    $("gitCommitArea").style.display = "";
+    closeDrawer();
+  }, 2000);
+}
+
+/* ===== 文件树 ===== */
+const fileTreeData = [
+  { name: "crates", type: "folder", children: [
+    { name: "xgent_core", type: "folder", children: [
+      { name: "src", type: "folder", children: [
+        { name: "lib.rs", type: "rs" },
+        { name: "error.rs", type: "rs", badge: "A" },
+        { name: "types.rs", type: "rs" },
+        { name: "rpc.rs", type: "rs" }
+      ]},
+      { name: "Cargo.toml", type: "toml" }
+    ]},
+    { name: "xgent_agent", type: "folder", children: [
+      { name: "src", type: "folder", children: [
+        { name: "lib.rs", type: "rs" },
+        { name: "loop.rs", type: "rs", badge: "M" },
+        { name: "context.rs", type: "rs", badge: "M" }
+      ]},
+      { name: "tests", type: "folder", children: [
+        { name: "error_test.rs", type: "rs", badge: "U" }
+      ]},
+      { name: "Cargo.toml", type: "toml" }
+    ]},
+    { name: "xgent_daemon", type: "folder", children: [
+      { name: "src", type: "folder", children: [
+        { name: "main.rs", type: "rs" },
+        { name: "server.rs", type: "rs" }
+      ]},
+      { name: "Cargo.toml", type: "toml" }
+    ]},
+    { name: "xui", type: "folder", children: [
+      { name: "src", type: "folder", children: [
+        { name: "lib.rs", type: "rs" }
+      ]}
+    ]},
+    { name: "xgent_ui", type: "folder", children: [
+      { name: "src", type: "folder", children: [
+        { name: "lib.rs", type: "rs" }
+      ]}
+    ]},
+    { name: "xgent_app", type: "folder", children: [
+      { name: "src", type: "folder", children: [
+        { name: "main.rs", type: "rs" }
+      ]}
+    ]}
+  ]},
+  { name: "doc", type: "folder", children: [
+    { name: "design", type: "folder", children: [
+      { name: "architecture.md", type: "md" },
+      { name: "requirements.md", type: "md" }
+    ]},
+    { name: "plans", type: "folder", children: [
+      { name: "README.md", type: "md" }
+    ]}
+  ]},
+  { name: "Cargo.toml", type: "toml", badge: "M" },
+  { name: "AGENTS.md", type: "md" },
+  { name: "README.md", type: "md" }
+];
+
+const fileIcons = {
+  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  rs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  toml: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  md: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>'
+};
+
+function renderFileTree(items, container, level) {
+  items.forEach(item => {
+    const div = document.createElement("div");
+    const hasChildren = item.children && item.children.length > 0;
+    const iconClass = item.type === "folder" ? "folder" : item.type;
+    const badge = item.badge ? '<span class="ft-badge ' + item.badge + '">' + item.badge + "</span>" : "";
+
+    if (hasChildren) {
+      div.className = "ft-item";
+      div.innerHTML =
+        '<span class="ft-chevron">▶</span>' +
+        '<span class="ft-icon ' + iconClass + '">' + (fileIcons[item.type] || fileIcons.rs) + "</span>" +
+        '<span class="ft-name">' + item.name + "</span>" + badge;
+      const childContainer = document.createElement("div");
+      childContainer.className = "ft-children";
+      div.onclick = function(e) {
+        e.stopPropagation();
+        const chev = this.querySelector(".ft-chevron");
+        chev.classList.toggle("open");
+        childContainer.classList.toggle("collapsed");
+      };
+      container.appendChild(div);
+      renderFileTree(item.children, childContainer, level + 1);
+      container.appendChild(childContainer);
+    } else {
+      div.className = "ft-item";
+      div.style.paddingLeft = (level * 0 + 8) + "px";
+      div.innerHTML =
+        '<span style="width:14px;display:inline-block"></span>' +
+        '<span class="ft-icon ' + iconClass + '">' + (fileIcons[item.type] || fileIcons.rs) + "</span>" +
+        '<span class="ft-name">' + item.name + "</span>" + badge;
+      div.onclick = function(e) {
+        e.stopPropagation();
+        showToast("打开文件：" + item.name);
+      };
+      container.appendChild(div);
+    }
+  });
+}
+
+/* ===== 命令面板项点击 ===== */
+document.addEventListener("click", function(e) {
+  const item = e.target.closest(".palette-item");
+  if (item) {
+    const action = item.dataset.action;
+    if (action) executePaletteAction(action);
+  }
+});
+
+/* ===== 键盘快捷键 ===== */
+document.addEventListener("keydown", function(e) {
+  // Esc 关闭各种浮层
+  if (e.key === "Escape") {
+    if ($("paletteOverlay").classList.contains("open")) { closePalette({ target: $("paletteOverlay") }); return; }
+    if ($("confirmModal").classList.contains("open")) { closeModal(); return; }
+    if (document.querySelector(".drawer.open")) { closeDrawer(); return; }
+    closeDropdowns();
+  }
+
+  const ctrl = e.ctrlKey || e.metaKey;
+
+  // Ctrl+N — 新建会话
+  if (ctrl && e.key === "n") {
+    e.preventDefault();
+    newSession();
+    return;
+  }
+  // Ctrl+Shift+P — 命令面板（或插件）
+  if (ctrl && e.shiftKey && (e.key === "p" || e.key === "P")) {
+    e.preventDefault();
+    openPalette();
+    return;
+  }
+  // Ctrl+1 — 对话
+  if (ctrl && e.key === "1") {
+    e.preventDefault();
+    railAction("chat");
+    return;
+  }
+  // Ctrl+2 — 文件
+  if (ctrl && e.key === "2") {
+    e.preventDefault();
+    railAction("files");
+    return;
+  }
+  // Ctrl+Shift+F — 搜索
+  if (ctrl && e.shiftKey && (e.key === "f" || e.key === "F")) {
+    e.preventDefault();
+    railAction("search");
+    return;
+  }
+  // Ctrl+Shift+G — Git
+  if (ctrl && e.shiftKey && (e.key === "g" || e.key === "G")) {
+    e.preventDefault();
+    railAction("git");
+    return;
+  }
+  // Ctrl+H — 历史
+  if (ctrl && e.key === "h") {
+    e.preventDefault();
+    railAction("history");
+    return;
+  }
+  // Ctrl+` — 终端
+  if (ctrl && e.key === "`") {
+    e.preventDefault();
+    railAction("terminal");
+    return;
+  }
+  // Ctrl+Shift+T — 主题
+  if (ctrl && e.shiftKey && (e.key === "t" || e.key === "T")) {
+    e.preventDefault();
+    toggleTheme();
+    return;
+  }
+  // Enter in palette — 执行第一项
+  if (e.key === "Enter" && $("paletteOverlay").classList.contains("open")) {
+    const active = document.querySelector(".palette-item.active");
+    if (active) {
+      e.preventDefault();
+      executePaletteAction(active.dataset.action);
+    }
+    return;
+  }
+  // Arrow keys in palette
+  if (($("paletteOverlay").classList.contains("open")) && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    e.preventDefault();
+    const items = Array.from(document.querySelectorAll(".palette-item")).filter(i => i.style.display !== "none");
+    if (items.length === 0) return;
+    let curIdx = items.findIndex(i => i.classList.contains("active"));
+    if (curIdx < 0) curIdx = 0;
+    items[curIdx].classList.remove("active");
+    if (e.key === "ArrowDown") curIdx = (curIdx + 1) % items.length;
+    else curIdx = (curIdx - 1 + items.length) % items.length;
+    items[curIdx].classList.add("active");
+    items[curIdx].scrollIntoView({ block: "nearest" });
+    return;
+  }
+});
+
+/* ===== 初始化 ===== */
+(function init() {
+  // 渲染文件树
+  const tree = $("fileTree");
+  if (tree) renderFileTree(fileTreeData, tree, 0);
+
+  // 命令面板输入框 Enter / 方向键已在全局 keydown 中处理
+  // 对话面板初始滚动到底
+  setTimeout(() => {
+    const conv = $("conversation");
+    if (conv) conv.scrollTop = conv.scrollHeight;
+  }, 100);
+
+  // 状态栏 token 模拟递增
+  let tokenCount = 2341;
+  setInterval(() => {
+    tokenCount += Math.floor(Math.random() * 3);
+    $("statusModel").textContent = $("modelLabel").textContent + " · " + tokenCount.toLocaleString() + " tokens";
+  }, 5000);
+})();
+</script>
+</body>
+</html>
