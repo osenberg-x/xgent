@@ -120,22 +120,6 @@ pub struct Theme {
     /// 标点 #8A8F98（编辑器高亮链消费，勿删——方案 §4.1）
     pub punc: Color,
 
-    // ===== 兼容旧字段（M1-T7 迁移引用、M1-T8 删除；新代码禁用）=====
-    /// 旧·面板底（= surface）
-    pub panel: Color,
-    /// 旧·顶/状态栏底（= surface）
-    pub bar: Color,
-    /// 旧·代码底（= code_bg）
-    pub deep: Color,
-    /// 旧·悬停底（= hover）
-    pub hover_bg: Color,
-    /// 旧·图标底（= icon_bg）
-    pub handle_active: Color,
-    /// 旧·用户消息气泡（= icon_bg）
-    pub bubble_user: Color,
-    /// 旧·助手消息气泡（= accent）
-    pub bubble_assistant: Color,
-
     // ===== 排版 =====
     /// 正文基准字号（逻辑像素）
     pub font_size: f32,
@@ -209,15 +193,6 @@ impl Theme {
             ty: Color::srgba(0.4353, 0.8275, 0.7804, 1.0),        // #6FD3C7
             com: Color::srgba(0.3843, 0.4000, 0.4275, 1.0),       // #62666D
             punc: Color::srgba(0.5412, 0.5608, 0.5961, 1.0),      // #8A8F98
-
-            // 兼容旧字段（值已对齐 v3 语义）
-            panel: Color::srgba(0.0588, 0.0627, 0.0667, 1.0),     // = surface
-            bar: Color::srgba(0.0588, 0.0627, 0.0667, 1.0),       // = surface
-            deep: Color::srgba(0.0510, 0.0549, 0.0627, 1.0),      // = code_bg
-            hover_bg: Color::srgba(1.0, 1.0, 1.0, 0.05),          // = hover
-            handle_active: Color::srgba(1.0, 1.0, 1.0, 0.06),     // = icon_bg
-            bubble_user: Color::srgba(1.0, 1.0, 1.0, 0.06),       // = icon_bg
-            bubble_assistant: Color::srgba(0.3686, 0.4157, 0.8235, 1.0), // = accent
 
             font_size: 14.0,
         }
