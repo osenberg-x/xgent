@@ -5,7 +5,7 @@
 //! 经 `ImageNode.color` 乘法染色。hover 一律走 [`HoverTint`] 数据驱动单系统，
 //! 禁止逐组件写专用 hover 系统（方案 §7.1）。
 
-use bevy::ecs::hierarchy::ChildSpawner;
+use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::prelude::*;
 use bevy::text::{FontFeatureTag, FontFeatures, FontSize, FontWeight, LetterSpacing, LineHeight};
 use std::collections::HashMap;
@@ -237,7 +237,7 @@ impl UiKit<'_> {
     /// ghost 按钮：`subtle` 底 + `border` + 6px 圆角 + 图标 + 文本（SMALL/510）。
     pub fn ghost_button(
         &self,
-        parent: &mut ChildSpawner,
+        parent: &mut ChildSpawnerCommands,
         label: &str,
         icon_name: &str,
     ) -> Entity {
@@ -271,7 +271,7 @@ impl UiKit<'_> {
     }
 
     /// primary 按钮：`accent` 底白字（hover `accent_hover`）。
-    pub fn primary_button(&self, parent: &mut ChildSpawner, label: &str, icon_name: &str) -> Entity {
+    pub fn primary_button(&self, parent: &mut ChildSpawnerCommands, label: &str, icon_name: &str) -> Entity {
         parent
             .spawn((
                 Button,
@@ -301,7 +301,7 @@ impl UiKit<'_> {
     }
 
     /// 图标钮（34px 方形圆角 6，透明底；`tip` 为 tooltip 文案）。
-    pub fn icon_button(&self, parent: &mut ChildSpawner, icon_name: &str, tip: &str) -> Entity {
+    pub fn icon_button(&self, parent: &mut ChildSpawnerCommands, icon_name: &str, tip: &str) -> Entity {
         parent
             .spawn((
                 Button,
@@ -328,7 +328,7 @@ impl UiKit<'_> {
     }
 
     /// 胶囊 pill（9999 圆角、透明底 + `border`，SMALL/510）。
-    pub fn pill(&self, parent: &mut ChildSpawner, label: &str) -> Entity {
+    pub fn pill(&self, parent: &mut ChildSpawnerCommands, label: &str) -> Entity {
         parent
             .spawn((
                 Node {
@@ -355,7 +355,7 @@ impl UiKit<'_> {
     }
 
     /// kbd 小徽章（`icon_bg` 底 + `border`，等宽 MICRO）。
-    pub fn kbd(&self, parent: &mut ChildSpawner, label: &str) -> Entity {
+    pub fn kbd(&self, parent: &mut ChildSpawnerCommands, label: &str) -> Entity {
         parent
             .spawn((
                 Node {
@@ -380,7 +380,7 @@ impl UiKit<'_> {
     }
 
     /// 大写分区标签（TINY/510 + 正字距）。
-    pub fn section_label(&self, parent: &mut ChildSpawner, label: &str) -> Entity {
+    pub fn section_label(&self, parent: &mut ChildSpawnerCommands, label: &str) -> Entity {
         parent.spawn((
             Text::new(label.to_string()),
             TextFont {
@@ -396,7 +396,7 @@ impl UiKit<'_> {
     }
 
     /// 单色图标节点（便捷重导出）。
-    pub fn icon(&self, parent: &mut ChildSpawner, name: &str, px_size: f32, color: Color) -> Entity {
+    pub fn icon(&self, parent: &mut ChildSpawnerCommands, name: &str, px_size: f32, color: Color) -> Entity {
         parent.spawn(icon(self.icons, name, px_size, color)).id()
     }
 }
