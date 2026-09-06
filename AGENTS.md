@@ -187,6 +187,7 @@ xgent_app → 组装所有 UI 侧 crate
 6. **产出文档放 doc/**：生成的设计/计划类文档放 `doc/` 对应分类目录（见第 2 节），不放项目根目录。
 7. **遗留清理**：根目录 `src/main.rs` 是遗留 Hello world，按计划应删除（xgent_app 接管入口）。
 8. **同步开发指南**：后续实现新功能或功能有变化，都需要更新 `doc/dev-tutorial.md`（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点）。新增/变更功能、crate、ADR、trait 时必须同步该文档对应章节，避免文档与代码脱节。
+9. **UI 视觉工作用 design-md**：UI 重构、新增界面、调整视觉风格时，使用项目 skill `design-md`（`.agents/skills/design-md/`，75 套 DESIGN.md 设计系统参考库），按其映射规则落地到 `xgent_ui::theme`。
 
 ---
 

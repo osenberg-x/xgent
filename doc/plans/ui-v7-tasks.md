@@ -1,0 +1,457 @@
+# UI v7（Linear 基准）落地任务清单
+
+> 基于 [方案 v1.5](ui-v7-migration.md)（五轮评审定稿）、[ADR-0014](../decisions/0014-ui-视觉基准采用-linear-设计系统-v7-原型.md)、原型 [ui-prototype-v7.1.html](../design/ui-prototype-v7.html) 拆解。
+>
+> 状态：待执行（v1.4，四轮自查修订，见文末修订记录）· 任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账，方案文档不再随进度改动。
+
+---
+
+## 0. 执行原则
+
+1. **严格按期推进**：M1 → M2 → M3 →（M4 ∥ M5 可并行）→ M6 → M7；期内任务按编号顺序（有依赖标注的除外）。
+2. **每任务有验收证据**：非「编译通过」，而是可观察行为或对照物（截图/测试/grep 计数）。
+3. **提交粒度**：每任务一提交（消息中文、引用任务号如 `M1-T4`）；方案 §8.1 标注的三步提交任务除外。
+4. **每期收尾**：`cargo fmt && cargo clippy --workspace && cargo test --workspace` 全绿后才进下一期。
+5. **截图工具**：`ui-snapshot` feature（M2-T6 建成）下 F12 截主窗到 `target/snapshots/`，与原型浏览器截图人工对照。
+6. **就地回写**：实施中发现与方案不符的事实，改代码的同时在方案 §15 追加勘误（文档跟随代码）。
+
+## 0.1 依赖总览
+
+```
+M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─┬→ M4（会话区）─┬→ M6（overlay）─→ M7（收尾）
+                                                  └→ M5（上下文面板）┘
+硬门槛：M1-T3（CJK spike）不通过 → 停止，升级处理，不得带病铺开。
+风险标记任务：⚠ M3-T1（图标导出坑）、⚠ M5-T6（抽屉化，改动面最大，留独立提交便于回滚）。
+```
+
+---
+
+## M1 令牌与字体
+
+**目标**：全 UI 换 Linear 配色与 Inter 排版；结构字段就位；xui 语法色接通。此期不动任何布局结构。
+
+### M1-T1 字体资产入库
+**依赖**：无
+- [ ] 下载 Inter 可变字体（rsms/inter release 的 `InterVariable.ttf`），放 `crates/xgent_app/assets/fonts/Inter-Variable.ttf`，**连同 `OFL.txt` 许可**一并入库。
+- [ ] 确认文件完整性（`fc-scan` 或字体工具读出 wght 轴 100–900）。
+
+**验收**：资产文件在库、许可文件在库、axis 正确。
+
+### M1-T2 fonts.rs 字体模块
+**依赖**：M1-T1
+- [ ] **配置资产根目录（阻断级前提，先行）**：main.rs DefaultPlugins 的 `AssetPlugin` 增 `file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets")`——现状资产根是 CWD 相对 `assets/`（workspace 根运行时该目录不存在），AssetServer 实际不可用（现有代码全部绕开：字体直读 startup.rs:56-59、插件扫描 main.rs:182 用 CARGO_MANIFEST_DIR）。此后字体/图标统一走 AssetServer。
+- [ ] 新建 `xgent_ui/src/fonts.rs`：`UiFonts { ui, mono }` Resource + `FontPlugin`；Inter **经 AssetServer** 加载（失败 `warn!` 回退 `Handle::default()`，不 panic）；全局默认字体替换（`AssetId::default()` 现机制）指向 Inter。
+- [ ] `mono` 句柄由 `xgent_app/startup.rs` 现有 Menlo 加载注入（**保持直读**——系统文件非资产）；`load_system_font` 注释语义改为 mono。
+- [ ] 定义文本构造器：`ui_text(size, weight, color, line_height)` / `mono_text(size, color, line_height)`（含 cv01/ss03 FontFeatures、LetterSpacing 按档 0/-0.29）。
+- [ ] `theme.rs` 增 `type_scale`（8 档）+ `type_scale::line_height`（5 档）+ 圆角常量（MICRO 2/SMALL 4/CTRL 6/CARD 8/PANEL 12）——先只加不改旧值。
+
+**验收**：`cargo check -p xgent_ui -p xgent_app` 过；任意一个试验性 `ui_text` 调用在窗口中显示 Inter。
+
+### M1-T3 ⚠ CJK spike（硬门槛）
+**依赖**：M1-T2
+- [ ] 临时把一个常显文本（如顶栏标题）换成 `ui_text(...)`，`cargo run -p xgent_app`。
+- [ ] 检查：中文回退渲染（macOS PingFang）正常、无豆腐块；中英混排基线与字号观感正常；换行正常（CJK 分词无日志刷屏）。
+- [ ] 结果记入方案 §15（通过/问题/结论）。**不通过 → 停止后续任务**，回退默认字体并升级讨论（备选：主字体换系统栈）。
+
+**验收**：spike 结论已记录且为「通过」。
+
+### M1-T4 theme.rs 新增 v3 字段（提交①，旧字段并存）
+**依赖**：M1-T3 通过
+- [ ] 按方案 §4.1 增加全部新字段并赋 v7.1 值：`code_bg/subtle/input_bg/hover/active/icon_bg/border_hover/text_faint/accent_interactive/accent_hover/accent_glow/accent_text/st_ok_bg/st_pending_bg/st_fail_bg/st_info/st_info_bg/warm/warm_bg/tooltip_bg/tooltip_text/code_text`；`punc` 保留（值 #8A8F98）。
+- [ ] 旧字段同函数内**换值为 v3 语义**（bg/surface/elevated/line/border/text 三级/accent/st_*/overlay/kw…）：`bg=#08090A、surface=#0F1011、elevated=#191A1B、accent=#5E6AD2` 等，逐字段对照方案 §4.2 表。
+- [ ] `size` 常量更新：`TOP_BAR_H=52、STATUS_BAR_H=32、ACTIVITY_BAR_W→RAIL_W=52、CONTEXT_W_DEFAULT=720、CONTEXT_W_MIN=380、CHAT_MIN=520、CONTEXT_TABS_H=38、DRAWER_W=320、RESIZER_W=6`；`CHAT_SIDEBAR_W/FILE_PANEL_W/VIEW_TABS_H` 暂留（M2/M5 删）。**改名与引用更新须同提交**（`ACTIVITY_BAR_W` 调用点 layout.rs:126），保证本任务落完可编译。
+- [ ] `font_size 13.5→14.0`。
+
+**验收**：`cargo check --workspace` 过（只加不删，旧引用照常编译）；启动全 UI 已是新配色。
+
+### M1-T5 xui 语法色注入口
+**依赖**：M1-T4
+- [ ] `xui/src/text_editor/render.rs`：`EditorTheme` 增语法色字段组（`Option<Color>` 的 kw/fn_/str_/num/ty/com/punc/plain，None 回落现硬编码默认）。
+- [ ] `xui/src/text_editor/highlight.rs:224-240`：`span_color_for` 优先读 EditorTheme。
+- [ ] `Scrollbar` 默认色参数化（可注入，默认维持现值）。
+
+**验收**：`cargo check -p xui` 过；`cargo tree -p xui` 仍无 xgent_* 依赖。
+
+### M1-T6 宿主注入语法色
+**依赖**：M1-T5
+- [ ] `xgent_ui/src/editor/mod.rs:250-262` `sync_editor_theme`：从 `Theme` 注入语法色与 `code_bg`。
+- [ ] editor/tabs.rs:261,276 两处 tailwind 硬编码（GRAY_400 行号、AMBER_400 光标）改读 Theme（行号=`text_faint`、光标=`accent_interactive`）。
+
+**验收**：编辑器打开文件，行号/光标/高亮色随主题。
+
+### M1-T7 全模块引用迁移（提交②）
+**依赖**：M1-T4~T6
+- [ ] `bar` 6 处 → confirm_dialog.rs:168,294（改 `elevated`）、terminal/mod.rs:286,383,425（改 `surface`）、file_panel.rs:209（改 `surface`）。
+- [ ] `panel` 8 文件逐点判定（layout/confirm_dialog/command_palette/session_history/tool_panel/chat_panel/settings_panel/terminal/tabs）→ 面板底色改 `surface`、卡片底改 `subtle`。
+- [ ] `deep` 1 处（confirm_dialog.rs:244）→ `code_bg`；`hover_bg`→`hover`；`handle_active`→`icon_bg`（resize.rs:173-186 暂以 `accent_glow` 过渡，M2-T2 正式改）。
+- [ ] 本模块范围文本调用迁 `ui_text/mono_text`（M2 起随模块，本期只动触碰到的文件）。
+
+**验收**：`cargo check --workspace` 过；`grep -rn "theme\.bar\|theme\.panel\|theme\.deep\|hover_bg\|handle_active" crates/xgent_ui/src` 为 0。
+
+### M1-T8 删除旧字段（提交③）
+**依赖**：M1-T7
+- [ ] 删 `Theme` 的 `bar/panel/deep/bubble_user/bubble_assistant/hover_bg/handle_active`；保留 `punc`。
+- [ ] `CHAT_SIDEBAR_W` 引用改指 `CONTEXT_W_DEFAULT`（本任务只改引用；**常量删除定死在 M2-T1**）。
+
+**验收**：`cargo check --workspace && cargo test --workspace` 全绿；方案 §4.2「删除字段」清单全部消失。
+
+### M1-T9 期验收
+- [ ] §12.1 令牌单测落地（`dark()` 关键值断言 + text/bg 对比度 luma 断言）。
+- [ ] 截图对照：主界面/命令面板/确认弹窗三张，与原型同区无明显色差。
+- [ ] 三笔提交（①字段 ②迁移 ③删除）历史清晰。
+
+---
+
+## M2 骨架与拖拽
+
+**目标**：五列过渡布局 + 可拖拽面板 + 状态栏 32px。**面板默认展开 720px**。
+
+### M2-T1 layout.rs 五列过渡重排
+**依赖**：M1 期验收
+- [ ] MainArea 子节点序：`ActivityBar(52) → FilePanel(240) → **LeftHandle(6)** → Chat(flex) → RightHandle(6) → SideView(720)`；左手柄随文件面板暂留（M5-T6 一并移除）——见方案 §3 过渡形态，保持既有拖拽能力。
+- [ ] 高度替换：顶栏 `TOP_BAR_H(52)`、状态栏 `STATUS_BAR_H(32)`、活动栏 `RAIL_W(52)`；边框换 `line`（0.05）。
+- [ ] 背景层级：根/会话区 `theme.bg`，顶栏/活动栏/面板 `theme.surface`。
+- [ ] **`SideViewCollapsed` 默认 `false`**（layout.rs:52-53）——面板默认展开；`SideViewMarker` 节点初始 `Display::Flex`（layout.rs:192）与 handle_bundle 右手柄初始 `Display::Flex`（resize.rs:98-101）同步改。
+- [ ] `PanelWidths` 默认 `side_view=720`（M1 已备常量）；`CHAT_SIDEBAR_W` 常量在本任务删除（M1-T8 仅改引用，定死分工）；`FILE_PANEL_W` 仍被文件面板使用，归 M5-T6 删除。
+
+**验收**：启动即五列、右侧面板默认可见 720px；`toggle_panel_visibility` 折叠/展开不回归。
+
+### M2-T2 resize.rs 钳制/双击复位/视觉
+**依赖**：M2-T1
+- [ ] 常量：`SIDE_VIEW_MIN 200→380`、`CHAT_MIN 240→520`。
+- [ ] 启动与窗口 resize 统一钳制 `PanelWidths`（新系统：`innerWidth − RAIL_W − [file_panel] − CHAT_MIN` 为上限；五列过渡期含 file_panel 240，M5 后该项为 0——公式读实际子面板显隐，不硬编码）。
+- [ ] 双击复位：手柄 `Interaction` 300ms 内两次 Pressed → `side_view=CONTEXT_W_DEFAULT`。
+- [ ] 手柄视觉：hover/拖拽 → 底 `accent_glow` + 居中 2px `accent_interactive` 竖线（替换现 `handle_active` 纯色）；宽度 6px 不变。
+- [ ] 钳制逻辑纯函数化（如 `clamp_side_view(w, available)`），配边界单测：380 下限、上限=可用空间、过渡期含文件面板/四列后不含两套场景（方案 §12.2）。
+
+**验收**：拖拽平滑、双向钳制（380 / 余空间）、双击回 720；1440px 窗口启动无溢出（面板被钳到 ~622px）；`cargo test -p xgent_ui` 钳制用例过。
+
+### M2-T3 响应式折叠
+**依赖**：M2-T2
+- [ ] 新系统：窗口宽 <1100px → 置 `SideViewCollapsed(true)`；恢复由 rail 展开钮（M3-T5 建，先以快捷键/命令面板人工验证）。
+- [ ] 折叠状态变化走既有 `toggle_panel_visibility`，不另写显示逻辑。
+
+**验收**：缩窗 <1100px 面板自动收起；拉宽不自动展开（用户手动）。
+
+### M2-T4 最小窗口尺寸
+**依赖**：无（可提前）
+- [ ] `xgent_app/main.rs:203` WindowPlugin 增 `ResizeConstraints` min 1024×640。
+
+**验收**：窗口拖不过最小尺寸。
+
+### M2-T5 status_bar 32px 重排
+**依赖**：M2-T1
+- [ ] 高度 32；底 `surface`、顶边 `line`；pill 分段（右边框 `line` 分隔）。
+- [ ] 内容处置（方案 §8.9）：daemon 状态点 + provider·tokens + 成本占位 + spacer + companion 开关 + 会话 id（`#id · N 轮`，轮数自 `Conversation` 统计）；**删会话状态文本**（status_bar.rs:171 段）；**保留编码段**（status-encoding）。
+- [ ] 可点击仅 companion（切 `warm` 点亮态，M3 前暂用文字/星字符，M3 换图标）。
+- [ ] 本模块文本迁 `ui_text/mono_text`。
+
+**验收**：TokenUsage/daemon 状态联动不回归；截图对照原型状态栏。
+
+### M2-T6 ui-snapshot 截图工具
+**依赖**：M2-T1
+- [ ] `xgent_app` 增 feature `ui-snapshot`：F12 → `bevy::render::view::window::Screenshot`（主窗）存 `target/snapshots/{timestamp}.png`。
+- [ ] README 或 dev-tutorial 一行用法说明（正式 dev-tutorial 同步放 M7）。
+
+**验收**：F12 出图。
+
+### M2-T7 期验收
+- [ ] 拖拽/双击复位/折叠/响应式/最小窗口五项实测全过。
+- [ ] snapshot 两张（1600px、1440px）对照原型布局比例（52/…/6/720）。
+
+---
+
+## M3 图标与顶轨
+
+**目标**：矢量图标体系 + kit 基础件 + 顶栏/图标轨换新。
+
+### M3-T1 ⚠ 图标导出管线
+**依赖**：M2 期验收
+- [ ] 图标清单定稿（实盘 `doc/design/icons/` 现成 30 枚，需求 22 枚）：**现成 19 枚直接用**（chat/folder/clock(=history)/terminal/star/plus/x(=close)/check/copy/retry/refresh/send/command/panel-right/chevron-down/info/file/diff/dollar）；**补画 3 枚**：`gear`（设置）、`chevron-right`（展开指示——ImageNode 不能旋转，不能复用 chevron-down）、`alert-triangle`（或以 shield-alert 替代）；脚本顺带产出命名对照表。
+- [ ] 新建 `doc/design/icons/export_png.py`（cairosvg）：**渲染时 `stroke="currentColor"` 替换为 `#FFFFFF`**（乘法染色前提，方案 §6.1）→ `crates/xgent_app/assets/icons/{name}@2x.png`（24 viewBox、2x=48px）。
+- [ ] 抽查导出 PNG：描边白、底透明。
+
+**验收**：`assets/icons/` ≥20 枚白描边 PNG；脚本可重复执行。
+
+### M3-T2 kit.rs 基础件
+**依赖**：M3-T1
+- [ ] `IconAssets` Resource（启动经 AssetServer 加载 icons 目录——**资产根已由 M1-T2 配置**）+ `icon(name, px, color)` 构造（ImageNode + color 乘色）。
+- [ ] `HoverTint` 组件 + **单一全局系统**（方案 §7.1：Changed<Interaction> 三态换 BackgroundColor/BorderColor）。
+- [ ] `ghost_button / primary_button / pill / kbd_badge / section_label / icon_button / tooltip`（hover 500ms 延迟浮现——**M3-T5 rail 同期消费，必须本期交付**）构造器（规格对照方案 §9 表）。
+- [ ] 方案 §9 表中 `badge` 本期无用例、延后；`companion_button` 内联在 M3-T5 实现（单一使用点，不进 kit）。
+- [ ] 注册进 `XgentUiPlugin`（kit 子插件）。
+
+**验收**：demo 调用各件一次目检；`cargo check` 过。
+
+### M3-T3 top_bar 重排（52px）
+**依赖**：M3-T2
+- [ ] 元素序（方案 §8.2）：品牌块（28×28 `accent` 底 "X"，圆角 8）+ "XGent"（H3/590）｜项目名（`text_dim` 静态）｜新建会话 ghost 钮｜spacer｜agent pill｜provider/model pill｜设置钮（**保留现状行为**）｜命令面板钮。**移除 🕐 历史钮**（迁 rail）。
+- [ ] emoji（🕐🔍⚙）全换 icon；按钮接 `HoverTint`。
+- [ ] 高度 52、底 `surface`、底边 `line`；本模块文本迁构造器。
+- [ ] 按钮交互：**四类不动**（新建/provider/命令面板/设置，top_bar.rs:266-306）；**历史分支删除**——`HistoryButtonMarker` 查询与 `SessionHistoryState` 联动迁 rail（M3-T5），handler 同步清理。
+
+**验收**：截图对照原型顶栏；新建/设置/面板/模型交互全通；`grep -n "🕐\|🔍\|⚙" top_bar.rs` 为 0。
+
+### M3-T4 agent pill
+**依赖**：M3-T3
+- [ ] kit `agent_pill`：胶囊 9999、状态机映射 `ConversationStatus`（Idle→ok 点 / Thinking→accent 脉冲 / Streaming→accent 快脉冲 / ToolRunning→warning / 等待确认→warning）+ `ErrorMessage`→error。
+- [ ] 脉冲动画：仿 status_bar 正弦 alpha（1.2s/0.8s 周期），仅激活态驱动。
+
+**验收**：真实对话走 idle→thinking→streaming→done；**确认态**走一次写文件确认流（tool/confirm 态）；**错误态**以无效 API key 触发——五态全部见过。
+
+### M3-T5 rail 改造（activity_bar → rail）
+**依赖**：M3-T2
+- [ ] 宽 52（`RAIL_W`）；按钮 40×40 圆角 6、`HoverTint`。
+- [ ] 按钮集：对话 / 文件（drawer 开关，现 `Files` 行为） / 历史（开 session_history，见 M6-T4）/ 分隔线 / 终端（现 Terminal 行为）/ spacer / **展开面板钮**（`SideViewCollapsed` 为 true 或响应式收起时显示）/ companion（40 圆形 `warm` 底深色 star，激活环 M7）。**不放设置/搜索/Git/插件**。
+- [ ] `ActivityKind` 枚举调整（现四态 `{Files(默认), Editor, Terminal, Settings}`，activity_bar.rs:13-19，**无 Chat**）：**新增 `Chat`（`#[default]`，行为=关抽屉/清其他 active）与 `History`（开历史抽屉）**；移除 `Editor`（预览归上下文面板页签，M5）；Terminal 保留；Settings 去留随 M6-T5 定。
+- [ ] active 态：`accent_bg` 底 + `accent_interactive` 图标 + 左 3px 圆角竖条（现 2px border 模拟改独立节点）。
+- [ ] tooltip：hover 500ms 延迟，`tooltip_bg` 底 + 名称 + kbd。
+- [ ] emoji（📁📝🖥⚙）全换 icon；交互逻辑（activity_bar.rs:155-207）随按钮集适配。
+
+**验收**：截图对照原型 rail；文件/终端/历史切换全通；无 emoji。
+
+### M3-T6 期验收
+- [ ] `grep -rn "📁\|📝\|🖥\|⚙\|🕐\|🔍\|🔧" crates/xgent_ui/src` 为 0。
+- [ ] 顶栏 + rail 两张 snapshot 对照原型。
+
+---
+
+## M4 会话区（可与 M5 并行）
+
+**目标**：对话主区完整换新。
+
+### M4-T1 消息视觉
+**依赖**：M3 期验收
+- [ ] 消息组容器 max-width 820 居中（列表 padding 调整）。
+- [ ] 消息头：28×28 圆角 6 头像（user=`icon_bg`/"你"、agent=`accent`/"X"）+ 角色（SMALL/510）+ 时间（MICRO `text_faint`）。
+- [ ] 正文 BODY/400 `text_dim` 行高 1.6；inline code（反引号简单分段）：`icon_bg` 底 + `accent_interactive` + mono CAPTION；代码块：`code_bg` + `border` + 圆角 6 + mono。
+- [ ] 流式光标：`▍` + `accent_interactive`，`t%0.8<0.4`（替换现 `▋` 逻辑，chat_panel.rs:709-732）。
+
+**验收**：构造含中英/代码的消息对照原型消息区截图。
+
+### M4-T2 消息操作栏
+**依赖**：M4-T1
+- [ ] agent 消息容器挂 `Button`+`Interaction` 做 hover 检测；hover 时右上显 26px 钮组（`elevated`+`border`）。
+- [ ] 复制：`Clipboard::set_text`（Resource 已由 DefaultPlugins 提供）取消息正文；重试：现有 `RetryMessage` 路径。
+
+**验收**：hover 显隐正确；复制到系统剪贴板可粘贴；重试触发既有链路。
+
+### M4-T3 回到底部浮钮
+**依赖**：M4-T1
+- [ ] 读消息列表 `ScrollPosition`：偏离底 >200px 显浮钮（`elevated`+`border`，输入区上方居中）；点击回底。
+- [ ] 与 `StickToBottom` 共存验证（贴底时浮钮不闪现）。
+
+**验收**：向上翻页出钮、点击回底、贴底无钮。
+
+### M4-T4 工具卡视觉
+**依赖**：M4-T1
+- [ ] tool_panel 卡片：`subtle` 底 + `border` + 圆角 8；head hover→`hover`（HoverTint）；展开/折叠逻辑不动。
+- [ ] head：24px 圆角 4 图标块四色 tint（read=`st_info`/write=`st_pending`/search=`accent_interactive`/exec=`st_fail`，底用对应 `_bg`）+ 工具名（SMALL/510）+ 参数（mono CAPTION `text_muted`）+ 状态色 + 展开 `▸/▾`。
+- [ ] 结果条 `st_ok_bg/st_ok`（fail 同理）。
+- [ ] 🔧 替换。
+
+**验收**：真实工具调用（读文件/搜索/写文件确认）三卡样式对照原型；调用链路不回归。
+
+### M4-T5 welcome 空态
+**依赖**：M4-T1
+- [ ] 新建 `welcome.rs`：会话空态显示——64px `accent` 圆角 12 品牌块 + DISPLAY 标题 + 副标题 + 3 快捷卡（`subtle`+`border`，图标 tint `st_info_bg/accent_bg/st_ok_bg`）+ 最近会话 3 条。
+- [ ] 进入空态发 `ListSessionsMessage`；`SessionListMessage` 回填渲染；点击 `RestoreSessionMessage`。
+- [ ] 首 条 `UserInputMessage` 发出即隐藏（复用现 hidden 切换模式）。
+
+**验收**：新会话空态→欢迎页；点最近会话恢复；发消息切消息流。
+
+### M4-T6 context_scope 上下文条
+**依赖**：M4-T1
+- [ ] 新建 `context_scope.rs`：会话区顶部 38px 行（`surface` 底 + 底边 `line`）——「上下文」section_label + chips（胶囊 9999、透明底+`border`：文件图标 `st_pending`/目录 `accent_interactive`、CAPTION）+「+ 添加」虚线胶囊。
+- [ ] **只读展示**：聚合编辑器 tabs 已打开文件；「+ 添加」→ 打开文件抽屉（M5-T6 前暂开现 FilePanel 折叠切换）。无删除钮（方案 §8.10）。
+- [ ] 随条删除：`VIEW_TABS_H` 常量、`ConversationInfoMarker` 及其更新系统（chat_panel.rs:739-758）、失效 i18n 键 `chat-tab-label`、`conversation-tokens`。
+
+**验收**：开/关文件 chips 增减；原视图标签条（含 ConversationInfoMarker）已删除且信息按 §8.4/§8.9 处置。
+
+### M4-T7 输入卡
+**依赖**：M4-T1
+- [ ] `input_bg` 底 + `border` + 圆角 12；focus：`Outline` 3px `accent_glow` + 边框 `accent_interactive`（**实测 Outline 随圆角**；不随则回退外层节点，结论记 §15）。
+- [ ] 工具行：模式钮（`subtle` 6px，现 cycleMode 保留）+ 安全提示（`st_pending` icon+文案）+ spacer + Shift+Enter kbd 徽章 + token 计数（MICRO `text_faint`）+ 发送钮（`accent`/流式中 `st_fail` 停止态——现 abort 逻辑保留）。
+- [ ] 顺手改：空输入红边闪烁段（chat_panel.rs:674-707，本次改动面内）边框色换 `st_fail`——**本任务定为其归属**，M7-T1 不再重复。
+
+**验收**：输入/focus 环/发送/停止/空输入闪烁（`st_fail`）全链路。
+
+### M4-T8 qa chips 点击填入
+**依赖**：M4-T7
+- [ ] 快捷提示工具栏（chat_panel.rs:220-249）→ 胶囊 chips（HoverTint）；点击经 `ChatInputMarker` 定位、`EditableText.editor`（PlainEditor）赋值预设文案并聚焦（注意 generation 刷新）。
+
+**验收**：五枚 chips 点击后输入框出现对应前缀文案。
+
+### M4-T9 期验收
+- [ ] 三场景 snapshot（流式中/工具调用/空态）对照原型；`DeltaMessage/DoneMessage/Error/Retry/SessionCleared` 手工回归。
+
+---
+
+## M5 上下文面板（可与 M4 并行）
+
+**目标**：SideView 变三页签上下文面板；文件面板抽屉化；布局收四列。
+
+### M5-T1 页签条与状态机
+**依赖**：M3 期验收（需 icon/kit）
+- [ ] SideView 顶部 38px 页签条（`CONTEXT_TABS_H`）：预览 / 差异 / 终端（SMALL/510，active=`accent_interactive`+底部 2px 线）+ 右侧折叠钮（现有折叠行为）。
+- [ ] `SideViewContent` 增 `Diff` 变体；页签切换系统（Editor/Preview→预览页、Terminal→终端页）。
+- [ ] rail 终端按钮 → 切 Terminal 页并展开面板（现逻辑保留，落点改页签）。
+
+**验收**：三页签互切、折叠展开正常。
+
+### M5-T2 预览页归一
+**依赖**：M5-T1
+- [ ] Editor/Preview 两态归一为预览页（现编辑器主体保留）；外框底 `code_bg`。**归一影响面**：`Preview` 写入点 file_panel.rs:739（非代码文件打开流）、比较点 :832、消费点 editor/mod.rs:329——与 M5-T6 的 `OpenFileRequest` 改道是同一流程的两半，**先本任务归一变体、M5-T6 改道入口，顺序不可倒**。
+- [ ] 编辑器 tab 条降调：高 28、底 `code_bg`、去 emoji、仅文件名+关闭（双 tab 条 MVP 方案，合并标 P1）。
+- [ ] `editor.view` 热键 → 切预览页签（shortcuts.rs 处理器改目标）。
+
+**验收**：文件打开/编辑/多 tab/外部修改冲突链路不回归；Cmd+E 落预览页。
+
+### M5-T3 共享 line_diff 抽取
+**依赖**：无（可提前）
+- [ ] confirm_dialog.rs:53 `line_diff` 抽到 `xgent_ui/src/diff.rs`（纯函数化；confirm_dialog 无现存测试，**补基础用例 ≥3 例**：纯增/纯删/增删混合）；confirm_dialog 改调用共享版。
+
+**验收**：`cargo test -p xgent_ui` 过（新 diff 用例）；confirm 行为不变。
+
+### M5-T4 差异页
+**依赖**：M5-T1、M5-T3
+- [ ] 新建 `editor/diff_view.rs`：buffer 侧读 `TextEditor.rope`（pub，text_editor.rs:80）、磁盘侧走 `FileReadRequest`/`PreviewReadResult` 通道取原文件；调共享 line_diff。
+- [ ] 渲染：`code_bg` 底 + mono CAPTION、行号 `text_faint`、add=`str_`/del=`st_fail` + 行底 tint；无差异空态「无未保存更改」（i18n）。
+
+**验收**：改 buffer 后差异页实时反映；撤销后空态。
+
+### M5-T5 终端页样式
+**依赖**：M5-T1
+- [ ] tab 条并入 38px 页签（多 tab 保留在页内或下拉——按现状 TerminalTabs 结构最小改动）；输出区 `code_bg`、正文 mono CAPTION `text_dim`、prompt `st_ok`、命令 `text`；ANSI 调色板不动。
+
+**验收**：PTY 全链路（spawn/输出/输入/resize/多 tab）不回归；截图对照原型终端页。
+
+### M5-T6 ⚠ file_panel 抽屉化（独立提交，留回滚点）
+**依赖**：M5-T1
+- [ ] 新 Resource `FileDrawerOpen(bool)`；文件面板渲染改左侧 overlay drawer（宽 `DRAWER_W=320`、`surface` 底 + 右边框 + `overlay` 遮罩，点击遮罩关）。
+- [ ] rail 文件按钮 / `filepanel.toggle` 热键 → 切 `FileDrawerOpen`；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
+- [ ] 树条目视觉：圆角 4、hover=`hover`（迁 HoverTint）、选中=`accent_bg`+`accent_interactive`、图标矢量化；M/A/U 徽章不做。
+- [ ] 点文件行为变更：发 `OpenFileRequest` → 上下文面板预览页加载（原内嵌预览区取消）。
+- [ ] **布局收四列**：移除 FilePanel 列与左手柄（layout.rs:141-160），`apply_panel_widths` 文件分支删除；面板钳制公式去 file_panel 项。
+
+**验收**：抽屉开→浏览→点文件→预览页加载全链路；四列布局无残留列；回滚点提交存在。
+
+### M5-T7 期验收
+- [ ] 三页签 + diff 两态 + 抽屉链路 + 编辑/终端全回归；1440px 窗口四列下面板钳制复查（上限变为 inner−52−520）。
+
+---
+
+## M6 overlay 层
+
+**目标**：四类浮层 + toast 视觉对齐。
+
+### M6-T1 kit::toast
+**依赖**：M3-T2
+- [ ] 底部居中浮层：`tooltip_bg` 底 + `border` + 圆角 8 + MICRO 文案，2.2s 自动消失（Timer 驱动显隐）；`show_toast(msg)` 便捷入口。
+
+**验收**：调用出 toast、自动消失、连续调用刷新计时。
+
+### M6-T2 命令面板
+**依赖**：M6-T1
+- [ ] 底 `elevated` + 圆角 12 + 遮罩 `overlay`；**选中态改中性 `hover`**（改 handle_palette_click/重绘逻辑）；条目图标块 `icon_bg` + kbd 徽章；输入区底线 `border`。
+- [ ] 键盘导航（↑↓/Enter/Esc）不回归。
+
+**验收**：截图对照原型；全键盘操作一遍。
+
+### M6-T3 确认弹窗
+**依赖**：M5-T3
+- [ ] 圆角 12、`overlay` 遮罩、icon 块 `st_pending_bg/st_pending`；diff 区 `code_bg` + `border`、add=`str_`/del=`st_fail`；按钮：拒绝=ghost、确认=`accent` 底；`line_diff` 已切共享模块（M5-T3）。
+- [ ] Esc 拒绝 / Enter 确认不回归。
+
+**验收**：真实写文件确认流截图对照原型。
+
+### M6-T4 会话历史抽屉化
+**依赖**：M6-T1
+- [ ] 居中弹窗改左抽屉视觉（复用 M5-T6 drawer 结构：320px/遮罩/右边框）；条目 active=`accent_bg`+`accent_interactive` 边框；rail 历史/`session.history` 命令/热键入口指向抽屉。
+
+**验收**：三入口开抽屉、恢复会话链路不回归。
+
+### M6-T5 设置面板对齐
+**依赖**：M6-T1
+- [ ] `text_input_node`：`input_bg` 底 + `border` 圆角 6、focus `accent_interactive`；kind 按钮组/保存/模型项接 HoverTint 与按钮规范；`ActivityKind::Settings` 变体去留在此定（rail 已无设置钮，若枚举无其他引用则删）。
+
+**验收**：设置读写/语言切换/模型拉取链路不回归；截图对照。
+
+### M6-T6 文本构造器清点
+**依赖**：M6-T5
+- [ ] `grep -rn "TextFont {" crates/xgent_ui/src` 清零（构造器内部除外）；字号全部经 `type_scale`。
+
+**验收**：grep 计数 0；`cargo fmt && clippy && test` 全绿。
+
+---
+
+## M7 动效与收尾
+
+### M7-T1 剩余动效
+- [ ] companion 激活环（外圈嵌套 2px 描边节点，scale 1.0→1.3 + alpha 0.4→0，2s 循环）。
+- [ ] 空输入红边闪烁已随 M4-T7 换色（本任务仅核验）。
+- [ ] 动效清单（方案 §7.2）逐项打勾。
+
+**验收**：目检三处动效。
+
+### M7-T2 i18n 收口
+- [ ] 新 key 全量核对（zh-CN/en-US 成对）；失效键删除（`chat-tab-label` 等）；`tr` 调用无裸中文。
+
+**验收**：两 locale 文件 diff 干净；切语言全 UI 无死角。
+
+### M7-T3 快捷键收口
+- [ ] `editor.view`→预览页签、`filepanel.toggle`→抽屉 重映射核验；`HotkeyRegistry` 无冲突告警。
+
+**验收**：12 热键逐个实测表。
+
+### M7-T4 文档同步
+- [ ] `doc/dev-tutorial.md`：kit/fonts/diff_view/context_scope 模块、Theme v3 字段、ADR-0014 链接、ui-snapshot 用法。
+- [ ] 方案 §14 DoD 逐项核对；本文档状态改「已完成」。
+
+### M7-T5 终验
+- [ ] `cargo fmt && cargo clippy --workspace && cargo test --workspace` 全绿。
+- [ ] `ui-snapshot` 全区截图 vs 原型逐区走查（顶栏/rail/消息/工具卡/输入/面板三页/抽屉/四类 overlay/状态栏）。
+- [ ] `grep` 终检：无 emoji 图标、无游离硬编码色（terminal ANSI 除外）、无裸 TextFont、xui 无 xgent_* 依赖。
+
+**验收**：方案 §14 DoD 全勾，M7 完成即项目 DoD。
+
+---
+
+## 附：风险任务速查
+
+| 任务 | 风险 | 缓解 |
+|---|---|---|
+| M1-T3 CJK spike | 回退链路不达标 | 硬门槛，不过不铺开；备选系统字体栈 |
+| M3-T1 图标导出 | stroke 染色坑 | 脚本强制 `#FFFFFF` + 抽查验收 |
+| M4-T7 Outline | 不随圆角 | 预案：回退外层节点，结论记 §15 |
+| M5-T6 抽屉化 | 改动面最大 | 独立提交留回滚点；链路验收清单化 |
+| M2-T2 窗口钳制 | 过渡期/终态公式不同 | 公式读实际显隐，不硬编码面板集 |
+
+---
+
+## 修订记录
+
+**v1.1（自查修订）**：
+1. M2-T1 序列补 `LeftHandle`（原文文字说暂留、序列却漏列，自相矛盾）。
+2. M2-T1 常量收口拆分：`FILE_PANEL_W` 归 M5-T6 删除（文件面板 M2–M5 期间仍在用）。
+3. M2-T2 补钳制逻辑纯函数化 + 边界单测（方案 §12.2 此前未落成任务）。
+4. M3-T2 补 `tooltip` 组件（M3-T5 rail 同期消费）；注明 `badge` 延后、`companion_button` 内联于 M3-T5。
+5. M3-T3 「五类按钮不动」改为「四类不动 + 历史分支迁 rail」（top_bar.rs:266-270 实为 5 个 marker）。
+6. M3-T1 图标清单实盘定稿：现成 19 枚、补画 3 枚（gear/chevron-right/alert-triangle）、替代关系 close→x、history→clock。
+7. M3-T4 验收补确认态（写文件确认流）与错误态（无效 key）触发方式。
+8. M4-T6 认领 `VIEW_TABS_H` 常量、`ConversationInfoMarker` 系统、失效 i18n 键的删除。
+9. M5-T3 「现有测试迁移」改为「补基础用例 ≥3 例」——confirm_dialog 实无 line_diff 测试（grep 证实仅有定义与调用）。
+
+**v1.2（第二轮自查修订）**——切面：编译连续性逐任务模拟、枚举/常量涟漪清单、归属消歧。
+1. M3-T5 枚举调整补全：`ActivityKind` 现无 Chat 变体（activity_bar.rs:13-19 实读）——**新增 Chat(默认)/History**、移除 Editor、Settings 随 M6-T5。
+2. M5-T2 列明 Preview 归一影响面（file_panel.rs:739/:832、editor/mod.rs:329），并与 M5-T6 定死先后（先归一变体、后改道入口）。
+3. M1-T4 改名与引用更新同提交（`ACTIVITY_BAR_W` 调用点 layout.rs:126），保「任务落完可编译」。
+4. `CHAT_SIDEBAR_W` 删除归属定死：M1-T8 只改引用、M2-T1 删常量。
+5. 空输入红边闪烁归属定死：M4-T7 顺手换色、M7-T1 仅核验。
+
+**v1.3（第三轮自查修订）**——切面：资产加载的物理前提。
+1. **M1-T2 新增阻断级子任务**：工程未配置 AssetPlugin 资产根（默认 CWD 相对 `assets/`，workspace 根运行不存在），且现有代码全部绕开 AssetServer——不配置则 M1 字体加载、M3 图标加载静默失败。修复：`AssetPlugin.file_path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets")`，Inter 改走 AssetServer，Menlo 保持直读。
+2. M3-T2 IconAssets 标注依赖 M1-T2 资产根配置。
+
+**v1.4（第四轮自查修订）**：
+1. M4-T6 失效键清单补 `conversation-tokens`（ConversationInfo 系统删除后失效；方案 v1.7 同步）。

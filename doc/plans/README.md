@@ -76,3 +76,10 @@ xgent_agent ← xgent_ui
 - 实现要点
 - 验证方法（编译检查 + 最小测试）
 - 完成后下一步
+
+## 后续迭代计划
+
+| 计划 | 文件 | 状态 |
+|:---|:---|:---|
+| O1~O10 优化落地 | `optimization-from-omp.md` | 已全部完成 |
+| UI v7（Linear 视觉基准）重构 | `ui-v7-migration.md`（方案）+ `ui-v7-tasks.md`（任务台账，唯一进度源） | 待实施 |
