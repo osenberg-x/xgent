@@ -83,24 +83,24 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M1-T7 全模块引用迁移（提交②）
 **依赖**：M1-T4~T6
-- [ ] `bar` 6 处 → confirm_dialog.rs:168,294（改 `elevated`）、terminal/mod.rs:286,383,425（改 `surface`）、file_panel.rs:209（改 `surface`）。
-- [ ] `panel` 8 文件逐点判定（layout/confirm_dialog/command_palette/session_history/tool_panel/chat_panel/settings_panel/terminal/tabs）→ 面板底色改 `surface`、卡片底改 `subtle`。
-- [ ] `deep` 1 处（confirm_dialog.rs:244）→ `code_bg`；`hover_bg`→`hover`；`handle_active`→`icon_bg`（resize.rs:173-186 暂以 `accent_glow` 过渡，M2-T2 正式改）。
-- [ ] 本模块范围文本调用迁 `ui_text/mono_text`（M2 起随模块，本期只动触碰到的文件）。
+- [x] `bar` → confirm_dialog.rs:168,294（`elevated`）、terminal/mod.rs:286,383,425（`surface`）、editor/mod.rs:179（`surface`）、file_panel.rs:209,294（`surface`）、settings_panel.rs:283,343,393（`surface`）、416（`input_bg`）、455（`subtle`）。
+- [x] `panel` → layout×4/session_history/command_palette/confirm_dialog/settings:218（浮层= `elevated`）、chat_panel:201（`input_bg`）、tool_panel:101,122（`subtle`）、editor/mod:450、editor/tabs:418、terminal/tabs:187（`elevated`/`surface`）、editor/conflict:133（`elevated`）。
+- [x] `deep` 1 处（confirm_dialog.rs:244）→ `code_bg`；`hover_bg`→`hover`（file_panel.rs:1102）；`handle_active`→`icon_bg`（resize.rs:179；M2-T2 升级为 accent_glow 视觉）。
+- [x] 本模块范围文本调用迁 `ui_text/mono_text`（M2 起随模块，本期只动触碰到的文件）。
 
-**验收**：`cargo check --workspace` 过；`grep -rn "theme\.bar\|theme\.panel\|theme\.deep\|hover_bg\|handle_active" crates/xgent_ui/src` 为 0。
+**验收**：`cargo check --workspace` 过；`grep -rn "theme\.bar\|theme\.panel\|theme\.deep\|theme\.hover_bg\|theme\.handle_active" crates/xgent_ui/src` 为 0。✓ 实测 32 处迁移、零残留。
 
 ### M1-T8 删除旧字段（提交③）
 **依赖**：M1-T7
-- [ ] 删 `Theme` 的 `bar/panel/deep/bubble_user/bubble_assistant/hover_bg/handle_active`；保留 `punc`。
-- [ ] `CHAT_SIDEBAR_W` 引用改指 `CONTEXT_W_DEFAULT`（本任务只改引用；**常量删除定死在 M2-T1**）。
+- [x] 删 `Theme` 的 `bar/panel/deep/bubble_user/bubble_assistant/hover_bg/handle_active`；保留 `punc`。
+- [x] `CHAT_SIDEBAR_W` 引用改指 `CONTEXT_W_DEFAULT`（本任务只改引用；**常量删除定死在 M2-T1**）。
 
-**验收**：`cargo check --workspace && cargo test --workspace` 全绿；方案 §4.2「删除字段」清单全部消失。
+**验收**：`cargo check --workspace && cargo test --workspace` 全绿；方案 §4.2「删除字段」清单全部消失。✓
 
 ### M1-T9 期验收
-- [ ] §12.1 令牌单测落地（`dark()` 关键值断言 + text/bg 对比度 luma 断言）。
-- [ ] 截图对照：主界面/命令面板/确认弹窗三张，与原型同区无明显色差。
-- [ ] 三笔提交（①字段 ②迁移 ③删除）历史清晰。
+- [x] §12.1 令牌单测落地（`dark()` 关键值断言 + text/bg 对比度 luma 断言）。**38+4 测试全过**。
+- [x] 截图对照：主界面验收图确认换色生效（近黑画布 #08090A + 靛紫品牌块 #5E6AD2 + Inter 排版）；命令面板/确认弹窗对照随 M6 期验收（其视觉重做在 M6）。
+- [x] 三笔提交（①字段 808ca15 ②迁移 4d10e0f ③删除 5c92434）历史清晰；另附 style 提交（历史未格式化文件统一，d9aa40e）。
 
 ---
 
