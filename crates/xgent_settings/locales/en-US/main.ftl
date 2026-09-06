@@ -136,3 +136,16 @@ history-restore-failed = Restore failed: session file missing or corrupted
 status-session = #{ $id } · { $rounds } rounds
 status-companion-on = ★ companion on
 status-companion-off = ☆ companion off
+
+## v7 qa quick chips (M4-T8)
+qa-explain = Explain
+qa-explain-prompt = Please explain the logic and design of the following code:
+qa-refactor = Refactor
+qa-refactor-prompt = Please refactor the following code for better structure and readability:
+qa-test = Generate tests
+qa-test-prompt = Please generate unit tests for the code in context:
+qa-fix = Fix issues
+qa-fix-prompt = Please analyze and fix the following issues:
+qa-review = Code review
+qa-review-prompt = Please review the code in context:
+

@@ -6,7 +6,8 @@
 //! 订阅 agent 的 [`DeltaMessage`] 累加到当前助手消息节点；[`DoneMessage`] 时把当前消息
 //! 固化为历史消息节点并清空当前。
 
-use bevy::input_focus::AutoFocus;
+use bevy::clipboard::Clipboard;
+use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, LineHeight};
 
@@ -17,6 +18,9 @@ use xgent_agent::{
 use xui::input::{ChatInput, ChatInputSubmitted};
 use xui::scroll_area::{ScrollArea, StickToBottom};
 
+use crate::fonts::ui_text;
+use crate::i18n::tr;
+use crate::kit::{HoverTint, icon};
 use crate::layout::ChatPanelMarker;
 use crate::status_bar::TokenUsage;
 use crate::theme::{Theme, radius, space, type_scale};
@@ -27,6 +31,31 @@ pub struct MessageListMarker;
 /// 当前正在流式累加的助手消息文本节点。
 #[derive(Component, Default)]
 pub struct CurrentAssistantText;
+
+/// 回到底部浮钮标记。
+#[derive(Component, Default)]
+pub struct BackToBottomMarker;
+
+/// agent 历史消息「复制」按钮标记（携带全文，点击写剪贴板）。
+#[derive(Component, Default)]
+pub struct CopyActionMarker {
+    pub text: String,
+}
+
+/// qa 快捷 chips（点击填入输入框；key 为 i18n prompt 键）。
+#[derive(Component)]
+pub struct QaChipMarker {
+    pub key: &'static str,
+}
+
+/// qa 快捷动作表（标签键, 提示词键）。
+const QA_ACTIONS: &[(&str, &str)] = &[
+    ("qa-explain", "qa-explain-prompt"),
+    ("qa-refactor", "qa-refactor-prompt"),
+    ("qa-test", "qa-test-prompt"),
+    ("qa-fix", "qa-fix-prompt"),
+    ("qa-review", "qa-review-prompt"),
+];
 
 /// 对话输入框实体标记。
 #[derive(Component, Default)]
@@ -55,6 +84,8 @@ pub struct ChatPanelEntities {
     pub message_list: Option<Entity>,
     pub current_text: Option<Entity>,
     pub input: Option<Entity>,
+    /// 回到底部浮钮（M4-T3）。
+    pub back_to_bottom: Option<Entity>,
 }
 
 /// 对话面板插件。
@@ -64,6 +95,15 @@ impl Plugin for ChatPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChatPanelEntities>()
             .add_systems(Startup, spawn_chat_panel.after(crate::layout::spawn_layout))
+            .add_systems(
+                Update,
+                (
+                    update_input_focus_ring,
+                    update_back_to_bottom,
+                    handle_qa_chips,
+                    update_msg_actions,
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -302,7 +342,47 @@ fn spawn_chat_panel(
         })
         .id();
 
-    // inputbar 容器（渐变背景模拟 + 居中限制宽度）
+    // qa 快捷 chips 行（v7.1：点击填入输入框，M4-T8）
+    let qa_row = commands
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: px(space::SM),
+            margin: UiRect::bottom(px(space::XS)),
+            flex_shrink: 0.0,
+            ..default()
+        },))
+        .id();
+    for (label_key, prompt_key) in QA_ACTIONS {
+        let chip = commands
+            .spawn((
+                Button,
+                Node {
+                    padding: UiRect::horizontal(px(space::SM)),
+                    margin: UiRect::right(px(space::XS)),
+                    border_radius: BorderRadius::MAX,
+                    border: UiRect::all(px(1.0)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                BorderColor::all(theme.border),
+                HoverTint::ghost(&theme),
+                QaChipMarker { key: prompt_key },
+            ))
+            .with_children(|c| {
+                c.spawn(ui_text(
+                    tr(&loc, label_key).to_string(),
+                    type_scale::MICRO,
+                    510,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ));
+            })
+            .id();
+        commands.entity(qa_row).add_child(chip);
+    }
+
+    // inputbar 容器（浮动卡风格）
     let inputbar = commands
         .spawn((
             Node {
@@ -319,19 +399,52 @@ fn spawn_chat_panel(
             },
             BackgroundColor(theme.surface),
         ))
+        .add_child(qa_row)
         .add_child(input_entity)
         .add_child(toolbar)
+        .id();
+
+    // 回到底部浮钮（M4-T3；默认隐藏，update_back_to_bottom 控显隐）
+    let back_to_bottom = commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(150.0),
+                left: Val::Percent(50.0),
+                width: px(36.0),
+                height: px(36.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::MAX,
+                border: UiRect::all(px(1.0)),
+                display: Display::None,
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(theme.elevated),
+            BorderColor::all(theme.border),
+            Text::new("▼"),
+            TextFont {
+                font_size: FontSize::Px(type_scale::MICRO),
+                ..default()
+            },
+            TextColor(theme.text_dim),
+            BackToBottomMarker,
+        ))
         .id();
 
     commands
         .entity(panel)
         .add_child(viewtabs)
         .add_child(message_list)
-        .add_child(inputbar);
+        .add_child(inputbar)
+        .add_child(back_to_bottom);
 
     entities.message_list = Some(message_list);
     entities.current_text = Some(current_text);
     entities.input = Some(input_entity);
+    entities.back_to_bottom = Some(back_to_bottom);
 }
 
 /// 用户提交输入时，在消息列表中 spawn 用户消息（全宽行式布局）。
@@ -440,6 +553,7 @@ fn finalize_on_done(
     mut commands: Commands,
     theme: Res<Theme>,
     loc: Res<xgent_settings::Localizer>,
+    icons: Res<crate::kit::IconAssets>,
 ) {
     let Some(current) = entities.current_text else {
         return;
@@ -506,14 +620,36 @@ fn finalize_on_done(
                             TextColor(theme.text),
                         ));
                         body.spawn((
-                            Text::new(content),
+                            Text::new(content.clone()),
                             TextFont {
                                 font_size: FontSize::Px(font),
                                 ..default()
                             },
                             TextColor(theme.text_dim),
+                            LineHeight::RelativeToFont(type_scale::line_height::BODY),
                         ));
                     });
+                // 操作栏（右上常显：复制到剪贴板；v7.1 悬停显隐留 span 重构）
+                row.spawn((
+                    Button,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: px(0.0),
+                        right: px(0.0),
+                        padding: UiRect::all(px(space::XS)),
+                        border_radius: BorderRadius::all(px(radius::SMALL)),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    BackgroundColor(Color::NONE),
+                    HoverTint::ghost(&theme),
+                    CopyActionMarker {
+                        text: content.clone(),
+                    },
+                ))
+                .with_children(|bar| {
+                    bar.spawn(icon(&icons, "copy", 12.0, theme.text_faint));
+                });
             });
     });
     commands.entity(current).insert(Text::new(String::new()));
@@ -812,5 +948,118 @@ fn update_token_hint(
     };
     if text.0 != label {
         text.0 = label;
+    }
+}
+
+/// 输入卡 focus 环（M4-T7）：聚焦时 `Outline` 3px `accent_glow` + 边框 `accent_interactive`。
+fn update_input_focus_ring(
+    mut commands: Commands,
+    focus: Res<InputFocus>,
+    theme: Res<Theme>,
+    q_input: Query<Entity, With<ChatInputMarker>>,
+    q_border: Query<&BorderColor, With<ChatInputMarker>>,
+    q_outline: Query<Option<&Outline>, With<ChatInputMarker>>,
+) {
+    let Ok(entity) = q_input.single() else {
+        return;
+    };
+    let focused = focus.get() == Some(entity);
+    let Ok(border) = q_border.get(entity) else {
+        return;
+    };
+    let line = if focused {
+        theme.accent_interactive
+    } else {
+        theme.border
+    };
+    let want_border = BorderColor::all(line);
+    if *border != want_border {
+        commands.entity(entity).insert(want_border);
+    }
+    let want_outline = focused.then_some(Outline {
+        width: Val::Px(3.0),
+        offset: Val::Px(0.0),
+        color: theme.accent_glow,
+    });
+    let has = matches!(q_outline.get(entity), Ok(Some(_)));
+    match (want_outline, has) {
+        (Some(o), false) => {
+            commands.entity(entity).insert(o);
+        }
+        (None, true) => {
+            commands.entity(entity).remove::<Outline>();
+        }
+        (Some(o), true) => {
+            if let Ok(Some(cur)) = q_outline.get(entity)
+                && *cur != o
+            {
+                commands.entity(entity).insert(o);
+            }
+        }
+        (None, false) => {}
+    }
+}
+
+/// 回到底部浮钮（M4-T3）：上滚（scroll.y > 1）显现；点击回底。
+fn update_back_to_bottom(
+    entities: Res<ChatPanelEntities>,
+    mut q_scroll: Query<&mut ScrollPosition, With<MessageListMarker>>,
+    mut q_node: Query<&mut Node, With<BackToBottomMarker>>,
+    q_btn: Query<&Interaction, (With<BackToBottomMarker>, Changed<Interaction>)>,
+) {
+    let Some(list) = entities.message_list else {
+        return;
+    };
+    let Some(btn) = entities.back_to_bottom else {
+        return;
+    };
+    let Ok(mut scroll) = q_scroll.get_mut(list) else {
+        return;
+    };
+    let show = scroll.y > 1.0;
+    if let Ok(mut node) = q_node.get_mut(btn)
+        && (node.display == Display::Flex) != show
+    {
+        node.display = if show { Display::Flex } else { Display::None };
+    }
+    for interaction in q_btn.iter() {
+        if *interaction == Interaction::Pressed {
+            scroll.y = 1.0e6; // bevy 滚动系统会钳到有效范围
+        }
+    }
+}
+
+/// qa chips 点击（M4-T8）：清空输入框并填入提示词。
+fn handle_qa_chips(
+    mut q: Query<(&Interaction, &QaChipMarker), (Changed<Interaction>, With<Button>)>,
+    entities: Res<ChatPanelEntities>,
+    loc: Res<xgent_settings::Localizer>,
+    mut q_input: Query<&mut EditableText, With<ChatInputMarker>>,
+) {
+    let Some(input) = entities.input else {
+        return;
+    };
+    for (interaction, marker) in q.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Ok(mut editable) = q_input.get_mut(input) {
+            editable.clear();
+            editable.queue_edit(bevy::text::TextEdit::Insert(
+                crate::i18n::tr(&loc, marker.key).to_string().into(),
+            ));
+        }
+    }
+}
+
+/// agent 历史消息复制钮（M4-T2）：写系统剪贴板。
+fn update_msg_actions(
+    mut q: Query<(&Interaction, &CopyActionMarker), (Changed<Interaction>, With<Button>)>,
+    mut clipboard: ResMut<Clipboard>,
+) {
+    for (interaction, action) in q.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            let _ = clipboard.set_text(action.text.clone());
+        }
     }
 }

@@ -137,3 +137,16 @@ history-restore-failed = 恢复失败：会话文件不存在或已损坏
 status-session = #{ $id } · { $rounds } 轮
 status-companion-on = ★ 陪伴已开启
 status-companion-off = ☆ 陪伴已关闭
+
+## v7 qa 快捷 chips（M4-T8）
+qa-explain = 解释代码
+qa-explain-prompt = 请解释以下代码的逻辑和设计：
+qa-refactor = 重构
+qa-refactor-prompt = 请重构以下代码，改善结构和可读性：
+qa-test = 生成测试
+qa-test-prompt = 请为当前上下文中的代码生成单元测试：
+qa-fix = 修复问题
+qa-fix-prompt = 请分析并修复以下问题：
+qa-review = 代码审查
+qa-review-prompt = 请对当前上下文中的代码进行审查：
+
