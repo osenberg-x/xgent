@@ -207,6 +207,12 @@ fn main() {
                 }),
                 ..default()
             })
+            .set(bevy::asset::AssetPlugin {
+                // 资产根指向本 crate 的 assets/（对齐内建插件目录的 CARGO_MANIFEST_DIR
+                // 取径方式），使 AssetServer 在任意工作目录下可用（v7 字体/图标依赖）。
+                file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").to_string(),
+                ..default()
+            })
             .disable::<bevy::log::LogPlugin>(),
     )
     .add_plugins((
@@ -259,7 +265,7 @@ fn main() {
             }
         });
     }
-    app.add_systems(Startup, crate::startup::load_system_font);
+    app.add_systems(Startup, crate::startup::load_fonts);
 
     // 清理提示：退出时 daemon 末个客户端退出后自退出
     let socket_path = daemon_socket_path();

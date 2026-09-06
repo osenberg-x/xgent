@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use xgent_settings_core::store::ProjectConfigStore;
+use xgent_ui::fonts::UiFonts;
 
 use crate::fs_event_bridge::IpcClientResource;
 
@@ -35,33 +36,43 @@ pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
     });
 }
 
-/// 加载 macOS 系统等宽字体（Menlo）作为全局默认，替代 Bevy 内置的 FiraMono。
+/// 加载字体：Inter Variable 为全局默认 + Menlo 等宽（macOS）。
 ///
-/// Bevy 默认字体是 FiraMono Medium，x-height 偏高、字宽偏宽，在 14px 下视觉
-/// 显得比 zed/VSCode 的 JetBrains Mono 大且「糊」。Menlo 是 macOS Terminal/
-/// Xcode 的默认等宽字体，度量紧凑、抗锯齿清晰，与 zed 视觉一致。
+/// Inter 读自随仓库分发的 `assets/fonts/Inter-Variable.ttf`（OFL 许可），
+/// 覆盖 `Assets<Font>` 的 `AssetId::default()`——所有未显式指定 `font` 的
+/// [`TextFont`] 自动用 Inter（Linear 视觉基准的排版底座）。Menlo 为 macOS
+/// Terminal/Xcode 默认等宽，度量紧凑，经 `fonts.add` 得强句柄存入
+/// [`UiFonts::mono`] 供等宽场景（代码/终端）显式引用。
 ///
-/// 用系统字体而非内嵌字体文件：零打包体积、跟随系统更新、与原生应用一致。
-/// 覆盖 `Assets<Font>` 的 `AssetId::default()`（对齐 Bevy `TextPlugin` 注册
-/// 默认字体的方式），所有未显式指定 `font` 的 `TextFont` 自动用此字体。
-///
-/// 非 macOS 平台静默跳过（保留 FiraMono 兜底）。
-pub fn load_system_font(mut fonts: ResMut<Assets<Font>>) {
-    let path = if cfg!(target_os = "macos") {
-        std::path::Path::new("/System/Library/Fonts/Menlo.ttc").to_path_buf()
-    } else {
-        // 非 macOS：保留 Bevy 默认 FiraMono
-        return;
-    };
-    match std::fs::read(&path) {
+/// 非 macOS：Inter 照常加载（随仓库分发），Menlo 跳过（mono 回退默认句柄）。
+pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
+    // Inter Variable —— 全局默认
+    let inter_path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/Inter-Variable.ttf");
+    match std::fs::read(inter_path) {
         Ok(data) => {
-            let font = Font::from_bytes(data);
-            fonts.insert(bevy::asset::AssetId::default(), font);
-            tracing::info!("已加载系统字体: {}", path.display());
+            let _ = fonts.insert(bevy::asset::AssetId::default(), Font::from_bytes(data));
+            tracing::info!("已加载 Inter Variable 为全局默认字体");
         }
         Err(e) => {
-            let p = path.display();
-            tracing::warn!("加载系统字体失败，回退 Bevy 默认: {p}: {e}");
+            tracing::warn!("加载 Inter 失败，回退 Bevy 默认: {inter_path}: {e}");
         }
     }
+
+    // Menlo —— 等宽（macOS 系统字体）
+    let mono = if cfg!(target_os = "macos") {
+        match std::fs::read("/System/Library/Fonts/Menlo.ttc") {
+            Ok(data) => fonts.add(Font::from_bytes(data)),
+            Err(e) => {
+                tracing::warn!("加载 Menlo 失败，等宽回退默认字体: {e}");
+                Handle::default()
+            }
+        }
+    } else {
+        Handle::default()
+    };
+
+    commands.insert_resource(UiFonts {
+        ui: Handle::default(),
+        mono,
+    });
 }

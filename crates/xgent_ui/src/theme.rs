@@ -182,3 +182,53 @@ pub mod size {
 pub fn px(v: f32) -> Val {
     Val::Px(v)
 }
+
+/// 排版阶梯（v7，原型唯一字号集合；新界面禁止就地发明字号）。
+pub mod type_scale {
+    /// welcome 标题（配负字距 -0.29）
+    pub const DISPLAY: f32 = 24.0;
+    /// 弹窗标题/顶栏品牌
+    pub const H3: f32 = 15.0;
+    /// 消息正文/输入框
+    pub const BODY: f32 = 14.0;
+    /// 次要正文/按钮
+    pub const BODY_SM: f32 = 13.0;
+    /// 工具名/按钮小字/pill
+    pub const SMALL: f32 = 12.5;
+    /// chips/参数/代码
+    pub const CAPTION: f32 = 12.0;
+    /// 时间戳/元信息/kbd
+    pub const MICRO: f32 = 11.0;
+    /// 大写分区标签/徽标
+    pub const TINY: f32 = 10.0;
+    /// 代码（终端另 -2）
+    pub const MONO: f32 = 12.0;
+
+    /// 行高档（配合字号使用；原型正文 1.6、UI 1.4-1.5、代码 1.5）
+    pub mod line_height {
+        /// 展示级标题
+        pub const TIGHT: f32 = 1.2;
+        /// 紧凑 UI 文本/时间戳
+        pub const UI: f32 = 1.4;
+        /// 控件/按钮/代码
+        pub const CTRL: f32 = 1.5;
+        /// 正文
+        pub const BODY: f32 = 1.6;
+        /// 终端
+        pub const TERM: f32 = 1.6;
+    }
+}
+
+/// 圆角阶梯（v7，Linear 尺度；胶囊形用 `BorderRadius::MAX`）。
+pub mod radius {
+    /// 行内徽标/微元素
+    pub const MICRO: f32 = 2.0;
+    /// 小元素
+    pub const SMALL: f32 = 4.0;
+    /// 按钮/输入等控件
+    pub const CTRL: f32 = 6.0;
+    /// 卡片
+    pub const CARD: f32 = 8.0;
+    /// 浮层/弹窗
+    pub const PANEL: f32 = 12.0;
+}

@@ -12,6 +12,7 @@ pub mod command_palette;
 pub mod confirm_dialog;
 pub mod editor;
 pub mod file_panel;
+pub mod fonts;
 pub mod i18n;
 pub mod layout;
 pub mod resize;
