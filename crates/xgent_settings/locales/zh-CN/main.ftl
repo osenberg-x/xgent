@@ -12,7 +12,6 @@ settings-saved = 设置已保存
 file-panel-placeholder = 文件面板
 file-panel-empty = 打开项目后显示文件树
 confirm-allow = 允许执行
-chat-tab-label = 对话
 file-panel-title = 资源管理器
 hint-send = Ctrl+Enter 发送
 hint-abort = Esc 中断
@@ -106,7 +105,6 @@ compaction-notice = ✦ 前序对话已摘要压缩（{ $before } → { $after }
 
 # 会话信息
 conversation-info = 会话 #{ $id } · { $turns } 轮{ $tokens }
-conversation-tokens = · ↑ { $tokens } tokens
 
 # 状态栏
 status-encoding = UTF-8 · LF · Rust
@@ -150,3 +148,15 @@ qa-fix-prompt = 请分析并修复以下问题：
 qa-review = 代码审查
 qa-review-prompt = 请对当前上下文中的代码进行审查：
 
+## v7 上下文条 / 欢迎空态（M4-T5/T6）
+context-scope-label = 上下文
+context-add = 添加上下文
+welcome-title = 开始新会话
+welcome-sub = 输入问题，或从快捷操作开始
+welcome-recent = 最近会话
+welcome-card-explain = 解释代码
+welcome-card-explain-desc = 分析选中文件的逻辑和设计
+welcome-card-refactor = 重构代码
+welcome-card-refactor-desc = 改善代码结构和可读性
+welcome-card-test = 生成测试
+welcome-card-test-desc = 为当前上下文生成单元测试

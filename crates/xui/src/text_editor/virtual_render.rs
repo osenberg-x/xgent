@@ -23,7 +23,7 @@
 
 use crate::text_editor::HighlightCache;
 use crate::text_editor::TextEditor;
-use crate::text_editor::highlight::{HighlightSpan, span_color_for, spans_for_line};
+use crate::text_editor::highlight::{HighlightSpan, spans_for_line};
 use crate::text_editor::render::EditorTheme;
 use bevy::prelude::*;
 use bevy::text::LineHeight;

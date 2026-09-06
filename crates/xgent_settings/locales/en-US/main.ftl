@@ -11,7 +11,6 @@ provider-not-configured = No provider configured
 settings-saved = Settings saved
 file-panel-placeholder = Files
 settings-kind = Provider Type
-chat-tab-label = Chat
 file-panel-title = Explorer
 hint-send = Ctrl+Enter Send
 hint-abort = Esc Abort
@@ -105,7 +104,6 @@ compaction-notice = ✦ Previous context compacted ({ $before } → { $after } t
 
 # Conversation info
 conversation-info = Session #{ $id } · { $turns } turns{ $tokens }
-conversation-tokens = · ↑ { $tokens } tokens
 
 # Status bar
 status-encoding = UTF-8 · LF · Rust
@@ -149,3 +147,15 @@ qa-fix-prompt = Please analyze and fix the following issues:
 qa-review = Code review
 qa-review-prompt = Please review the code in context:
 
+## v7 上下文条 / 欢迎空态（M4-T5/T6）
+context-scope-label = Context
+context-add = Add context
+welcome-title = Start a new session
+welcome-sub = Type a question, or start from a quick action
+welcome-recent = Recent sessions
+welcome-card-explain = Explain code
+welcome-card-explain-desc = Analyze logic and design of selected files
+welcome-card-refactor = Refactor code
+welcome-card-refactor-desc = Improve structure and readability
+welcome-card-test = Generate tests
+welcome-card-test-desc = Generate unit tests for the current context

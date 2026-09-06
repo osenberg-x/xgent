@@ -116,7 +116,11 @@ pub fn ui_screenshot_tool(
     // ② F12 常规截图
     if keys.just_pressed(KeyCode::F12) {
         let _ = std::fs::create_dir_all("target/snapshots");
-        let name = format!("target/snapshots/ui-{}-{}.png", std::process::id(), *counter);
+        let name = format!(
+            "target/snapshots/ui-{}-{}.png",
+            std::process::id(),
+            *counter
+        );
         *counter += 1;
         capture(&mut commands, name);
     }

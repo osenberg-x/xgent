@@ -4,8 +4,8 @@
 //! 会话状态文本已移除（顶栏 agent pill 承担，方案 §8.9）；状态点忙时脉冲。
 
 use bevy::prelude::*;
-use xgent_core::chat::AgentMessage;
 use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
+use xgent_core::chat::AgentMessage;
 
 use crate::layout::StatusBarMarker;
 use crate::theme::{Theme, space, type_scale};
@@ -57,7 +57,12 @@ impl Plugin for StatusBarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TokenUsage>()
             .init_resource::<CompanionOn>()
-            .add_systems(Startup, spawn_status_bar)
+            .add_systems(
+                Startup,
+                // 显式排在布局生成之后：Startup 系统并行无序，不排序则可能查不到
+                // StatusBarMarker 容器导致状态栏永久空白（Startup 只跑一次无重试）。
+                spawn_status_bar.after(crate::layout::spawn_layout),
+            )
             .add_systems(
                 Update,
                 (

@@ -115,7 +115,6 @@ impl Plugin for ChatPanelPlugin {
                     spawn_user_message,
                     update_input_border,
                     update_streaming_cursor,
-                    update_conversation_info,
                     clear_on_new_session,
                     update_token_hint,
                 )
@@ -131,7 +130,7 @@ impl Plugin for ChatPanelPlugin {
 }
 
 /// 启动时在对话主区内 spawn 视图标签条 + 消息列表 + 浮动输入卡。
-fn spawn_chat_panel(
+pub(crate) fn spawn_chat_panel(
     mut commands: Commands,
     q_panel: Query<Entity, With<ChatPanelMarker>>,
     theme: Res<Theme>,
@@ -143,59 +142,6 @@ fn spawn_chat_panel(
     };
     let font = theme.font_size;
     let font_size = FontSize::Px(font);
-
-    // 视图标签条：对话/编辑器/文件预览 + 右侧会话信息
-    let viewtabs = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: px(crate::theme::size::VIEW_TABS_H),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(space::XS),
-                padding: UiRect::horizontal(px(space::LG)),
-                border: UiRect::bottom(px(1.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(theme.surface),
-            BorderColor::all(theme.line),
-        ))
-        .with_children(|tabs| {
-            // 对话标签（active 态：elevated 底 + 边框）
-            tabs.spawn((
-                Node {
-                    padding: UiRect::all(px(space::XS)),
-                    border: UiRect::all(px(1.0)),
-                    border_radius: BorderRadius::all(px(6.0)),
-                    ..default()
-                },
-                BackgroundColor(theme.elevated),
-                BorderColor::all(theme.border),
-                Text::new(crate::i18n::tr(&loc, "chat-tab-label").to_string()),
-                TextFont {
-                    font_size,
-                    ..default()
-                },
-                TextColor(theme.text),
-            ));
-            // spacer
-            tabs.spawn((Node {
-                flex_grow: 1.0,
-                ..default()
-            },));
-            // 会话信息
-            tabs.spawn((
-                Text::new(String::new()),
-                TextFont {
-                    font_size: FontSize::Px(11.0),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
-                ConversationInfoMarker,
-            ));
-        })
-        .id();
 
     // 当前正在流式的助手消息节点（限宽 820 居中；v7 正文 text_dim/1.6）
     let current_text = commands
@@ -436,7 +382,6 @@ fn spawn_chat_panel(
 
     commands
         .entity(panel)
-        .add_child(viewtabs)
         .add_child(message_list)
         .add_child(inputbar)
         .add_child(back_to_bottom);
@@ -856,45 +801,6 @@ fn update_streaming_cursor(
         text.0.push('▋');
     } else if !show && has_cursor {
         text.0.pop();
-    }
-}
-/// 更新会话信息文本（有变更检测，避免每帧遍历消息列表）。
-fn update_conversation_info(
-    conv: Res<Conversation>,
-    tokens: Res<TokenUsage>,
-    loc: Res<xgent_settings::Localizer>,
-    mut q: Query<&mut Text, With<ConversationInfoMarker>>,
-) {
-    if !conv.is_changed() && !tokens.is_changed() && !loc.is_changed() {
-        return;
-    }
-    let Ok(mut text) = q.single_mut() else {
-        return;
-    };
-    let turns = conv
-        .messages
-        .iter()
-        .filter(|m| matches!(m, xgent_core::chat::AgentMessage::User(_)))
-        .count();
-    let token_part = if tokens.total > 0 {
-        let token_str = crate::status_bar::format_tokens(tokens.total);
-        crate::i18n::tr_with(&loc, "conversation-tokens", &[("tokens", token_str.into())])
-            .to_string()
-    } else {
-        String::new()
-    };
-    let new_text = crate::i18n::tr_with(
-        &loc,
-        "conversation-info",
-        &[
-            ("id", conv.id.0.to_string().into()),
-            ("turns", turns.to_string().into()),
-            ("tokens", token_part.into()),
-        ],
-    )
-    .to_string();
-    if text.0 != new_text {
-        text.0 = new_text;
     }
 }
 

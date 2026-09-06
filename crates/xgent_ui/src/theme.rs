@@ -240,8 +240,6 @@ pub mod size {
     pub const FILE_PANEL_W: f32 = 240.0;
     /// 旧·会话侧栏默认宽度（M2-T1 删除）
     pub const CHAT_SIDEBAR_W: f32 = 380.0;
-    /// 旧·视图标签条高度（M4-T6 删除）
-    pub const VIEW_TABS_H: f32 = 36.0;
     /// 编辑器 tab 条高度
     pub const EDITOR_TABS_H: f32 = 32.0;
     /// 终端 tab 条高度

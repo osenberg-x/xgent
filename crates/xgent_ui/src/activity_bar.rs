@@ -6,7 +6,6 @@
 //! 不放搜索/Git/插件入口（F-05/F-10 未实现，非本期目标）。
 
 use bevy::prelude::*;
-use bevy::text::FontSize;
 
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
 use crate::layout::{ActivityBarMarker, FilePanelCollapsed, SideViewCollapsed};
@@ -127,12 +126,15 @@ fn spawn_activity_bar(
         rail_button(&mut p, &kit, ActivityKind::Files, "folder", "文件");
         rail_button(&mut p, &kit, ActivityKind::History, "clock", "历史会话");
         // 分隔线
-        p.spawn((Node {
-            width: px(24.0),
-            height: px(1.0),
-            margin: UiRect::vertical(px(space::SM)),
-            ..default()
-        }, BackgroundColor(theme.border)));
+        p.spawn((
+            Node {
+                width: px(24.0),
+                height: px(1.0),
+                margin: UiRect::vertical(px(space::SM)),
+                ..default()
+            },
+            BackgroundColor(theme.border),
+        ));
         rail_button(&mut p, &kit, ActivityKind::Terminal, "terminal", "终端");
         // spacer
         p.spawn((Node {
@@ -181,13 +183,8 @@ fn spawn_activity_bar(
         ))
         .with_children(|b| {
             companion_star = Some(
-                b.spawn(icon(
-                    &icons,
-                    "star",
-                    20.0,
-                    Color::srgb_u8(0x1C, 0x19, 0x17),
-                ))
-                .id(),
+                b.spawn(icon(&icons, "star", 20.0, Color::srgb_u8(0x1C, 0x19, 0x17)))
+                    .id(),
             );
         });
     });

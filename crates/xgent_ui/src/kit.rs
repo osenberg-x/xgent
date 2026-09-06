@@ -17,9 +17,28 @@ use crate::theme::{Theme, radius, space, type_scale};
 
 /// 图标名清单（`assets/icons/{name}@2x.png`，导出管线见 export_png.py）。
 const ICON_NAMES: &[&str] = &[
-    "chat", "folder", "clock", "terminal", "star", "plus", "x", "check", "copy", "retry",
-    "refresh", "send", "command", "panel-right", "chevron-down", "chevron-right", "info",
-    "file", "diff", "dollar", "gear", "alert-triangle",
+    "chat",
+    "folder",
+    "clock",
+    "terminal",
+    "star",
+    "plus",
+    "x",
+    "check",
+    "copy",
+    "retry",
+    "refresh",
+    "send",
+    "command",
+    "panel-right",
+    "chevron-down",
+    "chevron-right",
+    "info",
+    "file",
+    "diff",
+    "dollar",
+    "gear",
+    "alert-triangle",
 ];
 
 /// 图标句柄表（启动经 AssetServer 加载；资产根见 xgent_app 的 AssetPlugin 配置）。
@@ -102,7 +121,12 @@ impl HoverTint {
 fn hover_tint_system(
     theme: Res<Theme>,
     mut q: Query<
-        (&Interaction, &HoverTint, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &HoverTint,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
         Changed<Interaction>,
     >,
 ) {
@@ -202,7 +226,9 @@ fn tooltip_system(
                     }
                     // 悬停开始：挂计时
                     None => {
-                        commands.entity(entity).insert(TooltipPending { elapsed: 0.0 });
+                        commands
+                            .entity(entity)
+                            .insert(TooltipPending { elapsed: 0.0 });
                     }
                 }
             }
@@ -271,7 +297,12 @@ impl UiKit<'_> {
     }
 
     /// primary 按钮：`accent` 底白字（hover `accent_hover`）。
-    pub fn primary_button(&self, parent: &mut ChildSpawnerCommands, label: &str, icon_name: &str) -> Entity {
+    pub fn primary_button(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        label: &str,
+        icon_name: &str,
+    ) -> Entity {
         parent
             .spawn((
                 Button,
@@ -301,7 +332,12 @@ impl UiKit<'_> {
     }
 
     /// 图标钮（34px 方形圆角 6，透明底；`tip` 为 tooltip 文案）。
-    pub fn icon_button(&self, parent: &mut ChildSpawnerCommands, icon_name: &str, tip: &str) -> Entity {
+    pub fn icon_button(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        icon_name: &str,
+        tip: &str,
+    ) -> Entity {
         parent
             .spawn((
                 Button,
@@ -381,29 +417,35 @@ impl UiKit<'_> {
 
     /// 大写分区标签（TINY/510 + 正字距）。
     pub fn section_label(&self, parent: &mut ChildSpawnerCommands, label: &str) -> Entity {
-        parent.spawn((
-            Text::new(label.to_string()),
-            TextFont {
-                font_size: FontSize::Px(type_scale::TINY),
-                weight: FontWeight(510),
-                ..default()
-            },
-            TextColor(self.theme.text_muted),
-            LetterSpacing::Px(0.5),
-            LineHeight::RelativeToFont(type_scale::line_height::UI),
-        ))
-        .id()
+        parent
+            .spawn((
+                Text::new(label.to_string()),
+                TextFont {
+                    font_size: FontSize::Px(type_scale::TINY),
+                    weight: FontWeight(510),
+                    ..default()
+                },
+                TextColor(self.theme.text_muted),
+                LetterSpacing::Px(0.5),
+                LineHeight::RelativeToFont(type_scale::line_height::UI),
+            ))
+            .id()
     }
 
     /// 单色图标节点（便捷重导出）。
-    pub fn icon(&self, parent: &mut ChildSpawnerCommands, name: &str, px_size: f32, color: Color) -> Entity {
+    pub fn icon(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        name: &str,
+        px_size: f32,
+        color: Color,
+    ) -> Entity {
         parent.spawn(icon(self.icons, name, px_size, color)).id()
     }
 }
 
 /// kit 插件：图标资源 + hover/tooltip 全局系统。
 pub struct KitPlugin;
-
 
 impl Plugin for KitPlugin {
     fn build(&self, app: &mut App) {
@@ -412,5 +454,3 @@ impl Plugin for KitPlugin {
             .add_systems(Update, (hover_tint_system, tooltip_system));
     }
 }
-
-

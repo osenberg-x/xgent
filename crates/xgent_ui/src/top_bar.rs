@@ -16,8 +16,8 @@ use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::kit::{HoverTint, IconAssets, UiKit, icon};
 use crate::layout::TopBarMarker;
-use crate::theme::{space, type_scale};
 use crate::theme::{Theme, radius};
+use crate::theme::{space, type_scale};
 
 use xgent_agent::Conversation;
 
@@ -155,11 +155,7 @@ fn spawn_top_bar(
             });
 
         // ③ 新建会话 ghost 钮
-        new_session_btn = Some(kit.ghost_button(
-            &mut p,
-            &tr(&loc, "topbar-new-session"),
-            "plus",
-        ));
+        new_session_btn = Some(kit.ghost_button(&mut p, &tr(&loc, "topbar-new-session"), "plus"));
 
         // ④ spacer
         p.spawn((Node {
@@ -188,22 +184,23 @@ fn spawn_top_bar(
             ProviderButtonMarker,
         ))
         .with_children(|pill| {
-            pill.spawn((Node {
-                width: px(16.0),
-                height: px(16.0),
-                border_radius: BorderRadius::all(px(radius::SMALL)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(theme.accent),
-            Text::new("G"),
-            TextFont {
-                font_size: FontSize::Px(9.0),
-                weight: FontWeight(590),
-                ..default()
-            },
-            TextColor(theme.accent_text),
+            pill.spawn((
+                Node {
+                    width: px(16.0),
+                    height: px(16.0),
+                    border_radius: BorderRadius::all(px(radius::SMALL)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(theme.accent),
+                Text::new("G"),
+                TextFont {
+                    font_size: FontSize::Px(9.0),
+                    weight: FontWeight(590),
+                    ..default()
+                },
+                TextColor(theme.accent_text),
             ));
             pill.spawn((
                 Text::new(String::new()),
@@ -371,8 +368,7 @@ fn update_agent_pill(
     if let Ok(mut dot_bg) = q.p1().single_mut() {
         let alpha = if pulsing {
             0.4 + 0.6
-                * (0.5
-                    + 0.5 * (time.elapsed().as_secs_f64() * std::f64::consts::TAU / 1.2).sin())
+                * (0.5 + 0.5 * (time.elapsed().as_secs_f64() * std::f64::consts::TAU / 1.2).sin())
         } else {
             1.0
         } as f32;

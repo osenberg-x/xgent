@@ -290,10 +290,10 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 **验收**：五枚 chips 点击后输入框出现对应前缀文案。
 
-### M4-T9 期验收（T1/T2/T3/T4/T7/T8 完成；T5/T6 未开始留续期）
-- [x] 编译/测试全绿（41+4）；空态截图无回归。
+### M4-T9 期验收（T1-T8 全部落地）
+- [x] 编译/测试全绿（41+4）；空态截图：welcome 空态完整渲染、视图标签条已移除、无布局回归。
 - [ ] 流式中/工具调用两场景 snapshot：需已配置 provider 的环境手测。
-- [ ] 手工回归：`DeltaMessage/DoneMessage/Error/Retry/SessionCleared` 五链路 + qa 点击填入/复制钮/回底钮/Focus 环。
+- [ ] 手工回归清单：`DeltaMessage/DoneMessage/Error/Retry/SessionCleared` 五链路 + qa chips 点击填入 + 复制钮 + 回底钮 + Focus 环 + 上下文条随开文件增减。
 
 ---
 

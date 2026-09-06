@@ -10,6 +10,7 @@ pub mod activity_bar;
 pub mod chat_panel;
 pub mod command_palette;
 pub mod confirm_dialog;
+pub mod context_scope;
 pub mod editor;
 pub mod file_panel;
 pub mod fonts;
@@ -25,6 +26,7 @@ pub mod terminal;
 pub mod theme;
 pub mod tool_panel;
 pub mod top_bar;
+pub mod welcome;
 
 use bevy::prelude::*;
 
@@ -41,6 +43,8 @@ impl Plugin for XgentUiPlugin {
             activity_bar::ActivityBarPlugin,
             top_bar::TopBarPlugin,
             chat_panel::ChatPanelPlugin,
+            context_scope::ContextScopePlugin,
+            welcome::WelcomePlugin,
             file_panel::FilePanelPlugin,
             status_bar::StatusBarPlugin,
             command_palette::CommandPalettePlugin,
