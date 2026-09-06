@@ -8,7 +8,7 @@
 
 use bevy::input_focus::AutoFocus;
 use bevy::prelude::*;
-use bevy::text::EditableText;
+use bevy::text::{EditableText, LineHeight};
 
 use xgent_agent::{
     CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage,
@@ -19,7 +19,7 @@ use xui::scroll_area::{ScrollArea, StickToBottom};
 
 use crate::layout::ChatPanelMarker;
 use crate::status_bar::TokenUsage;
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, radius, space, type_scale};
 /// 历史消息容器（消息列表，可滚动）。
 #[derive(Component, Default)]
 pub struct MessageListMarker;
@@ -157,21 +157,23 @@ fn spawn_chat_panel(
         })
         .id();
 
-    // 当前正在流式的助手消息节点（全宽行式，无气泡背景）
+    // 当前正在流式的助手消息节点（限宽 820 居中；v7 正文 text_dim/1.6）
     let current_text = commands
         .spawn((
             Node {
-                width: Val::Percent(100.0),
+                max_width: px(820.0),
+                align_self: AlignSelf::Center,
                 flex_direction: FlexDirection::Row,
                 column_gap: px(space::MD),
                 ..default()
             },
             Text::new(String::new()),
             TextFont {
-                font_size,
+                font_size: FontSize::Px(type_scale::BODY),
                 ..default()
             },
-            TextColor(theme.text),
+            TextColor(theme.text_dim),
+            LineHeight::RelativeToFont(type_scale::line_height::BODY),
             CurrentAssistantText,
         ))
         .id();
@@ -195,7 +197,7 @@ fn spawn_chat_panel(
                 flex_shrink: 0.0,
                 padding: UiRect::all(px(space::SM)),
                 border: UiRect::all(px(1.0)),
-                border_radius: BorderRadius::all(px(8.0)),
+                border_radius: BorderRadius::all(px(radius::PANEL)),
                 ..default()
             },
             BackgroundColor(theme.input_bg),
@@ -354,13 +356,15 @@ fn spawn_user_message(
         // 在当前助手节点之前插入用户消息（全宽行式：头像 + 消息体）
         commands.entity(list).with_children(|p| {
             p.spawn((Node {
+                max_width: px(820.0),
+                align_self: AlignSelf::Center,
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
                 column_gap: px(space::MD),
                 ..default()
             },))
                 .with_children(|row| {
-                    // 头像（elevated 底圆 + "你" 文字）
+                    // 头像（icon_bg 底 + "你"）
                     row.spawn((
                         Node {
                             width: px(28.0),
@@ -371,14 +375,14 @@ fn spawn_user_message(
                             flex_shrink: 0.0,
                             ..default()
                         },
-                        BackgroundColor(theme.elevated),
-                        BorderColor::all(theme.border),
+                        BackgroundColor(theme.icon_bg),
                         Text::new(crate::i18n::tr(&loc, "role-user")),
                         TextFont {
-                            font_size: FontSize::Px(12.0),
+                            font_size: FontSize::Px(type_scale::CAPTION),
+                            weight: FontWeight(590),
                             ..default()
                         },
-                        TextColor(theme.text),
+                        TextColor(theme.text_dim),
                     ));
                     // 消息体（role + content）
                     row.spawn((Node {
@@ -422,7 +426,7 @@ fn accumulate_delta(
         return;
     };
     for ev in reader.read() {
-        if text.0.ends_with('▋') {
+        if text.0.ends_with('▍') {
             text.0.pop();
         }
         text.0.push_str(&ev.text);
@@ -449,21 +453,23 @@ fn finalize_on_done(
     let Ok(text) = q.get(current) else {
         return;
     };
-    let content = text.0.trim_end_matches('▋').to_string();
+    let content = text.0.trim_end_matches('▍').to_string();
     if content.is_empty() {
         return;
     }
     let font = theme.font_size;
-    // 历史副本（全宽行式：头像 + 消息体）
+    // 历史副本（限宽 820 居中：头像 + 消息体）
     commands.entity(list).with_children(|p| {
         p.spawn((Node {
+            max_width: px(820.0),
+            align_self: AlignSelf::Center,
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             column_gap: px(space::MD),
             ..default()
         },))
             .with_children(|row| {
-                // 头像（渐变色 — 用 accent 底 + ✦ 文字模拟）
+                // 头像（accent 底 + "X"）
                 row.spawn((
                     Node {
                         width: px(28.0),
@@ -475,12 +481,13 @@ fn finalize_on_done(
                         ..default()
                     },
                     BackgroundColor(theme.accent),
-                    Text::new("✦"),
+                    Text::new("X"),
                     TextFont {
-                        font_size: FontSize::Px(12.0),
+                        font_size: FontSize::Px(type_scale::CAPTION),
+                        weight: FontWeight(590),
                         ..default()
                     },
-                    TextColor(theme.bg),
+                    TextColor(theme.accent_text),
                 ));
                 // 消息体
                 row.spawn((Node {

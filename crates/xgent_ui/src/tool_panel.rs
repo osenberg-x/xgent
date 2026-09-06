@@ -11,7 +11,8 @@ use xgent_settings::Localizer;
 
 use crate::chat_panel::MessageListMarker;
 use crate::i18n::tr;
-use crate::theme::{Theme, space};
+use crate::kit::{HoverTint, icon};
+use crate::theme::{Theme, radius, space};
 
 /// 工具调用时间线节点标记。
 #[derive(Component, Default)]
@@ -66,6 +67,7 @@ fn spawn_tool_card(
     mut reader: MessageReader<ToolCallMessage>,
     q_list: Query<Entity, With<MessageListMarker>>,
     theme: Res<Theme>,
+    icons: Res<crate::kit::IconAssets>,
     loc: Res<Localizer>,
     mut commands: Commands,
 ) {
@@ -84,27 +86,23 @@ fn spawn_tool_card(
                 ..default()
             },))
                 .with_children(|tl| {
-                    // 时间线图标节点（左侧，带连接线效果）
+                    // 时间线图标节点（分类色调块 + 矢量图标）
+                    let (icon_name, tint_bg, tint_fg) = tool_visual(&ev.tool_id, &theme);
                     tl.spawn((
                         Node {
                             width: px(28.0),
                             height: px(28.0),
-                            border_radius: BorderRadius::all(px(6.0)),
+                            border_radius: BorderRadius::all(px(radius::SMALL)),
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::Center,
-                            border: UiRect::all(px(1.0)),
                             flex_shrink: 0.0,
                             ..default()
                         },
-                        BackgroundColor(theme.subtle),
-                        BorderColor::all(theme.border),
-                        Text::new("🔧"),
-                        TextFont {
-                            font_size: FontSize::Px(12.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                    ));
+                        BackgroundColor(tint_bg),
+                    ))
+                    .with_children(|blk| {
+                        blk.spawn(icon(&icons, icon_name, 14.0, tint_fg));
+                    });
                     // 卡片体
                     tl.spawn((
                         Node {
@@ -136,6 +134,9 @@ fn spawn_tool_card(
                                 align_items: AlignItems::Center,
                                 ..default()
                             },
+                            BackgroundColor(Color::NONE),
+                            BorderColor::all(Color::NONE),
+                            HoverTint::ghost(&theme),
                             ToolCardHeadMarker,
                         ))
                         .with_children(|header| {
@@ -414,5 +415,29 @@ fn apply_tool_card_visibility(
                 }
             }
         }
+    }
+}
+
+/// 工具 id → 图标/色调（方案 §8.5：读=info、搜索=accent、写=warning、执行=fail）。
+fn tool_visual(tool_id: &str, theme: &Theme) -> (&'static str, Color, Color) {
+    let id = tool_id.to_ascii_lowercase();
+    if id.contains("search") || id.contains("grep") || id.contains("find") {
+        ("search", theme.accent_bg, theme.accent_interactive)
+    } else if id.contains("write")
+        || id.contains("edit")
+        || id.contains("apply")
+        || id.contains("patch")
+    {
+        ("edit", theme.st_pending_bg, theme.st_pending)
+    } else if id.contains("exec")
+        || id.contains("bash")
+        || id.contains("run")
+        || id.contains("terminal")
+    {
+        ("terminal", theme.st_fail_bg, theme.st_fail)
+    } else if id.contains("read") || id.contains("view") || id.contains("open") {
+        ("file", theme.st_info_bg, theme.st_info)
+    } else {
+        ("info", theme.st_info_bg, theme.st_info)
     }
 }

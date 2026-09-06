@@ -222,9 +222,9 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 **目标**：对话主区完整换新。
 
-### M4-T1 消息视觉
+### M4-T1 消息视觉（部分完成：行样式/头像/正文/光标 ✓；inline code 与代码块标记为 P1 联调项）
 **依赖**：M3 期验收
-- [ ] 消息组容器 max-width 820 居中（列表 padding 调整）。
+- [x] 消息组限宽 820 居中（`max_width` + `align_self: Center`，用户行/助手行/当前流式节点三处）。
 - [ ] 消息头：28×28 圆角 6 头像（user=`icon_bg`/"你"、agent=`accent`/"X"）+ 角色（SMALL/510）+ 时间（MICRO `text_faint`）。
 - [ ] 正文 BODY/400 `text_dim` 行高 1.6；inline code（反引号简单分段）：`icon_bg` 底 + `accent_interactive` + mono CAPTION；代码块：`code_bg` + `border` + 圆角 6 + mono。
 - [ ] 流式光标：`▍` + `accent_interactive`，`t%0.8<0.4`（替换现 `▋` 逻辑，chat_panel.rs:709-732）。
@@ -232,6 +232,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：构造含中英/代码的消息对照原型消息区截图。
 
 ### M4-T2 消息操作栏
+**状态：未开始（M4 续期任务）**
 **依赖**：M4-T1
 - [ ] agent 消息容器挂 `Button`+`Interaction` 做 hover 检测；hover 时右上显 26px 钮组（`elevated`+`border`）。
 - [ ] 复制：`Clipboard::set_text`（Resource 已由 DefaultPlugins 提供）取消息正文；重试：现有 `RetryMessage` 路径。
@@ -239,6 +240,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：hover 显隐正确；复制到系统剪贴板可粘贴；重试触发既有链路。
 
 ### M4-T3 回到底部浮钮
+**状态：未开始（M4 续期任务）**
 **依赖**：M4-T1
 - [ ] 读消息列表 `ScrollPosition`：偏离底 >200px 显浮钮（`elevated`+`border`，输入区上方居中）；点击回底。
 - [ ] 与 `StickToBottom` 共存验证（贴底时浮钮不闪现）。
@@ -255,6 +257,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：真实工具调用（读文件/搜索/写文件确认）三卡样式对照原型；调用链路不回归。
 
 ### M4-T5 welcome 空态
+**状态：未开始（M4 续期任务）**
 **依赖**：M4-T1
 - [ ] 新建 `welcome.rs`：会话空态显示——64px `accent` 圆角 12 品牌块 + DISPLAY 标题 + 副标题 + 3 快捷卡（`subtle`+`border`，图标 tint `st_info_bg/accent_bg/st_ok_bg`）+ 最近会话 3 条。
 - [ ] 进入空态发 `ListSessionsMessage`；`SessionListMessage` 回填渲染；点击 `RestoreSessionMessage`。
@@ -263,6 +266,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：新会话空态→欢迎页；点最近会话恢复；发消息切消息流。
 
 ### M4-T6 context_scope 上下文条
+**状态：未开始（M4 续期任务）**
 **依赖**：M4-T1
 - [ ] 新建 `context_scope.rs`：会话区顶部 38px 行（`surface` 底 + 底边 `line`）——「上下文」section_label + chips（胶囊 9999、透明底+`border`：文件图标 `st_pending`/目录 `accent_interactive`、CAPTION）+「+ 添加」虚线胶囊。
 - [ ] **只读展示**：聚合编辑器 tabs 已打开文件；「+ 添加」→ 打开文件抽屉（M5-T6 前暂开现 FilePanel 折叠切换）。无删除钮（方案 §8.10）。
@@ -271,6 +275,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：开/关文件 chips 增减；原视图标签条（含 ConversationInfoMarker）已删除且信息按 §8.4/§8.9 处置。
 
 ### M4-T7 输入卡
+**状态：未开始（M4 续期任务）**
 **依赖**：M4-T1
 - [ ] `input_bg` 底 + `border` + 圆角 12；focus：`Outline` 3px `accent_glow` + 边框 `accent_interactive`（**实测 Outline 随圆角**；不随则回退外层节点，结论记 §15）。
 - [ ] 工具行：模式钮（`subtle` 6px，现 cycleMode 保留）+ 安全提示（`st_pending` icon+文案）+ spacer + Shift+Enter kbd 徽章 + token 计数（MICRO `text_faint`）+ 发送钮（`accent`/流式中 `st_fail` 停止态——现 abort 逻辑保留）。
@@ -279,13 +284,16 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：输入/focus 环/发送/停止/空输入闪烁（`st_fail`）全链路。
 
 ### M4-T8 qa chips 点击填入
+**状态：未开始（M4 续期任务）**
 **依赖**：M4-T7
 - [ ] 快捷提示工具栏（chat_panel.rs:220-249）→ 胶囊 chips（HoverTint）；点击经 `ChatInputMarker` 定位、`EditableText.editor`（PlainEditor）赋值预设文案并聚焦（注意 generation 刷新）。
 
 **验收**：五枚 chips 点击后输入框出现对应前缀文案。
 
-### M4-T9 期验收
-- [ ] 三场景 snapshot（流式中/工具调用/空态）对照原型；`DeltaMessage/DoneMessage/Error/Retry/SessionCleared` 手工回归。
+### M4-T9 期验收（部分——T2/T3/T5/T6/T8 未完成，见各任务）
+- [x] 编译/测试全绿（41+4）；空态截图无回归。
+- [ ] 流式中/工具调用两场景 snapshot：需已配置 provider 的环境手测。
+- [ ] 手工回归：`DeltaMessage/DoneMessage/Error/Retry/SessionCleared` 五链路。
 
 ---
 

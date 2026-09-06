@@ -20,7 +20,7 @@ OUT_SIZE = 48  # 2x（viewBox 24，UI 按 12-22px 逻辑像素显示）
 
 # M3 需求清单（任务台账 M3-T1）：现成 19 枚 + 补画 3 枚
 ICONS = [
-    "chat", "folder", "clock", "terminal", "star", "plus", "x", "check",
+    "chat", "search", "edit", "folder", "clock", "terminal", "star", "plus", "x", "check",
     "copy", "retry", "refresh", "send", "command", "panel-right",
     "chevron-down", "info", "file", "diff", "dollar",
     "gear", "chevron-right", "alert-triangle",
