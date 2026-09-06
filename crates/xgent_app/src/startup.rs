@@ -81,28 +81,43 @@ pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     });
 }
 
-/// 启动 3 秒后截取主窗存盘（`XGENT_SHOT=<路径>` 时启用）。
+/// 截图捕获（统一入口）：spawn Screenshot + 落盘观察器。
+fn capture(commands: &mut Commands, path: String) {
+    tracing::info!("UI 截图 → {path}");
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(path));
+}
+
+/// UI 截图工具：
+/// ① 启动 3 秒后自动截一次（`XGENT_SHOT=<路径>` 时启用，spike/验收取证）；
+/// ② F12 随时截图到 `target/snapshots/`（期验收对照用，M2-T6）。
 ///
-/// 字体/CJK spike 与 UI 期验收的视觉取证工具——app 截自己的渲染目标，
-/// 不依赖系统录屏权限。M2-T6 将把快捷键触发版本正式化为 `ui-snapshot` feature。
-pub fn spike_screenshot(
+/// app 截自己的渲染目标，不依赖系统录屏权限。
+pub fn ui_screenshot_tool(
     mut commands: Commands,
     time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
     mut path: Local<Option<String>>,
     mut done: Local<bool>,
+    mut counter: Local<u32>,
 ) {
     if path.is_none() {
         *path = std::env::var("XGENT_SHOT").ok();
     }
-    let Some(p) = path.as_ref() else {
-        return;
-    };
-    if *done || time.elapsed_secs() < 3.0 {
-        return;
+    // ① 环境变量一次性截图
+    if let Some(p) = path.as_ref()
+        && !*done
+        && time.elapsed_secs() >= 3.0
+    {
+        *done = true;
+        capture(&mut commands, p.clone());
     }
-    *done = true;
-    tracing::info!("spike 截图 → {p}");
-    commands
-        .spawn(Screenshot::primary_window())
-        .observe(save_to_disk(p.clone()));
+    // ② F12 常规截图
+    if keys.just_pressed(KeyCode::F12) {
+        let _ = std::fs::create_dir_all("target/snapshots");
+        let name = format!("target/snapshots/ui-{}-{}.png", std::process::id(), *counter);
+        *counter += 1;
+        capture(&mut commands, name);
+    }
 }

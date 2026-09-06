@@ -203,6 +203,12 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "XGent".into(),
+                    // 最小窗口尺寸（方案 §8.8）：五列/四列布局的钳制下限
+                    resize_constraints: WindowResizeConstraints {
+                        min_width: 1024.0,
+                        min_height: 640.0,
+                        ..default()
+                    },
                     ..default()
                 }),
                 ..default()
@@ -266,7 +272,7 @@ fn main() {
         });
     }
     app.add_systems(Startup, crate::startup::load_fonts);
-    app.add_systems(Update, crate::startup::spike_screenshot);
+    app.add_systems(Update, crate::startup::ui_screenshot_tool);
 
     // 清理提示：退出时 daemon 末个客户端退出后自退出
     let socket_path = daemon_socket_path();
