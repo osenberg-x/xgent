@@ -14,6 +14,7 @@
 
 pub mod at_syntax;
 pub mod buffer;
+pub mod diff_view;
 pub mod command;
 pub mod conflict;
 pub mod io;
@@ -36,7 +37,9 @@ use crate::editor::tabs::{
     OpenFileRequest, handle_close_tab_requests, handle_cycle_tab_requests,
     handle_dirty_close_decision, handle_open_file_requests,
 };
-use crate::theme::{Theme, px};
+use xgent_settings::Localizer;
+
+use crate::theme::{Theme, px, radius, space, type_scale};
 use xgent_agent::EditorCommandRequestMessage;
 
 /// 编辑器视图状态（对话/编辑器/文件预览切换）。
@@ -67,6 +70,8 @@ pub enum SideViewContent {
     Editor,
     /// 文件预览（非代码文件）
     Preview,
+    /// 差异视图（buffer vs 磁盘，M5-T4）
+    Diff,
     /// 终端视图（多 tab PTY）
     Terminal,
 }
@@ -97,8 +102,22 @@ impl Plugin for EditorPlugin {
             .init_resource::<EditorStateSnapshot>()
             .add_systems(Update, sync_editor_theme.before(xui::TextEditorUpdateSet))
             .add_systems(
+                Update,
+                (
+                    handle_page_tab_click,
+                    update_page_tab_indicators,
+                    diff_view::rebuild_diff_view,
+                ),
+            )
+            .add_systems(
                 Startup,
-                spawn_editor_view.after(crate::layout::spawn_layout),
+                (
+                    spawn_editor_view,
+                    spawn_page_tabs,
+                    diff_view::spawn_diff_view,
+                )
+                    .after(crate::layout::spawn_layout)
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -162,7 +181,7 @@ fn spawn_editor_view(
                 display: Display::None,
                 ..default()
             },
-            BackgroundColor(theme.bg),
+            BackgroundColor(theme.code_bg),
             EditorViewMarker,
         ))
         .with_children(|p| {
@@ -170,7 +189,7 @@ fn spawn_editor_view(
             p.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(crate::theme::size::TOP_BAR_H),
+                    height: Val::Px(crate::theme::size::EDITOR_TABS_H),
                     align_items: AlignItems::Center,
                     flex_direction: FlexDirection::Row,
                     border: UiRect::bottom(px(1.0)),
@@ -606,5 +625,161 @@ pub fn handle_pending_goto(
         commands
             .entity(entity)
             .remove::<crate::editor::buffer::PendingGoTo>();
+    }
+}
+
+
+// ===== 上下文面板页签（M5-T1）=====
+
+/// 页签页类型（映射 `SideViewContent`：Editor/Preview 归一为预览页）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SideViewPage {
+    Preview,
+    Diff,
+    Terminal,
+}
+
+/// 页签按钮标记。
+#[derive(Component)]
+pub struct PageTabMarker {
+    pub page: SideViewPage,
+}
+
+/// 启动时在分屏容器顶部（index 0）spawn 38px 页签条。
+fn spawn_page_tabs(
+    mut commands: Commands,
+    q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
+    theme: Res<Theme>,
+    loc: Res<Localizer>,
+) {
+    let Ok(side) = q_side.single() else {
+        return;
+    };
+    let pages = [
+        (SideViewPage::Preview, "预览"),
+        (SideViewPage::Diff, "差异"),
+        (SideViewPage::Terminal, "终端"),
+    ];
+    let _ = loc;
+    let bar = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: px(crate::theme::size::CONTEXT_TABS_H),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                padding: UiRect::horizontal(px(space::XS)),
+                border: UiRect::bottom(px(1.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(theme.surface),
+            BorderColor::all(theme.line),
+        ))
+        .id();
+    for (page, label) in pages {
+        let tab = commands
+            .spawn((
+                Button,
+                Node {
+                    height: Val::Percent(100.0),
+                    padding: UiRect::horizontal(px(space::MD)),
+                    align_items: AlignItems::Center,
+                    border: UiRect::bottom(px(2.0)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(type_scale::SMALL),
+                    weight: FontWeight(510),
+                    ..default()
+                },
+                TextColor(theme.text_muted),
+                PageTabMarker { page },
+            ))
+            .id();
+        commands.entity(bar).add_child(tab);
+    }
+    // 收起钮（复用 EditorBackButtonMarker 的行为链路）
+    let close = commands
+        .spawn((
+            Button,
+            Node {
+                width: px(28.0),
+                height: px(28.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(radius::SMALL)),
+                margin: UiRect::right(px(space::XS)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Text::new("×"),
+            TextFont {
+                font_size: FontSize::Px(type_scale::BODY),
+                ..default()
+            },
+            TextColor(theme.text_muted),
+            EditorBackButtonMarker,
+        ))
+        .id();
+    commands.entity(bar).add_child(close);
+    commands.entity(side).insert_children(0, &[bar]);
+}
+
+/// 页签点击：切 `SideViewContent` 并展开面板。
+fn handle_page_tab_click(
+    q: Query<(&Interaction, &PageTabMarker), (Changed<Interaction>, With<Button>)>,
+    mut content: ResMut<SideViewContent>,
+    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
+) {
+    for (interaction, tab) in q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        *content = match tab.page {
+            SideViewPage::Preview => SideViewContent::Editor,
+            SideViewPage::Diff => SideViewContent::Diff,
+            SideViewPage::Terminal => SideViewContent::Terminal,
+        };
+        collapsed.0 = false;
+    }
+}
+
+/// 页签指示器：active 页 `accent_interactive` 文字 + 底部 2px 交互色线。
+fn update_page_tab_indicators(
+    content: Res<SideViewContent>,
+    theme: Res<Theme>,
+    mut q: Query<(&PageTabMarker, &mut TextColor, &mut Node, &mut BorderColor), With<Button>>,
+) {
+    if !content.is_changed() && !theme.is_changed() {
+        return;
+    }
+    let active_page = match *content {
+        SideViewContent::Editor | SideViewContent::Preview => SideViewPage::Preview,
+        SideViewContent::Diff => SideViewPage::Diff,
+        SideViewContent::Terminal => SideViewPage::Terminal,
+        SideViewContent::None => return,
+    };
+    for (tab, mut color, mut node, mut border) in q.iter_mut() {
+        let is_active = tab.page == active_page;
+        let want_color = if is_active {
+            theme.accent_interactive
+        } else {
+            theme.text_muted
+        };
+        if color.0 != want_color {
+            color.0 = want_color;
+        }
+        node.border = UiRect {
+            bottom: px(if is_active { 2.0 } else { 0.0 }),
+            ..default()
+        };
+        border.set_all(if is_active {
+            theme.accent_interactive
+        } else {
+            Color::NONE
+        });
     }
 }

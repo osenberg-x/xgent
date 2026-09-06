@@ -33,72 +33,7 @@ fn px(v: f32) -> Val {
     Val::Px(v)
 }
 
-/// diff 行的类型（增/删/上下文）。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum DiffKind {
-    Add,
-    Del,
-    Context,
-}
-
-/// 一行 diff（kind + 文本）。
-struct DiffLine {
-    kind: DiffKind,
-    text: String,
-}
-
-/// 简单行级 diff：求公共前缀与后缀，中间旧行标 Del、新行标 Add。
-///
-/// 无需外部依赖，MVP 足够。复杂 diff（跨行移动）留待 P1。
-fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
-    let old_lines: Vec<&str> = old.lines().collect();
-    let new_lines: Vec<&str> = new.lines().collect();
-    // 公共前缀
-    let mut prefix = 0;
-    while prefix < old_lines.len()
-        && prefix < new_lines.len()
-        && old_lines[prefix] == new_lines[prefix]
-    {
-        prefix += 1;
-    }
-    // 公共后缀
-    let mut suffix = 0;
-    while suffix < old_lines.len() - prefix
-        && suffix < new_lines.len() - prefix
-        && old_lines[old_lines.len() - 1 - suffix] == new_lines[new_lines.len() - 1 - suffix]
-    {
-        suffix += 1;
-    }
-    let mut out = Vec::new();
-    // 前缀上下文
-    for i in 0..prefix {
-        out.push(DiffLine {
-            kind: DiffKind::Context,
-            text: old_lines[i].into(),
-        });
-    }
-    // 中间：先删后增
-    for i in prefix..old_lines.len() - suffix {
-        out.push(DiffLine {
-            kind: DiffKind::Del,
-            text: old_lines[i].into(),
-        });
-    }
-    for i in prefix..new_lines.len() - suffix {
-        out.push(DiffLine {
-            kind: DiffKind::Add,
-            text: new_lines[i].into(),
-        });
-    }
-    // 后缀上下文
-    for i in old_lines.len() - suffix..old_lines.len() {
-        out.push(DiffLine {
-            kind: DiffKind::Context,
-            text: old_lines[i].into(),
-        });
-    }
-    out
-}
+use crate::diff::{DiffKind, DiffLine, line_diff};
 
 /// 收到 ConfirmRequestMessage 时弹出确认窗口。
 fn show_on_request(

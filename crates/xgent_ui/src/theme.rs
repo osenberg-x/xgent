@@ -241,7 +241,7 @@ pub mod size {
     /// 旧·会话侧栏默认宽度（M2-T1 删除）
     pub const CHAT_SIDEBAR_W: f32 = 380.0;
     /// 编辑器 tab 条高度
-    pub const EDITOR_TABS_H: f32 = 32.0;
+    pub const EDITOR_TABS_H: f32 = 28.0;
     /// 终端 tab 条高度
     pub const TERMINAL_TABS_H: f32 = 32.0;
 }
