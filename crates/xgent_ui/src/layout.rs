@@ -123,7 +123,7 @@ pub(crate) fn spawn_layout(
                 // 活动栏（48px 固定宽度）
                 main.spawn((
                     Node {
-                        width: px(size::ACTIVITY_BAR_W),
+                        width: px(size::RAIL_W),
                         height: Val::Percent(100.0),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,

@@ -1,142 +1,225 @@
-//! 主题：三层深度配色体系 + 间距/尺寸常量。
+//! 主题：Linear 视觉基准（v7）——近黑画布、四级灰阶文字、单一靛紫强调，
+//! 层级用「背景明度阶梯 + 半透明白细边框」表达，非浮层元素零投影。
 //!
-//! v2 重构：采用 ui-ux-pro-max 推荐的 Developer Tool 调色板，
-//! 三层视觉深度（bg < panel < elevated），绿色强调色。
-//! MVP 仅暗色主题（K-01 主题增强留待 P1）。
+//! 色值即规范表：ADR-0014 与 `doc/plans/ui-v7-migration.md` §4.2。
+//! 状态色为 Radix 深色阶外推、陪伴暖色为唯一例外——均见 ADR 裁剪清单。
+//! MVP 仅暗色预设（K-01 亮色留待 P1；半透明叠加组换黑色系即可）。
 
 use bevy::prelude::*;
 
-/// 暗色主题颜色表（v2 三层深度体系）。
+/// 暗色主题（v7，Linear 基准）。
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct Theme {
-    // ===== 三层深度 =====
-    /// L0 最深层 — 全局背景
+    // ===== 表面：明度阶梯 =====
+    /// L0 会话画布（最深层）#08090A
     pub bg: Color,
-    /// L0.5 — 对话区背景，略浅于 bg
+    /// L1 顶栏/图标轨/上下文面板 #0F1011
     pub surface: Color,
-    /// L1 面板 — 文件树/侧栏/卡片底
-    pub panel: Color,
-    /// L2 提升 — hover/active/floating
+    /// L2 浮层/下拉/命令面板 #191A1B
     pub elevated: Color,
-    /// L-1 最深 — 代码块/终端
-    pub deep: Color,
+    /// 代码/终端/预览底 #0D0E10
+    pub code_bg: Color,
 
-    // ===== 边框丝线 =====
-    /// 微弱分隔线
+    // ===== 交互面（半透明白叠加；亮色主题时换黑色系）=====
+    /// 卡片/工具卡底 white@0.02
+    pub subtle: Color,
+    /// 输入类底 white@0.02
+    pub input_bg: Color,
+    /// 悬停步进 white@0.05
+    pub hover: Color,
+    /// 按下/选中步进 white@0.08
+    pub active: Color,
+    /// 图标底/小徽标 white@0.06
+    pub icon_bg: Color,
+
+    // ===== 边框：半透明白丝线 =====
+    /// 弱分隔（面板边界）white@0.05
     pub line: Color,
-    /// 标准边框
+    /// 标准边框 white@0.08
     pub border: Color,
-    /// 顶栏/状态栏背景（兼容旧代码，= bg 略深）
-    pub bar: Color,
+    /// 悬停边框 white@0.14
+    pub border_hover: Color,
 
-    // ===== 文字 =====
-    /// 标题/主文字
+    // ===== 文字：四级灰阶 =====
+    /// 标题/主文字 #F7F8F8（禁用纯白）
     pub text: Color,
-    /// 次要文字（兼容旧代码 = text_dim）
+    /// 正文/次要 #D0D6E0
     pub text_dim: Color,
-    /// 弱化文字/placeholder
+    /// 弱化/placeholder #8A8F98
     pub text_muted: Color,
+    /// 最弱（时间戳/行号/禁用）#62666D
+    pub text_faint: Color,
 
-    // ===== 强调色 =====
-    /// 主强调 — 绿色（CTA/运行/成功）
+    // ===== 强调色：唯一彩色系统（靛紫）=====
+    /// 主色（CTA/主按钮/品牌块）#5E6AD2
     pub accent: Color,
-    /// 用户消息气泡（兼容旧代码）
-    pub bubble_user: Color,
-    /// 助手消息气泡（兼容旧代码 = panel）
-    pub bubble_assistant: Color,
+    /// 交互强调（链接/active/选中）#7170FF
+    pub accent_interactive: Color,
+    /// 强调悬停 #828FFF
+    pub accent_hover: Color,
+    /// 强调薄底 rgba(94,106,210,0.14)
+    pub accent_bg: Color,
+    /// 强调辉光（focus 环/拖拽条高亮）rgba(113,112,255,0.16)
+    pub accent_glow: Color,
+    /// 强调色上的文字 #FFFFFF
+    pub accent_text: Color,
 
-    // ===== 字体 =====
-    /// 字体大小（逻辑像素）
-    pub font_size: f32,
-
-    // ===== 状态色 =====
-    /// 待确认（pending）
+    // ===== 功能状态色（Radix 深色阶，外推值见 ADR-0014 裁剪#1）=====
+    /// 待确认 #FFB224
     pub st_pending: Color,
-    /// 执行中（running）
+    /// 执行中 #7170FF
     pub st_running: Color,
-    /// 完成（ok）
+    /// 成功 #30A46C
     pub st_ok: Color,
-    /// 失败（fail）
+    /// 失败 #E5484D
     pub st_fail: Color,
-    /// 已拒绝（deny）
+    /// 已拒绝（与 fail 同色，可调）
     pub st_deny: Color,
+    /// 成功薄底 rgba(48,164,108,0.12)
+    pub st_ok_bg: Color,
+    /// 待确认薄底 rgba(255,178,36,0.12)
+    pub st_pending_bg: Color,
+    /// 失败薄底 rgba(229,72,77,0.12)
+    pub st_fail_bg: Color,
+    /// 信息 #0091FF
+    pub st_info: Color,
+    /// 信息薄底 rgba(0,145,255,0.12)
+    pub st_info_bg: Color,
 
-    // ===== 语法高亮色 =====
-    /// 关键字
+    // ===== 陪伴暖色（全界面唯一暖色例外，ADR-0014 裁剪#3）=====
+    /// 陪伴主色 #FFB224
+    pub warm: Color,
+    /// 陪伴薄底/激活环 rgba(255,178,36,0.15)
+    pub warm_bg: Color,
+
+    // ===== 反色浮层（tooltip/toast，两主题恒为暗底）=====
+    /// tooltip/toast 底 #28282C
+    pub tooltip_bg: Color,
+    /// tooltip/toast 文字 #F7F8F8
+    pub tooltip_text: Color,
+
+    // ===== 半透明覆盖 =====
+    /// 抽屉/弹窗遮罩 black@0.5
+    pub overlay: Color,
+
+    // ===== 代码语法（冷调低饱和，与靛紫体系一致）=====
+    /// 代码正文 #D0D6E0
+    pub code_text: Color,
+    /// 关键字 #B3A5FF
     pub kw: Color,
-    /// 函数名
+    /// 函数名 #7FB3FF
     pub fn_: Color,
-    /// 字符串
+    /// 字符串 #56C08D
     pub str_: Color,
-    /// 数字
+    /// 数字 #E2A35C
     pub num: Color,
-    /// 类型名
+    /// 类型名 #6FD3C7
     pub ty: Color,
-    /// 注释
+    /// 注释 #62666D
     pub com: Color,
-    /// 标点
+    /// 标点 #8A8F98（编辑器高亮链消费，勿删——方案 §4.1）
     pub punc: Color,
 
-    // ===== 半透明覆盖色 =====
-    /// 遮罩背景（modal overlay）
-    pub overlay: Color,
-    /// 选中态半透明背景
-    pub accent_bg: Color,
-    /// 悬停态半透明背景
+    // ===== 兼容旧字段（M1-T7 迁移引用、M1-T8 删除；新代码禁用）=====
+    /// 旧·面板底（= surface）
+    pub panel: Color,
+    /// 旧·顶/状态栏底（= surface）
+    pub bar: Color,
+    /// 旧·代码底（= code_bg）
+    pub deep: Color,
+    /// 旧·悬停底（= hover）
     pub hover_bg: Color,
-    /// 拖拽手柄激活色
+    /// 旧·图标底（= icon_bg）
     pub handle_active: Color,
+    /// 旧·用户消息气泡（= icon_bg）
+    pub bubble_user: Color,
+    /// 旧·助手消息气泡（= accent）
+    pub bubble_assistant: Color,
+
+    // ===== 排版 =====
+    /// 正文基准字号（逻辑像素）
+    pub font_size: f32,
 }
 
 impl Theme {
-    /// 暗色主题（v2 Developer Tool 调色板）。
+    /// 暗色主题（v7，Linear 基准）。
     pub fn dark() -> Self {
         Self {
-            // 三层深度 — slate 系列
-            bg: Color::srgba(0.043, 0.067, 0.125, 1.0),       // #0B1120
-            surface: Color::srgba(0.059, 0.086, 0.137, 1.0),   // #0F1623
-            panel: Color::srgba(0.075, 0.102, 0.168, 1.0),     // #131A2B
-            elevated: Color::srgba(0.110, 0.149, 0.251, 1.0),  // #1C2640
-            deep: Color::srgba(0.024, 0.039, 0.078, 1.0),      // #060A14
+            // 表面明度阶梯
+            bg: Color::srgba(0.0314, 0.0353, 0.0392, 1.0),      // #08090A
+            surface: Color::srgba(0.0588, 0.0627, 0.0667, 1.0), // #0F1011
+            elevated: Color::srgba(0.0980, 0.1020, 0.1059, 1.0), // #191A1B
+            code_bg: Color::srgba(0.0510, 0.0549, 0.0627, 1.0), // #0D0E10
+
+            // 交互面（半透明白）
+            subtle: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            input_bg: Color::srgba(1.0, 1.0, 1.0, 0.02),
+            hover: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            active: Color::srgba(1.0, 1.0, 1.0, 0.08),
+            icon_bg: Color::srgba(1.0, 1.0, 1.0, 0.06),
 
             // 边框丝线
-            line: Color::srgba(0.58, 0.64, 0.72, 0.10),       // rgba(148,163,184,0.10)
-            border: Color::srgba(0.58, 0.64, 0.72, 0.18),      // rgba(148,163,184,0.18)
-            bar: Color::srgba(0.039, 0.059, 0.110, 1.0),       // 略深于 bg
+            line: Color::srgba(1.0, 1.0, 1.0, 0.05),
+            border: Color::srgba(1.0, 1.0, 1.0, 0.08),
+            border_hover: Color::srgba(1.0, 1.0, 1.0, 0.14),
 
-            // 文字
-            text: Color::srgba(0.945, 0.961, 0.976, 1.0),      // #F1F5F9
-            text_dim: Color::srgba(0.796, 0.835, 0.882, 1.0),  // #CBD5E1
-            text_muted: Color::srgba(0.392, 0.455, 0.545, 1.0), // #64748B
+            // 文字四级灰阶
+            text: Color::srgba(0.9686, 0.9725, 0.9725, 1.0),      // #F7F8F8
+            text_dim: Color::srgba(0.8157, 0.8392, 0.8784, 1.0),  // #D0D6E0
+            text_muted: Color::srgba(0.5412, 0.5608, 0.5961, 1.0), // #8A8F98
+            text_faint: Color::srgba(0.3843, 0.4000, 0.4275, 1.0), // #62666D
 
-            // 强调色 — emerald green
-            accent: Color::srgba(0.133, 0.773, 0.369, 1.0),    // #22C55E
-            bubble_user: Color::srgba(0.118, 0.227, 0.373, 1.0), // #1E3A5F
-            bubble_assistant: Color::srgba(0.075, 0.102, 0.168, 1.0), // = panel
-
-            font_size: 13.5,
+            // 强调（靛紫）
+            accent: Color::srgba(0.3686, 0.4157, 0.8235, 1.0),    // #5E6AD2
+            accent_interactive: Color::srgba(0.4431, 0.4392, 1.0, 1.0), // #7170FF
+            accent_hover: Color::srgba(0.5098, 0.5608, 1.0, 1.0), // #828FFF
+            accent_bg: Color::srgba(0.3686, 0.4157, 0.8235, 0.14),
+            accent_glow: Color::srgba(0.4431, 0.4392, 1.0, 0.16),
+            accent_text: Color::WHITE,
 
             // 状态色
-            st_pending: Color::srgba(0.878, 0.702, 0.255, 1.0), // #E0B341
-            st_running: Color::srgba(0.231, 0.510, 0.965, 1.0), // #3B82F6
-            st_ok: Color::srgba(0.133, 0.773, 0.369, 1.0),     // #22C55E
-            st_fail: Color::srgba(0.937, 0.267, 0.267, 1.0),   // #EF4444
-            st_deny: Color::srgba(0.392, 0.455, 0.545, 1.0),   // #64748B
+            st_pending: Color::srgba(1.0, 0.6980, 0.1412, 1.0),   // #FFB224
+            st_running: Color::srgba(0.4431, 0.4392, 1.0, 1.0),   // #7170FF
+            st_ok: Color::srgba(0.1882, 0.6431, 0.4235, 1.0),     // #30A46C
+            st_fail: Color::srgba(0.8980, 0.2824, 0.3020, 1.0),   // #E5484D
+            st_deny: Color::srgba(0.8980, 0.2824, 0.3020, 1.0),   // #E5484D
+            st_ok_bg: Color::srgba(0.1882, 0.6431, 0.4235, 0.12),
+            st_pending_bg: Color::srgba(1.0, 0.6980, 0.1412, 0.12),
+            st_fail_bg: Color::srgba(0.8980, 0.2824, 0.3020, 0.12),
+            st_info: Color::srgba(0.0, 0.5686, 1.0, 1.0),         // #0091FF
+            st_info_bg: Color::srgba(0.0, 0.5686, 1.0, 0.12),
 
-            // 语法高亮色
-            kw: Color::srgba(0.753, 0.518, 0.988, 1.0),   // #C084FC
-            fn_: Color::srgba(0.376, 0.647, 0.980, 1.0),  // #60A5FA
-            str_: Color::srgba(0.525, 0.937, 0.675, 1.0), // #86EFAC
-            num: Color::srgba(0.984, 0.749, 0.145, 1.0),  // #FBBF24
-            ty: Color::srgba(0.988, 0.827, 0.302, 1.0),   // #FCD34D
-            com: Color::srgba(0.392, 0.455, 0.545, 1.0),  // #64748B
-            punc: Color::srgba(0.796, 0.835, 0.882, 1.0), // #CBD5E1
+            // 陪伴暖色（唯一例外）
+            warm: Color::srgba(1.0, 0.6980, 0.1412, 1.0),         // #FFB224
+            warm_bg: Color::srgba(1.0, 0.6980, 0.1412, 0.15),
 
-            // 半透明覆盖色
-            overlay: Color::srgba(0.0, 0.0, 0.0, 0.55),
-            accent_bg: Color::srgba(0.133, 0.773, 0.369, 0.10), // rgba(34,197,94,0.10)
-            hover_bg: Color::srgba(0.58, 0.64, 0.72, 0.05),     // rgba(148,163,184,0.05)
-            handle_active: Color::srgba(0.5, 0.65, 1.0, 0.6),
+            // 反色浮层
+            tooltip_bg: Color::srgba(0.1569, 0.1569, 0.1725, 1.0), // #28282C
+            tooltip_text: Color::srgba(0.9686, 0.9725, 0.9725, 1.0), // #F7F8F8
+
+            // 遮罩
+            overlay: Color::srgba(0.0, 0.0, 0.0, 0.5),
+
+            // 代码语法
+            code_text: Color::srgba(0.8157, 0.8392, 0.8784, 1.0), // #D0D6E0
+            kw: Color::srgba(0.7020, 0.6471, 1.0, 1.0),           // #B3A5FF
+            fn_: Color::srgba(0.4980, 0.7020, 1.0, 1.0),          // #7FB3FF
+            str_: Color::srgba(0.3373, 0.7529, 0.5529, 1.0),      // #56C08D
+            num: Color::srgba(0.8863, 0.6392, 0.3608, 1.0),       // #E2A35C
+            ty: Color::srgba(0.4353, 0.8275, 0.7804, 1.0),        // #6FD3C7
+            com: Color::srgba(0.3843, 0.4000, 0.4275, 1.0),       // #62666D
+            punc: Color::srgba(0.5412, 0.5608, 0.5961, 1.0),      // #8A8F98
+
+            // 兼容旧字段（值已对齐 v3 语义）
+            panel: Color::srgba(0.0588, 0.0627, 0.0667, 1.0),     // = surface
+            bar: Color::srgba(0.0588, 0.0627, 0.0667, 1.0),       // = surface
+            deep: Color::srgba(0.0510, 0.0549, 0.0627, 1.0),      // = code_bg
+            hover_bg: Color::srgba(1.0, 1.0, 1.0, 0.05),          // = hover
+            handle_active: Color::srgba(1.0, 1.0, 1.0, 0.06),     // = icon_bg
+            bubble_user: Color::srgba(1.0, 1.0, 1.0, 0.06),       // = icon_bg
+            bubble_assistant: Color::srgba(0.3686, 0.4157, 0.8235, 1.0), // = accent
+
+            font_size: 14.0,
         }
     }
 }
@@ -161,26 +244,33 @@ pub mod space {
 /// 尺寸常量（逻辑像素）。
 pub mod size {
     /// 顶栏高度
-    pub const TOP_BAR_H: f32 = 48.0;
+    pub const TOP_BAR_H: f32 = 52.0;
     /// 状态栏高度
-    pub const STATUS_BAR_H: f32 = 28.0;
-    /// 活动栏宽度
-    pub const ACTIVITY_BAR_W: f32 = 48.0;
-    /// 文件面板宽度
+    pub const STATUS_BAR_H: f32 = 32.0;
+    /// 图标轨宽度（原活动栏）
+    pub const RAIL_W: f32 = 52.0;
+    /// 上下文面板默认宽度
+    pub const CONTEXT_W_DEFAULT: f32 = 720.0;
+    /// 上下文面板最小宽度
+    pub const CONTEXT_W_MIN: f32 = 380.0;
+    /// 会话主区最小宽度（拖拽钳制）
+    pub const CHAT_MIN: f32 = 520.0;
+    /// 上下文面板页签条高度
+    pub const CONTEXT_TABS_H: f32 = 38.0;
+    /// 抽屉宽度
+    pub const DRAWER_W: f32 = 320.0;
+    /// 拖拽分隔条宽度
+    pub const RESIZER_W: f32 = 6.0;
+    /// 文件面板宽度（过渡期；M5 抽屉化后删除）
     pub const FILE_PANEL_W: f32 = 240.0;
-    /// 对话侧栏（SideView）默认宽度
+    /// 旧·会话侧栏默认宽度（M2-T1 删除）
     pub const CHAT_SIDEBAR_W: f32 = 380.0;
-    /// 视图标签条高度
+    /// 旧·视图标签条高度（M4-T6 删除）
     pub const VIEW_TABS_H: f32 = 36.0;
     /// 编辑器 tab 条高度
     pub const EDITOR_TABS_H: f32 = 32.0;
     /// 终端 tab 条高度
     pub const TERMINAL_TABS_H: f32 = 32.0;
-}
-
-/// 便捷：f32 → Val::Px（跨模块共享，避免重复定义）。
-pub fn px(v: f32) -> Val {
-    Val::Px(v)
 }
 
 /// 排版阶梯（v7，原型唯一字号集合；新界面禁止就地发明字号）。
@@ -231,4 +321,9 @@ pub mod radius {
     pub const CARD: f32 = 8.0;
     /// 浮层/弹窗
     pub const PANEL: f32 = 12.0;
+}
+
+/// 便捷：f32 → Val::Px（跨模块共享，避免重复定义）。
+pub fn px(v: f32) -> Val {
+    Val::Px(v)
 }
