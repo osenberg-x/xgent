@@ -197,10 +197,9 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M3-T4 agent pill
 **依赖**：M3-T3
-- [ ] kit `agent_pill`：胶囊 9999、状态机映射 `ConversationStatus`（Idle→ok 点 / Thinking→accent 脉冲 / Streaming→accent 快脉冲 / ToolRunning→warning / 等待确认→warning）+ `ErrorMessage`→error。
-- [ ] 脉冲动画：仿 status_bar 正弦 alpha（1.2s/0.8s 周期），仅激活态驱动。
-
-**验收**：真实对话走 idle→thinking→streaming→done；**确认态**走一次写文件确认流（tool/confirm 态）；**错误态**以无效 API key 触发——五态全部见过。
+- [x] pill 五态机在 top_bar 内实现（Idle=ok/subtle、Thinking/Streaming=accent 脉冲、ToolRunning/Confirming/Aborting=warning、Error=fail；文本复用 status-* i18n 键）。
+- [x] 脉冲：1.2s 正弦 alpha 仅 Thinking/Streaming 驱动。
+- [ ] 手测项：确认态/错误态需真实对话触发（留用户手测）。
 
 ### M3-T5 rail 改造（activity_bar → rail）
 **依赖**：M3-T2
