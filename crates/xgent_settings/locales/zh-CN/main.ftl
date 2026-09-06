@@ -132,3 +132,8 @@ history-close = ✕
 history-message-count = { $count } 条消息
 history-restore = 恢复
 history-restore-failed = 恢复失败：会话文件不存在或已损坏
+
+# v7 状态栏：会话段 / 陪伴开关
+status-session = #{ $id } · { $rounds } 轮
+status-companion-on = ★ 陪伴已开启
+status-companion-off = ☆ 陪伴已关闭

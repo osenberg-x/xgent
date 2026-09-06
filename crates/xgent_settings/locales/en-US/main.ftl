@@ -131,3 +131,8 @@ history-close = x
 history-message-count = { $count } messages
 history-restore = Restore
 history-restore-failed = Restore failed: session file missing or corrupted
+
+# v7 状态栏：会话段 / 陪伴开关
+status-session = #{ $id } · { $rounds } rounds
+status-companion-on = ★ companion on
+status-companion-off = ☆ companion off

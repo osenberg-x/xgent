@@ -1,13 +1,14 @@
-//! 状态栏：药丸标签布局（provider pill + token pill + 状态 + spacer + 编码语言）。
+//! 状态栏（v7）：分段时间线——daemon/提供方 · tokens · 成本 | spacer | 陪伴 ·
+//! 编码 · 会话（#id · N 轮）。段间以右侧细线分隔；仅陪伴开关可点击（本期）。
 //!
-//! v2 重构：每个信息块用圆角容器（pill）包裹，视觉更清晰。
-//! 状态点忙时脉冲；空闲时 ok 色。
+//! 会话状态文本已移除（顶栏 agent pill 承担，方案 §8.9）；状态点忙时脉冲。
 
 use bevy::prelude::*;
+use xgent_core::chat::AgentMessage;
 use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
 
 use crate::layout::StatusBarMarker;
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, space, type_scale};
 
 /// 状态点（小圆点）标记。
 #[derive(Component, Default)]
@@ -17,13 +18,31 @@ pub struct StatusDotMarker;
 #[derive(Component, Default)]
 pub struct ProviderTextMarker;
 
-/// 会话状态文本节点标记。
-#[derive(Component, Default)]
-pub struct ConvStatusMarker;
-
 /// token 用量文本节点标记。
 #[derive(Component, Default)]
 pub struct TokenTextMarker;
+
+/// 会话段文本标记（#id · N 轮）。
+#[derive(Component, Default)]
+pub struct SessionTextMarker;
+
+/// 陪伴开关按钮标记。
+#[derive(Component, Default)]
+pub struct CompanionToggleMarker;
+
+/// 陪伴开关文本标记（★ 陪伴已开启/关闭）。
+#[derive(Component, Default)]
+pub struct CompanionTextMarker;
+
+/// 陪伴开关状态（宠物本体为 P1；本期为状态栏点亮态占位）。
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct CompanionOn(pub bool);
+
+impl Default for CompanionOn {
+    fn default() -> Self {
+        Self(true)
+    }
+}
 
 /// 累计 token 用量（UI 侧粗略估算）。
 #[derive(Resource, Debug, Clone, Copy, Default)]
@@ -37,15 +56,36 @@ pub struct StatusBarPlugin;
 impl Plugin for StatusBarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TokenUsage>()
+            .init_resource::<CompanionOn>()
             .add_systems(Startup, spawn_status_bar)
             .add_systems(
                 Update,
-                (update_status_segments, update_status_dot, track_token_usage),
+                (
+                    update_status_segments,
+                    update_session_text,
+                    update_companion_text,
+                    toggle_companion,
+                    update_status_dot,
+                    track_token_usage,
+                ),
             );
     }
 }
 
-/// 启动时在状态栏内 spawn：provider pill + token pill + 状态 + spacer + 编码。
+/// 状态栏分段节点（右侧细线分隔；高度 20px 垂直居中于 32px 栏）。
+fn segment_node() -> Node {
+    Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: px(space::XS),
+        padding: UiRect::horizontal(px(space::SM)),
+        height: px(20.0),
+        border: UiRect::right(px(1.0)),
+        ..default()
+    }
+}
+
+/// 启动时在状态栏内 spawn 各分段。
 fn spawn_status_bar(
     mut commands: Commands,
     q_bar: Query<Entity, With<StatusBarMarker>>,
@@ -55,101 +95,113 @@ fn spawn_status_bar(
     let Ok(bar) = q_bar.single() else {
         return;
     };
-    let font_size = FontSize::Px(11.0);
+    let micro = FontSize::Px(type_scale::MICRO);
     let dim = theme.text_muted;
 
     commands.entity(bar).with_children(|p| {
-        // provider pill（elevated 底 + dot + 文本）
-        p.spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(space::XS),
-                padding: UiRect::horizontal(px(space::SM)),
-                border_radius: BorderRadius::all(px(16.0)),
-                ..default()
-            },
-            BackgroundColor(theme.elevated),
-        ))
-        .with_children(|pill| {
-            pill.spawn((
-                Node {
-                    width: px(6.0),
-                    height: px(6.0),
-                    border_radius: BorderRadius::all(px(3.0)),
-                    ..default()
-                },
-                BackgroundColor(theme.st_ok),
-                StatusDotMarker,
-            ));
-            pill.spawn((
-                Text::new(String::new()),
-                TextFont {
-                    font_size,
-                    ..default()
-                },
-                TextColor(dim),
-                ProviderTextMarker,
-            ));
-        });
-        // token pill
-        p.spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                padding: UiRect::horizontal(px(space::SM)),
-                border_radius: BorderRadius::all(px(16.0)),
-                ..default()
-            },
-            BackgroundColor(theme.elevated),
-        ))
-        .with_children(|pill| {
-            pill.spawn((
-                Text::new(String::new()),
-                TextFont {
-                    font_size,
-                    ..default()
-                },
-                TextColor(dim),
-                TokenTextMarker,
-            ));
-        });
-        // 会话状态文本
-        p.spawn((
-            Text::new(String::new()),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(dim),
-            ConvStatusMarker,
-        ));
+        // daemon/提供方段：状态点 + provider 文本
+        p.spawn((segment_node(), BorderColor::all(theme.line)))
+            .with_children(|seg| {
+                seg.spawn((
+                    Node {
+                        width: px(6.0),
+                        height: px(6.0),
+                        border_radius: BorderRadius::all(px(3.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.st_ok),
+                    StatusDotMarker,
+                ));
+                seg.spawn((
+                    Text::new(String::new()),
+                    TextFont {
+                        font_size: micro,
+                        ..default()
+                    },
+                    TextColor(dim),
+                    ProviderTextMarker,
+                ));
+            });
+        // token 段
+        p.spawn((segment_node(), BorderColor::all(theme.line)))
+            .with_children(|seg| {
+                seg.spawn((
+                    Text::new(String::new()),
+                    TextFont {
+                        font_size: micro,
+                        ..default()
+                    },
+                    TextColor(dim),
+                    TokenTextMarker,
+                ));
+            });
+        // 成本段（占位，OQ-10 成本统计细化后接入）
+        p.spawn((segment_node(), BorderColor::all(theme.line)))
+            .with_children(|seg| {
+                seg.spawn((
+                    Text::new("$0.00"),
+                    TextFont {
+                        font_size: micro,
+                        ..default()
+                    },
+                    TextColor(dim),
+                ));
+            });
         // spacer
         p.spawn((Node {
             flex_grow: 1.0,
             ..default()
         },));
-        // 编码/语言段
+        // 陪伴开关（本期唯一可点项）
         p.spawn((
-            Text::new(crate::i18n::tr(&loc, "status-encoding").to_string()),
+            Button,
+            segment_node(),
+            BorderColor::all(theme.line),
+            CompanionToggleMarker,
+        ))
+        .with_children(|seg| {
+            seg.spawn((
+                Text::new(String::new()),
+                TextFont {
+                    font_size: micro,
+                    ..default()
+                },
+                TextColor(theme.warm),
+                CompanionTextMarker,
+            ));
+        });
+        // 编码段（保留）
+        p.spawn((segment_node(), BorderColor::all(theme.line)))
+            .with_children(|seg| {
+                seg.spawn((
+                    Text::new(crate::i18n::tr(&loc, "status-encoding").to_string()),
+                    TextFont {
+                        font_size: micro,
+                        ..default()
+                    },
+                    TextColor(dim),
+                ));
+            });
+        // 会话段：#id · N 轮（末段无分隔线）
+        p.spawn((
+            Text::new(String::new()),
             TextFont {
-                font_size,
+                font_size: micro,
                 ..default()
             },
             TextColor(dim),
+            SessionTextMarker,
         ));
     });
 }
 
-/// 每帧更新各分段文本（有变更检测，避免每帧分配 i18n 字符串）。
+/// 每帧更新 provider/token 文本（有变更检测，避免每帧分配 i18n 字符串）。
 fn update_status_segments(
-    conv: Res<Conversation>,
     info: Res<ProviderInfo>,
     tokens: Res<TokenUsage>,
     loc: Res<xgent_settings::Localizer>,
     mut q: ParamSet<(
         Query<&mut Text, With<ProviderTextMarker>>,
-        Query<&mut Text, With<ConvStatusMarker>>,
         Query<&mut Text, With<TokenTextMarker>>,
     )>,
 ) {
@@ -165,24 +217,8 @@ fn update_status_segments(
             text.0 = label;
         }
     }
-    if conv.is_changed() || loc.is_changed() {
-        if let Ok(mut text) = q.p1().single_mut() {
-            let label = match conv.status {
-                ConversationStatus::Idle => crate::i18n::tr(&loc, "status-ready"),
-                ConversationStatus::Thinking => crate::i18n::tr(&loc, "status-thinking"),
-                ConversationStatus::Streaming => crate::i18n::tr(&loc, "status-streaming"),
-                ConversationStatus::ToolRunning => crate::i18n::tr(&loc, "status-tool-running"),
-                ConversationStatus::Confirming => crate::i18n::tr(&loc, "status-confirming"),
-                ConversationStatus::Aborting => crate::i18n::tr(&loc, "status-aborting"),
-                ConversationStatus::Error => crate::i18n::tr(&loc, "status-error"),
-            };
-            if text.0 != label {
-                text.0 = label.to_string();
-            }
-        }
-    }
     if tokens.is_changed() {
-        if let Ok(mut text) = q.p2().single_mut() {
+        if let Ok(mut text) = q.p1().single_mut() {
             let label = if tokens.total > 0 {
                 format!("↑ {} tokens", format_tokens(tokens.total))
             } else {
@@ -195,7 +231,77 @@ fn update_status_segments(
     }
 }
 
-/// 状态点：忙时 running 色 + 脉冲，空闲 ok 色。
+/// 更新会话段：#id · N 轮（轮数 = 用户消息数；承接原 ConversationInfo，方案 §8.4）。
+fn update_session_text(
+    conv: Res<Conversation>,
+    loc: Res<xgent_settings::Localizer>,
+    mut q: Query<&mut Text, With<SessionTextMarker>>,
+) {
+    if !conv.is_changed() && !loc.is_changed() {
+        return;
+    }
+    let Ok(mut text) = q.single_mut() else {
+        return;
+    };
+    let rounds = conv
+        .messages
+        .iter()
+        .filter(|m| matches!(m, AgentMessage::User(_)))
+        .count();
+    let label = crate::i18n::tr_with(
+        &loc,
+        "status-session",
+        &[
+            ("id", conv.id.to_string().into()),
+            ("rounds", rounds.to_string().into()),
+        ],
+    );
+    if text.0 != label {
+        text.0 = label.to_string();
+    }
+}
+
+/// 更新陪伴开关文本与颜色（开启=warm 星标，关闭=muted）。
+fn update_companion_text(
+    on: Res<CompanionOn>,
+    loc: Res<xgent_settings::Localizer>,
+    theme: Res<Theme>,
+    mut q: Query<(&mut Text, &mut TextColor), With<CompanionTextMarker>>,
+) {
+    if !on.is_changed() && !loc.is_changed() && !theme.is_changed() {
+        return;
+    }
+    let Ok((mut text, mut color)) = q.single_mut() else {
+        return;
+    };
+    let key = if on.0 {
+        "status-companion-on"
+    } else {
+        "status-companion-off"
+    };
+    let label = crate::i18n::tr(&loc, key).to_string();
+    if text.0 != label {
+        text.0 = label;
+    }
+    let want = if on.0 { theme.warm } else { theme.text_muted };
+    if color.0 != want {
+        color.0 = want;
+    }
+}
+
+/// 点击陪伴段：切换开关（本期唯一可点项，方案 §8.9）。
+fn toggle_companion(
+    q: Query<&Interaction, (With<CompanionToggleMarker>, Changed<Interaction>)>,
+    mut on: ResMut<CompanionOn>,
+) {
+    for interaction in q.iter() {
+        if *interaction == Interaction::Pressed {
+            on.0 = !on.0;
+        }
+    }
+}
+
+/// 状态点：忙时 running 色 + 脉冲，空闲 ok 色，错误 fail 色。
 fn update_status_dot(
     conv: Res<Conversation>,
     time: Res<Time>,
