@@ -32,20 +32,22 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M1-T1 字体资产入库
 **依赖**：无
-- [ ] 下载 Inter 可变字体（rsms/inter release 的 `InterVariable.ttf`），放 `crates/xgent_app/assets/fonts/Inter-Variable.ttf`，**连同 `OFL.txt` 许可**一并入库。
-- [ ] 确认文件完整性（`fc-scan` 或字体工具读出 wght 轴 100–900）。
+- [x] 下载 Inter 可变字体（rsms/inter v4.1），放 `crates/xgent_app/assets/fonts/Inter-Variable.ttf`，连同 `OFL.txt` 许可入库。
+- [x] 文件完整性：python 解析 fvar 表——`wght 100/400/900`（另含 opsz 14-32 光学尺寸轴）。
 
-**验收**：资产文件在库、许可文件在库、axis 正确。
+**验收**：✓ 资产/许可在库、axis 正确。
 
 ### M1-T2 fonts.rs 字体模块
 **依赖**：M1-T1
-- [ ] **配置资产根目录（阻断级前提，先行）**：main.rs DefaultPlugins 的 `AssetPlugin` 增 `file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets")`——现状资产根是 CWD 相对 `assets/`（workspace 根运行时该目录不存在），AssetServer 实际不可用（现有代码全部绕开：字体直读 startup.rs:56-59、插件扫描 main.rs:182 用 CARGO_MANIFEST_DIR）。此后字体/图标统一走 AssetServer。
-- [ ] 新建 `xgent_ui/src/fonts.rs`：`UiFonts { ui, mono }` Resource + `FontPlugin`；Inter **经 AssetServer** 加载（失败 `warn!` 回退 `Handle::default()`，不 panic）；全局默认字体替换（`AssetId::default()` 现机制）指向 Inter。
-- [ ] `mono` 句柄由 `xgent_app/startup.rs` 现有 Menlo 加载注入（**保持直读**——系统文件非资产）；`load_system_font` 注释语义改为 mono。
-- [ ] 定义文本构造器：`ui_text(size, weight, color, line_height)` / `mono_text(size, color, line_height)`（含 cv01/ss03 FontFeatures、LetterSpacing 按档 0/-0.29）。
-- [ ] `theme.rs` 增 `type_scale`（8 档）+ `type_scale::line_height`（5 档）+ 圆角常量（MICRO 2/SMALL 4/CTRL 6/CARD 8/PANEL 12）——先只加不改旧值。
+- [x] **配置资产根目录（阻断级前提，先行）**：main.rs `AssetPlugin.file_path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets")` 已落地（M3 图标依赖此配置）。
+- [x] 新建 `xgent_ui/src/fonts.rs`：`UiFonts { ui, mono }` Resource + `ui_text/mono_text` 构造器（含 cv01/ss03 FontFeatures）。Inter 实际走**直读模式**（见偏差记录），全局默认字体替换指向 Inter。
+- [x] `mono` 句柄由 `xgent_app/startup.rs` Menlo 加载注入；`load_system_font` 更名 `load_fonts` 并统一处理两种字体。
+- [x] 文本构造器：`ui_text(text, size, weight, color, line_height)` / `mono_text(fonts, text, size, color, line_height)`——签名与任务书的差异见偏差记录（+text 参数、暂无 LetterSpacing）。
+- [x] `theme.rs` 增 `type_scale`（8 档）+ `type_scale::line_height`（5 档）+ `radius` 常量（2/4/6/8/12）。
 
-**验收**：`cargo check -p xgent_ui -p xgent_app` 过；任意一个试验性 `ui_text` 调用在窗口中显示 Inter。
+**验收**：✓ `cargo check` 过；CJK spike（M1-T3）真机确认 Inter 生效。
+
+> **实施偏差记录（2026-09-06）**：① Inter 实际采用**直读模式**（`CARGO_MANIFEST_DIR` 相对路径 + `Font::from_bytes` + 插默认 `AssetId`），未走 AssetServer——同步加载、天然支持默认句柄覆盖、对齐 startup 既有模式，避免「异步句柄 + 默认 id 二次插入」的双读复杂度；AssetServer 根配置保留（M3 图标必需）。② 构造器**暂无 LetterSpacing**（唯一消费者是 M4 的 DISPLAY 标题，届时在实际编码处按确认后的类型接入）。③ 字体加载位于 `xgent_app::startup`（非 xgent_ui::FontPlugin）——`CARGO_MANIFEST_DIR` 只能解析本 crate 路径。
 
 ### M1-T3 ⚠ CJK spike（硬门槛）
 **依赖**：M1-T2
