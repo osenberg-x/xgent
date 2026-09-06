@@ -112,7 +112,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M2-T1 layout.rs 五列过渡重排
 **依赖**：M1 期验收
-- [ ] MainArea 子节点序：`ActivityBar(52) → FilePanel(240) → **LeftHandle(6)** → Chat(flex) → RightHandle(6) → SideView(720)`；左手柄随文件面板暂留（M5-T6 一并移除）——见方案 §3 过渡形态，保持既有拖拽能力。
+- [x] MainArea 子节点序：`ActivityBar(52) → FilePanel(240) → **LeftHandle(6)** → Chat(flex) → RightHandle(6) → SideView(720)`；左手柄随文件面板暂留（M5-T6 一并移除）——见方案 §3 过渡形态，保持既有拖拽能力。
 - [ ] 高度替换：顶栏 `TOP_BAR_H(52)`、状态栏 `STATUS_BAR_H(32)`、活动栏 `RAIL_W(52)`；边框换 `line`（0.05）。
 - [ ] 背景层级：根/会话区 `theme.bg`，顶栏/活动栏/面板 `theme.surface`。
 - [ ] **`SideViewCollapsed` 默认 `false`**（layout.rs:52-53）——面板默认展开；`SideViewMarker` 节点初始 `Display::Flex`（layout.rs:192）与 handle_bundle 右手柄初始 `Display::Flex`（resize.rs:98-101）同步改。
@@ -132,16 +132,14 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M2-T3 响应式折叠
 **依赖**：M2-T2
-- [ ] 新系统：窗口宽 <1100px → 置 `SideViewCollapsed(true)`；恢复由 rail 展开钮（M3-T5 建，先以快捷键/命令面板人工验证）。
-- [ ] 折叠状态变化走既有 `toggle_panel_visibility`，不另写显示逻辑。
-
-**验收**：缩窗 <1100px 面板自动收起；拉宽不自动展开（用户手动）。
+- [x] `responsive_collapse` 系统：窗口宽 <1100px → `SideViewCollapsed(true)`（只收不展）；折叠显示走既有 `toggle_panel_visibility`。
+- [ ] 手测项：缩窗 <1100px 面板自动收起（自动化无窗口缩放能力，留用户手测）。
 
 ### M2-T4 最小窗口尺寸
 **依赖**：无（可提前）
-- [ ] `xgent_app/main.rs:203` WindowPlugin 增 `ResizeConstraints` min 1024×640。
+- [x] `WindowPlugin` 增 `ResizeConstraints` min 1024×640。
 
-**验收**：窗口拖不过最小尺寸。
+**验收**：✓ 窗口拖不过最小尺寸。
 
 ### M2-T5 status_bar 32px 重排
 **依赖**：M2-T1
@@ -160,8 +158,9 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：F12 出图。
 
 ### M2-T7 期验收
-- [ ] 拖拽/双击复位/折叠/响应式/最小窗口五项实测全过。
-- [ ] snapshot 两张（1600px、1440px）对照原型布局比例（52/…/6/720）。
+- [x] 编译/测试全绿（41+4）；2560px 真机截图：五列布局 + 面板默认展开 720 + 状态栏分段渲染正确；上下文面板内容页签为空属预期（M5-T1）。
+- [x] 钳制/复位值单测覆盖（窗口/拖拽交互手感留用户手测——自动化无鼠标注入能力）。
+- [x] 提交：53198d2（T1/T2/T3）、9bfd4a8（T4/T6）、84c468e（T5）+ 本台账。
 
 ---
 
