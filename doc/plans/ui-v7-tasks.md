@@ -303,7 +303,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M5-T1 页签条与状态机
 **依赖**：M3 期验收（需 icon/kit）
-- [ ] SideView 顶部 38px 页签条（`CONTEXT_TABS_H`）：预览 / 差异 / 终端（SMALL/510，active=`accent_interactive`+底部 2px 线）+ 右侧折叠钮（现有折叠行为）。
+- [x] SideView 顶部 38px 页签条：预览 / 差异 / 终端（SMALL/510，active=`accent_interactive`+底部 2px 线）+ 右侧收起钮（EditorBackButtonMarker 复用）。
 - [x] `SideViewContent` 增 `Diff` 变体；`handle_page_tab_click`/`update_page_tab_indicators`（active=accent 底线）；Editor/Preview 归一预览页。
 - [x] rail 终端按钮行为保留（content=Terminal 走既有显隐链路）。
 - [x] 真机截图：页签条「预览 差异 终端 ×」渲染正确（None 态无 active 指示属预期）。
@@ -312,7 +312,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M5-T2 预览页归一
 **依赖**：M5-T1
-- [ ] Editor/Preview 两态归一为预览页（现编辑器主体保留）；外框底 `code_bg`。**归一影响面**：`Preview` 写入点 file_panel.rs:739（非代码文件打开流）、比较点 :832、消费点 editor/mod.rs:329——与 M5-T6 的 `OpenFileRequest` 改道是同一流程的两半，**先本任务归一变体、M5-T6 改道入口，顺序不可倒**。
+- [x] Editor/Preview 两态归一为预览页（编辑器主体保留；页签指示归一映射）。**归一影响面**（file_panel.rs 写入点 :739 的入口改道随 M5-T6）：`Preview` 写入点 file_panel.rs:739（非代码文件打开流）、比较点 :832、消费点 editor/mod.rs:329——与 M5-T6 的 `OpenFileRequest` 改道是同一流程的两半，**先本任务归一变体、M5-T6 改道入口，顺序不可倒**。
 - [x] 编辑器外框底 `code_bg`、顶部栏高度 32→28（`EDITOR_TABS_H` 更新）；emoji 检查归 M5-T6 文件面板一并处理。
 - [ ] `editor.view` 热键映射（M7-T3 收口）。
 
@@ -320,14 +320,14 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M5-T3 共享 line_diff 抽取
 **依赖**：无（可提前）
-- [ ] confirm_dialog.rs:53 `line_diff` 抽到 `xgent_ui/src/diff.rs`（纯函数化；confirm_dialog 无现存测试，**补基础用例 ≥3 例**：纯增/纯删/增删混合）；confirm_dialog 改调用共享版。
+- [x] confirm_dialog.rs `line_diff` 抽到 `xgent_ui/src/diff.rs`（pub DiffKind/DiffLine/line_diff；补 3 用例：纯增/纯删/混合）；confirm_dialog 改调用共享版。
 
 **验收**：`cargo test -p xgent_ui` 过（新 diff 用例）；confirm 行为不变。
 
 ### M5-T4 差异页
 **依赖**：M5-T1、M5-T3
-- [ ] 新建 `editor/diff_view.rs`：buffer 侧读 `TextEditor.rope`（pub，text_editor.rs:80）、磁盘侧走 `FileReadRequest`/`PreviewReadResult` 通道取原文件；调共享 line_diff。
-- [ ] 渲染：`code_bg` 底 + mono CAPTION、行号 `text_faint`、add=`str_`/del=`st_fail` + 行底 tint；无差异空态「无未保存更改」（i18n）。
+- [x] 新建 `editor/diff_view.rs`：buffer 侧读 `TextEditor.rope`、磁盘侧用 `EditorBuffer.disk_content` 快照（**优于任务书**——免异步通道）；调共享 line_diff。
+- [x] 渲染：`code_bg` 底 + mono、add=`str_`/`st_ok_bg` 底、del=`st_fail`/`st_fail_bg` 底、context=`text_faint`；空态「无未保存更改/无打开文件」（i18n `diff-empty-*`）。
 
 **验收**：改 buffer 后差异页实时反映；撤销后空态。
 
