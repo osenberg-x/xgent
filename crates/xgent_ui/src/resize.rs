@@ -1,13 +1,14 @@
 //! 面板拖拽调整大小。
 //!
-//! 主区（[`crate::layout::MainAreaMarker`]）是水平行布局，子节点顺序：
-//! 文件面板 → 左手柄 → 对话主区 → 右手柄 → 右侧分屏。
-//! - 左手柄（[`ResizeEdge::Left`]）拖拽改变文件面板宽度；
-//! - 右手柄（[`ResizeEdge::Right`]）拖拽改变右侧分屏宽度（分屏展开时才可见/可拖）。
+//! 主区（[`crate::layout::MainAreaMarker`]）是水平行布局，v7 过渡期子节点顺序：
+//! 图标轨 → 文件面板 → 左手柄 → 对话主区 → 右手柄 → 上下文面板。
+//! - 左手柄（[`ResizeEdge::Left`]）拖拽改变文件面板宽度（M5 抽屉化后随文件列移除）；
+//! - 右手柄（[`ResizeEdge::Right`]）拖拽改变上下文面板宽度，双击复位默认宽度。
 //!
-//! 宽度由 [`PanelWidths`] Resource 驱动：文件面板/右侧分屏用显式像素宽度，
+//! 宽度由 [`PanelWidths`] Resource 驱动：文件面板/上下文面板用显式像素宽度，
 //! 对话主区用 `flex_grow: 1.0` 填充剩余空间。拖拽时据每帧
-//! [`AccumulatedMouseMotion`] 增量更新宽度，并据主区 `ComputedNode` 物理尺寸做上下限钳制。
+//! [`AccumulatedMouseMotion`] 增量更新宽度，钳制经纯函数 [`clamp_side_view`]
+//! （配单测）。启动/缩窗时统一钳制防溢出（方案 §8.8）；窗口 <1100px 自动收起面板。
 //!
 //! 不引入 `bevy_picking`（默认未启用，会拉重依赖）；改用手柄 `Interaction::Pressed`
 //! 触发拖拽 + `ButtonInput<MouseButton>` 维持 + 释放清除的状态机。
@@ -21,12 +22,14 @@ use crate::theme::size;
 
 /// 文件面板最小宽度（逻辑像素）。
 const FILE_PANEL_MIN: f32 = 160.0;
-/// 右侧分屏最小宽度（逻辑像素）。
-const SIDE_VIEW_MIN: f32 = 200.0;
+/// 上下文面板最小宽度（逻辑像素）。
+const SIDE_VIEW_MIN: f32 = 380.0;
 /// 对话主区最小宽度（逻辑像素）——拖拽时为其保留的最小空间。
-const CHAT_MIN: f32 = 240.0;
+const CHAT_MIN: f32 = 520.0;
 /// 分隔手柄命中宽度（逻辑像素）。
 const HANDLE_W: f32 = 6.0;
+/// 双击判定窗口（秒）。
+const DOUBLE_CLICK_SECS: f64 = 0.3;
 
 /// 拖拽边界标识。
 #[derive(Component, Copy, Clone, Eq, PartialEq, Debug, Default)]
@@ -34,7 +37,7 @@ pub enum ResizeEdge {
     /// 文件面板 ↔ 对话主区（拖拽改变文件面板宽度）。
     #[default]
     Left,
-    /// 对话主区 ↔ 右侧分屏（拖拽改变右侧分屏宽度）。
+    /// 对话主区 ↔ 上下文面板（拖拽改变面板宽度）。
     Right,
 }
 
@@ -43,14 +46,11 @@ pub enum ResizeEdge {
 pub struct ResizeEdgeMarker(pub ResizeEdge);
 
 /// 面板显式宽度（逻辑像素），由拖拽更新。
-///
-/// 启动时初始化为 [`size::FILE_PANEL_W`] / [`size::CHAT_SIDEBAR_W`]；
-/// [`crate::layout`] 的折叠系统改读此 Resource（不再直接写常量）。
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct PanelWidths {
-    /// 文件面板宽度。
+    /// 文件面板宽度（过渡期）。
     pub file_panel: f32,
-    /// 右侧分屏宽度（展开时生效）。
+    /// 上下文面板宽度。
     pub side_view: f32,
 }
 
@@ -58,7 +58,7 @@ impl Default for PanelWidths {
     fn default() -> Self {
         Self {
             file_panel: size::FILE_PANEL_W,
-            side_view: size::CHAT_SIDEBAR_W,
+            side_view: size::CONTEXT_W_DEFAULT,
         }
     }
 }
@@ -66,6 +66,15 @@ impl Default for PanelWidths {
 /// 当前激活的拖拽边界（鼠标按到手柄、未释放期间）。
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ActiveResize(pub Option<ResizeEdge>);
+
+/// 上下文面板宽度钳制（纯函数，单测覆盖边界）。
+///
+/// `available`：主区可用宽度（调用方已扣除文件面板等占用）。
+/// 下限 [`SIDE_VIEW_MIN`]；上限 = available − [`CHAT_MIN`]（不足时取下限）。
+fn clamp_side_view(w: f32, available: f32) -> f32 {
+    let max = (available - CHAT_MIN).max(SIDE_VIEW_MIN);
+    w.clamp(SIDE_VIEW_MIN, max)
+}
 
 /// 拖拽调整大小插件。
 pub struct ResizePlugin;
@@ -76,7 +85,13 @@ impl Plugin for ResizePlugin {
             .init_resource::<ActiveResize>()
             .add_systems(
                 Update,
-                (apply_panel_widths, handle_resize_drag)
+                (
+                    apply_panel_widths,
+                    handle_resize_drag,
+                    handle_double_click_reset,
+                    clamp_on_window_resize,
+                    responsive_collapse,
+                )
                     .chain()
                     .after(crate::layout::toggle_panel_visibility),
             );
@@ -84,33 +99,24 @@ impl Plugin for ResizePlugin {
 }
 /// 构造一条竖向拖拽手柄节点 Bundle（在 [`crate::layout::spawn_layout`] 中 spawn）。
 ///
-/// 宽 [`HANDLE_W`]，既是视觉宽度也是命中宽度（透明，hover/拖拽时变色）。
-/// 不用负 margin 扩展命中区——flex 负 margin 在 bevy_ui 行为不稳且易被邻面板背景遮盖。
+/// 宽 [`HANDLE_W`]，既是视觉宽度也是命中宽度（透明，hover/拖拽时高亮 +
+/// 2px 交互色竖线）。v7 两个手柄初始均可见（上下文面板默认展开）。
 pub fn handle_bundle(edge: ResizeEdge) -> impl Bundle {
     (
         Node {
             width: Val::Px(HANDLE_W),
             height: Val::Percent(100.0),
             flex_shrink: 0.0,
-            // 右手柄初始隐藏（右侧分屏默认收起，display:none）；
-            // 左手柄初始显示（文件面板默认展开）。
-            // 后续由 layout::toggle_panel_visibility 据 SideViewCollapsed/FilePanelCollapsed 切换。
-            display: match edge {
-                ResizeEdge::Left => Display::Flex,
-                ResizeEdge::Right => Display::None,
-            },
             ..default()
         },
         BackgroundColor(Color::NONE),
+        BorderColor::all(Color::NONE),
         Button,
         ResizeEdgeMarker(edge),
     )
 }
 
-/// 每帧据 [`PanelWidths`] 应用文件面板/右侧分屏宽度（折叠态下置 0 / 不影响）。
-///
-/// - 文件面板折叠态下强制宽 0，否则写资源宽度；
-/// - 右侧分屏折叠时 `display:none`（由布局系统管），宽度即便写入也不影响渲染。
+/// 每帧据 [`PanelWidths`] 应用文件面板/上下文面板宽度（折叠态下置 0 / 不影响）。
 pub(crate) fn apply_panel_widths(
     widths: Res<PanelWidths>,
     file_collapsed: Res<FilePanelCollapsed>,
@@ -146,8 +152,8 @@ pub(crate) fn apply_panel_widths(
 
 /// 处理拖拽：手柄 Pressed 启动、鼠标按下期间累积位移、释放清除。
 ///
-/// 手柄 hover/拖拽时变色，提供视觉反馈。
-pub(crate) fn handle_resize_drag(
+/// 手柄 hover/拖拽时高亮（`accent_glow` 底 + 2px `accent_interactive` 竖线）。
+fn handle_resize_drag(
     mut widths: ResMut<PanelWidths>,
     mut active: ResMut<ActiveResize>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -155,7 +161,7 @@ pub(crate) fn handle_resize_drag(
     main_q: Query<&ComputedNode, With<MainAreaMarker>>,
     handles: Query<(&ResizeEdgeMarker, &Interaction)>,
     side_collapsed: Res<SideViewCollapsed>,
-    mut q_handle_bg: Query<(&ResizeEdgeMarker, &mut BackgroundColor)>,
+    mut q_handle_style: Query<(&ResizeEdgeMarker, &mut BackgroundColor, &mut BorderColor)>,
     theme: Res<crate::theme::Theme>,
 ) {
     // 1. 启动：任一手柄被按下（鼠标在按下瞬间位于手柄上）
@@ -168,21 +174,27 @@ pub(crate) fn handle_resize_drag(
         }
     }
 
-    // 2. 手柄视觉反馈：hover/拖拽时高亮
+    // 2. 手柄视觉反馈：hover/拖拽 → accent_glow 底 + 交互色竖线
     let active_edge = active.0;
-    for (marker, mut bg) in q_handle_bg.iter_mut() {
+    for (marker, mut bg, mut border) in q_handle_style.iter_mut() {
         let hovered = handles
             .iter()
             .any(|(m, i)| m.0 == marker.0 && *i == Interaction::Hovered);
         let highlighted = active_edge == Some(marker.0) || hovered;
         let target = if highlighted {
-            theme.icon_bg
+            theme.accent_glow
+        } else {
+            Color::NONE
+        };
+        let line = if highlighted {
+            theme.accent_interactive
         } else {
             Color::NONE
         };
         if bg.0 != target {
             bg.0 = target;
         }
+        border.set_all(line);
     }
 
     let Some(edge) = active_edge else {
@@ -209,7 +221,7 @@ pub(crate) fn handle_resize_drag(
 
     match edge {
         ResizeEdge::Left => {
-            // 拖右→文件面板变宽；上限 = 主区宽 - 右侧分屏占用 - 对话主区最小
+            // 拖右→文件面板变宽；上限 = 主区宽 - 上下文面板占用 - 对话主区最小
             let side_occupied = if side_collapsed.0 {
                 0.0
             } else {
@@ -219,15 +231,104 @@ pub(crate) fn handle_resize_drag(
             widths.file_panel = (widths.file_panel + dx).clamp(FILE_PANEL_MIN, max_w);
         }
         ResizeEdge::Right => {
-            // 右侧分屏折叠时不可拖（手柄本就隐藏），防御：跳过
+            // 上下文面板折叠时不可拖（手柄本就隐藏），防御：跳过
             if side_collapsed.0 {
                 return;
             }
-            // 手柄位于对话主区与右侧分屏之间，是分屏的左边界：
-            // 鼠标右移（dx>0）→ 手柄右移 → 分屏变窄；左移 → 分屏变宽。
-            // 故 side_view 随 dx 反向变化。
-            let max_w = (main_w - widths.file_panel - CHAT_MIN).max(SIDE_VIEW_MIN);
-            widths.side_view = (widths.side_view - dx).clamp(SIDE_VIEW_MIN, max_w);
+            // 手柄右移（dx>0）→ 面板变窄；钳制走纯函数（单测覆盖）
+            widths.side_view = clamp_side_view(widths.side_view - dx, main_w - widths.file_panel);
         }
+    }
+}
+
+/// 双击右手柄：复位上下文面板为默认宽度（300ms 内两次按下，方案 §8.8）。
+fn handle_double_click_reset(
+    mut widths: ResMut<PanelWidths>,
+    handles: Query<(&ResizeEdgeMarker, &Interaction), Changed<Interaction>>,
+    time: Res<Time>,
+    mut last: Local<Option<f64>>,
+) {
+    for (marker, interaction) in handles.iter() {
+        if marker.0 != ResizeEdge::Right || *interaction != Interaction::Pressed {
+            continue;
+        }
+        let now = time.elapsed_secs_f64();
+        if let Some(prev) = *last
+            && now - prev < DOUBLE_CLICK_SECS
+        {
+            widths.side_view = size::CONTEXT_W_DEFAULT;
+            *last = None;
+        } else {
+            *last = Some(now);
+        }
+    }
+}
+
+/// 窗口尺寸变化时统一钳制面板宽度（启动/缩窗溢出防护；方案 §8.8）。
+///
+/// 主区宽每帧可得后即生效：五列过渡期扣除文件面板占用，M5 后该项自然为 0
+/// （文件面板折叠/移除）。
+fn clamp_on_window_resize(
+    main_q: Query<&ComputedNode, With<MainAreaMarker>>,
+    file_collapsed: Res<FilePanelCollapsed>,
+    mut widths: ResMut<PanelWidths>,
+) {
+    let Ok(node) = main_q.single() else {
+        return;
+    };
+    let main_w = node.size.x * node.inverse_scale_factor;
+    if main_w <= 0.0 {
+        return;
+    }
+    let file_occupied = if file_collapsed.0 {
+        0.0
+    } else {
+        widths.file_panel
+    };
+    let clamped = clamp_side_view(widths.side_view, main_w - file_occupied);
+    if clamped != widths.side_view {
+        widths.side_view = clamped;
+    }
+}
+
+/// 窗口过窄时自动折叠上下文面板（对应原型 <1100px 断点，方案 §8.8）。
+///
+/// 只自动收起、不自动展开——恢复走 rail 展开钮（M3-T5）或终端快捷键。
+fn responsive_collapse(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut side: ResMut<SideViewCollapsed>,
+) {
+    let Ok(w) = windows.single() else {
+        return;
+    };
+    if w.width() < 1100.0 && !side.0 {
+        side.0 = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 下限保护：可用空间再小，也不低于 SIDE_VIEW_MIN。
+    #[test]
+    fn clamp_respects_min() {
+        assert_eq!(clamp_side_view(100.0, 0.0), SIDE_VIEW_MIN);
+        assert_eq!(clamp_side_view(720.0, 100.0), SIDE_VIEW_MIN);
+    }
+
+    /// 正常区间：夹在 [SIDE_VIEW_MIN, available − CHAT_MIN]。
+    #[test]
+    fn clamp_upper_bound() {
+        // available=1600：上限 1600-520=1080
+        assert_eq!(clamp_side_view(2000.0, 1600.0), 1080.0);
+        assert_eq!(clamp_side_view(720.0, 1600.0), 720.0);
+        assert_eq!(clamp_side_view(500.0, 1600.0), 500.0);
+    }
+
+    /// 双击复位值即默认宽度（回归保护）。
+    #[test]
+    fn reset_value_matches_default() {
+        assert_eq!(PanelWidths::default().side_view, size::CONTEXT_W_DEFAULT);
     }
 }

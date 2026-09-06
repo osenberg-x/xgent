@@ -45,10 +45,10 @@ pub struct MainAreaMarker;
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FilePanelCollapsed(pub bool);
 
-/// 右侧分屏折叠状态。
+/// 右侧分屏（上下文面板）折叠状态。
 ///
-/// `true`（默认）= 分屏收起，对话主区独占；
-/// `false` = 分屏展开，与对话主区并排。
+/// `false`（默认）= 展开，与对话主区并排（v7）；
+/// `true` = 收起，对话主区独占。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SideViewCollapsed(pub bool);
 
@@ -170,7 +170,7 @@ pub(crate) fn spawn_layout(
                         overflow: Overflow::clip(),
                         ..default()
                     },
-                    BackgroundColor(theme.surface),
+                    BackgroundColor(theme.bg),
                     ChatPanelMarker,
                 ));
 
@@ -179,7 +179,7 @@ pub(crate) fn spawn_layout(
                     crate::resize::ResizeEdge::Right,
                 ));
 
-                // 右侧分屏容器
+                // 上下文面板（预览/差异/终端；默认展开，宽度走 PanelWidths）
                 main.spawn((
                     Node {
                         width: px(widths.side_view),
@@ -189,7 +189,6 @@ pub(crate) fn spawn_layout(
                         min_width: Val::ZERO,
                         min_height: Val::ZERO,
                         overflow: Overflow::clip(),
-                        display: Display::None,
                         ..default()
                     },
                     BackgroundColor(theme.surface),
