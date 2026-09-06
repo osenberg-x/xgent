@@ -198,7 +198,7 @@ fn spawn_chat_panel(
                 border_radius: BorderRadius::all(px(8.0)),
                 ..default()
             },
-            BackgroundColor(theme.panel),
+            BackgroundColor(theme.input_bg),
             BorderColor::all(theme.border),
             TextFont {
                 font_size,

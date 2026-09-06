@@ -176,7 +176,7 @@ fn spawn_editor_view(
                     border: UiRect::bottom(px(1.0)),
                     ..default()
                 },
-                BackgroundColor(theme.bar),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
             ))
             .with_children(|bar| {
@@ -447,7 +447,7 @@ pub fn rebuild_editor_tabs(
         let bg = if is_active {
             BackgroundColor(theme.bg)
         } else {
-            BackgroundColor(theme.panel)
+            BackgroundColor(theme.surface)
         };
         let txt_color = if is_active {
             theme.text

@@ -176,7 +176,7 @@ pub(crate) fn handle_resize_drag(
             .any(|(m, i)| m.0 == marker.0 && *i == Interaction::Hovered);
         let highlighted = active_edge == Some(marker.0) || hovered;
         let target = if highlighted {
-            theme.handle_active
+            theme.icon_bg
         } else {
             Color::NONE
         };

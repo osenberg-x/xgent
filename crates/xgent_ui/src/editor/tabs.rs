@@ -415,7 +415,7 @@ fn spawn_dirty_close_dialog(
 ) {
     let accent = theme.accent;
     let danger = theme.st_fail;
-    let panel = theme.panel;
+    let panel = theme.surface;
     let border = theme.border;
     let title = crate::i18n::tr(loc, "dirty-close-title");
     let body = crate::i18n::tr_with(

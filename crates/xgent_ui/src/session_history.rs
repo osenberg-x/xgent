@@ -145,7 +145,7 @@ fn spawn_overlay(
                         overflow: Overflow::clip_y(),
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.elevated),
                     BorderColor::all(theme.border),
                 ))
                 .with_children(|panel| {

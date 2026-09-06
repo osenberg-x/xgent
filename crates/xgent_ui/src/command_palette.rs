@@ -144,7 +144,7 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                         overflow: Overflow::clip_y(),
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.elevated),
                     BorderColor::all(theme.border),
                 ))
                 .with_children(|panel| {

@@ -130,7 +130,7 @@ fn spawn_conflict_dialog(
     loc: &xgent_settings::Localizer,
 ) {
     let accent = theme.accent;
-    let panel = theme.panel;
+    let panel = theme.elevated;
     let border = theme.border;
     let title = crate::i18n::tr(loc, "conflict-title");
     let body_path = crate::i18n::tr_with(

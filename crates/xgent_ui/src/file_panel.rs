@@ -206,7 +206,7 @@ fn spawn_file_panel(
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(theme.bar),
+            BackgroundColor(theme.surface),
             BorderColor::all(theme.border),
         ))
         .with_children(|head| {
@@ -291,7 +291,7 @@ fn spawn_file_preview(
                     flex_shrink: 0.0,
                     ..default()
                 },
-                BackgroundColor(theme.bar),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
             ))
             .with_children(|head| {
@@ -1099,7 +1099,7 @@ fn update_file_entry_style(
     theme: Res<Theme>,
 ) {
     let sel_color = BackgroundColor(theme.accent_bg);
-    let hover_color = BackgroundColor(theme.hover_bg);
+    let hover_color = BackgroundColor(theme.hover);
     let none_color = BackgroundColor(Color::NONE);
     for (entity, selected, interaction) in q.iter() {
         let want = if selected.is_some() {

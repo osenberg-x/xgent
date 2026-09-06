@@ -149,7 +149,7 @@ fn show_on_request(
                         border_radius: BorderRadius::all(px(8.0)),
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.elevated),
                     BorderColor::all(theme.border),
                 ))
                 .with_children(|modal| {
@@ -165,7 +165,7 @@ fn show_on_request(
                                 border: UiRect::bottom(px(1.0)),
                                 ..default()
                             },
-                            BackgroundColor(theme.bar),
+                            BackgroundColor(theme.elevated),
                             BorderColor::all(theme.border),
                         ))
                         .with_children(|head| {
@@ -241,7 +241,7 @@ fn show_on_request(
                                         border_radius: BorderRadius::all(px(4.0)),
                                         ..default()
                                     },
-                                    BackgroundColor(theme.deep),
+                                    BackgroundColor(theme.code_bg),
                                     BorderColor::all(theme.border),
                                     ScrollPosition::default(),
                                 ))
@@ -291,7 +291,7 @@ fn show_on_request(
                                 border: UiRect::top(px(1.0)),
                                 ..default()
                             },
-                            BackgroundColor(theme.bar),
+                            BackgroundColor(theme.elevated),
                             BorderColor::all(theme.border),
                         ))
                         .with_children(|foot| {

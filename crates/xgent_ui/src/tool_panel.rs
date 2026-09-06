@@ -98,7 +98,7 @@ fn spawn_tool_card(
                         flex_shrink: 0.0,
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.subtle),
                     BorderColor::all(theme.border),
                     Text::new("🔧"),
                     TextFont {
@@ -119,7 +119,7 @@ fn spawn_tool_card(
                         row_gap: px(space::XS),
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.subtle),
                     BorderColor::all(theme.border),
                     ToolCardMarker {
                         tool_call_id: ev.tool_call_id.clone(),

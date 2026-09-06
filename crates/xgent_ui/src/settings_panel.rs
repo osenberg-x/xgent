@@ -215,7 +215,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     min_width: px(420.0),
                     ..default()
                 },
-                BackgroundColor(theme.panel),
+                BackgroundColor(theme.elevated),
                 BorderColor::all(theme.border),
             ))
             .with_children(|card| {
@@ -280,7 +280,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                                     padding: UiRect::all(px(space::SM)),
                                     ..default()
                                 },
-                                BackgroundColor(theme.bar),
+                                BackgroundColor(theme.surface),
                                 Text::new(label),
                                 TextFont {
                                     font_size: FontSize::Px(font),
@@ -340,7 +340,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                             padding: UiRect::all(px(space::SM)),
                             ..default()
                         },
-                        BackgroundColor(theme.bar),
+                        BackgroundColor(theme.surface),
                         Text::new("↻"),
                         TextFont {
                             font_size: FontSize::Px(font),
@@ -390,7 +390,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                                 padding: UiRect::all(px(space::SM)),
                                 ..default()
                             },
-                            BackgroundColor(theme.bar),
+                            BackgroundColor(theme.surface),
                             Text::new(tr(loc, "settings-close")),
                             TextFont {
                                 font_size: FontSize::Px(font),
@@ -413,7 +413,7 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
             min_height: px(font + 8.0),
             ..default()
         },
-        BackgroundColor(theme.bar),
+        BackgroundColor(theme.input_bg),
         BorderColor::all(theme.border),
         TextFont {
             font_size: FontSize::Px(font),
@@ -452,7 +452,7 @@ fn handle_kind_button(
                     kind: kb.kind,
                     selected,
                 },
-                BackgroundColor(if selected { theme.accent } else { theme.bar }),
+                BackgroundColor(if selected { theme.accent } else { theme.subtle }),
             ));
         }
     }

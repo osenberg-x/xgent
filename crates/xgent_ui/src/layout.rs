@@ -102,7 +102,7 @@ pub(crate) fn spawn_layout(
                     flex_shrink: 0.0,
                     ..default()
                 },
-                BackgroundColor(theme.panel),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
                 TopBarMarker,
             ));
@@ -133,7 +133,7 @@ pub(crate) fn spawn_layout(
                         border: UiRect::right(px(1.0)),
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.surface),
                     BorderColor::all(theme.line),
                     ActivityBarMarker,
                 ));
@@ -149,7 +149,7 @@ pub(crate) fn spawn_layout(
                         border: UiRect::right(px(1.0)),
                         ..default()
                     },
-                    BackgroundColor(theme.panel),
+                    BackgroundColor(theme.surface),
                     BorderColor::all(theme.line),
                     FilePanelMarker,
                 ));
@@ -211,7 +211,7 @@ pub(crate) fn spawn_layout(
                     flex_shrink: 0.0,
                     ..default()
                 },
-                BackgroundColor(theme.panel),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
                 StatusBarMarker,
             ));

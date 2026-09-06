@@ -283,7 +283,7 @@ fn spawn_terminal_view(
                     border: UiRect::bottom(px(1.0)),
                     ..default()
                 },
-                BackgroundColor(theme.bar),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
             ))
             .with_children(|head| {
@@ -380,7 +380,7 @@ fn spawn_terminal_view(
                     border: UiRect::top(px(1.0)),
                     ..default()
                 },
-                BackgroundColor(theme.bar),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
             ))
             .with_children(|line| {
@@ -422,7 +422,7 @@ fn spawn_terminal_view(
                     border: UiRect::top(px(1.0)),
                     ..default()
                 },
-                BackgroundColor(theme.bar),
+                BackgroundColor(theme.surface),
                 BorderColor::all(theme.border),
             ))
             .with_children(|bar| {
