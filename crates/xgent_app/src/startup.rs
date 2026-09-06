@@ -1,7 +1,7 @@
 //! 启动系统：打开项目、订阅 fs.watch。
 
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use xgent_settings_core::store::ProjectConfigStore;
 use xgent_ui::fonts::UiFonts;
 
@@ -48,7 +48,10 @@ pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
 /// 非 macOS：Inter 照常加载（随仓库分发），Menlo 跳过（mono 回退默认句柄）。
 pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     // Inter Variable —— 全局默认
-    let inter_path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/Inter-Variable.ttf");
+    let inter_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/fonts/Inter-Variable.ttf"
+    );
     match std::fs::read(inter_path) {
         Ok(data) => {
             let _ = fonts.insert(bevy::asset::AssetId::default(), Font::from_bytes(data));

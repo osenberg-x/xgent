@@ -100,7 +100,6 @@ pub struct FileWriteRequest {
     pub content: String,
 }
 
-
 /// buffer 已保存事件（写入成功后发，供 xgent_app 桥接转 IPC fs.changed）。
 #[derive(Message, Debug, Clone)]
 pub struct BufferSavedEvent {
@@ -228,20 +227,18 @@ pub fn poll_io_results(
     let mut still_pending = Vec::with_capacity(writes.len());
     for (req, mut rx) in writes.drain(..) {
         match rx.try_recv() {
-            Ok(result) => {
-                match result {
-                    Ok(()) => {
-                        saved_writer.write(BufferSavedEvent {
-                            entity: req.entity,
-                            path: req.path.clone(),
-                            content: req.content.clone(),
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!("写入文件失败 {}: {e}", req.path.display());
-                    }
+            Ok(result) => match result {
+                Ok(()) => {
+                    saved_writer.write(BufferSavedEvent {
+                        entity: req.entity,
+                        path: req.path.clone(),
+                        content: req.content.clone(),
+                    });
                 }
-            }
+                Err(e) => {
+                    tracing::warn!("写入文件失败 {}: {e}", req.path.display());
+                }
+            },
             Err(oneshot::error::TryRecvError::Empty) => {
                 still_pending.push((req, rx));
             }

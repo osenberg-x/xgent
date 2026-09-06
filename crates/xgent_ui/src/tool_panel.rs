@@ -77,163 +77,162 @@ fn spawn_tool_card(
         let summary = format_tool_summary(&ev.tool_id, &ev.input);
         commands.entity(list).with_children(|p| {
             // 时间线行：图标节点 + 卡片体
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(space::MD),
-                    ..default()
-                },
-            ))
-            .with_children(|tl| {
-                // 时间线图标节点（左侧，带连接线效果）
-                tl.spawn((
-                    Node {
-                        width: px(28.0),
-                        height: px(28.0),
-                        border_radius: BorderRadius::all(px(6.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        border: UiRect::all(px(1.0)),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                    BackgroundColor(theme.subtle),
-                    BorderColor::all(theme.border),
-                    Text::new("🔧"),
-                    TextFont {
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                ));
-                // 卡片体
-                tl.spawn((
-                    Node {
-                        flex_grow: 1.0,
-                        min_width: Val::ZERO,
-                        padding: UiRect::all(px(space::SM)),
-                        border: UiRect::all(px(1.0)),
-                        border_radius: BorderRadius::all(px(8.0)),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(space::XS),
-                        ..default()
-                    },
-                    BackgroundColor(theme.subtle),
-                    BorderColor::all(theme.border),
-                    ToolCardMarker {
-                        tool_call_id: ev.tool_call_id.clone(),
-                        tool_id: ev.tool_id.clone(),
-                        expanded: false,
-                    },
-                ))
-                .with_children(|card| {
-                    // head：工具名 + 参数摘要 + 状态药丸
-                    card.spawn((
-                        Button,
+            p.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: px(space::MD),
+                ..default()
+            },))
+                .with_children(|tl| {
+                    // 时间线图标节点（左侧，带连接线效果）
+                    tl.spawn((
                         Node {
-                            width: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Row,
-                            column_gap: px(space::SM),
+                            width: px(28.0),
+                            height: px(28.0),
+                            border_radius: BorderRadius::all(px(6.0)),
                             align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            border: UiRect::all(px(1.0)),
+                            flex_shrink: 0.0,
                             ..default()
                         },
-                        ToolCardHeadMarker,
-                    ))
-                    .with_children(|header| {
-                        // 工具名
-                        header.spawn((
-                            Text::new(ev.tool_id.clone()),
-                            TextFont {
-                                font_size: FontSize::Px(12.0),
-                                ..default()
-                            },
-                            TextColor(theme.text),
-                        ));
-                        // 参数摘要
-                        header.spawn((
-                            Node {
-                                flex_grow: 1.0,
-                                ..default()
-                            },
-                            Text::new(summary),
-                            TextFont {
-                                font_size: FontSize::Px(11.5),
-                                ..default()
-                            },
-                            TextColor(theme.text_dim),
-                        ));
-                        // 状态药丸（elevated 底 + dot + 标签）
-                        header.spawn((
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                column_gap: px(space::XS),
-                                padding: UiRect::horizontal(px(space::SM)),
-                                border_radius: BorderRadius::all(px(16.0)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.elevated),
-                        ))
-                        .with_children(|pill| {
-                            pill.spawn((
-                                Node {
-                                    width: px(6.0),
-                                    height: px(6.0),
-                                    border_radius: BorderRadius::all(px(3.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(theme.st_running),
-                                ToolStatusDotMarker,
-                            ));
-                            pill.spawn((
-                                Text::new(tr(&loc, "tool-running")),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
-                                ToolStatusLabelMarker,
-                            ));
-                        });
-                    });
-                    // 结果区域（初始隐藏）
-                    card.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            overflow: Overflow::clip_y(),
-                            max_height: Val::Px(0.0),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        Text::new(String::new()),
+                        BackgroundColor(theme.subtle),
+                        BorderColor::all(theme.border),
+                        Text::new("🔧"),
                         TextFont {
-                            font_size: FontSize::Px(font - 1.5),
+                            font_size: FontSize::Px(12.0),
                             ..default()
                         },
                         TextColor(theme.text_dim),
-                        ToolResultTextMarker,
                     ));
-                    // fold 行
-                    card.spawn((
-                        Button,
+                    // 卡片体
+                    tl.spawn((
                         Node {
-                            width: Val::Percent(100.0),
-                            padding: UiRect::all(px(space::XS)),
-                            border: UiRect::top(px(1.0)),
+                            flex_grow: 1.0,
+                            min_width: Val::ZERO,
+                            padding: UiRect::all(px(space::SM)),
+                            border: UiRect::all(px(1.0)),
+                            border_radius: BorderRadius::all(px(8.0)),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(space::XS),
                             ..default()
                         },
-                        BorderColor::all(theme.line),
-                        Text::new(String::new()),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
+                        BackgroundColor(theme.subtle),
+                        BorderColor::all(theme.border),
+                        ToolCardMarker {
+                            tool_call_id: ev.tool_call_id.clone(),
+                            tool_id: ev.tool_id.clone(),
+                            expanded: false,
                         },
-                        TextColor(theme.text_muted),
-                        ToolFoldMarker,
-                    ));
+                    ))
+                    .with_children(|card| {
+                        // head：工具名 + 参数摘要 + 状态药丸
+                        card.spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Row,
+                                column_gap: px(space::SM),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            ToolCardHeadMarker,
+                        ))
+                        .with_children(|header| {
+                            // 工具名
+                            header.spawn((
+                                Text::new(ev.tool_id.clone()),
+                                TextFont {
+                                    font_size: FontSize::Px(12.0),
+                                    ..default()
+                                },
+                                TextColor(theme.text),
+                            ));
+                            // 参数摘要
+                            header.spawn((
+                                Node {
+                                    flex_grow: 1.0,
+                                    ..default()
+                                },
+                                Text::new(summary),
+                                TextFont {
+                                    font_size: FontSize::Px(11.5),
+                                    ..default()
+                                },
+                                TextColor(theme.text_dim),
+                            ));
+                            // 状态药丸（elevated 底 + dot + 标签）
+                            header
+                                .spawn((
+                                    Node {
+                                        flex_direction: FlexDirection::Row,
+                                        align_items: AlignItems::Center,
+                                        column_gap: px(space::XS),
+                                        padding: UiRect::horizontal(px(space::SM)),
+                                        border_radius: BorderRadius::all(px(16.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(theme.elevated),
+                                ))
+                                .with_children(|pill| {
+                                    pill.spawn((
+                                        Node {
+                                            width: px(6.0),
+                                            height: px(6.0),
+                                            border_radius: BorderRadius::all(px(3.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(theme.st_running),
+                                        ToolStatusDotMarker,
+                                    ));
+                                    pill.spawn((
+                                        Text::new(tr(&loc, "tool-running")),
+                                        TextFont {
+                                            font_size: FontSize::Px(11.0),
+                                            ..default()
+                                        },
+                                        TextColor(theme.text_dim),
+                                        ToolStatusLabelMarker,
+                                    ));
+                                });
+                        });
+                        // 结果区域（初始隐藏）
+                        card.spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                overflow: Overflow::clip_y(),
+                                max_height: Val::Px(0.0),
+                                ..default()
+                            },
+                            ScrollPosition::default(),
+                            Text::new(String::new()),
+                            TextFont {
+                                font_size: FontSize::Px(font - 1.5),
+                                ..default()
+                            },
+                            TextColor(theme.text_dim),
+                            ToolResultTextMarker,
+                        ));
+                        // fold 行
+                        card.spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                padding: UiRect::all(px(space::XS)),
+                                border: UiRect::top(px(1.0)),
+                                ..default()
+                            },
+                            BorderColor::all(theme.line),
+                            Text::new(String::new()),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextColor(theme.text_muted),
+                            ToolFoldMarker,
+                        ));
+                    });
                 });
-            });
         });
     }
 }

@@ -303,7 +303,7 @@ fn selected_marker_preserved_across_rebuild() {
             .insert(FileSelectedMarker);
         app.world_mut()
             .insert_resource(xgent_ui::file_panel::SelectedFilePath(Some(
-                root.join("alpha.txt")
+                root.join("alpha.txt"),
             )));
     }
 
@@ -335,8 +335,5 @@ fn selected_marker_preserved_across_rebuild() {
         .iter(app.world())
         .find(|(e, _)| e.path == root.join("beta.rs"))
         .expect("beta.rs 应在重建后的树中");
-    assert!(
-        beta.1.is_none(),
-        "重建后 beta.rs 不应挂 FileSelectedMarker"
-    );
+    assert!(beta.1.is_none(), "重建后 beta.rs 不应挂 FileSelectedMarker");
 }

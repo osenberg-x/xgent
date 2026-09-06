@@ -130,7 +130,7 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             // 表面明度阶梯
-            bg: Color::srgba(0.0314, 0.0353, 0.0392, 1.0),      // #08090A
+            bg: Color::srgba(0.0314, 0.0353, 0.0392, 1.0), // #08090A
             surface: Color::srgba(0.0588, 0.0627, 0.0667, 1.0), // #0F1011
             elevated: Color::srgba(0.0980, 0.1020, 0.1059, 1.0), // #191A1B
             code_bg: Color::srgba(0.0510, 0.0549, 0.0627, 1.0), // #0D0E10
@@ -148,13 +148,13 @@ impl Theme {
             border_hover: Color::srgba(1.0, 1.0, 1.0, 0.14),
 
             // 文字四级灰阶
-            text: Color::srgba(0.9686, 0.9725, 0.9725, 1.0),      // #F7F8F8
-            text_dim: Color::srgba(0.8157, 0.8392, 0.8784, 1.0),  // #D0D6E0
+            text: Color::srgba(0.9686, 0.9725, 0.9725, 1.0), // #F7F8F8
+            text_dim: Color::srgba(0.8157, 0.8392, 0.8784, 1.0), // #D0D6E0
             text_muted: Color::srgba(0.5412, 0.5608, 0.5961, 1.0), // #8A8F98
             text_faint: Color::srgba(0.3843, 0.4000, 0.4275, 1.0), // #62666D
 
             // 强调（靛紫）
-            accent: Color::srgba(0.3686, 0.4157, 0.8235, 1.0),    // #5E6AD2
+            accent: Color::srgba(0.3686, 0.4157, 0.8235, 1.0), // #5E6AD2
             accent_interactive: Color::srgba(0.4431, 0.4392, 1.0, 1.0), // #7170FF
             accent_hover: Color::srgba(0.5098, 0.5608, 1.0, 1.0), // #828FFF
             accent_bg: Color::srgba(0.3686, 0.4157, 0.8235, 0.14),
@@ -162,19 +162,19 @@ impl Theme {
             accent_text: Color::WHITE,
 
             // 状态色
-            st_pending: Color::srgba(1.0, 0.6980, 0.1412, 1.0),   // #FFB224
-            st_running: Color::srgba(0.4431, 0.4392, 1.0, 1.0),   // #7170FF
-            st_ok: Color::srgba(0.1882, 0.6431, 0.4235, 1.0),     // #30A46C
-            st_fail: Color::srgba(0.8980, 0.2824, 0.3020, 1.0),   // #E5484D
-            st_deny: Color::srgba(0.8980, 0.2824, 0.3020, 1.0),   // #E5484D
+            st_pending: Color::srgba(1.0, 0.6980, 0.1412, 1.0), // #FFB224
+            st_running: Color::srgba(0.4431, 0.4392, 1.0, 1.0), // #7170FF
+            st_ok: Color::srgba(0.1882, 0.6431, 0.4235, 1.0),   // #30A46C
+            st_fail: Color::srgba(0.8980, 0.2824, 0.3020, 1.0), // #E5484D
+            st_deny: Color::srgba(0.8980, 0.2824, 0.3020, 1.0), // #E5484D
             st_ok_bg: Color::srgba(0.1882, 0.6431, 0.4235, 0.12),
             st_pending_bg: Color::srgba(1.0, 0.6980, 0.1412, 0.12),
             st_fail_bg: Color::srgba(0.8980, 0.2824, 0.3020, 0.12),
-            st_info: Color::srgba(0.0, 0.5686, 1.0, 1.0),         // #0091FF
+            st_info: Color::srgba(0.0, 0.5686, 1.0, 1.0), // #0091FF
             st_info_bg: Color::srgba(0.0, 0.5686, 1.0, 0.12),
 
             // 陪伴暖色（唯一例外）
-            warm: Color::srgba(1.0, 0.6980, 0.1412, 1.0),         // #FFB224
+            warm: Color::srgba(1.0, 0.6980, 0.1412, 1.0), // #FFB224
             warm_bg: Color::srgba(1.0, 0.6980, 0.1412, 0.15),
 
             // 反色浮层
@@ -301,4 +301,45 @@ pub mod radius {
 /// 便捷：f32 → Val::Px（跨模块共享，避免重复定义）。
 pub fn px(v: f32) -> Val {
     Val::Px(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 关键令牌值断言（防误改；规范表见方案 §4.2）。
+    #[test]
+    fn dark_tokens_match_v7_spec() {
+        let t = Theme::dark();
+        let bg = t.bg.to_srgba();
+        assert!((bg.red - 0.0314).abs() < 0.001, "bg 应为 #08090A");
+        assert!((bg.green - 0.0353).abs() < 0.001, "bg 应为 #08090A");
+
+        let surface = t.surface.to_srgba();
+        assert!((surface.red - 0.0588).abs() < 0.001, "surface 应为 #0F1011");
+
+        let accent = t.accent.to_srgba();
+        assert!((accent.red - 0.3686).abs() < 0.001, "accent 应为 #5E6AD2");
+        assert!((accent.blue - 0.8235).abs() < 0.001, "accent 应为 #5E6AD2");
+    }
+
+    /// 正文/背景对比度门槛（简化 luma，暗色主题可读性护栏）。
+    #[test]
+    fn text_contrast_above_threshold() {
+        let t = Theme::dark();
+        let luma = |c: Color| {
+            let s = c.to_srgba();
+            0.2126 * s.red + 0.7152 * s.green + 0.0722 * s.blue
+        };
+        let ratio_main = (luma(t.text) + 0.05) / (luma(t.bg) + 0.05);
+        assert!(
+            ratio_main > 4.5,
+            "主文字/画布对比度 {ratio_main:.2} 应 > 4.5"
+        );
+        let ratio_dim = (luma(t.text_dim) + 0.05) / (luma(t.bg) + 0.05);
+        assert!(
+            ratio_dim > 4.5,
+            "次级文字/画布对比度 {ratio_dim:.2} 应 > 4.5"
+        );
+    }
 }

@@ -18,7 +18,9 @@ use xgent_agent::bridge::AgentBridge;
 use xgent_core::config::{ConfigReadRequest, ConfigScope, ConfigWriteRequest};
 use xgent_core::methods;
 use xgent_settings_core::global::{ProviderConfig, ProviderKind};
-use xgent_ui::settings_panel::{FetchModelsMessage, ModelListResultMessage, SaveLanguageMessage, SaveProviderConfigMessage};
+use xgent_ui::settings_panel::{
+    FetchModelsMessage, ModelListResultMessage, SaveLanguageMessage, SaveProviderConfigMessage,
+};
 
 use crate::fs_event_bridge::{ConfigChangedMessage, IpcClientResource};
 
@@ -292,7 +294,10 @@ fn fetch_models(
         bridge.runtime.handle().spawn(async move {
             // 先确保 provider 配置已写入 daemon（临时写入，不打扰用户全局配置）
             let fields: [(&str, serde_json::Value); 3] = [
-                ("kind", serde_json::to_value(kind).unwrap_or(serde_json::Value::Null)),
+                (
+                    "kind",
+                    serde_json::to_value(kind).unwrap_or(serde_json::Value::Null),
+                ),
                 ("api_base", serde_json::Value::String(api_base)),
                 ("api_key", serde_json::Value::String(api_key)),
             ];
@@ -312,23 +317,28 @@ fn fetch_models(
             let result = ipc.call_ok(methods::PROVIDER_LIST_MODELS, req).await;
             match result {
                 Ok(v) => {
-                    let models: Vec<String> = v.as_array()
+                    let models: Vec<String> = v
+                        .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let _ = tx.send(ModelListResult {
-                        models,
-                        error: String::new(),
-                    }).await;
+                    let _ = tx
+                        .send(ModelListResult {
+                            models,
+                            error: String::new(),
+                        })
+                        .await;
                 }
                 Err(e) => {
-                    let _ = tx.send(ModelListResult {
-                        models: Vec::new(),
-                        error: format!("拉取模型失败: {e}"),
-                    }).await;
+                    let _ = tx
+                        .send(ModelListResult {
+                            models: Vec::new(),
+                            error: format!("拉取模型失败: {e}"),
+                        })
+                        .await;
                 }
             }
         });

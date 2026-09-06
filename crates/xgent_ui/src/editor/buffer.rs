@@ -94,10 +94,7 @@ impl EditorBuffer {
     /// 保留本地，但若外部**再次**修改，需重新触发冲突协调（设计 §3.6）。
     /// `Clean` 不进冲突（走静默重载），`ConflictDetected` 不重复进入。
     pub fn enter_conflict(&mut self) {
-        if matches!(
-            self.state,
-            BufferState::Dirty | BufferState::LocalPreferred
-        ) {
+        if matches!(self.state, BufferState::Dirty | BufferState::LocalPreferred) {
             self.state = BufferState::ConflictDetected;
         }
     }

@@ -323,10 +323,11 @@ fn stale_preview_result_discarded_after_view_switch() {
     assert_eq!(content, SideViewContent::Editor);
 
     // 发一个过期的 PreviewReadResult（路径为 A），模拟异步读取延迟到达
-    app.world_mut().write_message(xgent_ui::file_panel::PreviewReadResult {
-        path: log_path,
-        content: Ok((11, "log content".to_string())),
-    });
+    app.world_mut()
+        .write_message(xgent_ui::file_panel::PreviewReadResult {
+            path: log_path,
+            content: Ok((11, "log content".to_string())),
+        });
 
     // 跑多帧让 apply_preview_read_result 处理
     for _ in 0..5 {
@@ -354,10 +355,11 @@ fn stale_preview_result_discarded_after_view_switch() {
     };
     // 过期结果到达前的子节点数应与之后一致（未被过期结果填充新内容）
     // 发另一个过期结果再跑帧，子节点数不应增长
-    app.world_mut().write_message(xgent_ui::file_panel::PreviewReadResult {
-        path: root.join("a.log"),
-        content: Ok((99, "stale payload".to_string())),
-    });
+    app.world_mut()
+        .write_message(xgent_ui::file_panel::PreviewReadResult {
+            path: root.join("a.log"),
+            content: Ok((99, "stale payload".to_string())),
+        });
     for _ in 0..3 {
         app.update();
     }
@@ -449,8 +451,11 @@ fn rust_file_with_utf8_highlight_no_panic() {
     let rs_path = root.join("utf8_test.rs");
     // 注意：此文件走代码文件路径（Editor 视图），不走 Preview 高亮。
     // 但 PreviewReadResult 可被手动注入验证 apply_preview_read_result 的字节边界安全。
-    std::fs::write(&rs_path, "// 中文注释\nfn 主函数() {\n    println!(\"你好\");\n}\n")
-        .expect("写文件");
+    std::fs::write(
+        &rs_path,
+        "// 中文注释\nfn 主函数() {\n    println!(\"你好\");\n}\n",
+    )
+    .expect("写文件");
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -473,9 +478,7 @@ fn rust_file_with_utf8_highlight_no_panic() {
 
     // 手动设 Preview 视图 + CurrentPreviewPath（绕过 is_code_file 判断）
     {
-        let mut content = app
-            .world_mut()
-            .resource_mut::<SideViewContent>();
+        let mut content = app.world_mut().resource_mut::<SideViewContent>();
         *content = SideViewContent::Preview;
     }
     {
@@ -487,9 +490,7 @@ fn rust_file_with_utf8_highlight_no_panic() {
 
     // 重新确认 Preview 视图状态（跑帧后可能被其他系统重置）
     {
-        let mut content = app
-            .world_mut()
-            .resource_mut::<SideViewContent>();
+        let mut content = app.world_mut().resource_mut::<SideViewContent>();
         *content = SideViewContent::Preview;
     }
     {
@@ -504,10 +505,11 @@ fn rust_file_with_utf8_highlight_no_panic() {
     let bytes = std::fs::read(&rs_path).expect("读文件");
     let len = bytes.len();
     let text = String::from_utf8_lossy(&bytes).to_string();
-    app.world_mut().write_message(xgent_ui::file_panel::PreviewReadResult {
-        path: rs_path.clone(),
-        content: Ok((len, text)),
-    });
+    app.world_mut()
+        .write_message(xgent_ui::file_panel::PreviewReadResult {
+            path: rs_path.clone(),
+            content: Ok((len, text)),
+        });
 
     // 跑帧让 apply_preview_read_result 处理（含高亮 span 切片），不应 panic
     for _ in 0..5 {
@@ -571,7 +573,10 @@ fn code_file_click_clears_preview_state() {
     app.update();
 
     // 确认已进入 Preview 视图 + CurrentPreviewPath = A
-    assert_eq!(*app.world().resource::<SideViewContent>(), SideViewContent::Preview);
+    assert_eq!(
+        *app.world().resource::<SideViewContent>(),
+        SideViewContent::Preview
+    );
     assert_eq!(
         app.world()
             .resource::<xgent_ui::file_panel::CurrentPreviewPath>()
@@ -592,7 +597,10 @@ fn code_file_click_clears_preview_state() {
     app.update();
 
     // 视图应为 Editor
-    assert_eq!(*app.world().resource::<SideViewContent>(), SideViewContent::Editor);
+    assert_eq!(
+        *app.world().resource::<SideViewContent>(),
+        SideViewContent::Editor
+    );
 
     // CurrentPreviewPath 应为 None（被清除）
     assert!(

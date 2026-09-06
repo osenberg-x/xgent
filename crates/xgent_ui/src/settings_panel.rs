@@ -332,24 +332,24 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     column_gap: px(space::SM),
                     ..default()
                 },))
-                .with_children(|row| {
-                    row.spawn(text_input_node(theme, font, ModelInput));
-                    row.spawn((
-                        Button,
-                        Node {
-                            padding: UiRect::all(px(space::SM)),
-                            ..default()
-                        },
-                        BackgroundColor(theme.surface),
-                        Text::new("↻"),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
-                        FetchModelsButtonMarker,
-                    ));
-                });
+                    .with_children(|row| {
+                        row.spawn(text_input_node(theme, font, ModelInput));
+                        row.spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::all(px(space::SM)),
+                                ..default()
+                            },
+                            BackgroundColor(theme.surface),
+                            Text::new("↻"),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.text_dim),
+                            FetchModelsButtonMarker,
+                        ));
+                    });
                 // 模型列表容器（动态填充）
                 card.spawn((
                     Node {
@@ -629,7 +629,8 @@ fn handle_model_click(
             if *interaction == Interaction::Pressed {
                 // 用 clear + Insert 语义：先 clear 再 Insert
                 model_input.clear();
-                model_input.queue_edit(bevy::text::TextEdit::Insert(marker.model_id.clone().into()));
+                model_input
+                    .queue_edit(bevy::text::TextEdit::Insert(marker.model_id.clone().into()));
             }
         }
     }

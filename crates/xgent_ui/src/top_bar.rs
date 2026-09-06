@@ -65,43 +65,41 @@ fn spawn_top_bar(
 
     commands.entity(bar).with_children(|p| {
         // 品牌：logo 方块 + "XGent" 文字
-        p.spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(space::SM),
-                padding: UiRect::right(px(space::MD)),
-                ..default()
-            },
-        ))
-        .with_children(|brand| {
-            // logo 方块（渐变色 — 用 elevated 底 + accent 文字模拟）
-            brand.spawn((
-                Node {
-                    width: px(26.0),
-                    height: px(26.0),
-                    border_radius: BorderRadius::all(px(6.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                BackgroundColor(theme.accent),
-                Text::new("✦"),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(theme.bg),
-            ));
-            brand.spawn((
-                Text::new("XGent"),
-                TextFont {
-                    font_size: FontSize::Px(15.0),
-                    ..default()
-                },
-                TextColor(theme.text),
-            ));
-        });
+        p.spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(space::SM),
+            padding: UiRect::right(px(space::MD)),
+            ..default()
+        },))
+            .with_children(|brand| {
+                // logo 方块（渐变色 — 用 elevated 底 + accent 文字模拟）
+                brand.spawn((
+                    Node {
+                        width: px(26.0),
+                        height: px(26.0),
+                        border_radius: BorderRadius::all(px(6.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(theme.accent),
+                    Text::new("✦"),
+                    TextFont {
+                        font_size: FontSize::Px(14.0),
+                        ..default()
+                    },
+                    TextColor(theme.bg),
+                ));
+                brand.spawn((
+                    Text::new("XGent"),
+                    TextFont {
+                        font_size: FontSize::Px(15.0),
+                        ..default()
+                    },
+                    TextColor(theme.text),
+                ));
+            });
 
         // 分隔线
         p.spawn((

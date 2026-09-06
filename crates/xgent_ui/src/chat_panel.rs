@@ -237,48 +237,48 @@ fn spawn_chat_panel(
                 align_items: AlignItems::Center,
                 ..default()
             },))
-            .with_children(|hint| {
-                hint.spawn((
-                    Text::new(crate::i18n::tr(&loc, "hint-send")),
-                    TextFont {
-                        font_size: FontSize::Px(10.5),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                ));
-                hint.spawn((
-                    Text::new(crate::i18n::tr(&loc, "hint-abort")),
-                    TextFont {
-                        font_size: FontSize::Px(10.5),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                ));
-                hint.spawn((
-                    Text::new(crate::i18n::tr(&loc, "hint-palette")),
-                    TextFont {
-                        font_size: FontSize::Px(10.5),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                ));
-                hint.spawn((
-                    Text::new(crate::i18n::tr(&loc, "hint-toggle-sideview")),
-                    TextFont {
-                        font_size: FontSize::Px(10.5),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                ));
-                hint.spawn((
-                    Text::new(crate::i18n::tr(&loc, "hint-terminal")),
-                    TextFont {
-                        font_size: FontSize::Px(10.5),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                ));
-            });
+                .with_children(|hint| {
+                    hint.spawn((
+                        Text::new(crate::i18n::tr(&loc, "hint-send")),
+                        TextFont {
+                            font_size: FontSize::Px(10.5),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                    hint.spawn((
+                        Text::new(crate::i18n::tr(&loc, "hint-abort")),
+                        TextFont {
+                            font_size: FontSize::Px(10.5),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                    hint.spawn((
+                        Text::new(crate::i18n::tr(&loc, "hint-palette")),
+                        TextFont {
+                            font_size: FontSize::Px(10.5),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                    hint.spawn((
+                        Text::new(crate::i18n::tr(&loc, "hint-toggle-sideview")),
+                        TextFont {
+                            font_size: FontSize::Px(10.5),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                    hint.spawn((
+                        Text::new(crate::i18n::tr(&loc, "hint-terminal")),
+                        TextFont {
+                            font_size: FontSize::Px(10.5),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                });
             // 右侧 tokenhint + 发送按钮
             meta.spawn((Node {
                 flex_direction: FlexDirection::Row,
@@ -286,17 +286,17 @@ fn spawn_chat_panel(
                 column_gap: px(space::SM),
                 ..default()
             },))
-            .with_children(|right| {
-                right.spawn((
-                    Text::new(crate::i18n::tr(&loc, "status-ready")),
-                    TextFont {
-                        font_size: FontSize::Px(10.5),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                    TokenHintMarker,
-                ));
-            });
+                .with_children(|right| {
+                    right.spawn((
+                        Text::new(crate::i18n::tr(&loc, "status-ready")),
+                        TextFont {
+                            font_size: FontSize::Px(10.5),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                        TokenHintMarker,
+                    ));
+                });
         })
         .id();
 
@@ -353,47 +353,26 @@ fn spawn_user_message(
         }
         // 在当前助手节点之前插入用户消息（全宽行式：头像 + 消息体）
         commands.entity(list).with_children(|p| {
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(space::MD),
-                    ..default()
-                },
-            ))
-            .with_children(|row| {
-                // 头像（elevated 底圆 + "你" 文字）
-                row.spawn((
-                    Node {
-                        width: px(28.0),
-                        height: px(28.0),
-                        border_radius: BorderRadius::all(px(6.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                    BackgroundColor(theme.elevated),
-                    BorderColor::all(theme.border),
-                    Text::new(crate::i18n::tr(&loc, "role-user")),
-                    TextFont {
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(theme.text),
-                ));
-                // 消息体（role + content）
-                row.spawn((
-                    Node {
-                        flex_grow: 1.0,
-                        min_width: Val::ZERO,
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ))
-                .with_children(|body| {
-                    // role 行
-                    body.spawn((
+            p.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: px(space::MD),
+                ..default()
+            },))
+                .with_children(|row| {
+                    // 头像（elevated 底圆 + "你" 文字）
+                    row.spawn((
+                        Node {
+                            width: px(28.0),
+                            height: px(28.0),
+                            border_radius: BorderRadius::all(px(6.0)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        BackgroundColor(theme.elevated),
+                        BorderColor::all(theme.border),
                         Text::new(crate::i18n::tr(&loc, "role-user")),
                         TextFont {
                             font_size: FontSize::Px(12.0),
@@ -401,17 +380,34 @@ fn spawn_user_message(
                         },
                         TextColor(theme.text),
                     ));
-                    // 正文
-                    body.spawn((
-                        Text::new(ev.text.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.text),
-                    ));
+                    // 消息体（role + content）
+                    row.spawn((Node {
+                        flex_grow: 1.0,
+                        min_width: Val::ZERO,
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },))
+                        .with_children(|body| {
+                            // role 行
+                            body.spawn((
+                                Text::new(crate::i18n::tr(&loc, "role-user")),
+                                TextFont {
+                                    font_size: FontSize::Px(12.0),
+                                    ..default()
+                                },
+                                TextColor(theme.text),
+                            ));
+                            // 正文
+                            body.spawn((
+                                Text::new(ev.text.clone()),
+                                TextFont {
+                                    font_size: FontSize::Px(font),
+                                    ..default()
+                                },
+                                TextColor(theme.text),
+                            ));
+                        });
                 });
-            });
         });
         commands.entity(list).add_child(current);
         commands.entity(current).insert(Text::new(String::new()));
@@ -460,62 +456,58 @@ fn finalize_on_done(
     let font = theme.font_size;
     // 历史副本（全宽行式：头像 + 消息体）
     commands.entity(list).with_children(|p| {
-        p.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(space::MD),
-                ..default()
-            },
-        ))
-        .with_children(|row| {
-            // 头像（渐变色 — 用 accent 底 + ✦ 文字模拟）
-            row.spawn((
-                Node {
-                    width: px(28.0),
-                    height: px(28.0),
-                    border_radius: BorderRadius::all(px(6.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(theme.accent),
-                Text::new("✦"),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(theme.bg),
-            ));
-            // 消息体
-            row.spawn((
-                Node {
-                    flex_grow: 1.0,
-                    min_width: Val::ZERO,
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-            ))
-            .with_children(|body| {
-                body.spawn((
-                    Text::new(crate::i18n::tr(&loc, "role-assistant")),
+        p.spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: px(space::MD),
+            ..default()
+        },))
+            .with_children(|row| {
+                // 头像（渐变色 — 用 accent 底 + ✦ 文字模拟）
+                row.spawn((
+                    Node {
+                        width: px(28.0),
+                        height: px(28.0),
+                        border_radius: BorderRadius::all(px(6.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    BackgroundColor(theme.accent),
+                    Text::new("✦"),
                     TextFont {
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
-                    TextColor(theme.text),
+                    TextColor(theme.bg),
                 ));
-                body.spawn((
-                    Text::new(content),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                ));
+                // 消息体
+                row.spawn((Node {
+                    flex_grow: 1.0,
+                    min_width: Val::ZERO,
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },))
+                    .with_children(|body| {
+                        body.spawn((
+                            Text::new(crate::i18n::tr(&loc, "role-assistant")),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(theme.text),
+                        ));
+                        body.spawn((
+                            Text::new(content),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(theme.text_dim),
+                        ));
+                    });
             });
-        });
     });
     commands.entity(current).insert(Text::new(String::new()));
 }
@@ -536,13 +528,9 @@ fn on_error(
             xgent_core::chat::ErrorKind::NotConfigured => {
                 crate::i18n::tr(&loc, "error-not-configured")
             }
-            xgent_core::chat::ErrorKind::AuthFailed => {
-                crate::i18n::tr(&loc, "error-auth-failed")
-            }
+            xgent_core::chat::ErrorKind::AuthFailed => crate::i18n::tr(&loc, "error-auth-failed"),
             xgent_core::chat::ErrorKind::Network => crate::i18n::tr(&loc, "error-network"),
-            xgent_core::chat::ErrorKind::StreamParse => {
-                crate::i18n::tr(&loc, "error-stream-parse")
-            }
+            xgent_core::chat::ErrorKind::StreamParse => crate::i18n::tr(&loc, "error-stream-parse"),
             xgent_core::chat::ErrorKind::ProviderError => crate::i18n::tr(&loc, "error-provider"),
         };
         let retry_hint = crate::i18n::tr(&loc, "error-retry-hint");
@@ -608,10 +596,7 @@ fn show_compacted_notice(
         let notice = crate::i18n::tr_with(
             &loc,
             "compaction-notice",
-            &[
-                ("before", before.into()),
-                ("after", after.into()),
-            ],
+            &[("before", before.into()), ("after", after.into())],
         );
         commands.entity(list).with_children(|p| {
             p.spawn((Node {
@@ -750,12 +735,8 @@ fn update_conversation_info(
         .count();
     let token_part = if tokens.total > 0 {
         let token_str = crate::status_bar::format_tokens(tokens.total);
-        crate::i18n::tr_with(
-            &loc,
-            "conversation-tokens",
-            &[("tokens", token_str.into())],
-        )
-        .to_string()
+        crate::i18n::tr_with(&loc, "conversation-tokens", &[("tokens", token_str.into())])
+            .to_string()
     } else {
         String::new()
     };

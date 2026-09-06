@@ -266,31 +266,29 @@ fn spawn_session_item(
         ))
         .with_children(|row| {
             // 左侧：标题 + 元信息
-            row.spawn((
-                Node {
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-            ))
-            .with_children(|info| {
-                info.spawn((
-                    Text::new(title.clone()),
-                    TextFont {
-                        font_size: FontSize::Px(13.0),
-                        ..default()
-                    },
-                    TextColor(theme.text),
-                ));
-                info.spawn((
-                    Text::new(format!("{date} · {msg_count}")),
-                    TextFont {
-                        font_size: FontSize::Px(11.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
-                ));
-            });
+            row.spawn((Node {
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },))
+                .with_children(|info| {
+                    info.spawn((
+                        Text::new(title.clone()),
+                        TextFont {
+                            font_size: FontSize::Px(13.0),
+                            ..default()
+                        },
+                        TextColor(theme.text),
+                    ));
+                    info.spawn((
+                        Text::new(format!("{date} · {msg_count}")),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                });
             // 右侧：恢复按钮
             row.spawn((
                 Button,
@@ -403,10 +401,26 @@ fn handle_restore_results(
                 }
                 AgentMessage::ToolResult(tr_msg) => {
                     let label = format!("[{}] {}", tr_msg.tool_name, tr_msg.content);
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &label, false, font);
+                    spawn_history_message_row(
+                        &mut commands,
+                        list,
+                        &theme,
+                        &loc,
+                        &label,
+                        false,
+                        font,
+                    );
                 }
                 AgentMessage::Notification(n) => {
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &n.text, false, font);
+                    spawn_history_message_row(
+                        &mut commands,
+                        list,
+                        &theme,
+                        &loc,
+                        &n.text,
+                        false,
+                        font,
+                    );
                 }
             }
         }
@@ -453,59 +467,55 @@ fn spawn_history_message_row(
     }
 
     commands.entity(list).with_children(|p| {
-        p.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(space::MD),
-                ..default()
-            },
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Node {
-                    width: Val::Px(28.0),
-                    height: Val::Px(28.0),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(avatar_bg),
-                Text::new(avatar_text),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(theme.text),
-            ));
-            row.spawn((
-                Node {
-                    flex_grow: 1.0,
-                    min_width: Val::ZERO,
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-            ))
-            .with_children(|body| {
-                body.spawn((
-                    Text::new(role_label),
+        p.spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(space::MD),
+            ..default()
+        },))
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: Val::Px(28.0),
+                        height: Val::Px(28.0),
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    BackgroundColor(avatar_bg),
+                    Text::new(avatar_text),
                     TextFont {
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
                     TextColor(theme.text),
                 ));
-                body.spawn((
-                    Text::new(text.to_string()),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(text_color),
-                ));
+                row.spawn((Node {
+                    flex_grow: 1.0,
+                    min_width: Val::ZERO,
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },))
+                    .with_children(|body| {
+                        body.spawn((
+                            Text::new(role_label),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(theme.text),
+                        ));
+                        body.spawn((
+                            Text::new(text.to_string()),
+                            TextFont {
+                                font_size: FontSize::Px(font),
+                                ..default()
+                            },
+                            TextColor(text_color),
+                        ));
+                    });
             });
-        });
     });
 }

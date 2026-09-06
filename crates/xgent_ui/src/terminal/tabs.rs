@@ -184,7 +184,11 @@ pub fn rebuild_terminal_tabs(
             TerminalTabStatus::Running => theme.st_ok,
             TerminalTabStatus::Exited => theme.text_dim,
         };
-        let bg = if is_active { theme.elevated } else { theme.surface };
+        let bg = if is_active {
+            theme.elevated
+        } else {
+            theme.surface
+        };
         let border_color = if is_active {
             theme.accent
         } else {

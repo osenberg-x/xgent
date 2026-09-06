@@ -370,7 +370,13 @@ pub fn handle_close_tab_requests(
                 if buf.state.is_dirty() {
                     // 无弹窗才弹新窗；已有弹窗则静默跳过（等用户处理完当前确认）
                     if q_dialog.single().is_err() {
-                        spawn_dirty_close_dialog(&mut commands, req.entity, buf.path(), &theme, &loc);
+                        spawn_dirty_close_dialog(
+                            &mut commands,
+                            req.entity,
+                            buf.path(),
+                            &theme,
+                            &loc,
+                        );
                     }
                     continue;
                 }
@@ -504,12 +510,8 @@ pub fn handle_dirty_close_decision(
     let Ok((dialog, for_buf)) = q_dialog.single() else {
         return;
     };
-    let discard = q_discard
-        .iter()
-        .any(|i| *i == Interaction::Pressed);
-    let cancel = q_cancel
-        .iter()
-        .any(|i| *i == Interaction::Pressed);
+    let discard = q_discard.iter().any(|i| *i == Interaction::Pressed);
+    let cancel = q_cancel.iter().any(|i| *i == Interaction::Pressed);
     if discard {
         close_writer.write(CloseTabRequest {
             entity: for_buf.buffer,

@@ -210,14 +210,23 @@ fn handle_activity_click(
 fn update_activity_indicators(
     active: Res<ActiveActivity>,
     theme: Res<Theme>,
-    mut q: Query<(&ActivityItemMarker, &mut TextColor, &mut Node, &mut BorderColor)>,
+    mut q: Query<(
+        &ActivityItemMarker,
+        &mut TextColor,
+        &mut Node,
+        &mut BorderColor,
+    )>,
 ) {
     if !active.is_changed() && !theme.is_changed() {
         return;
     }
     for (item, mut color, mut node, mut border_color) in q.iter_mut() {
         let is_active = item.kind == active.0;
-        color.0 = if is_active { theme.text } else { theme.text_dim };
+        color.0 = if is_active {
+            theme.text
+        } else {
+            theme.text_dim
+        };
         // active 项左侧加 2px 边框作为竖条指示器
         node.border = if is_active {
             UiRect {

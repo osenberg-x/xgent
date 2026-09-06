@@ -40,9 +40,7 @@ fn count_writes_after_save(world: &mut World) -> usize {
     let mut schedule = Schedule::default();
     schedule.add_systems(handle_editor_save_requests);
     schedule.run(world);
-    world
-        .resource::<Messages<FileWriteRequest>>()
-        .len()
+    world.resource::<Messages<FileWriteRequest>>().len()
 }
 
 /// ConflictDetected 态按 Cmd+S 不应落盘。

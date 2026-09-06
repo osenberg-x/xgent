@@ -27,8 +27,8 @@ use crate::editor::command::handle_editor_commands;
 use crate::editor::conflict::{FileChangedEvent, handle_conflict_decision, handle_file_changed};
 use crate::editor::io::{
     BufferSavedEvent, EditorIoRuntime, FileReadRequest, FileReadResult, FileWriteRequest,
-    apply_file_read_results, handle_file_read_requests,
-    handle_file_write_requests, poll_io_results, process_pending_reads,
+    apply_file_read_results, handle_file_read_requests, handle_file_write_requests,
+    poll_io_results, process_pending_reads,
 };
 use crate::editor::state::{EditorStateSnapshot, update_editor_state_snapshot};
 use crate::editor::tabs::{

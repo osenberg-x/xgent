@@ -839,22 +839,16 @@ fn apply_preview_read_result(
             Err(e) => {
                 // 读取失败：更新元信息显示错误
                 if let Ok(mut meta_text) = q_texts.p1().single_mut() {
-                    meta_text.0 = crate::i18n::tr_with(
-                        &loc,
-                        "preview-read-error",
-                        &[("error", e.clone())],
-                    );
+                    meta_text.0 =
+                        crate::i18n::tr_with(&loc, "preview-read-error", &[("error", e.clone())]);
                 }
                 continue;
             }
         };
         // 更新 fv-head 元信息：字节数 · 只读预览
         if let Ok(mut meta_text) = q_texts.p1().single_mut() {
-            meta_text.0 = crate::i18n::tr_with(
-                &loc,
-                "preview-bytes",
-                &[("bytes", bytes_len.to_string())],
-            );
+            meta_text.0 =
+                crate::i18n::tr_with(&loc, "preview-bytes", &[("bytes", bytes_len.to_string())]);
         }
         // 填充 fv-body 内容（Rust 语法高亮，其余纯文本）
         if let Ok(body) = q_body.single() {
@@ -1033,7 +1027,14 @@ fn handle_dir_click(
             let selected_path = selected_file.0.clone();
             commands.entity(child_container).with_children(|p| {
                 for entry in &entries {
-                    spawn_entry(p, entry, &theme, font, expanded_set, selected_path.as_deref());
+                    spawn_entry(
+                        p,
+                        entry,
+                        &theme,
+                        font,
+                        expanded_set,
+                        selected_path.as_deref(),
+                    );
                 }
             });
         }

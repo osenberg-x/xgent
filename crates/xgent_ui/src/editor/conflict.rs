@@ -265,12 +265,12 @@ pub fn handle_conflict_decision(
                     path: buf.path.clone(),
                     line: None,
                 });
-                commands.entity(for_buf.buffer).insert(
-                    crate::editor::io::FileReadPending {
+                commands
+                    .entity(for_buf.buffer)
+                    .insert(crate::editor::io::FileReadPending {
                         path: buf.path.clone(),
                         line: None,
-                    },
-                );
+                    });
             }
             ConflictDecision::KeepLocal => {
                 buf.keep_local();
