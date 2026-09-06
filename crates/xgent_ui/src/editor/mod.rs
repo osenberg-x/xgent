@@ -259,6 +259,15 @@ fn sync_editor_theme(
     editor_theme.line_height_ratio = 1.55;
     editor_theme.text = theme.text;
     editor_theme.text_dim = theme.text_dim;
+    // 语法色注入（v7 冷调低饱和；xui 侧 None 类别回落内置映射）
+    editor_theme.kw = Some(theme.kw);
+    editor_theme.fn_ = Some(theme.fn_);
+    editor_theme.str_ = Some(theme.str_);
+    editor_theme.num = Some(theme.num);
+    editor_theme.ty = Some(theme.ty);
+    editor_theme.com = Some(theme.com);
+    editor_theme.punc = Some(theme.punc);
+    editor_theme.plain = Some(theme.code_text);
 }
 /// 返回对话按钮标记。
 #[derive(Component, Default)]

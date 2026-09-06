@@ -245,6 +245,7 @@ pub fn handle_open_file_requests(
     mut view: ResMut<crate::editor::EditorView>,
     mut content: ResMut<crate::editor::SideViewContent>,
     editor_theme: Res<xui::text_editor::render::EditorTheme>,
+    theme: Res<crate::theme::Theme>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -272,7 +273,7 @@ pub fn handle_open_file_requests(
                         font_size: FontSize::Px(editor_theme.font_size),
                         ..default()
                     },
-                    TextColor(bevy::color::palettes::tailwind::GRAY_400.into()),
+                    TextColor(editor_theme.text_dim),
                     xui::LineNumbersMarker,
                     Node {
                         position_type: PositionType::Absolute,
@@ -294,7 +295,7 @@ pub fn handle_open_file_requests(
                         height: Val::Px(20.0),
                         ..default()
                     },
-                    BackgroundColor(bevy::color::palettes::tailwind::AMBER_400.into()),
+                    BackgroundColor(theme.accent_interactive),
                     xui::CursorBarMarker,
                 ))
                 .id();
