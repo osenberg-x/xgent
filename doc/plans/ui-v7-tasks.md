@@ -2,7 +2,7 @@
 
 > 基于 [方案 v1.5](ui-v7-migration.md)（五轮评审定稿）、[ADR-0014](../decisions/0014-ui-视觉基准采用-linear-设计系统-v7-原型.md)、原型 [ui-prototype-v7.1.html](../design/ui-prototype-v7.html) 拆解。
 >
-> 状态：待执行（v1.4，四轮自查修订，见文末修订记录）· 任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账，方案文档不再随进度改动。
+> 状态：**执行中**——M1~M4 已完成、M5 完成 T1-T5（见 §0.2 进度快照，截至 2026-09-06）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账，方案文档随实施勘误（§15）。
 
 ---
 
@@ -23,6 +23,47 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 硬门槛：M1-T3（CJK spike）不通过 → 停止，升级处理，不得带病铺开。
 风险标记任务：⚠ M3-T1（图标导出坑）、⚠ M5-T6（抽屉化，改动面最大，留独立提交便于回滚）。
 ```
+
+---
+
+## 0.2 进度快照（截至 2026-09-06，基线 `576246e` → `a771c38`，30 笔提交）
+
+### 里程碑状态
+
+| 里程碑 | 状态 | 提交 |
+|:---|:---|:---|
+| M1 令牌与字体 | ✅ 完成（T1-T9 + 偏差回写） | `8025ba3`~`d7ec085`（10 笔，含三步提交） |
+| M2 骨架与拖拽 | ✅ 完成（T1-T7；**顺带修复状态栏 Startup 竞态 bug**） | `53198d2`/`9bfd4a8`/`84c468e`/`7396cd6` |
+| M3 图标与顶轨 | ✅ 完成（T1-T6；24 枚图标/kit/顶栏九元素/agent pill/rail） | `ba111d8`~`7e711be` |
+| M4 会话区 | ✅ 完成（T1-T8；消息/工具卡/操作栏/回底/welcome/context_scope/输入卡/qa chips） | `fcf3d6c`/`827b949`/`f3b9fc2` |
+| M5 上下文面板 | ◐ **T1-T5 完成**（页签条/Diff 变体/diff.rs 共享+差异页/终端样式）；**T6 抽屉化未开始**、T7 待验收 | `77b0c77`/`200f188`/`a771c38` |
+| M6 overlay 层 | ○ 未开始（toast/palette/confirm/history/settings 视觉对齐） | — |
+| M7 收尾 | ○ 未开始（动效/i18n 收口/快捷键收口/dev-tutorial 同步/终验） | — |
+
+另：`576246e`（design-md skill + 文档基线）、`d9aa40e`（cargo fmt 历史统一）、`62fe0b5`（M1-T2 偏差回写）。
+
+### 下一任务
+
+**M5-T6 ⚠ 文件面板抽屉化**（任务书详列五个子项；独立提交留回滚点）：
+1. 新 Resource `FileDrawerOpen`；文件面板改左侧 overlay drawer（320/surface/遮罩）。
+2. rail 文件钮 + `filepanel.toggle` 热键切抽屉；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
+3. 树条目视觉 v7（📁📂 → 矢量图标、HoverTint、accent 选中）。
+4. 点文件改发 `OpenFileRequest`（预览归上下文面板预览页；注意 `SideViewContent::Preview` 写入点 file_panel.rs:739/:832 归一已在 M5-T2 完成，本任务只改道入口）。
+5. 布局收四列：移除 FilePanel 列与左手柄、`apply_panel_widths`/钳制公式去 file_panel 项。
+
+之后：M5-T7 期验收 → M6 → M7。
+
+### 集中手测清单（自动化无法覆盖，累计于各任务）
+
+1. **需已配置 provider 的对话联调**：消息流/工具卡 tint/agent pill 五态（含确认态、错误态）轮转。
+2. **交互手感**：拖拽分隔条/双击复位、缩窗 <1100px 响应式折叠、回底浮钮显隐与 StickToBottom 耦合、qa chips 点击填入光标位置、复制钮落剪贴板、rail/顶栏 tooltip 悬停 500ms。
+3. **Outline 圆角跟随**（输入卡 focus 环）——不随则回退外层节点方案。
+4. **diff 页联调**：打开文件→修改→差异页实时反映；撤销后空态。
+
+### 实施期发现索引（均已回写至对应任务块）
+
+- bevy 0.19：`BorderRadius` 是 `Node` 字段非组件；`Query::iter()` 恒只读（可变走 `iter_mut()`）；`LetterSpacing`/`LineHeight` 是枚举；`Plugins` 元组上限 15；`EntityCommands` 无 `.spawn`（用 `commands.spawn().with_children()` + `add_child`）；`InputFocus::get()` 读焦点；`TextBackgroundColor` 支持 per-span 背景；`TextEdit::Insert(SmolStr)`。
+- 工程：`spawn_status_bar` 曾缺 `.after(spawn_layout)`（Startup 竞态致状态栏空白，已修）；Inter 实际走直读模式（偏差记录在 M1-T2）；确认对话框 `line_diff` 无既有测试（已补 3 用例）。
 
 ---
 
