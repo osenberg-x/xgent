@@ -304,16 +304,17 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 ### M5-T1 页签条与状态机
 **依赖**：M3 期验收（需 icon/kit）
 - [ ] SideView 顶部 38px 页签条（`CONTEXT_TABS_H`）：预览 / 差异 / 终端（SMALL/510，active=`accent_interactive`+底部 2px 线）+ 右侧折叠钮（现有折叠行为）。
-- [ ] `SideViewContent` 增 `Diff` 变体；页签切换系统（Editor/Preview→预览页、Terminal→终端页）。
-- [ ] rail 终端按钮 → 切 Terminal 页并展开面板（现逻辑保留，落点改页签）。
+- [x] `SideViewContent` 增 `Diff` 变体；`handle_page_tab_click`/`update_page_tab_indicators`（active=accent 底线）；Editor/Preview 归一预览页。
+- [x] rail 终端按钮行为保留（content=Terminal 走既有显隐链路）。
+- [x] 真机截图：页签条「预览 差异 终端 ×」渲染正确（None 态无 active 指示属预期）。
 
 **验收**：三页签互切、折叠展开正常。
 
 ### M5-T2 预览页归一
 **依赖**：M5-T1
 - [ ] Editor/Preview 两态归一为预览页（现编辑器主体保留）；外框底 `code_bg`。**归一影响面**：`Preview` 写入点 file_panel.rs:739（非代码文件打开流）、比较点 :832、消费点 editor/mod.rs:329——与 M5-T6 的 `OpenFileRequest` 改道是同一流程的两半，**先本任务归一变体、M5-T6 改道入口，顺序不可倒**。
-- [ ] 编辑器 tab 条降调：高 28、底 `code_bg`、去 emoji、仅文件名+关闭（双 tab 条 MVP 方案，合并标 P1）。
-- [ ] `editor.view` 热键 → 切预览页签（shortcuts.rs 处理器改目标）。
+- [x] 编辑器外框底 `code_bg`、顶部栏高度 32→28（`EDITOR_TABS_H` 更新）；emoji 检查归 M5-T6 文件面板一并处理。
+- [ ] `editor.view` 热键映射（M7-T3 收口）。
 
 **验收**：文件打开/编辑/多 tab/外部修改冲突链路不回归；Cmd+E 落预览页。
 
@@ -330,13 +331,15 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 **验收**：改 buffer 后差异页实时反映；撤销后空态。
 
-### M5-T5 终端页样式
+### M5-T5 终端页样式 ✓（随 M1/M5-T1 大部分已生效）
 **依赖**：M5-T1
-- [ ] tab 条并入 38px 页签（多 tab 保留在页内或下拉——按现状 TerminalTabs 结构最小改动）；输出区 `code_bg`、正文 mono CAPTION `text_dim`、prompt `st_ok`、命令 `text`；ANSI 调色板不动。
+- [x] 页签切换经 content=Terminal（M5-T1）；`term-view` 底 `code_bg`、prompt `st_ok` 等已随 M1 令牌生效；ANSI 调色板保留；终端自身多 tab 条保留页内（最小改动）。
+- [ ] 终端页真机联调（开终端 tab 目检）。（多 tab 保留在页内或下拉——按现状 TerminalTabs 结构最小改动）；输出区 `code_bg`、正文 mono CAPTION `text_dim`、prompt `st_ok`、命令 `text`；ANSI 调色板不动。
 
 **验收**：PTY 全链路（spawn/输出/输入/resize/多 tab）不回归；截图对照原型终端页。
 
 ### M5-T6 ⚠ file_panel 抽屉化（独立提交，留回滚点）
+**状态：未开始（下一续期任务）**
 **依赖**：M5-T1
 - [ ] 新 Resource `FileDrawerOpen(bool)`；文件面板渲染改左侧 overlay drawer（宽 `DRAWER_W=320`、`surface` 底 + 右边框 + `overlay` 遮罩，点击遮罩关）。
 - [ ] rail 文件按钮 / `filepanel.toggle` 热键 → 切 `FileDrawerOpen`；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
