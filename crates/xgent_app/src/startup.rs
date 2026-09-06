@@ -1,6 +1,7 @@
 //! 启动系统：打开项目、订阅 fs.watch。
 
 use bevy::prelude::*;
+use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use xgent_settings_core::store::ProjectConfigStore;
 use xgent_ui::fonts::UiFonts;
 
@@ -75,4 +76,30 @@ pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
         ui: Handle::default(),
         mono,
     });
+}
+
+/// 启动 3 秒后截取主窗存盘（`XGENT_SHOT=<路径>` 时启用）。
+///
+/// 字体/CJK spike 与 UI 期验收的视觉取证工具——app 截自己的渲染目标，
+/// 不依赖系统录屏权限。M2-T6 将把快捷键触发版本正式化为 `ui-snapshot` feature。
+pub fn spike_screenshot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut path: Local<Option<String>>,
+    mut done: Local<bool>,
+) {
+    if path.is_none() {
+        *path = std::env::var("XGENT_SHOT").ok();
+    }
+    let Some(p) = path.as_ref() else {
+        return;
+    };
+    if *done || time.elapsed_secs() < 3.0 {
+        return;
+    }
+    *done = true;
+    tracing::info!("spike 截图 → {p}");
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(p.clone()));
 }

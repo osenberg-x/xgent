@@ -266,6 +266,7 @@ fn main() {
         });
     }
     app.add_systems(Startup, crate::startup::load_fonts);
+    app.add_systems(Update, crate::startup::spike_screenshot);
 
     // 清理提示：退出时 daemon 末个客户端退出后自退出
     let socket_path = daemon_socket_path();
