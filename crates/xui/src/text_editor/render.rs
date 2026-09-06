@@ -50,6 +50,7 @@ pub struct TextEditorChildren {
 pub fn sync_highlight_layer(
     mut q: Query<(&TextEditor, &HighlightCache, &mut TextEditorChildren), Changed<HighlightCache>>,
     q_layer: Query<&Text, With<HighlightLayerMarker>>,
+    theme: Res<EditorTheme>,
     mut commands: Commands,
 ) {
     for (editor, _cache, children) in q.iter_mut() {
@@ -82,13 +83,13 @@ pub fn sync_highlight_layer(
                     continue;
                 }
                 let segment = full[s.start..end].to_string();
-                let color = crate::text_editor::highlight::span_color_for(s.kind);
+                let color = theme.span_color(s.kind);
                 p.spawn((TextSpan::new(segment), TextColor(color)));
             }
         });
     }
 }
-/// 编辑器主题（颜色 + 字号 + 行高比），由宿主注入。xui 不依赖 xgent_ui 的 Theme。
+/// 编辑器主题（颜色 + 字号 + 行高比 + 语法色），由宿主注入。xui 不依赖 xgent_ui 的 Theme。
 #[derive(Resource, Debug, Clone)]
 pub struct EditorTheme {
     /// 主文本色
@@ -102,6 +103,16 @@ pub struct EditorTheme {
     /// 对齐 zed `buffer_line_height = comfortable`（≈1.5）：1.5 是主流代码编辑器
     /// （zed / VSCode）的紧凑行高，1.6 留 CJK 裕量但偏稀疏。宿主可按需调。
     pub line_height_ratio: f32,
+    /// 语法色注入（宿主任选）；`None` 的类别回落 xui 内置暗色映射（对齐 VSCode Dark+）。
+    pub kw: Option<Color>,
+    pub fn_: Option<Color>,
+    pub str_: Option<Color>,
+    pub num: Option<Color>,
+    pub ty: Option<Color>,
+    pub com: Option<Color>,
+    pub punc: Option<Color>,
+    /// 普通/标识符文本色
+    pub plain: Option<Color>,
 }
 
 impl Default for EditorTheme {
@@ -111,7 +122,33 @@ impl Default for EditorTheme {
             text_dim: Color::srgb(0.62, 0.64, 0.68),
             font_size: 14.0,
             line_height_ratio: 1.5,
+            kw: None,
+            fn_: None,
+            str_: None,
+            num: None,
+            ty: None,
+            com: None,
+            punc: None,
+            plain: None,
         }
+    }
+}
+
+impl EditorTheme {
+    /// span kind → 颜色：优先取宿主注入的语法色，`None` 回落内置暗色映射。
+    pub fn span_color(&self, kind: crate::text_editor::highlight::SpanKind) -> Color {
+        use crate::text_editor::highlight::SpanKind::*;
+        match kind {
+            Keyword | Boolean => self.kw,
+            String => self.str_,
+            Comment => self.com,
+            Number | Constant => self.num,
+            FunctionName => self.fn_,
+            Type => self.ty,
+            Punctuation => self.punc,
+            Identifier | Macro | Plain => self.plain,
+        }
+        .unwrap_or_else(|| crate::text_editor::highlight::span_color_for(kind))
     }
 }
 

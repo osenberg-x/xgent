@@ -238,6 +238,7 @@ pub fn update_virtual_lines(
                 &editor.spans,
                 start,
                 end,
+                &theme,
                 theme.text,
                 FontSize::Px(theme.font_size),
             );
@@ -257,6 +258,7 @@ fn rebuild_visible_spans(
     global_spans: &[HighlightSpan],
     start: usize,
     end: usize,
+    theme: &EditorTheme,
     default_color: Color,
     font_size: FontSize,
 ) {
@@ -277,7 +279,7 @@ fn rebuild_visible_spans(
             segments.push(("\n".to_string(), default_color));
         } else {
             for (seg, kind) in line_spans {
-                segments.push((seg, span_color_for(kind)));
+                segments.push((seg, theme.span_color(kind)));
             }
             // 行尾换行（最后一行除外，避免末尾空行）
             if row + 1 < end {
@@ -445,6 +447,7 @@ mod tests {
             &[],
             0,
             2,
+            &crate::text_editor::render::EditorTheme::default(),
             Color::WHITE,
             FontSize::Px(12.5),
         );
