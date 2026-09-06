@@ -14,6 +14,7 @@ pub mod editor;
 pub mod file_panel;
 pub mod fonts;
 pub mod i18n;
+pub mod kit;
 pub mod layout;
 pub mod resize;
 pub mod session_history;
@@ -44,6 +45,8 @@ impl Plugin for XgentUiPlugin {
             status_bar::StatusBarPlugin,
             command_palette::CommandPalettePlugin,
             settings_panel::SettingsPanelPlugin,
+        ))
+        .add_plugins((
             session_history::SessionHistoryPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
@@ -51,6 +54,7 @@ impl Plugin for XgentUiPlugin {
             terminal::TerminalPlugin,
             resize::ResizePlugin,
             shortcuts::ShortcutsPlugin,
+            kit::KitPlugin,
         ));
     }
 }
