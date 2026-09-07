@@ -63,9 +63,9 @@ async fn git_plugin_register_and_id_consistency() {
         .await
         .expect("加载 git 插件");
 
-    // register 返回 3 个工具
+    // register 返回 4 个工具（git_diff/git_log/git_status/git_commit）
     let tools = plugin.call_tool_register().await.expect("register");
-    assert_eq!(tools.len(), 3, "git 插件应注册 3 个工具");
+    assert_eq!(tools.len(), 4, "git 插件应注册 4 个工具");
 
     // id 一致性硬约束：PluginTool::id() == schema.name == "plugin.git.git_diff"
     let git_diff_def = tools.iter().find(|t| t.id == "git_diff").unwrap();
