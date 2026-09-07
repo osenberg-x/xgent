@@ -77,7 +77,10 @@ fn session_history_overlay_systems(
     loc: Res<Localizer>,
     cached: Res<CachedSessionList>,
     mut commands: Commands,
-    q_overlay: Query<Entity, With<SessionHistoryOverlayMarker>>,
+    q_overlay: Query<
+        (&Interaction, Entity),
+        (With<SessionHistoryOverlayMarker>, Changed<Interaction>),
+    >,
     q_restore: Query<(&Interaction, &SessionRestoreButtonMarker), Changed<Interaction>>,
     q_close: Query<&Interaction, (With<SessionHistoryCloseMarker>, Changed<Interaction>)>,
     mut restore_writer: MessageWriter<RestoreSessionMessage>,
@@ -85,15 +88,22 @@ fn session_history_overlay_systems(
     mut list_writer: MessageWriter<ListSessionsMessage>,
 ) {
     // 打开时 spawn overlay（若不存在）
-    if history_state.open && q_overlay.is_empty() {
+    if history_state.open && q_overlay.iter().next().is_none() {
         list_writer.write(ListSessionsMessage);
         spawn_overlay(&mut commands, &theme, &loc, &cached);
     }
 
     // 关闭时 despawn overlay
-    if !history_state.open && !q_overlay.is_empty() {
-        for entity in q_overlay.iter() {
+    if !history_state.open {
+        for (_, entity) in q_overlay.iter() {
             commands.entity(entity).despawn();
+        }
+    }
+
+    // 遮罩点击关闭（点在面板外 = overlay 根节点收到 Pressed）
+    for (i, _) in q_overlay.iter() {
+        if *i == Interaction::Pressed {
+            history_state.open = false;
         }
     }
 
@@ -130,28 +140,27 @@ fn spawn_overlay(
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(theme.overlay),
-            GlobalZIndex(40),
+            GlobalZIndex(DRAWER_Z),
+            Button,
             SessionHistoryOverlayMarker,
         ))
         .with_children(|overlay| {
+            // 左抽屉面板（M6-T4：复用 M5-T6 drawer 结构：320px/surface/右边框）
             overlay
                 .spawn((
                     Node {
-                        width: Val::Px(480.0),
-                        max_height: Val::Px(520.0),
+                        width: Val::Px(crate::theme::size::DRAWER_W),
+                        height: Val::Percent(100.0),
                         flex_direction: FlexDirection::Column,
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        border: UiRect::right(Val::Px(1.0)),
                         overflow: Overflow::clip_y(),
                         ..default()
                     },
-                    BackgroundColor(theme.elevated),
-                    BorderColor::all(theme.border),
+                    BackgroundColor(theme.surface),
+                    BorderColor::all(theme.line),
                 ))
                 .with_children(|panel| {
                     // 标题栏
