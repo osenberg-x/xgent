@@ -155,23 +155,23 @@ mod tests {
     }
 
     #[test]
-    fn get_welcome_zh_cn() {
+    fn get_key_zh_cn() {
         let loc = Localizer::load("zh-CN");
-        assert_eq!(loc.get("welcome", &[]), "欢迎");
+        assert_eq!(loc.get("status-ready", &[]), "就绪");
     }
 
     #[test]
-    fn get_welcome_en_us() {
+    fn get_key_en_us() {
         let loc = Localizer::load("en-US");
-        assert_eq!(loc.get("welcome", &[]), "Welcome");
+        assert_eq!(loc.get("status-ready", &[]), "Ready");
     }
 
     #[test]
     fn get_with_args() {
         let loc = Localizer::load("zh-CN");
-        let args = [("path", "/tmp/x.rs".to_string())];
-        let s = loc.get("confirm-write-file", &args);
-        assert!(s.contains("/tmp/x.rs"), "got: {s}");
+        let args = [("count", "3".to_string())];
+        let s = loc.get("history-message-count", &args);
+        assert!(s.contains("3"), "got: {s}");
     }
 
     #[test]
@@ -183,10 +183,10 @@ mod tests {
     #[test]
     fn switch_changes_language() {
         let mut loc = Localizer::load("zh-CN");
-        assert_eq!(loc.get("welcome", &[]), "欢迎");
+        assert_eq!(loc.get("status-ready", &[]), "就绪");
         loc.switch("en-US");
         assert_eq!(loc.current_lang(), "en-US");
-        assert_eq!(loc.get("welcome", &[]), "Welcome");
+        assert_eq!(loc.get("status-ready", &[]), "Ready");
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
         loc.switch("fr-FR");
         // 找不到则保持原语言
         assert_eq!(loc.current_lang(), "zh-CN");
-        assert_eq!(loc.get("welcome", &[]), "欢迎");
+        assert_eq!(loc.get("status-ready", &[]), "就绪");
     }
 
     #[test]
@@ -209,23 +209,23 @@ mod tests {
     fn dyn_string_source_works() {
         let loc = Localizer::load("en-US");
         let s: &dyn StringSource = &loc;
-        assert_eq!(s.get("welcome", &[]), "Welcome");
+        assert_eq!(s.get("status-ready", &[]), "Ready");
         assert_eq!(s.current_lang(), "en-US");
     }
 
     #[test]
     fn all_keys_present_in_both_langs() {
-        // 确保两语言资源都包含所有 key
+        // 确保两语言资源都包含在用 key
         let zh = Localizer::load("zh-CN");
         let en = Localizer::load("en-US");
         let keys = [
-            "app-title",
-            "welcome",
-            "chat-placeholder",
-            "confirm-write-file",
-            "confirm-run-command",
-            "provider-not-configured",
-            "settings-saved",
+            "status-ready",
+            "confirm-title",
+            "confirm-allow",
+            "history-title",
+            "settings-save",
+            "toast-copied",
+            "diff-empty-nobuffer",
         ];
         for k in keys {
             let z = zh.get(k, &[]);

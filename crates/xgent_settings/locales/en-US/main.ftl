@@ -1,15 +1,6 @@
-app-title = XGent
-welcome = Welcome
-chat-placeholder = Type a message and press Ctrl+Enter to send
-chat-empty = Start a conversation
-confirm-write-file = Confirm write file { $path }?
-confirm-run-command = Confirm run command: { $cmd }
 confirm-title = Confirm Action
 confirm-will-write = will write file:
 confirm-diff-label = diff preview:
-provider-not-configured = No provider configured
-settings-saved = Settings saved
-file-panel-placeholder = Files
 settings-kind = Provider Type
 file-panel-title = Explorer
 hint-send = Ctrl+Enter Send
@@ -30,7 +21,6 @@ settings-api-key = API Key
 settings-model = Model name (e.g. gpt-4o-mini)
 settings-save = Save
 settings-close = Close
-file-panel-empty = Open a project to see the file tree
 confirm-allow = Allow
 confirm-deny = Deny
 cmd-session-new = New Session
@@ -49,9 +39,7 @@ hotkey-chat-view = Switch to Chat View
 hotkey-editor-close-tab = Close Current Tab
 hotkey-editor-cycle-tab = Cycle Editor Tabs
 hotkey-toggle-sideview = Toggle Side View
-editor-back-to-chat = ← Back to Chat
 topbar-new-session = New Session
-topbar-settings = Settings
 status-ready = Ready
 status-thinking = Thinking…
 status-streaming = Generating…
@@ -59,18 +47,13 @@ status-tool-running = Running tool…
 status-confirming = Awaiting confirmation
 status-aborting = Aborting…
 status-error = Error
-tool-pending = Pending
 tool-running = Running
 tool-done = Done
 tool-failed = Failed
 tool-denied = Denied
-tool-result = Result
-tool-expand = Click to expand
 tool-fold-result = Result: { $lines } lines · Click to fold
 tool-unfold-result = Result: { $lines } lines · Click to expand
-palette-placeholder = Type a command...
 hotkey-toggle-terminal = Toggle Terminal
-terminal-title = Terminal
 terminal-no-tabs = No terminal
 terminal-status-created = ◐ Starting · { $shell } · { $cwd }
 terminal-status-running = ● Running · { $shell } · { $cwd }
@@ -81,10 +64,6 @@ terminal-new-tab = +
 terminal-clear = Clear
 terminal-close = x
 terminal-prompt = >
-preview-loading = · Loading...
-preview-read-error = Read failed: { $error }
-preview-bytes = · { $bytes } bytes · Read-only preview
-preview-error = · { $error }
 
 # Error prefixes
 error-not-configured = ⚠ [Not configured]
@@ -103,7 +82,6 @@ retry-last-error = Last error: { $error }
 compaction-notice = ✦ Previous context compacted ({ $before } → { $after } tokens)
 
 # Conversation info
-conversation-info = Session #{ $id } · { $turns } turns{ $tokens }
 
 # Status bar
 status-encoding = UTF-8 · LF · Rust
@@ -124,11 +102,9 @@ conflict-diff = Compare
 # Session history
 history-title = Session History
 history-empty = No saved sessions
-history-loading = Loading...
 history-close = x
 history-message-count = { $count } messages
 history-restore = Restore
-history-restore-failed = Restore failed: session file missing or corrupted
 
 # v7 状态栏：会话段 / 陪伴开关
 status-session = #{ $id } · { $rounds } rounds
@@ -161,3 +137,6 @@ welcome-card-test = Generate tests
 welcome-card-test-desc = Generate unit tests for the current context
 
 toast-copied = Copied to clipboard
+
+diff-empty-nobuffer = No open file
+diff-empty-clean = No unsaved changes

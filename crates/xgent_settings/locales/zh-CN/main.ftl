@@ -1,16 +1,6 @@
-app-title = XGent
-welcome = 欢迎
-chat-placeholder = 输入消息，按 Ctrl+Enter 发送
-chat-empty = 开始对话吧
-confirm-write-file = 确认写入文件 { $path }？
-confirm-run-command = 确认运行命令：{ $cmd }
 confirm-title = 确认执行
 confirm-will-write = 将写入文件：
 confirm-diff-label = diff 预览：
-provider-not-configured = 尚未配置 provider
-settings-saved = 设置已保存
-file-panel-placeholder = 文件面板
-file-panel-empty = 打开项目后显示文件树
 confirm-allow = 允许执行
 file-panel-title = 资源管理器
 hint-send = Ctrl+Enter 发送
@@ -37,9 +27,7 @@ hotkey-chat-view = 切换回对话视图
 hotkey-editor-close-tab = 关闭当前标签
 hotkey-editor-cycle-tab = 循环切换编辑器标签
 hotkey-toggle-sideview = 切换右侧分屏
-editor-back-to-chat = ← 返回对话
 topbar-new-session = 新建会话
-topbar-settings = 设置
 settings-title = Provider 配置
 settings-provider-id = Provider ID（如 openai、deepseek）
 settings-api-base = API Base URL
@@ -59,18 +47,13 @@ status-tool-running = 执行工具…
 status-confirming = 等待确认
 status-aborting = 中断中…
 status-error = 出错
-tool-pending = 待确认
 tool-running = 执行中
 tool-done = 完成
 tool-failed = 失败
 tool-denied = 已拒绝
-tool-result = 结果
-tool-expand = 点击展开
 tool-fold-result = 结果：{ $lines } 行 · 点击折叠
 tool-unfold-result = 结果：{ $lines } 行 · 点击展开
-palette-placeholder = 输入命令...
 hotkey-toggle-terminal = 切换终端
-terminal-title = 终端
 terminal-no-tabs = 无终端
 terminal-status-created = ◐ 启动中 · { $shell } · { $cwd }
 terminal-status-running = ● 运行中 · { $shell } · { $cwd }
@@ -82,10 +65,6 @@ terminal-clear = 清屏
 terminal-close = ✕
 terminal-prompt = ❯
 
-preview-loading = · 加载中...
-preview-read-error = 读取失败: { $error }
-preview-bytes = · { $bytes } 字节 · 只读预览
-preview-error = · { $error }
 
 # 错误前缀
 error-not-configured = ⚠ [未配置]
@@ -104,7 +83,6 @@ retry-last-error = 上次失败：{ $error }
 compaction-notice = ✦ 前序对话已摘要压缩（{ $before } → { $after } tokens）
 
 # 会话信息
-conversation-info = 会话 #{ $id } · { $turns } 轮{ $tokens }
 
 # 状态栏
 status-encoding = UTF-8 · LF · Rust
@@ -125,11 +103,9 @@ conflict-diff = 对比合并
 # 会话历史
 history-title = 历史会话
 history-empty = 暂无历史会话
-history-loading = 加载中...
 history-close = ✕
 history-message-count = { $count } 条消息
 history-restore = 恢复
-history-restore-failed = 恢复失败：会话文件不存在或已损坏
 
 # v7 状态栏：会话段 / 陪伴开关
 status-session = #{ $id } · { $rounds } 轮
@@ -162,3 +138,6 @@ welcome-card-test = 生成测试
 welcome-card-test-desc = 为当前上下文生成单元测试
 
 toast-copied = 已复制到剪贴板
+
+diff-empty-nobuffer = 无打开文件
+diff-empty-clean = 无未保存更改
