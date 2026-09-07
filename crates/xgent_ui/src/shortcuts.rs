@@ -126,6 +126,7 @@ pub(crate) fn handle_hotkey_triggers(
     mut palette: ResMut<CommandPaletteState>,
     mut abort_writer: MessageWriter<AbortMessage>,
     mut file_drawer: ResMut<FileDrawerOpen>,
+    mut history_drawer: ResMut<crate::session_history::SessionHistoryState>,
     mut side_view: ResMut<crate::layout::SideViewCollapsed>,
     mut view: ResMut<EditorView>,
     mut content: ResMut<SideViewContent>,
@@ -175,6 +176,10 @@ pub(crate) fn handle_hotkey_triggers(
             }
             "filepanel.toggle" => {
                 file_drawer.0 = !file_drawer.0;
+                // R2 修复：双抽屉互斥（对齐 rail 入口行为）
+                if file_drawer.0 {
+                    history_drawer.open = false;
+                }
             }
             "sideview.toggle" => {
                 // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）

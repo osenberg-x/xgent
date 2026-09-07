@@ -268,10 +268,19 @@ fn handle_rail_click(
             }
             ActivityKind::Files => {
                 drawer_open.0 = !drawer_open.0;
+                // R2 修复：双抽屉互斥——文件抽屉打开时关历史抽屉（z 层 41>40，
+                // 同开会遮挡历史抽屉内容并吞点击）
+                if drawer_open.0 {
+                    history_state.open = false;
+                }
                 active.0 = ActivityKind::Files;
             }
             ActivityKind::History => {
                 history_state.open = !history_state.open;
+                // R2 修复：历史抽屉打开时关文件抽屉（互斥，见上）
+                if history_state.open {
+                    drawer_open.0 = false;
+                }
                 active.0 = ActivityKind::History;
             }
             ActivityKind::Terminal => {
