@@ -15,12 +15,13 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 
 use crate::editor::SideViewContent;
+use crate::fonts::{UiFonts, mono_text};
 use crate::terminal::io::{PtyBridge, default_spawn_request, spawn_pty_session};
 use crate::terminal::{
     TerminalIoRuntime, TerminalTab, TerminalTabCloseMarker, TerminalTabMarker, TerminalTabStatus,
     TerminalTabs,
 };
-use crate::theme::{Theme, px, space};
+use crate::theme::{Theme, px, space, type_scale};
 
 /// 新建 tab 请求（由 ＋ 按钮 / Ctrl+` 首次唤起 / 活动栏 🖥 触发）。
 #[derive(Message, Debug, Clone)]
@@ -159,6 +160,7 @@ pub fn rebuild_terminal_tabs(
     q_bar: Query<Entity, With<crate::terminal::TerminalTabBarMarker>>,
     q_existing: Query<Entity, With<TerminalTabMarker>>,
     theme: Res<Theme>,
+    fonts: Res<UiFonts>,
     mut commands: Commands,
 ) {
     // TerminalTabs 变化（open/close/switch）或任何 TerminalTab 组件变化
@@ -172,7 +174,6 @@ pub fn rebuild_terminal_tabs(
     for entity in q_existing.iter() {
         commands.entity(entity).despawn();
     }
-    let font = theme.font_size;
     let active_idx = tabs.active;
     for (i, &tab_entity) in tabs.tabs.iter().enumerate() {
         let Ok(tab) = q_tabs.get(tab_entity) else {
@@ -222,13 +223,12 @@ pub fn rebuild_terminal_tabs(
                     },
                     BackgroundColor(dot_color),
                 ));
-                item.spawn((
-                    Text::new(title),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text),
+                item.spawn(mono_text(
+                    &fonts,
+                    title,
+                    type_scale::BODY,
+                    theme.text,
+                    type_scale::line_height::TERM,
                 ));
                 item.spawn((
                     Button,
@@ -239,12 +239,13 @@ pub fn rebuild_terminal_tabs(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    Text::new("x"),
-                    TextFont {
-                        font_size: FontSize::Px(font - 2.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    mono_text(
+                        &fonts,
+                        "x",
+                        type_scale::CAPTION,
+                        theme.text_dim,
+                        type_scale::line_height::TERM,
+                    ),
                     TerminalTabCloseMarker,
                 ));
             });

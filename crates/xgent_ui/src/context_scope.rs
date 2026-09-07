@@ -5,8 +5,8 @@
 //! editor_queries），删 chip 关 tab 会误伤用户。「+ 添加」打开文件面板。
 //! chips 挂 `ContextChipMarker`，tab 列表变化时按签名比对整批重建（标签/添加钮保留）。
 
+use crate::fonts::ui_text;
 use bevy::prelude::*;
-use bevy::text::FontSize;
 use xgent_settings::Localizer;
 
 use crate::editor::buffer::EditorBuffer;
@@ -78,13 +78,13 @@ fn spawn_context_scope(
         ))
         .with_children(|row| {
             row.spawn((
-                Text::new(tr(&loc, "context-scope-label").to_string()),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::TINY),
-                    weight: FontWeight(510),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
+                ui_text(
+                    tr(&loc, "context-scope-label").to_string(),
+                    type_scale::TINY,
+                    510,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ),
                 ContextScopeLabelMarker,
             ));
             row.spawn((
@@ -105,13 +105,12 @@ fn spawn_context_scope(
             ))
             .with_children(|add| {
                 add.spawn(icon(&icons, "plus", 12.0, theme.text_muted));
-                add.spawn((
-                    Text::new(tr(&loc, "context-add").to_string()),
-                    TextFont {
-                        font_size: FontSize::Px(type_scale::MICRO),
-                        ..default()
-                    },
-                    TextColor(theme.text_muted),
+                add.spawn(ui_text(
+                    tr(&loc, "context-add").to_string(),
+                    type_scale::MICRO,
+                    400,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
                 ));
             });
         })
@@ -182,13 +181,12 @@ fn rebuild_context_chips(
             ))
             .with_children(|chip| {
                 chip.spawn(icon(&icons, "file", 12.0, theme.st_pending));
-                chip.spawn((
-                    Text::new(name),
-                    TextFont {
-                        font_size: FontSize::Px(type_scale::MICRO),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                chip.spawn(ui_text(
+                    name,
+                    type_scale::MICRO,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
                 ));
             });
         });

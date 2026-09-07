@@ -10,9 +10,10 @@ use xgent_agent::{ToolCallMessage, ToolResultMessage};
 use xgent_settings::Localizer;
 
 use crate::chat_panel::MessageListMarker;
+use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::kit::{HoverTint, icon};
-use crate::theme::{Theme, radius, space};
+use crate::theme::{Theme, radius, space, type_scale};
 
 /// 工具调用时间线节点标记。
 #[derive(Component, Default)]
@@ -141,26 +142,26 @@ fn spawn_tool_card(
                         ))
                         .with_children(|header| {
                             // 工具名
-                            header.spawn((
-                                Text::new(ev.tool_id.clone()),
-                                TextFont {
-                                    font_size: FontSize::Px(12.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
-                            ));
+                            header.spawn((ui_text(
+                                ev.tool_id.clone(),
+                                type_scale::CAPTION,
+                                400,
+                                theme.text,
+                                type_scale::line_height::UI,
+                            ),));
                             // 参数摘要
                             header.spawn((
                                 Node {
                                     flex_grow: 1.0,
                                     ..default()
                                 },
-                                Text::new(summary),
-                                TextFont {
-                                    font_size: FontSize::Px(11.5),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
+                                ui_text(
+                                    summary,
+                                    type_scale::MICRO,
+                                    400,
+                                    theme.text_dim,
+                                    type_scale::line_height::UI,
+                                ),
                             ));
                             // 状态药丸（elevated 底 + dot + 标签）
                             header
@@ -187,12 +188,13 @@ fn spawn_tool_card(
                                         ToolStatusDotMarker,
                                     ));
                                     pill.spawn((
-                                        Text::new(tr(&loc, "tool-running")),
-                                        TextFont {
-                                            font_size: FontSize::Px(11.0),
-                                            ..default()
-                                        },
-                                        TextColor(theme.text_dim),
+                                        ui_text(
+                                            tr(&loc, "tool-running"),
+                                            type_scale::MICRO,
+                                            400,
+                                            theme.text_dim,
+                                            type_scale::line_height::UI,
+                                        ),
                                         ToolStatusLabelMarker,
                                     ));
                                 });
@@ -206,12 +208,13 @@ fn spawn_tool_card(
                                 ..default()
                             },
                             ScrollPosition::default(),
-                            Text::new(String::new()),
-                            TextFont {
-                                font_size: FontSize::Px(font - 1.5),
-                                ..default()
-                            },
-                            TextColor(theme.text_dim),
+                            ui_text(
+                                String::new(),
+                                font - 1.5,
+                                400,
+                                theme.text_dim,
+                                type_scale::line_height::UI,
+                            ),
                             ToolResultTextMarker,
                         ));
                         // fold 行
@@ -224,12 +227,13 @@ fn spawn_tool_card(
                                 ..default()
                             },
                             BorderColor::all(theme.line),
-                            Text::new(String::new()),
-                            TextFont {
-                                font_size: FontSize::Px(11.0),
-                                ..default()
-                            },
-                            TextColor(theme.text_muted),
+                            ui_text(
+                                String::new(),
+                                type_scale::MICRO,
+                                400,
+                                theme.text_muted,
+                                type_scale::line_height::UI,
+                            ),
                             ToolFoldMarker,
                         ));
                     });

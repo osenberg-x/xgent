@@ -9,11 +9,12 @@
 
 use bevy::prelude::*;
 
+use crate::fonts::{UiFonts, mono_text};
 use crate::terminal::io::{TerminalOutputChunk, TerminalResize};
 use crate::terminal::{
     TerminalOutputMarker, TerminalStatusBarMarker, TerminalTab, TerminalTabStatus, TerminalTabs,
 };
-use crate::theme::{Theme, px};
+use crate::theme::{Theme, px, type_scale};
 
 use xgent_terminal::{RenderLine, TerminalParser};
 /// 历史上限（行）。
@@ -80,6 +81,7 @@ pub fn update_output_visibility(
     theme: Res<Theme>,
     mut commands: Commands,
     q_line_children: Query<(Entity, &ChildOf), With<OutputLineMarker>>,
+    fonts: Res<UiFonts>,
 ) {
     let Ok(output_container) = q_output.single() else {
         return;
@@ -129,12 +131,13 @@ pub fn update_output_visibility(
             .with_children(|row| {
                 for span in &line.spans {
                     row.spawn((
-                        Text::new(span.text.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(map_color(span.style.fg, &theme)),
+                        mono_text(
+                            &fonts,
+                            span.text.clone(),
+                            type_scale::MONO,
+                            map_color(span.style.fg, &theme),
+                            type_scale::line_height::TERM,
+                        ),
                         OutputSpanMarker,
                     ));
                 }
@@ -156,12 +159,13 @@ pub fn update_output_visibility(
             .with_children(|row| {
                 for span in &current.spans {
                     row.spawn((
-                        Text::new(span.text.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(map_color(span.style.fg, &theme)),
+                        mono_text(
+                            &fonts,
+                            span.text.clone(),
+                            type_scale::MONO,
+                            map_color(span.style.fg, &theme),
+                            type_scale::line_height::TERM,
+                        ),
                         OutputSpanMarker,
                     ));
                 }

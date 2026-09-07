@@ -421,6 +421,7 @@ impl UiKit<'_> {
             .spawn((
                 Text::new(label.to_string()),
                 TextFont {
+                    // M6-T6 例外：LetterSpacing
                     font_size: FontSize::Px(type_scale::TINY),
                     weight: FontWeight(510),
                     ..default()

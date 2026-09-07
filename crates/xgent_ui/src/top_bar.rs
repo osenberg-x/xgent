@@ -6,7 +6,6 @@
 //! 按钮交互标记与既有系统（`handle_top_bar_buttons`）保持兼容。
 
 use bevy::prelude::*;
-use bevy::text::FontSize;
 use xgent_agent::ProviderInfo;
 use xgent_settings::Localizer;
 use xui::command_palette::CommandPaletteState;
@@ -115,13 +114,13 @@ fn spawn_top_bar(
                         ..default()
                     },
                     BackgroundColor(theme.accent),
-                    Text::new("X"),
-                    TextFont {
-                        font_size: FontSize::Px(14.0),
-                        weight: FontWeight(590),
-                        ..default()
-                    },
-                    TextColor(theme.accent_text),
+                    ui_text(
+                        "X",
+                        type_scale::BODY,
+                        590,
+                        theme.accent_text,
+                        type_scale::line_height::UI,
+                    ),
                 ));
                 brand.spawn(ui_text(
                     "XGent",
@@ -194,22 +193,22 @@ fn spawn_top_bar(
                     ..default()
                 },
                 BackgroundColor(theme.accent),
-                Text::new("G"),
-                TextFont {
-                    font_size: FontSize::Px(9.0),
-                    weight: FontWeight(590),
-                    ..default()
-                },
-                TextColor(theme.accent_text),
+                ui_text(
+                    "G",
+                    9.0,
+                    590,
+                    theme.accent_text,
+                    type_scale::line_height::UI,
+                ),
             ));
             pill.spawn((
-                Text::new(String::new()),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::SMALL),
-                    weight: FontWeight(510),
-                    ..default()
-                },
-                TextColor(theme.text_dim),
+                ui_text(
+                    String::new(),
+                    type_scale::SMALL,
+                    510,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
+                ),
                 ProviderLabelMarker,
             ));
             pill.spawn(icon(&icons, "chevron-down", 12.0, theme.text_muted));
@@ -266,13 +265,13 @@ fn spawn_agent_pill(
             AgentPillDotMarker,
         ));
         pill.spawn((
-            Text::new(tr(loc, "status-ready").to_string()),
-            TextFont {
-                font_size: FontSize::Px(type_scale::SMALL),
-                weight: FontWeight(510),
-                ..default()
-            },
-            TextColor(theme.text_dim),
+            ui_text(
+                tr(loc, "status-ready").to_string(),
+                type_scale::SMALL,
+                510,
+                theme.text_dim,
+                type_scale::line_height::UI,
+            ),
             AgentPillTextMarker,
         ));
     });

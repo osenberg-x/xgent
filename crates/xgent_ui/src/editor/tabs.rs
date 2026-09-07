@@ -269,6 +269,7 @@ pub fn handle_open_file_requests(
             let line_num_entity = commands
                 .spawn((
                     Text::new(String::new()),
+                    // M6-T6 例外：editor_theme 动态字号（编辑器正文 -1.5，经 sync_editor_theme 跟随 Theme）
                     TextFont {
                         font_size: FontSize::Px(editor_theme.font_size),
                         ..default()

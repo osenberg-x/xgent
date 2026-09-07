@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
 use xgent_core::chat::AgentMessage;
 
+use crate::fonts::ui_text;
 use crate::layout::StatusBarMarker;
 use crate::theme::{Theme, space, type_scale};
 
@@ -100,7 +101,7 @@ fn spawn_status_bar(
     let Ok(bar) = q_bar.single() else {
         return;
     };
-    let micro = FontSize::Px(type_scale::MICRO);
+    let micro = type_scale::MICRO;
     let dim = theme.text_muted;
 
     commands.entity(bar).with_children(|p| {
@@ -118,12 +119,7 @@ fn spawn_status_bar(
                     StatusDotMarker,
                 ));
                 seg.spawn((
-                    Text::new(String::new()),
-                    TextFont {
-                        font_size: micro,
-                        ..default()
-                    },
-                    TextColor(dim),
+                    ui_text(String::new(), micro, 400, dim, type_scale::line_height::UI),
                     ProviderTextMarker,
                 ));
             });
@@ -131,25 +127,19 @@ fn spawn_status_bar(
         p.spawn((segment_node(), BorderColor::all(theme.line)))
             .with_children(|seg| {
                 seg.spawn((
-                    Text::new(String::new()),
-                    TextFont {
-                        font_size: micro,
-                        ..default()
-                    },
-                    TextColor(dim),
+                    ui_text(String::new(), micro, 400, dim, type_scale::line_height::UI),
                     TokenTextMarker,
                 ));
             });
         // 成本段（占位，OQ-10 成本统计细化后接入）
         p.spawn((segment_node(), BorderColor::all(theme.line)))
             .with_children(|seg| {
-                seg.spawn((
-                    Text::new("$0.00"),
-                    TextFont {
-                        font_size: micro,
-                        ..default()
-                    },
-                    TextColor(dim),
+                seg.spawn(ui_text(
+                    "$0.00",
+                    micro,
+                    400,
+                    dim,
+                    type_scale::line_height::UI,
                 ));
             });
         // spacer
@@ -166,35 +156,30 @@ fn spawn_status_bar(
         ))
         .with_children(|seg| {
             seg.spawn((
-                Text::new(String::new()),
-                TextFont {
-                    font_size: micro,
-                    ..default()
-                },
-                TextColor(theme.warm),
+                ui_text(
+                    String::new(),
+                    micro,
+                    400,
+                    theme.warm,
+                    type_scale::line_height::UI,
+                ),
                 CompanionTextMarker,
             ));
         });
         // 编码段（保留）
         p.spawn((segment_node(), BorderColor::all(theme.line)))
             .with_children(|seg| {
-                seg.spawn((
-                    Text::new(crate::i18n::tr(&loc, "status-encoding").to_string()),
-                    TextFont {
-                        font_size: micro,
-                        ..default()
-                    },
-                    TextColor(dim),
+                seg.spawn(ui_text(
+                    crate::i18n::tr(&loc, "status-encoding").to_string(),
+                    micro,
+                    400,
+                    dim,
+                    type_scale::line_height::UI,
                 ));
             });
         // 会话段：#id · N 轮（末段无分隔线）
         p.spawn((
-            Text::new(String::new()),
-            TextFont {
-                font_size: micro,
-                ..default()
-            },
-            TextColor(dim),
+            ui_text(String::new(), micro, 400, dim, type_scale::line_height::UI),
             SessionTextMarker,
         ));
     });

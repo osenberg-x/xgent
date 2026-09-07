@@ -29,16 +29,12 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 
 use crate::editor::SideViewContent;
+use crate::fonts::{UiFonts, mono_text};
 use crate::i18n::tr;
-use crate::theme::{Theme, px, space};
+use crate::theme::{Theme, px, space, type_scale};
 use xgent_settings::Localizer;
 use xgent_terminal::{LocalPtyBackend, TerminalBackend};
 use xui::scroll_area::{ScrollArea, StickToBottom};
-
-/// 把 f32 转为 [`FontSize`]。
-fn px_size(v: f32) -> FontSize {
-    FontSize::Px(v)
-}
 
 /// 终端视图容器标记（挂于 [`crate::layout::SideViewMarker`] 下，初始隐藏）。
 ///
@@ -251,11 +247,11 @@ fn spawn_terminal_view(
     q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
+    fonts: Res<UiFonts>,
 ) {
     let Ok(side) = q_side.single() else {
         return;
     };
-    let font = theme.font_size;
     commands.entity(side).with_children(|p| {
         // 终端视图容器：初始隐藏（由 apply_terminal_view_visibility 据 SideViewContent 切换）
         p.spawn((
@@ -310,12 +306,13 @@ fn spawn_terminal_view(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new(tr(&loc, "terminal-new-tab")),
-                    TextFont {
-                        font_size: px_size(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    mono_text(
+                        &fonts,
+                        tr(&loc, "terminal-new-tab"),
+                        type_scale::BODY,
+                        theme.text_dim,
+                        type_scale::line_height::TERM,
+                    ),
                     TerminalNewTabButtonMarker,
                 ));
                 // 清屏
@@ -329,12 +326,13 @@ fn spawn_terminal_view(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new(tr(&loc, "terminal-clear")),
-                    TextFont {
-                        font_size: px_size(font - 2.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    mono_text(
+                        &fonts,
+                        tr(&loc, "terminal-clear"),
+                        type_scale::CAPTION,
+                        theme.text_dim,
+                        type_scale::line_height::TERM,
+                    ),
                     TerminalClearButtonMarker,
                 ));
                 // ✕ 关闭分屏
@@ -348,12 +346,13 @@ fn spawn_terminal_view(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new(tr(&loc, "terminal-close")),
-                    TextFont {
-                        font_size: px_size(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    mono_text(
+                        &fonts,
+                        tr(&loc, "terminal-close"),
+                        type_scale::BODY,
+                        theme.text_dim,
+                        type_scale::line_height::TERM,
+                    ),
                     TerminalCloseButtonMarker,
                 ));
             });
@@ -385,14 +384,13 @@ fn spawn_terminal_view(
             ))
             .with_children(|line| {
                 // prompt ❯
-                line.spawn((
-                    Text::new(tr(&loc, "terminal-prompt")),
-                    TextFont {
-                        font_size: px_size(font),
-                        ..default()
-                    },
-                    TextColor(theme.accent),
-                ));
+                line.spawn((mono_text(
+                    &fonts,
+                    tr(&loc, "terminal-prompt"),
+                    type_scale::BODY,
+                    theme.accent,
+                    type_scale::line_height::TERM,
+                ),));
                 // 输入文本节点（由 input 模块更新内容）
                 line.spawn((
                     Node {
@@ -400,12 +398,13 @@ fn spawn_terminal_view(
                         min_width: Val::ZERO,
                         ..default()
                     },
-                    Text::new(""),
-                    TextFont {
-                        font_size: px_size(font),
-                        ..default()
-                    },
-                    TextColor(theme.text),
+                    mono_text(
+                        &fonts,
+                        "",
+                        type_scale::BODY,
+                        theme.text,
+                        type_scale::line_height::TERM,
+                    ),
                     TerminalInputMarker,
                 ));
             });
@@ -427,12 +426,13 @@ fn spawn_terminal_view(
             ))
             .with_children(|bar| {
                 bar.spawn((
-                    Text::new(""),
-                    TextFont {
-                        font_size: px_size(font - 2.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    mono_text(
+                        &fonts,
+                        "",
+                        type_scale::CAPTION,
+                        theme.text_dim,
+                        type_scale::line_height::TERM,
+                    ),
                     TerminalStatusBarMarker,
                 ));
             });

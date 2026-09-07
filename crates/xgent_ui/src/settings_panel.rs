@@ -8,9 +8,9 @@
 
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::text::FontSize;
 use xgent_settings::Localizer;
 
+use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::theme::{Theme, space, type_scale};
 
@@ -219,35 +219,32 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                 BorderColor::all(theme.border),
             ))
             .with_children(|card| {
-                // 标题
-                card.spawn((
-                    Text::new(tr(loc, "settings-title")),
-                    TextFont {
-                        font_size: FontSize::Px(font + 2.0),
-                        ..default()
-                    },
-                    TextColor(theme.text),
+                // 标题（H3 档）
+                card.spawn(ui_text(
+                    tr(loc, "settings-title"),
+                    type_scale::H3,
+                    400,
+                    theme.text,
+                    type_scale::line_height::UI,
                 ));
 
                 // Provider ID
-                card.spawn((
-                    Text::new(tr(loc, "settings-provider-id")),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                card.spawn(ui_text(
+                    tr(loc, "settings-provider-id"),
+                    type_scale::BODY,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
                 ));
                 card.spawn(text_input_node(theme, font, ProviderIdInput));
 
                 // Kind 选择（横排按钮组，MVP 暴露 4 变体，隐藏 Custom）
-                card.spawn((
-                    Text::new(tr(loc, "settings-kind")),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                card.spawn(ui_text(
+                    tr(loc, "settings-kind"),
+                    type_scale::BODY,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
                 ));
                 card.spawn((Node {
                     flex_direction: FlexDirection::Row,
@@ -280,13 +277,13 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                                     padding: UiRect::all(px(space::SM)),
                                     ..default()
                                 },
-                                BackgroundColor(theme.surface),
-                                Text::new(label),
-                                TextFont {
-                                    font_size: FontSize::Px(font),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
+                                ui_text(
+                                    label,
+                                    type_scale::BODY,
+                                    400,
+                                    theme.text,
+                                    type_scale::line_height::UI,
+                                ),
                                 KindButton {
                                     kind,
                                     selected: false,
@@ -296,35 +293,32 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     });
 
                 // API Base
-                card.spawn((
-                    Text::new(tr(loc, "settings-api-base")),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                card.spawn(ui_text(
+                    tr(loc, "settings-api-base"),
+                    type_scale::BODY,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
                 ));
                 card.spawn(text_input_node(theme, font, ApiBaseInput));
 
                 // API Key
-                card.spawn((
-                    Text::new(tr(loc, "settings-api-key")),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                card.spawn(ui_text(
+                    tr(loc, "settings-api-key"),
+                    type_scale::BODY,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
                 ));
                 card.spawn(text_input_node(theme, font, ApiKeyInput));
 
                 // Model
-                card.spawn((
-                    Text::new(tr(loc, "settings-model")),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                card.spawn(ui_text(
+                    tr(loc, "settings-model"),
+                    type_scale::BODY,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
                 ));
                 // Model 输入 + 刷新按钮行
                 card.spawn((Node {
@@ -341,12 +335,13 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                                 ..default()
                             },
                             BackgroundColor(theme.surface),
-                            Text::new("↻"),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(theme.text_dim),
+                            ui_text(
+                                "↻",
+                                type_scale::BODY,
+                                400,
+                                theme.text_dim,
+                                type_scale::line_height::UI,
+                            ),
                             FetchModelsButtonMarker,
                         ));
                     });
@@ -382,13 +377,13 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                                 ..default()
                             },
                             BackgroundColor(theme.accent),
-                            Text::new(tr(loc, "settings-save")),
-                            TextFont {
-                                font_size: FontSize::Px(type_scale::BODY_SM),
-                                weight: FontWeight(510),
-                                ..default()
-                            },
-                            TextColor(theme.accent_text),
+                            ui_text(
+                                tr(loc, "settings-save"),
+                                type_scale::BODY_SM,
+                                510,
+                                theme.accent_text,
+                                type_scale::line_height::CTRL,
+                            ),
                             SettingsSaveButtonMarker,
                         ));
                         btns.spawn((
@@ -399,13 +394,13 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                                 ..default()
                             },
                             BackgroundColor(Color::NONE),
-                            Text::new(tr(loc, "settings-close")),
-                            TextFont {
-                                font_size: FontSize::Px(type_scale::BODY_SM),
-                                weight: FontWeight(510),
-                                ..default()
-                            },
-                            TextColor(theme.text_dim),
+                            ui_text(
+                                tr(loc, "settings-close"),
+                                type_scale::BODY_SM,
+                                510,
+                                theme.text_dim,
+                                type_scale::line_height::CTRL,
+                            ),
                             SettingsCloseButtonMarker,
                         ));
                     });
@@ -414,6 +409,11 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
 }
 
 /// 创建一个 EditableText 输入框节点。
+///
+/// 例外：输入框无 `Text` 组件（内容存于 [`EditableText`] 编辑器），若改用
+/// [`ui_text`] 会额外插入 `Text::new("")`，被 `measure_text_system` 当静态
+/// 文本节点测量，与输入框自身的 `TextInputMeasure` 冲突。故保留显式
+/// `TextFont::from_font_size`（构造器式写法，非裸字面量）。
 fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bundle {
     (
         Node {
@@ -425,12 +425,7 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
         },
         BackgroundColor(theme.input_bg),
         BorderColor::all(theme.border),
-        TextFont {
-            font_size: FontSize::Px(font),
-            ..default()
-        },
-        TextColor(theme.text),
-        bevy::text::TextCursorStyle::default(),
+        TextFont::from_font_size(font),
         marker,
         EditableText::default(),
     )
@@ -578,27 +573,24 @@ fn handle_model_list_results(
         // 重建列表 UI
         if let Ok(container) = q_container.single() {
             commands.entity(container).despawn_related::<Children>();
-            let font = theme.font_size;
             if !ev.error.is_empty() {
                 commands.entity(container).with_children(|c| {
-                    c.spawn((
-                        Text::new(ev.error.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.st_fail),
+                    c.spawn(ui_text(
+                        ev.error.clone(),
+                        type_scale::MICRO,
+                        400,
+                        theme.st_fail,
+                        type_scale::line_height::UI,
                     ));
                 });
             } else if ev.models.is_empty() {
                 commands.entity(container).with_children(|c| {
-                    c.spawn((
-                        Text::new("（无模型）"),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
+                    c.spawn(ui_text(
+                        "（无模型）",
+                        type_scale::MICRO,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
                     ));
                 });
             } else {
@@ -612,12 +604,13 @@ fn handle_model_list_results(
                                 ..default()
                             },
                             BorderColor::all(theme.line),
-                            Text::new(model_id.clone()),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(theme.text_dim),
+                            ui_text(
+                                model_id.clone(),
+                                type_scale::BODY,
+                                400,
+                                theme.text_dim,
+                                type_scale::line_height::UI,
+                            ),
                             ModelItemMarker {
                                 model_id: model_id.clone(),
                             },

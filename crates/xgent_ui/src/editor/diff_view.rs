@@ -6,15 +6,14 @@
 //! 无差异/无 buffer 时空态文案（i18n）。
 
 use bevy::prelude::*;
-use bevy::text::FontSize;
 use xgent_settings::Localizer;
 
 use crate::diff::{DiffKind, line_diff};
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::tabs::EditorTabs;
+use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::theme::{Theme, space, type_scale};
-
 /// 差异页容器标记（挂 `crate::layout::SideViewMarker`，显隐由
 /// `apply_editor_view_visibility` 据 `SideViewContent::Diff` 控制）。
 #[derive(Component, Default)]
@@ -67,13 +66,13 @@ pub fn spawn_diff_view(
                     padding: UiRect::all(px(space::MD)),
                     ..default()
                 },
-                Text::new(tr(&loc, "diff-empty-nobuffer").to_string()),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::SMALL),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
-                DiffEmptyMarker,
+                ui_text(
+                    tr(&loc, "diff-empty-nobuffer").to_string(),
+                    type_scale::SMALL,
+                    400,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ),
             ));
         })
         .id();
@@ -176,13 +175,12 @@ pub(crate) fn rebuild_diff_view(
                 DiffLineRowMarker,
             ))
             .with_children(|row| {
-                row.spawn((
-                    Text::new(line.text.clone()),
-                    TextFont {
-                        font_size: FontSize::Px(type_scale::MONO),
-                        ..default()
-                    },
-                    TextColor(fg),
+                row.spawn(ui_text(
+                    line.text.clone(),
+                    type_scale::MONO,
+                    400,
+                    fg,
+                    type_scale::line_height::CTRL,
                 ));
             });
         });
@@ -212,13 +210,13 @@ fn show_empty(
                 padding: UiRect::all(px(space::MD)),
                 ..default()
             },
-            Text::new(text.to_string()),
-            TextFont {
-                font_size: FontSize::Px(type_scale::SMALL),
-                ..default()
-            },
-            TextColor(Theme::dark().text_muted),
-            DiffEmptyMarker,
+            ui_text(
+                text.to_string(),
+                type_scale::SMALL,
+                400,
+                Theme::dark().text_muted,
+                type_scale::line_height::UI,
+            ),
         ));
     });
 }

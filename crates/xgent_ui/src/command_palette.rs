@@ -157,12 +157,13 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                             ..default()
                         },
                         BorderColor::all(theme.border),
-                        Text::new(String::new()),
-                        TextFont {
-                            font_size: FontSize::Px(type_scale::BODY),
-                            ..default()
-                        },
-                        TextColor(theme.text),
+                        crate::fonts::ui_text(
+                            String::new(),
+                            type_scale::BODY,
+                            400,
+                            theme.text,
+                            type_scale::line_height::BODY,
+                        ),
                         EditableText {
                             allow_newlines: false,
                             ..default()
@@ -292,12 +293,13 @@ fn rebuild_list(
                             ..default()
                         },
                         BackgroundColor(theme.icon_bg),
-                        Text::new(kind_icon(cmd.kind).to_string()),
-                        TextFont {
-                            font_size: FontSize::Px(type_scale::SMALL),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
+                        crate::fonts::ui_text(
+                            kind_icon(cmd.kind).to_string(),
+                            type_scale::SMALL,
+                            400,
+                            theme.text_muted,
+                            type_scale::line_height::UI,
+                        ),
                     ));
                     // 命令名（SMALL/510）
                     row.spawn(crate::fonts::ui_text(

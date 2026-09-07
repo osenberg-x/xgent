@@ -4,7 +4,6 @@
 //! 订阅 `SessionListMessage` 获取会话列表，发 `RestoreSessionMessage` 恢复。
 
 use bevy::prelude::*;
-use bevy::text::FontSize;
 use bevy::ui::ScrollPosition;
 
 use xgent_agent::{
@@ -13,8 +12,9 @@ use xgent_agent::{
 };
 use xgent_settings::Localizer;
 
+use crate::fonts::ui_text;
 use crate::i18n::{tr, tr_with};
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, space, type_scale};
 
 /// 抽屉/浮层 z 基准：历史抽屉占用 40，文件抽屉（M5-T6）同层共享。
 ///
@@ -178,13 +178,12 @@ fn spawn_overlay(
                             BorderColor::all(theme.border),
                         ))
                         .with_children(|head| {
-                            head.spawn((
-                                Text::new(tr(loc, "history-title").to_string()),
-                                TextFont {
-                                    font_size: FontSize::Px(14.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
+                            head.spawn(ui_text(
+                                tr(loc, "history-title"),
+                                type_scale::BODY,
+                                400,
+                                theme.text,
+                                type_scale::line_height::UI,
                             ));
                             head.spawn((
                                 Button,
@@ -195,12 +194,13 @@ fn spawn_overlay(
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 },
-                                Text::new(tr(loc, "history-close").to_string()),
-                                TextFont {
-                                    font_size: FontSize::Px(14.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
+                                ui_text(
+                                    tr(loc, "history-close"),
+                                    type_scale::BODY,
+                                    400,
+                                    theme.text_dim,
+                                    type_scale::line_height::UI,
+                                ),
                                 SessionHistoryCloseMarker,
                             ));
                         });
@@ -226,12 +226,13 @@ fn spawn_overlay(
                                         align_items: AlignItems::Center,
                                         ..default()
                                     },
-                                    Text::new(tr(loc, "history-empty").to_string()),
-                                    TextFont {
-                                        font_size: FontSize::Px(13.0),
-                                        ..default()
-                                    },
-                                    TextColor(theme.text_muted),
+                                    ui_text(
+                                        tr(loc, "history-empty"),
+                                        type_scale::BODY_SM,
+                                        400,
+                                        theme.text_muted,
+                                        type_scale::line_height::UI,
+                                    ),
                                 ));
                             } else {
                                 for s in &cached.sessions {
@@ -286,21 +287,19 @@ fn spawn_session_item(
                 ..default()
             },))
                 .with_children(|info| {
-                    info.spawn((
-                        Text::new(title.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(13.0),
-                            ..default()
-                        },
-                        TextColor(theme.text),
+                    info.spawn(ui_text(
+                        title,
+                        type_scale::BODY_SM,
+                        400,
+                        theme.text,
+                        type_scale::line_height::UI,
                     ));
-                    info.spawn((
-                        Text::new(format!("{date} · {msg_count}")),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
+                    info.spawn(ui_text(
+                        format!("{date} · {msg_count}"),
+                        type_scale::MICRO,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
                     ));
                 });
             // 右侧：恢复按钮
@@ -314,12 +313,13 @@ fn spawn_session_item(
                 },
                 BackgroundColor(theme.elevated),
                 BorderColor::all(theme.border),
-                Text::new(tr(loc, "history-restore").to_string()),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(theme.text),
+                ui_text(
+                    tr(loc, "history-restore"),
+                    type_scale::CAPTION,
+                    400,
+                    theme.text,
+                    type_scale::line_height::UI,
+                ),
                 SessionRestoreButtonMarker {
                     session_id: session.id.clone(),
                 },
@@ -387,7 +387,6 @@ fn handle_restore_results(
             .entity(cur)
             .insert((Text::new(String::new()), TextColor(theme.text)));
 
-        let font = theme.font_size;
         for msg in &ev.messages {
             use xgent_core::chat::AgentMessage;
             match msg {
@@ -396,45 +395,21 @@ fn handle_restore_results(
                     if text.is_empty() {
                         continue;
                     }
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &text, true, font);
+                    spawn_history_message_row(&mut commands, list, &theme, &loc, &text, true);
                 }
                 AgentMessage::Assistant(am) => {
                     let text = extract_text(&am.content);
                     if text.is_empty() {
                         continue;
                     }
-                    spawn_history_message_row(
-                        &mut commands,
-                        list,
-                        &theme,
-                        &loc,
-                        &text,
-                        false,
-                        font,
-                    );
+                    spawn_history_message_row(&mut commands, list, &theme, &loc, &text, false);
                 }
                 AgentMessage::ToolResult(tr_msg) => {
                     let label = format!("[{}] {}", tr_msg.tool_name, tr_msg.content);
-                    spawn_history_message_row(
-                        &mut commands,
-                        list,
-                        &theme,
-                        &loc,
-                        &label,
-                        false,
-                        font,
-                    );
+                    spawn_history_message_row(&mut commands, list, &theme, &loc, &label, false);
                 }
                 AgentMessage::Notification(n) => {
-                    spawn_history_message_row(
-                        &mut commands,
-                        list,
-                        &theme,
-                        &loc,
-                        &n.text,
-                        false,
-                        font,
-                    );
+                    spawn_history_message_row(&mut commands, list, &theme, &loc, &n.text, false);
                 }
             }
         }
@@ -461,7 +436,6 @@ fn spawn_history_message_row(
     loc: &Localizer,
     text: &str,
     is_user: bool,
-    font: f32,
 ) {
     let avatar_text: String;
     let role_label: String;
@@ -499,12 +473,13 @@ fn spawn_history_message_row(
                         ..default()
                     },
                     BackgroundColor(avatar_bg),
-                    Text::new(avatar_text),
-                    TextFont {
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(theme.text),
+                    ui_text(
+                        avatar_text,
+                        type_scale::CAPTION,
+                        400,
+                        theme.text,
+                        type_scale::line_height::UI,
+                    ),
                 ));
                 row.spawn((Node {
                     flex_grow: 1.0,
@@ -513,21 +488,19 @@ fn spawn_history_message_row(
                     ..default()
                 },))
                     .with_children(|body| {
-                        body.spawn((
-                            Text::new(role_label),
-                            TextFont {
-                                font_size: FontSize::Px(12.0),
-                                ..default()
-                            },
-                            TextColor(theme.text),
+                        body.spawn(ui_text(
+                            role_label,
+                            type_scale::CAPTION,
+                            400,
+                            theme.text,
+                            type_scale::line_height::UI,
                         ));
-                        body.spawn((
-                            Text::new(text.to_string()),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(text_color),
+                        body.spawn(ui_text(
+                            text.to_string(),
+                            type_scale::BODY,
+                            400,
+                            text_color,
+                            type_scale::line_height::BODY,
                         ));
                     });
             });

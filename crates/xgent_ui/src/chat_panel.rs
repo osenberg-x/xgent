@@ -9,7 +9,7 @@
 use bevy::clipboard::Clipboard;
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::prelude::*;
-use bevy::text::{EditableText, LineHeight};
+use bevy::text::EditableText;
 
 use xgent_agent::{
     CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage,
@@ -139,8 +139,6 @@ pub(crate) fn spawn_chat_panel(
     let Ok(panel) = q_panel.single() else {
         return;
     };
-    let font = theme.font_size;
-    let font_size = FontSize::Px(font);
 
     // 当前正在流式的助手消息节点（限宽 820 居中；v7 正文 text_dim/1.6）
     let current_text = commands
@@ -152,13 +150,13 @@ pub(crate) fn spawn_chat_panel(
                 column_gap: px(space::MD),
                 ..default()
             },
-            Text::new(String::new()),
-            TextFont {
-                font_size: FontSize::Px(type_scale::BODY),
-                ..default()
-            },
-            TextColor(theme.text_dim),
-            LineHeight::RelativeToFont(type_scale::line_height::BODY),
+            ui_text(
+                String::new(),
+                type_scale::BODY,
+                400,
+                theme.text_dim,
+                type_scale::line_height::BODY,
+            ),
             CurrentAssistantText,
         ))
         .id();
@@ -187,11 +185,13 @@ pub(crate) fn spawn_chat_panel(
             },
             BackgroundColor(theme.input_bg),
             BorderColor::all(theme.border),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(theme.text),
+            ui_text(
+                String::new(),
+                theme.font_size,
+                400,
+                theme.text,
+                type_scale::line_height::UI,
+            ),
             bevy::text::TextCursorStyle::default(),
             EditableText {
                 allow_newlines: true,
@@ -225,46 +225,41 @@ pub(crate) fn spawn_chat_panel(
                 ..default()
             },))
                 .with_children(|hint| {
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-send")),
-                        TextFont {
-                            font_size: FontSize::Px(10.5),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-abort")),
-                        TextFont {
-                            font_size: FontSize::Px(10.5),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-palette")),
-                        TextFont {
-                            font_size: FontSize::Px(10.5),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-toggle-sideview")),
-                        TextFont {
-                            font_size: FontSize::Px(10.5),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
-                    ));
-                    hint.spawn((
-                        Text::new(crate::i18n::tr(&loc, "hint-terminal")),
-                        TextFont {
-                            font_size: FontSize::Px(10.5),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
-                    ));
+                    hint.spawn((ui_text(
+                        crate::i18n::tr(&loc, "hint-send"),
+                        type_scale::TINY,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),));
+                    hint.spawn((ui_text(
+                        crate::i18n::tr(&loc, "hint-abort"),
+                        type_scale::TINY,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),));
+                    hint.spawn((ui_text(
+                        crate::i18n::tr(&loc, "hint-palette"),
+                        type_scale::TINY,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),));
+                    hint.spawn((ui_text(
+                        crate::i18n::tr(&loc, "hint-toggle-sideview"),
+                        type_scale::TINY,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),));
+                    hint.spawn((ui_text(
+                        crate::i18n::tr(&loc, "hint-terminal"),
+                        type_scale::TINY,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),));
                 });
             // 右侧 tokenhint + 发送按钮
             meta.spawn((Node {
@@ -275,12 +270,13 @@ pub(crate) fn spawn_chat_panel(
             },))
                 .with_children(|right| {
                     right.spawn((
-                        Text::new(crate::i18n::tr(&loc, "status-ready")),
-                        TextFont {
-                            font_size: FontSize::Px(10.5),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
+                        ui_text(
+                            crate::i18n::tr(&loc, "status-ready"),
+                            type_scale::TINY,
+                            400,
+                            theme.text_muted,
+                            type_scale::line_height::UI,
+                        ),
                         TokenHintMarker,
                     ));
                 });
@@ -369,12 +365,13 @@ pub(crate) fn spawn_chat_panel(
             },
             BackgroundColor(theme.elevated),
             BorderColor::all(theme.border),
-            Text::new("▼"),
-            TextFont {
-                font_size: FontSize::Px(type_scale::MICRO),
-                ..default()
-            },
-            TextColor(theme.text_dim),
+            ui_text(
+                "▼",
+                type_scale::MICRO,
+                400,
+                theme.text_dim,
+                type_scale::line_height::UI,
+            ),
             BackToBottomMarker,
         ))
         .id();
@@ -433,13 +430,13 @@ fn spawn_user_message(
                             ..default()
                         },
                         BackgroundColor(theme.icon_bg),
-                        Text::new(crate::i18n::tr(&loc, "role-user")),
-                        TextFont {
-                            font_size: FontSize::Px(type_scale::CAPTION),
-                            weight: FontWeight(590),
-                            ..default()
-                        },
-                        TextColor(theme.text_dim),
+                        ui_text(
+                            crate::i18n::tr(&loc, "role-user"),
+                            type_scale::CAPTION,
+                            590,
+                            theme.text_dim,
+                            type_scale::line_height::UI,
+                        ),
                     ));
                     // 消息体（role + content）
                     row.spawn((Node {
@@ -450,23 +447,21 @@ fn spawn_user_message(
                     },))
                         .with_children(|body| {
                             // role 行
-                            body.spawn((
-                                Text::new(crate::i18n::tr(&loc, "role-user")),
-                                TextFont {
-                                    font_size: FontSize::Px(12.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
-                            ));
+                            body.spawn((ui_text(
+                                crate::i18n::tr(&loc, "role-user"),
+                                type_scale::CAPTION,
+                                400,
+                                theme.text,
+                                type_scale::line_height::UI,
+                            ),));
                             // 正文
-                            body.spawn((
-                                Text::new(ev.text.clone()),
-                                TextFont {
-                                    font_size: FontSize::Px(font),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
-                            ));
+                            body.spawn((ui_text(
+                                ev.text.clone(),
+                                font,
+                                400,
+                                theme.text,
+                                type_scale::line_height::BODY,
+                            ),));
                         });
                 });
         });
@@ -539,13 +534,13 @@ fn finalize_on_done(
                         ..default()
                     },
                     BackgroundColor(theme.accent),
-                    Text::new("X"),
-                    TextFont {
-                        font_size: FontSize::Px(type_scale::CAPTION),
-                        weight: FontWeight(590),
-                        ..default()
-                    },
-                    TextColor(theme.accent_text),
+                    ui_text(
+                        "X",
+                        type_scale::CAPTION,
+                        590,
+                        theme.accent_text,
+                        type_scale::line_height::UI,
+                    ),
                 ));
                 // 消息体
                 row.spawn((Node {
@@ -555,23 +550,20 @@ fn finalize_on_done(
                     ..default()
                 },))
                     .with_children(|body| {
-                        body.spawn((
-                            Text::new(crate::i18n::tr(&loc, "role-assistant")),
-                            TextFont {
-                                font_size: FontSize::Px(12.0),
-                                ..default()
-                            },
-                            TextColor(theme.text),
-                        ));
-                        body.spawn((
-                            Text::new(content.clone()),
-                            TextFont {
-                                font_size: FontSize::Px(font),
-                                ..default()
-                            },
-                            TextColor(theme.text_dim),
-                            LineHeight::RelativeToFont(type_scale::line_height::BODY),
-                        ));
+                        body.spawn((ui_text(
+                            crate::i18n::tr(&loc, "role-assistant"),
+                            type_scale::CAPTION,
+                            400,
+                            theme.text,
+                            type_scale::line_height::UI,
+                        ),));
+                        body.spawn((ui_text(
+                            content.clone(),
+                            font,
+                            400,
+                            theme.text_dim,
+                            type_scale::line_height::BODY,
+                        ),));
                     });
                 // 操作栏（右上常显：复制到剪贴板；v7.1 悬停显隐留 span 重构）
                 row.spawn((
@@ -699,12 +691,13 @@ fn show_compacted_notice(
                             ..default()
                         },
                         BackgroundColor(theme.elevated),
-                        Text::new(notice.to_string()),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(theme.text_muted),
+                        ui_text(
+                            notice,
+                            type_scale::MICRO,
+                            400,
+                            theme.text_muted,
+                            type_scale::line_height::UI,
+                        ),
                     ));
                 });
         });

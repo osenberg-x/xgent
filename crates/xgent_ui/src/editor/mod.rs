@@ -37,6 +37,7 @@ use crate::editor::tabs::{
     OpenFileRequest, handle_close_tab_requests, handle_cycle_tab_requests,
     handle_dirty_close_decision, handle_open_file_requests,
 };
+use crate::fonts::ui_text;
 use xgent_settings::Localizer;
 
 use crate::theme::{Theme, px, radius, space, type_scale};
@@ -169,7 +170,6 @@ fn spawn_editor_view(
     let Ok(side) = q_side.single() else {
         return;
     };
-    let font = theme.font_size;
     // 编辑器视图容器：作为分屏内容，初始隐藏（由 buffer 显隐 + 分屏显隐共同决定）
     let editor_view = commands
         .spawn((
@@ -221,12 +221,13 @@ fn spawn_editor_view(
                         border_radius: BorderRadius::all(px(4.0)),
                         ..default()
                     },
-                    Text::new("×"),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    ui_text(
+                        "×",
+                        type_scale::BODY,
+                        400,
+                        theme.text_dim,
+                        type_scale::line_height::UI,
+                    ),
                     EditorBackButtonMarker,
                 ));
             });
@@ -436,7 +437,6 @@ pub fn rebuild_editor_tabs(
     for entity in q_existing.iter() {
         commands.entity(entity).despawn();
     }
-    let font = theme.font_size;
     let active_idx = tabs.active;
     for (i, &buf_entity) in tabs.tabs.iter().enumerate() {
         let Ok(buf) = q_buffers.get(buf_entity) else {
@@ -482,23 +482,21 @@ pub fn rebuild_editor_tabs(
             .with_children(|tab| {
                 // 脏标记●
                 if dirty {
-                    tab.spawn((
-                        Text::new("*"),
-                        TextFont {
-                            font_size: FontSize::Px(font),
-                            ..default()
-                        },
-                        TextColor(theme.st_pending),
+                    tab.spawn(ui_text(
+                        "*",
+                        type_scale::BODY,
+                        400,
+                        theme.st_pending,
+                        type_scale::line_height::UI,
                     ));
                 }
                 // 文件名
-                tab.spawn((
-                    Text::new(name.clone()),
-                    TextFont {
-                        font_size: FontSize::Px(font - 1.5),
-                        ..default()
-                    },
-                    TextColor(txt_color),
+                tab.spawn(ui_text(
+                    name.clone(),
+                    type_scale::SMALL,
+                    400,
+                    txt_color,
+                    type_scale::line_height::UI,
                 ));
                 // 关闭×
                 tab.spawn((
@@ -510,12 +508,13 @@ pub fn rebuild_editor_tabs(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    Text::new("×"),
-                    TextFont {
-                        font_size: FontSize::Px(font + 1.0),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
+                    ui_text(
+                        "×",
+                        type_scale::H3,
+                        400,
+                        theme.text_dim,
+                        type_scale::line_height::UI,
+                    ),
                     EditorTabCloseMarker,
                 ));
             });
@@ -674,13 +673,13 @@ fn spawn_page_tabs(
                     flex_shrink: 0.0,
                     ..default()
                 },
-                Text::new(label),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::SMALL),
-                    weight: FontWeight(510),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
+                ui_text(
+                    label,
+                    type_scale::SMALL,
+                    510,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ),
                 PageTabMarker { page },
             ))
             .id();
@@ -700,12 +699,13 @@ fn spawn_page_tabs(
                 flex_shrink: 0.0,
                 ..default()
             },
-            Text::new("×"),
-            TextFont {
-                font_size: FontSize::Px(type_scale::BODY),
-                ..default()
-            },
-            TextColor(theme.text_muted),
+            ui_text(
+                "×",
+                type_scale::BODY,
+                400,
+                theme.text_muted,
+                type_scale::line_height::UI,
+            ),
             EditorBackButtonMarker,
         ))
         .id();

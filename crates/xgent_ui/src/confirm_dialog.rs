@@ -8,6 +8,7 @@ use xgent_agent::{ConfirmDecisionMessage, ConfirmRequestMessage};
 use xgent_settings::Localizer;
 use xgent_tools::confirm::ConfirmDecision;
 
+use crate::fonts::{mono_text_weighted, ui_text};
 use crate::i18n::tr;
 use crate::theme::{Theme, radius, space, type_scale};
 
@@ -40,6 +41,7 @@ fn show_on_request(
     mut commands: Commands,
     mut reader: MessageReader<ConfirmRequestMessage>,
     theme: Res<Theme>,
+    fonts: Res<crate::fonts::UiFonts>,
     loc: Res<Localizer>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
 ) {
@@ -51,8 +53,6 @@ fn show_on_request(
     if let Ok(existing) = q_dialog.single() {
         commands.entity(existing).despawn();
     }
-    let font = theme.font_size;
-    let mono = font - 1.5;
     let path = req.input["path"].as_str().unwrap_or(&req.tool_id);
 
     commands
@@ -123,23 +123,21 @@ fn show_on_request(
                                             ..default()
                                         },
                                         BackgroundColor(theme.st_pending_bg),
-                                        Text::new("!"),
-                                        TextFont {
-                                            font_size: FontSize::Px(type_scale::BODY),
-                                            weight: FontWeight(590),
-                                            ..default()
-                                        },
-                                        TextColor(theme.st_pending),
+                                        ui_text(
+                                            "!",
+                                            type_scale::BODY,
+                                            590,
+                                            theme.st_pending,
+                                            type_scale::line_height::UI,
+                                        ),
                                     ));
-                                    left.spawn((
-                                        Text::new(tr(&loc, "confirm-title")),
-                                        TextFont {
-                                            font_size: FontSize::Px(type_scale::H3),
-                                            weight: FontWeight(590),
-                                            ..default()
-                                        },
-                                        TextColor(theme.text),
-                                    ));
+                                    left.spawn((ui_text(
+                                        tr(&loc, "confirm-title"),
+                                        type_scale::H3,
+                                        590,
+                                        theme.text,
+                                        type_scale::line_height::UI,
+                                    ),));
                                 });
                             head.spawn((
                                 Button,
@@ -150,12 +148,13 @@ fn show_on_request(
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 },
-                                Text::new("x"),
-                                TextFont {
-                                    font_size: FontSize::Px(font),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
+                                ui_text(
+                                    "x",
+                                    type_scale::BODY,
+                                    400,
+                                    theme.text_dim,
+                                    type_scale::line_height::UI,
+                                ),
                                 ConfirmDenyMarker,
                             ));
                         });
@@ -170,28 +169,26 @@ fn show_on_request(
                         },))
                         .with_children(|body| {
                             // 工具名 + 描述
-                            body.spawn((
-                                Text::new(format!(
+                            body.spawn(ui_text(
+                                format!(
                                     "{} {} {}",
                                     req.tool_id,
                                     tr(&loc, "confirm-will-write"),
                                     path
-                                )),
-                                TextFont {
-                                    font_size: FontSize::Px(font),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
+                                ),
+                                type_scale::BODY,
+                                400,
+                                theme.text_dim,
+                                type_scale::line_height::UI,
                             ));
                             // diff 区（若有 old/new）
                             if let (Some(old), Some(new)) = (&req.old_content, &req.new_content) {
-                                body.spawn((
-                                    Text::new(tr(&loc, "confirm-diff-label")),
-                                    TextFont {
-                                        font_size: FontSize::Px(font - 2.0),
-                                        ..default()
-                                    },
-                                    TextColor(theme.text_faint),
+                                body.spawn(ui_text(
+                                    tr(&loc, "confirm-diff-label"),
+                                    type_scale::CAPTION,
+                                    400,
+                                    theme.text_faint,
+                                    type_scale::line_height::UI,
                                 ));
                                 let lines = line_diff(old, new);
                                 body.spawn((
@@ -227,24 +224,25 @@ fn show_on_request(
                                                 ..default()
                                             },
                                             BackgroundColor(bg),
-                                            Text::new(format!("{prefix}{}", line.text)),
-                                            TextFont {
-                                                font_size: FontSize::Px(mono),
-                                                ..default()
-                                            },
-                                            TextColor(color),
+                                            mono_text_weighted(
+                                                &fonts,
+                                                format!("{prefix}{}", line.text),
+                                                type_scale::MONO,
+                                                400,
+                                                color,
+                                                type_scale::line_height::CTRL,
+                                            ),
                                         ));
                                     }
                                 });
                             } else {
                                 // 无 diff：展示 summary
-                                body.spawn((
-                                    Text::new(req.summary.clone()),
-                                    TextFont {
-                                        font_size: FontSize::Px(font),
-                                        ..default()
-                                    },
-                                    TextColor(theme.text),
+                                body.spawn(ui_text(
+                                    req.summary.clone(),
+                                    type_scale::BODY,
+                                    400,
+                                    theme.text,
+                                    type_scale::line_height::UI,
                                 ));
                             }
                         });
@@ -279,13 +277,13 @@ fn show_on_request(
                                 },
                                 BackgroundColor(Color::NONE),
                                 BorderColor::all(Color::NONE),
-                                Text::new(format!("{} (Esc)", tr(&loc, "confirm-deny"))),
-                                TextFont {
-                                    font_size: FontSize::Px(type_scale::BODY_SM),
-                                    weight: FontWeight(510),
-                                    ..default()
-                                },
-                                TextColor(theme.text_dim),
+                                ui_text(
+                                    format!("{} (Esc)", tr(&loc, "confirm-deny")),
+                                    type_scale::BODY_SM,
+                                    510,
+                                    theme.text_dim,
+                                    type_scale::line_height::CTRL,
+                                ),
                                 ConfirmDenyMarker,
                             ));
                             // 确认 = accent 底白字
@@ -303,13 +301,13 @@ fn show_on_request(
                                 },
                                 BackgroundColor(theme.accent),
                                 BorderColor::all(Color::NONE),
-                                Text::new(format!("{} (Enter)", tr(&loc, "confirm-allow"))),
-                                TextFont {
-                                    font_size: FontSize::Px(type_scale::BODY_SM),
-                                    weight: FontWeight(510),
-                                    ..default()
-                                },
-                                TextColor(theme.accent_text),
+                                ui_text(
+                                    format!("{} (Enter)", tr(&loc, "confirm-allow")),
+                                    type_scale::BODY_SM,
+                                    510,
+                                    theme.accent_text,
+                                    type_scale::line_height::CTRL,
+                                ),
                                 ConfirmAllowMarker,
                             ));
                         });

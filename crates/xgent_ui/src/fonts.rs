@@ -51,6 +51,28 @@ pub fn ui_text(
     )
 }
 
+/// 等宽文本构造器（带字重，等宽标签/强调用）。
+pub fn mono_text_weighted(
+    fonts: &UiFonts,
+    text: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Color,
+    line_height: f32,
+) -> impl Bundle {
+    (
+        Text::new(text.into()),
+        TextFont {
+            font: fonts.mono.clone().into(),
+            font_size: FontSize::Px(size),
+            weight: FontWeight(weight),
+            ..default()
+        },
+        TextColor(color),
+        LineHeight::RelativeToFont(line_height),
+    )
+}
+
 /// 等宽文本构造器（显式引用 [`UiFonts::mono`]）。
 pub fn mono_text(
     fonts: &UiFonts,

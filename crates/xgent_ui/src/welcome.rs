@@ -3,13 +3,14 @@
 //! 最近会话数据复用 `ListSessionsMessage`/`SessionListMessage` 流。
 
 use bevy::prelude::*;
-use bevy::text::{FontSize, LetterSpacing, LineHeight};
+use bevy::text::LetterSpacing;
 use xgent_agent::{
     Conversation, ListSessionsMessage, RestoreSessionMessage, SessionListMessage, SessionSummary,
 };
 use xgent_settings::Localizer;
 
 use crate::chat_panel::QaChipMarker;
+use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::kit::{HoverTint, IconAssets, icon};
 use crate::layout::ChatPanelMarker;
@@ -100,34 +101,32 @@ fn spawn_welcome(
                     ..default()
                 },
                 BackgroundColor(theme.accent),
-                Text::new("X"),
-                TextFont {
-                    font_size: FontSize::Px(28.0),
-                    weight: FontWeight(590),
-                    ..default()
-                },
-                TextColor(theme.accent_text),
+                ui_text(
+                    "X",
+                    28.0,
+                    590,
+                    theme.accent_text,
+                    type_scale::line_height::UI,
+                ),
             ));
             // 标题 / 副标题
             w.spawn((
-                Text::new(tr(&loc, "welcome-title").to_string()),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::DISPLAY),
-                    weight: FontWeight(590),
-                    ..default()
-                },
-                TextColor(theme.text),
+                ui_text(
+                    tr(&loc, "welcome-title").to_string(),
+                    type_scale::DISPLAY,
+                    590,
+                    theme.text,
+                    type_scale::line_height::TIGHT,
+                ),
                 LetterSpacing::Px(-0.29),
-                LineHeight::RelativeToFont(type_scale::line_height::TIGHT),
             ));
-            w.spawn((
-                Text::new(tr(&loc, "welcome-sub").to_string()),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::BODY),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
-            ));
+            w.spawn((ui_text(
+                tr(&loc, "welcome-sub").to_string(),
+                type_scale::BODY,
+                400,
+                theme.text_muted,
+                type_scale::line_height::BODY,
+            ),));
 
             // 快捷卡 ×3（点击经 QaChipMarker 填入输入框）
             let cards = [
@@ -202,36 +201,33 @@ fn spawn_welcome(
                             .with_children(|blk| {
                                 blk.spawn(icon(&icons, icon_name, 16.0, tint_fg));
                             });
-                            card.spawn((
-                                Text::new(tr(&loc, title_key).to_string()),
-                                TextFont {
-                                    font_size: FontSize::Px(type_scale::SMALL),
-                                    weight: FontWeight(590),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
-                            ));
-                            card.spawn((
-                                Text::new(tr(&loc, desc_key).to_string()),
-                                TextFont {
-                                    font_size: FontSize::Px(type_scale::MICRO),
-                                    ..default()
-                                },
-                                TextColor(theme.text_muted),
-                            ));
+                            card.spawn((ui_text(
+                                tr(&loc, title_key).to_string(),
+                                type_scale::SMALL,
+                                590,
+                                theme.text,
+                                type_scale::line_height::UI,
+                            ),));
+                            card.spawn((ui_text(
+                                tr(&loc, desc_key).to_string(),
+                                type_scale::MICRO,
+                                400,
+                                theme.text_muted,
+                                type_scale::line_height::UI,
+                            ),));
                         });
                     }
                 });
 
             // 最近会话
             w.spawn((
-                Text::new(tr(&loc, "welcome-recent").to_string()),
-                TextFont {
-                    font_size: FontSize::Px(type_scale::TINY),
-                    weight: FontWeight(510),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
+                ui_text(
+                    tr(&loc, "welcome-recent").to_string(),
+                    type_scale::TINY,
+                    510,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ),
                 LetterSpacing::Px(0.5),
             ));
             w.spawn((
@@ -321,23 +317,20 @@ fn rebuild_recent_sessions(
                 },
             ))
             .with_children(|row| {
-                row.spawn((
-                    Text::new(title),
-                    TextFont {
-                        font_size: FontSize::Px(type_scale::BODY_SM),
-                        weight: FontWeight(510),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
-                ));
-                row.spawn((
-                    Text::new(s.id.clone()),
-                    TextFont {
-                        font_size: FontSize::Px(type_scale::MICRO),
-                        ..default()
-                    },
-                    TextColor(theme.text_faint),
-                ));
+                row.spawn((ui_text(
+                    title,
+                    type_scale::BODY_SM,
+                    510,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
+                ),));
+                row.spawn((ui_text(
+                    s.id.clone(),
+                    type_scale::MICRO,
+                    400,
+                    theme.text_faint,
+                    type_scale::line_height::UI,
+                ),));
             });
         });
     }
