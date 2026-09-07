@@ -12,7 +12,7 @@ use bevy::text::FontSize;
 use xgent_settings::Localizer;
 
 use crate::i18n::tr;
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, space, type_scale};
 
 /// 设置面板根节点标记。
 #[derive(Component, Default)]
@@ -372,31 +372,40 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                         btns.spawn((
                             Button,
                             Node {
-                                padding: UiRect::all(px(space::SM)),
+                                padding: UiRect {
+                                    left: px(space::LG),
+                                    right: px(space::LG),
+                                    top: px(space::SM + 1.0),
+                                    bottom: px(space::SM + 1.0),
+                                },
+                                border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
                                 ..default()
                             },
                             BackgroundColor(theme.accent),
                             Text::new(tr(loc, "settings-save")),
                             TextFont {
-                                font_size: FontSize::Px(font),
+                                font_size: FontSize::Px(type_scale::BODY_SM),
+                                weight: FontWeight(510),
                                 ..default()
                             },
-                            TextColor(theme.text),
+                            TextColor(theme.accent_text),
                             SettingsSaveButtonMarker,
                         ));
                         btns.spawn((
                             Button,
                             Node {
                                 padding: UiRect::all(px(space::SM)),
+                                border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
                                 ..default()
                             },
-                            BackgroundColor(theme.surface),
+                            BackgroundColor(Color::NONE),
                             Text::new(tr(loc, "settings-close")),
                             TextFont {
-                                font_size: FontSize::Px(font),
+                                font_size: FontSize::Px(type_scale::BODY_SM),
+                                weight: FontWeight(510),
                                 ..default()
                             },
-                            TextColor(theme.text),
+                            TextColor(theme.text_dim),
                             SettingsCloseButtonMarker,
                         ));
                     });
@@ -410,6 +419,7 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
         Node {
             padding: UiRect::all(px(space::SM)),
             border: UiRect::all(px(1.0)),
+            border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
             min_height: px(font + 8.0),
             ..default()
         },
