@@ -65,6 +65,8 @@ impl Plugin for ActivityBarPlugin {
                     update_active_indicators,
                     update_expand_visibility,
                     update_companion_visual,
+                    companion_ring_system,
+                    companion_ring_visibility,
                 ),
             );
     }
@@ -165,7 +167,7 @@ fn spawn_activity_bar(
         .with_children(|b| {
             b.spawn(icon(&icons, "panel-right", 20.0, theme.text_muted));
         });
-        // 陪伴开关（全界面唯一暖色例外）
+        // 陪伴开关（全界面唯一暖色例外）+ 激活环（M7-T1：嵌套描边节点）
         p.spawn((
             Button,
             Node {
@@ -182,6 +184,20 @@ fn spawn_activity_bar(
             CompanionButtonMarker,
         ))
         .with_children(|b| {
+            // 激活环：外圈 2px 描边（warm），由 companion_ring_system 驱动
+            // scale 1.0→1.3 + alpha 0.4→0，2s 循环；关闭时隐藏
+            b.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: px(40.0),
+                    height: px(40.0),
+                    border: UiRect::all(px(2.0)),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BorderColor::all(theme.warm),
+                CompanionRingMarker,
+            ));
             companion_star = Some(
                 b.spawn(icon(&icons, "star", 20.0, Color::srgb_u8(0x1C, 0x19, 0x17)))
                     .id(),
@@ -190,6 +206,50 @@ fn spawn_activity_bar(
     });
     if let Some(star) = companion_star {
         commands.entity(star).insert(CompanionIconMarker);
+    }
+}
+
+/// 陪伴激活环节点标记。
+#[derive(Component, Default)]
+pub struct CompanionRingMarker;
+
+/// 陪伴激活环动效：2s 循环 scale 1.0→1.3 + 透明度 0.4→0（仅开启时显示）。
+fn companion_ring_system(
+    on: Res<CompanionOn>,
+    theme: Res<Theme>,
+    time: Res<Time>,
+    mut q_ring: Query<(&mut Node, &mut BorderColor), With<CompanionRingMarker>>,
+) {
+    if !on.is_changed() && !theme.is_changed() && q_ring.is_empty() {
+        return;
+    }
+    // 相位 0..1（2s 循环）
+    let t = (time.elapsed_secs() % 2.0) / 2.0;
+    let scale = 1.0 + 0.3 * t;
+    let alpha = 0.4 * (1.0 - t);
+    for (mut node, mut border) in q_ring.iter_mut() {
+        if on.0 {
+            let side = 40.0 * scale;
+            node.width = px(side);
+            node.height = px(side);
+            node.left = px(-(side - 40.0) / 2.0);
+            node.top = px(-(side - 40.0) / 2.0);
+            border.set_all(theme.warm.with_alpha(alpha));
+        }
+    }
+}
+
+/// 陪伴激活环显隐随开关。
+fn companion_ring_visibility(
+    on: Res<CompanionOn>,
+    mut q: Query<&mut Node, With<CompanionRingMarker>>,
+) {
+    if !on.is_changed() {
+        return;
+    }
+    let display = if on.0 { Display::Flex } else { Display::None };
+    for mut node in q.iter_mut() {
+        node.display = display;
     }
 }
 
