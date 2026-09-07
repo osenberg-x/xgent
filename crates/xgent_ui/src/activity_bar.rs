@@ -66,7 +66,6 @@ impl Plugin for ActivityBarPlugin {
                     update_expand_visibility,
                     update_companion_visual,
                     companion_ring_system,
-                    companion_ring_visibility,
                 ),
             );
     }
@@ -213,21 +212,24 @@ fn spawn_activity_bar(
 #[derive(Component, Default)]
 pub struct CompanionRingMarker;
 
-/// 陪伴激活环动效：2s 循环 scale 1.0→1.3 + 透明度 0.4→0（仅开启时显示）。
+/// 陪伴激活环动效（单系统，R1 修复：合并原两系统避免双写 Node 调度歧义）。
+///
+/// 2s 循环 scale 1.0→1.3 + 透明度 0.4→0；显隐随 `CompanionOn`。
 fn companion_ring_system(
     on: Res<CompanionOn>,
     theme: Res<Theme>,
     time: Res<Time>,
     mut q_ring: Query<(&mut Node, &mut BorderColor), With<CompanionRingMarker>>,
 ) {
-    if !on.is_changed() && !theme.is_changed() && q_ring.is_empty() {
-        return;
-    }
+    let display = if on.0 { Display::Flex } else { Display::None };
     // 相位 0..1（2s 循环）
     let t = (time.elapsed_secs() % 2.0) / 2.0;
     let scale = 1.0 + 0.3 * t;
     let alpha = 0.4 * (1.0 - t);
     for (mut node, mut border) in q_ring.iter_mut() {
+        if node.display != display {
+            node.display = display;
+        }
         if on.0 {
             let side = 40.0 * scale;
             node.width = px(side);
@@ -236,20 +238,6 @@ fn companion_ring_system(
             node.top = px(-(side - 40.0) / 2.0);
             border.set_all(theme.warm.with_alpha(alpha));
         }
-    }
-}
-
-/// 陪伴激活环显隐随开关。
-fn companion_ring_visibility(
-    on: Res<CompanionOn>,
-    mut q: Query<&mut Node, With<CompanionRingMarker>>,
-) {
-    if !on.is_changed() {
-        return;
-    }
-    let display = if on.0 { Display::Flex } else { Display::None };
-    for mut node in q.iter_mut() {
-        node.display = display;
     }
 }
 

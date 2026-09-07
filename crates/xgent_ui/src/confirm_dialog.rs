@@ -17,6 +17,10 @@ use crate::theme::{Theme, radius, space, type_scale};
 pub struct ConfirmDialogMarker;
 
 /// 确认弹窗插件。
+///
+/// **组合约束**（R1 记录）：diff 行渲染依赖 `UiFonts`（等宽构造器）——单独
+/// 注册本插件且无 `xgent_app` 注入 `UiFonts` 时，收到 `ConfirmRequestMessage`
+/// 会因缺资源 panic。真实 app 组合不受影响。
 pub struct ConfirmDialogPlugin;
 
 impl Plugin for ConfirmDialogPlugin {

@@ -4,7 +4,7 @@
 //! 订阅 `SessionListMessage` 获取会话列表，发 `RestoreSessionMessage` 恢复。
 
 use bevy::prelude::*;
-use bevy::ui::ScrollPosition;
+use bevy::ui::{FocusPolicy, ScrollPosition};
 
 use xgent_agent::{
     ListSessionsMessage, RestoreSessionMessage, SessionListMessage, SessionRestoredMessage,
@@ -77,8 +77,9 @@ fn session_history_overlay_systems(
     loc: Res<Localizer>,
     cached: Res<CachedSessionList>,
     mut commands: Commands,
-    q_overlay: Query<
-        (&Interaction, Entity),
+    q_overlay: Query<(Option<&Interaction>, Entity), With<SessionHistoryOverlayMarker>>,
+    q_overlay_pressed: Query<
+        &Interaction,
         (With<SessionHistoryOverlayMarker>, Changed<Interaction>),
     >,
     q_restore: Query<(&Interaction, &SessionRestoreButtonMarker), Changed<Interaction>>,
@@ -87,21 +88,27 @@ fn session_history_overlay_systems(
     mut history_state: ResMut<SessionHistoryState>,
     mut list_writer: MessageWriter<ListSessionsMessage>,
 ) {
+    // 存在性检查（R1 修复：不用 Changed<Interaction> 闸门——bevy_ui 仅在悬停/点击
+    // 变化帧写 Interaction，未动鼠标时 Changed 过滤为空会误判「不存在」每帧重复
+    // spawn；关闭时同样误判跳过 despawn 留下全屏僵尸遮罩锁死 UI）
+    let existing: Vec<Entity> = q_overlay.iter().map(|(_, e)| e).collect();
+    let exists = !existing.is_empty();
+
     // 打开时 spawn overlay（若不存在）
-    if history_state.open && q_overlay.iter().next().is_none() {
+    if history_state.open && !exists {
         list_writer.write(ListSessionsMessage);
         spawn_overlay(&mut commands, &theme, &loc, &cached);
     }
 
     // 关闭时 despawn overlay
-    if !history_state.open {
-        for (_, entity) in q_overlay.iter() {
+    if !history_state.open && exists {
+        for entity in existing {
             commands.entity(entity).despawn();
         }
     }
 
-    // 遮罩点击关闭（点在面板外 = overlay 根节点收到 Pressed）
-    for (i, _) in q_overlay.iter() {
+    // 遮罩点击关闭（点在面板外 = overlay 根节点收到 Pressed；仅变化帧检查）
+    for i in q_overlay_pressed.iter() {
         if *i == Interaction::Pressed {
             history_state.open = false;
         }
@@ -161,6 +168,9 @@ fn spawn_overlay(
                     },
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.line),
+                    // R1 修复：Block 阻止 press 穿透面板（Pass）到达遮罩 Button，
+                    // 否则点面板非按钮区域会误触遮罩关闭抽屉
+                    FocusPolicy::Block,
                 ))
                 .with_children(|panel| {
                     // 标题栏

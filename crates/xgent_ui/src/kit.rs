@@ -447,9 +447,10 @@ impl UiKit<'_> {
 
 // ===== toast =====
 
-/// toast 消息队列（M6-T1）：任何系统写入即触发底部居中浮层。
+/// toast 消息（M6-T1）：任何系统写入即触发底部居中浮层。
 ///
-/// 连续写入叠加排队；每条 2.2s 自动消失（原型 §`.toast`）。
+/// 全局唯一节点**替换式刷新**：已有 toast 在场时新消息替换文案并重置 2.2s
+/// 计时（同帧多条只显示最后一条，不排队——原型 §`.toast` 的单浮层语义）。
 #[derive(Message, Debug, Clone)]
 pub struct ToastMessage {
     /// 展示文案
@@ -552,12 +553,10 @@ impl Plugin for KitPlugin {
             .add_message::<ToastMessage>()
             .add_systems(
                 Update,
-                (
-                    show_toast,
-                    toast_ttl_system,
-                    hover_tint_system,
-                    tooltip_system,
-                ),
-            );
+                // R1 修复：show_toast（重置 TTL）与 toast_ttl_system（扣减 TTL）
+                // 双写 ToastTtl，chain 消除调度歧义
+                (show_toast, toast_ttl_system).chain(),
+            )
+            .add_systems(Update, (hover_tint_system, tooltip_system));
     }
 }

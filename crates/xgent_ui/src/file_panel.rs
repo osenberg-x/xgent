@@ -8,7 +8,7 @@
 
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::prelude::*;
-use bevy::ui::ScrollPosition;
+use bevy::ui::{FocusPolicy, ScrollPosition};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -62,8 +62,12 @@ pub struct ExpandedDirs(pub HashSet<PathBuf>);
 /// 当前选中的文件路径（重建/折叠恢复选中态，与 `FileSelectedMarker` 同步）。
 #[derive(Resource, Default)]
 pub struct SelectedFilePath(pub Option<PathBuf>);
-
 /// 文件面板插件。
+///
+/// **组合约束**（R1 记录）：文件树条目为矢量图标，依赖 `KitPlugin` 注入的
+/// `IconAssets`——单独注册本插件而不加 KitPlugin 时，`rebuild_file_tree`
+/// 在 ProjectRoot 变化帧会因缺资源 panic。真实 app 走 `XgentUiPlugin` 组合
+/// （已含 KitPlugin）不受影响。
 pub struct FilePanelPlugin;
 
 impl Plugin for FilePanelPlugin {
@@ -138,6 +142,9 @@ fn spawn_file_panel(
             BackgroundColor(theme.surface),
             BorderColor::all(theme.line),
             GlobalZIndex(crate::session_history::DRAWER_Z + 1),
+            // R1 修复：Block 阻止 press 穿透面板（Pass）到达遮罩 Button，
+            // 否则点面板非按钮区域会误触遮罩关闭抽屉
+            FocusPolicy::Block,
             FilePanelMarker,
         ))
         .with_children(|p| {

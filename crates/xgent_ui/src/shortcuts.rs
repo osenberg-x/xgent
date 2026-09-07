@@ -188,12 +188,17 @@ pub(crate) fn handle_hotkey_triggers(
             }
             "input.focus" => {}
             // M7-T3 语义重映射（方案 §10）：editor.view → 上下文面板预览页签
+            // R1 修复：须同步 EditorView——update_buffer_visibility 据 view 决定
+            // buffer 显隐，漏写会打开「容器可见但全部 buffer 隐藏」的空白预览页
             "editor.view" => {
+                *view = EditorView::Editor;
                 *content = SideViewContent::Editor;
                 side_view.0 = false;
             }
             "chat.view" => {
-                // 聚焦会话区：收起上下文面板
+                // 聚焦会话区：收起上下文面板；同步 view 保证 Esc（chat.abort）
+                // 的 view 判断与可见状态一致，否则 Esc 被静默吞掉一次
+                *view = EditorView::Chat;
                 *content = SideViewContent::None;
                 side_view.0 = true;
             }
