@@ -20,7 +20,7 @@ use xui::command_palette::{
 use xui::input::ChatInput;
 
 use crate::i18n::tr;
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, px, space, type_scale};
 
 /// 命令面板 overlay 根节点标记。
 #[derive(Component, Default)]
@@ -113,7 +113,6 @@ fn toggle_palette_visibility(
 
 /// spawn 命令面板 overlay。
 fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localizer) {
-    let font = theme.font_size;
     commands
         .spawn((
             Node {
@@ -132,15 +131,15 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
             CommandPaletteOverlayMarker,
         ))
         .with_children(|overlay| {
-            // 面板容器
+            // 面板容器（M6-T2：elevated 底 + 圆角 12）
             overlay
                 .spawn((
                     Node {
-                        width: px(500.0),
-                        max_height: px(400.0),
+                        width: px(560.0),
+                        max_height: px(440.0),
                         flex_direction: FlexDirection::Column,
                         border: UiRect::all(px(1.0)),
-                        border_radius: BorderRadius::all(px(8.0)),
+                        border_radius: BorderRadius::all(px(crate::theme::radius::PANEL)),
                         overflow: Overflow::clip_y(),
                         ..default()
                     },
@@ -148,16 +147,19 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                     BorderColor::all(theme.border),
                 ))
                 .with_children(|panel| {
-                    // 输入框
+                    // 输入框（M6-T2：底线 border 分隔）
                     panel.spawn((
                         Node {
                             width: Val::Percent(100.0),
-                            padding: UiRect::all(px(space::SM)),
+                            padding: UiRect::all(px(space::SM + 2.0)),
+                            border: UiRect::bottom(px(1.0)),
+                            flex_shrink: 0.0,
                             ..default()
                         },
+                        BorderColor::all(theme.border),
                         Text::new(String::new()),
                         TextFont {
-                            font_size: FontSize::Px(font),
+                            font_size: FontSize::Px(type_scale::BODY),
                             ..default()
                         },
                         TextColor(theme.text),
@@ -226,6 +228,9 @@ fn sync_input_to_query(
 /// 关键：不能每帧无条件 despawn+重建，否则 `Interaction::Pressed` 来不及被
 /// `handle_palette_click` 观察到就被新 entity 覆盖（新 entity 的 Interaction 为 None）。
 /// 用 `Local` 缓存上次 filtered，内容相同时保持 entity 稳定。
+///
+/// M6-T2 视觉：条目 = 图标块（`icon_bg` 底圆角 4）+ 命令名（SMALL/510）；
+/// **选中态改中性 `hover` 底**（Linear 命令面板惯例，非 accent）。
 fn rebuild_list(
     state: Res<CommandPaletteState>,
     registry: Res<CommandRegistry>,
@@ -247,43 +252,68 @@ fn rebuild_list(
     };
 
     // 仅当 filtered 内容变化时才重建 entity，保持 Interaction 组件稳定。
-    // 若每帧无条件 despawn+重建，鼠标按下那帧的 Interaction::Pressed 会被
-    // 新 entity（Interaction::None）覆盖，handle_palette_click 永远观察不到 Pressed。
     if *last_filtered != state.filtered {
         for entity in q_items_entity.iter() {
             commands.entity(entity).despawn();
         }
         last_filtered.clone_from(&state.filtered);
-        let font = theme.font_size;
         commands.entity(list).with_children(|p| {
             for &idx in state.filtered.iter().take(20) {
                 let Some(cmd) = registry.commands.get(idx) else {
                     continue;
                 };
                 p.spawn((
-                    // 用 Button（自带 Interaction）使鼠标点击可被检测，
-                    // 对齐 top_bar/file_panel 的点击处理模式。
+                    // Button 自带 Interaction，使鼠标点击可被检测
                     Button,
                     Node {
                         width: Val::Percent(100.0),
-                        padding: UiRect::horizontal(px(space::SM)),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(space::SM),
+                        padding: UiRect::all(px(space::SM)),
+                        border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
+                        margin: UiRect::horizontal(px(space::XS)),
                         ..default()
                     },
                     Interaction::default(),
                     BackgroundColor::default(),
-                    Text::new(format!("{} {}", kind_icon(cmd.kind), cmd.label.clone())),
-                    TextFont {
-                        font_size: FontSize::Px(font),
-                        ..default()
-                    },
-                    TextColor(theme.text_dim),
                     PaletteItemMarker { index: idx },
-                ));
+                ))
+                .with_children(|row| {
+                    // 图标块（`icon_bg` 底 + 圆角 4）
+                    row.spawn((
+                        Node {
+                            width: px(28.0),
+                            height: px(28.0),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        BackgroundColor(theme.icon_bg),
+                        Text::new(kind_icon(cmd.kind).to_string()),
+                        TextFont {
+                            font_size: FontSize::Px(type_scale::SMALL),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                    // 命令名（SMALL/510）
+                    row.spawn(crate::fonts::ui_text(
+                        cmd.label.clone(),
+                        type_scale::SMALL,
+                        510,
+                        theme.text,
+                        type_scale::line_height::UI,
+                    ));
+                });
             }
         });
     }
 
-    // 选中态视觉更新（不重建 entity，避免破坏 Interaction 状态）
+    // 选中态视觉更新（不重建 entity，避免破坏 Interaction 状态）：
+    // 选中 = 中性 `hover` 底（非 accent）；未选中 = 透明
     let selected_idx = state
         .filtered
         .get(state.selected)
@@ -291,11 +321,14 @@ fn rebuild_list(
         .unwrap_or(usize::MAX);
     for (marker, mut bg, mut color) in q_items_visual.iter_mut() {
         let is_selected = marker.index == selected_idx;
-        bg.0 = if is_selected {
-            theme.accent_bg
+        let want_bg = if is_selected {
+            theme.hover
         } else {
             Color::NONE
         };
+        if bg.0 != want_bg {
+            bg.0 = want_bg;
+        }
         color.0 = if is_selected {
             theme.text
         } else {
