@@ -187,11 +187,15 @@ pub(crate) fn handle_hotkey_triggers(
                 }
             }
             "input.focus" => {}
+            // M7-T3 语义重映射（方案 §10）：editor.view → 上下文面板预览页签
             "editor.view" => {
-                *view = EditorView::Editor;
+                *content = SideViewContent::Editor;
+                side_view.0 = false;
             }
             "chat.view" => {
-                *view = EditorView::Chat;
+                // 聚焦会话区：收起上下文面板
+                *content = SideViewContent::None;
+                side_view.0 = true;
             }
             "editor.close_tab" => {
                 // 关闭当前标签：MVP 留给 UI 按钮处理
