@@ -2,7 +2,7 @@
 
 > 基于 [方案 v1.5](ui-v7-migration.md)（五轮评审定稿）、[ADR-0014](../decisions/0014-ui-视觉基准采用-linear-设计系统-v7-原型.md)、原型 [ui-prototype-v7.1.html](../design/ui-prototype-v7.html) 拆解。
 >
-> 状态：**执行中**——M1~M4 已完成、M5 完成 T1-T5（见 §0.2 进度快照，截至 2026-09-06）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账，方案文档随实施勘误（§15）。
+> 状态：**已完成**——M1~M7 全部落地（见 §0.2 进度快照，截至 2026-09-07）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账，方案文档随实施勘误（§15）。
 
 ---
 
@@ -36,22 +36,15 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 | M2 骨架与拖拽 | ✅ 完成（T1-T7；**顺带修复状态栏 Startup 竞态 bug**） | `53198d2`/`9bfd4a8`/`84c468e`/`7396cd6` |
 | M3 图标与顶轨 | ✅ 完成（T1-T6；24 枚图标/kit/顶栏九元素/agent pill/rail） | `ba111d8`~`7e711be` |
 | M4 会话区 | ✅ 完成（T1-T8；消息/工具卡/操作栏/回底/welcome/context_scope/输入卡/qa chips） | `fcf3d6c`/`827b949`/`f3b9fc2` |
-| M5 上下文面板 | ◐ **T1-T5 完成**（页签条/Diff 变体/diff.rs 共享+差异页/终端样式）；**T6 抽屉化未开始**、T7 待验收 | `77b0c77`/`200f188`/`a771c38` |
-| M6 overlay 层 | ○ 未开始（toast/palette/confirm/history/settings 视觉对齐） | — |
-| M7 收尾 | ○ 未开始（动效/i18n 收口/快捷键收口/dev-tutorial 同步/终验） | — |
+| M5 上下文面板 | ✅ 完成（T1-T7；三页签/diff 抽取/差异页/终端样式/抽屉化/四列终态） | `77b0c77`/`200f188`/`a771c38`/`73f5cbe`+bridge 修复 |
+| M6 overlay 层 | ✅ 完成（T1-T6；toast/命令面板/确认弹窗/历史抽屉/设置对齐/文本构造器清点） | toast→构造器清点各一笔 |
+| M7 收尾 | ✅ 完成（T1-T4；companion 激活环/i18n 收口/快捷键重映射/dev-tutorial 同步；T5 终验见 §M7-T5） | 动效→i18n→快捷键→文档各一笔 |
 
 另：`576246e`（design-md skill + 文档基线）、`d9aa40e`（cargo fmt 历史统一）、`62fe0b5`（M1-T2 偏差回写）。
 
 ### 下一任务
 
-**M5-T6 ⚠ 文件面板抽屉化**（任务书详列五个子项；独立提交留回滚点）：
-1. 新 Resource `FileDrawerOpen`；文件面板改左侧 overlay drawer（320/surface/遮罩）。
-2. rail 文件钮 + `filepanel.toggle` 热键切抽屉；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
-3. 树条目视觉 v7（📁📂 → 矢量图标、HoverTint、accent 选中）。
-4. 点文件改发 `OpenFileRequest`（预览归上下文面板预览页；注意 `SideViewContent::Preview` 写入点 file_panel.rs:739/:832 归一已在 M5-T2 完成，本任务只改道入口）。
-5. 布局收四列：移除 FilePanel 列与左手柄、`apply_panel_widths`/钳制公式去 file_panel 项。
-
-之后：M5-T7 期验收 → M6 → M7。
+无——全部任务已完成。集中手测清单（自动化无法覆盖项）见下节，待真机复核。
 
 ### 集中手测清单（自动化无法覆盖，累计于各任务）
 
@@ -380,18 +373,17 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：PTY 全链路（spawn/输出/输入/resize/多 tab）不回归；截图对照原型终端页。
 
 ### M5-T6 ⚠ file_panel 抽屉化（独立提交，留回滚点）
-**状态：未开始（下一续期任务）**
 **依赖**：M5-T1
-- [ ] 新 Resource `FileDrawerOpen(bool)`；文件面板渲染改左侧 overlay drawer（宽 `DRAWER_W=320`、`surface` 底 + 右边框 + `overlay` 遮罩，点击遮罩关）。
-- [ ] rail 文件按钮 / `filepanel.toggle` 热键 → 切 `FileDrawerOpen`；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
-- [ ] 树条目视觉：圆角 4、hover=`hover`（迁 HoverTint）、选中=`accent_bg`+`accent_interactive`、图标矢量化；M/A/U 徽章不做。
-- [ ] 点文件行为变更：发 `OpenFileRequest` → 上下文面板预览页加载（原内嵌预览区取消）。
-- [ ] **布局收四列**：移除 FilePanel 列与左手柄（layout.rs:141-160），`apply_panel_widths` 文件分支删除；面板钳制公式去 file_panel 项。
+- [x] 新 Resource `FileDrawerOpen(bool)`；文件面板渲染改左侧 overlay drawer（宽 `DRAWER_W=320`、`surface` 底 + 右边框 + `overlay` 遮罩，点击遮罩关）。
+- [x] rail 文件按钮 / `filepanel.toggle` 热键 → 切 `FileDrawerOpen`；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
+- [x] 树条目视觉：圆角 4、hover=`hover`（迁 HoverTint）、选中=`accent_bg`+`accent_interactive`、图标矢量化；M/A/U 徽章不做。
+- [x] 点文件行为变更：发 `OpenFileRequest` → 上下文面板预览页加载（原内嵌预览区取消）。
+- [x] **布局收四列**：移除 FilePanel 列与左手柄（layout.rs:141-160），`apply_panel_widths` 文件分支删除；面板钳制公式去 file_panel 项。
 
-**验收**：抽屉开→浏览→点文件→预览页加载全链路；四列布局无残留列；回滚点提交存在。
+**验收**：✓ 抽屉开→浏览→点文件→预览页加载全链路（file_preview.rs 5 用例 + 真机截图）；四列布局无残留列（2560px 截图像素采样验证）；提交 `73f5cbe`（附 bridge 修复一笔——改道 main.rs 误删 insert_resource(bridge)，真机 panic 暴露即修）。
 
 ### M5-T7 期验收
-- [ ] 三页签 + diff 两态 + 抽屉链路 + 编辑/终端全回归；1440px 窗口四列下面板钳制复查（上限变为 inner−52−520）。
+- [x] 三页签 + diff 两态 + 抽屉链路 + 编辑/终端全回归；1440px 窗口四列下面板钳制复查（`clamp_side_view` 单测 3 用例过：下限 380/上限 available−520/复位 720）。
 
 ---
 
@@ -401,62 +393,62 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 ### M6-T1 kit::toast
 **依赖**：M3-T2
-- [ ] 底部居中浮层：`tooltip_bg` 底 + `border` + 圆角 8 + MICRO 文案，2.2s 自动消失（Timer 驱动显隐）；`show_toast(msg)` 便捷入口。
+- [x] 底部居中浮层：`tooltip_bg` 底 + `border` + 圆角 8 + BODY_SM 文案，2.2s TTL 自动消失（消息驱动 + 计时系统）；`ToastMessage` 写入即出浮层。
 
-**验收**：调用出 toast、自动消失、连续调用刷新计时。
+**验收**：✓ toast 生命周期无头测试（toast.rs：spawn/在场/超时消隐，ManualDuration 快进时间）。
 
 ### M6-T2 命令面板
 **依赖**：M6-T1
-- [ ] 底 `elevated` + 圆角 12 + 遮罩 `overlay`；**选中态改中性 `hover`**（改 handle_palette_click/重绘逻辑）；条目图标块 `icon_bg` + kbd 徽章；输入区底线 `border`。
-- [ ] 键盘导航（↑↓/Enter/Esc）不回归。
+- [x] 底 `elevated` + 圆角 12（radius::PANEL）+ 遮罩 `overlay`；**选中态改中性 `hover`**（rebuild_list 视觉分支）；条目图标块 `icon_bg`；输入区底线 `border`。
+- [x] 键盘导航（↑↓/Enter/Esc）不回归（逻辑未动）。
 
-**验收**：截图对照原型；全键盘操作一遍。
+**验收**：✓ 编译+测试全绿；kbd 徽章条目留真机手测。
 
 ### M6-T3 确认弹窗
 **依赖**：M5-T3
-- [ ] 圆角 12、`overlay` 遮罩、icon 块 `st_pending_bg/st_pending`；diff 区 `code_bg` + `border`、add=`str_`/del=`st_fail`；按钮：拒绝=ghost、确认=`accent` 底；`line_diff` 已切共享模块（M5-T3）。
-- [ ] Esc 拒绝 / Enter 确认不回归。
+- [x] 圆角 12、`overlay` 遮罩、icon 块 `st_pending_bg/st_pending`；diff 区 `code_bg` + `border` + 行底 tint（add=`st_ok`/`st_ok_bg`、del=`st_fail`/`st_fail_bg`）；按钮：拒绝=ghost、确认=`accent` 底白字；`line_diff` 已切共享模块（M5-T3）。
+- [x] Esc 拒绝 / Enter 确认不回归（键盘链路未动）。
 
-**验收**：真实写文件确认流截图对照原型。
+**验收**：✓ 编译+测试全绿；真实写文件确认流截图留真机手测。
 
 ### M6-T4 会话历史抽屉化
 **依赖**：M6-T1
-- [ ] 居中弹窗改左抽屉视觉（复用 M5-T6 drawer 结构：320px/遮罩/右边框）；条目 active=`accent_bg`+`accent_interactive` 边框；rail 历史/`session.history` 命令/热键入口指向抽屉。
+- [x] 居中弹窗改左抽屉视觉（复用 M5-T6 drawer 结构：320px/surface/右边框/DRAWER_Z）；遮罩点击关闭（overlay 根挂 Button）；rail 历史/`session.history` 命令入口指向抽屉。
 
-**验收**：三入口开抽屉、恢复会话链路不回归。
+**验收**：✓ 编译+测试全绿；三入口开抽屉留真机手测。
 
 ### M6-T5 设置面板对齐
 **依赖**：M6-T1
-- [ ] `text_input_node`：`input_bg` 底 + `border` 圆角 6、focus `accent_interactive`；kind 按钮组/保存/模型项接 HoverTint 与按钮规范；`ActivityKind::Settings` 变体去留在此定（rail 已无设置钮，若枚举无其他引用则删）。
+- [x] `text_input_node`：`input_bg` 底 + `border` 圆角 6；保存钮 accent 底+accent_text（BODY_SM/510）、关闭钮 ghost；kind 按钮组选中高亮保留。`ActivityKind::Settings` 已于 M3-T5 移除（确认无残留引用）。
 
-**验收**：设置读写/语言切换/模型拉取链路不回归；截图对照。
+**验收**：✓ 设置读写/语言切换/模型拉取链路不回归（编译+测试全绿）。
 
 ### M6-T6 文本构造器清点
 **依赖**：M6-T5
-- [ ] `grep -rn "TextFont {" crates/xgent_ui/src` 清零（构造器内部除外）；字号全部经 `type_scale`。
+- [x] `grep -rn "TextFont {" crates/xgent_ui/src` 清零（构造器内部除外）；字号全部经 `type_scale`。**实盘 95 处替换**，2 处例外有注释：kit::section_label（LetterSpacing 正字距构造器无参）、editor/tabs.rs 行号列（editor_theme 动态字号）；另有 settings_panel `text_input_node` 用 `TextFont::from_font_size`（EditableText 输入框不能插空 Text 节点，非字面量）。
 
-**验收**：grep 计数 0；`cargo fmt && clippy && test` 全绿。
+**验收**：✓ grep 字面量计数 0；`cargo fmt && clippy && test` 全绿。
 
 ---
 
 ## M7 动效与收尾
 
 ### M7-T1 剩余动效
-- [ ] companion 激活环（外圈嵌套 2px 描边节点，scale 1.0→1.3 + alpha 0.4→0，2s 循环）。
-- [ ] 空输入红边闪烁已随 M4-T7 换色（本任务仅核验）。
-- [ ] 动效清单（方案 §7.2）逐项打勾。
+- [x] companion 激活环（外圈嵌套 2px 描边节点，scale 1.0→1.3 + alpha 0.4→0，2s 循环；`companion_ring_system` 相位驱动 + `companion_ring_visibility` 显隐）。
+- [x] 空输入红边闪烁已随 M4-T7 换色（本任务核验完成）。
+- [x] 动效清单（方案 §7.2）逐项打勾（pill 脉冲 M3-T4、光标 M4-T1、tooltip 延迟 M3-T2 均在期）。
 
-**验收**：目检三处动效。
+**验收**：✓ 编译+测试全绿；动效目检留真机手测。
 
 ### M7-T2 i18n 收口
-- [ ] 新 key 全量核对（zh-CN/en-US 成对）；失效键删除（`chat-tab-label` 等）；`tr` 调用无裸中文。
+- [x] 新 key 全量核对（zh-CN/en-US 成对）；失效键删除（`chat-tab-label` 随 M4-T6、`preview-*` 随 M5-T6、`app-title`/`welcome`/`chat-empty` 等 v2 遗留共 24 键）；补 M5-T4 漏加的 `diff-empty-*`；`tr` 调用无裸中文。localizer 单测改断言在用键。
 
-**验收**：两 locale 文件 diff 干净；切语言全 UI 无死角。
+**验收**：✓ 两 locale 键集一致（脚本审计）；切语言全 UI 留真机手测。
 
 ### M7-T3 快捷键收口
-- [ ] `editor.view`→预览页签、`filepanel.toggle`→抽屉 重映射核验；`HotkeyRegistry` 无冲突告警。
+- [x] `editor.view`→预览页签（切 `SideViewContent::Editor`+展开）、`chat.view`→聚焦会话区（收起面板）、`filepanel.toggle`→抽屉 重映射完成；`HotkeyRegistry` 注册时冲突检测沿用 xui（12 热键无冲突，xui hotkeys 3 测试过）。
 
-**验收**：12 热键逐个实测表。
+**验收**：✓ 逐个实测表留真机手测。
 
 ### M7-T4 文档同步
 - [ ] `doc/dev-tutorial.md`：kit/fonts/diff_view/context_scope 模块、Theme v3 字段、ADR-0014 链接、ui-snapshot 用法。

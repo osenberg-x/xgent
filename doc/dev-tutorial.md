@@ -434,40 +434,40 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - 编辑器上线只触发到 C（向量 RAG）；D（LSP/AST）延后到 LSP 真正接入；E（混合检索）跟随 D。
 - 新增检索实现时实现 `ContextProvider` trait，`build_context_provider` 据配置切换，调用方无感。
 
-### 5.11 对话/编辑器分屏（右侧 SideView）
+### 5.11 上下文面板与文件抽屉（v7，ADR-0014）
 
-- **布局**：`MainAreaMarker`（横向 row）下五子节点——`FilePanelMarker`（显式宽，由 `PanelWidths` 驱动）+ 左手柄 + `ChatPanelMarker`（flex:1 填充剩余）+ 右手柄 + `SideViewMarker`（显式宽，默认 `display:none`）。手柄由 `resize::handle_bundle` spawn。
-- **分屏内容**：编辑器视图（`EditorViewMarker`，代码文件）与文件预览（`FilePreviewMarker`，非代码文件）二者互斥挂于 `SideViewMarker` 下，由 `handle_file_click` 据文件类型切换显隐。
-- **展开/收起**：`SideViewCollapsed` Resource 驱动 `toggle_panel_visibility`（合并系统，避免跨系统 B0001）切换 `SideViewMarker` + 右手柄的 `display`。展开触发：点击文件节点（代码/非代码均展开）；收起触发：编辑器返回按钮、关闭最后一个 tab、`Ctrl+\`（`sideview.toggle`）。
-- **快捷键**：`Ctrl+\` = `sideview.toggle`（切换分屏）。
-- **设计图**：`doc/design/ui-prototype.html` §2.1 P1。
+- **布局（v7 四列终态）**：`MainAreaMarker`（横向 row）下四子节点——`ActivityBarMarker`（图标轨 52px）+ `ChatPanelMarker`（flex:1 填充剩余）+ 右手柄 + `SideViewMarker`（上下文面板，默认展开 720px）。文件面板已抽屉化（M5-T6）：`FileDrawerOpen` Resource 驱动左侧 overlay（`DRAWER_W=320`、`surface` 底 + 右边框 + 遮罩点击关闭），rail 文件钮 / `filepanel.toggle`(Cmd+B) 切换；点文件条目发 `OpenFileRequest` 走上下文面板预览页（内嵌预览区已删除）。
+- **上下文面板三页签**（M5-T1）：`SideViewContent::{None, Editor, Preview, Diff, Terminal}`，`PageTabMarker` 页签条 38px（预览/差异/终端）；Editor/Preview 归一预览页（M5-T2）。差异页（M5-T4）`editor/diff_view.rs`：buffer `TextEditor.rope` vs `EditorBuffer.disk_content` 经共享 `diff.rs::line_diff` 渲染（add=st_ok/del=st_fail 行 tint）。
+- **展开/收起**：`SideViewCollapsed` Resource 驱动 `toggle_panel_visibility`；窗口 <1100px 自动收起（`responsive_collapse`）。
+- **快捷键**：`Ctrl+\` = `sideview.toggle`；`Cmd+Shift+E` = `editor.view`（切预览页签，M7-T3 重映射）；`Ctrl+`` = 终端页。
 
-### 5.12 面板拖拽调整大小（resize）
+### 5.12 面板拖拽调整大小（resize，v7）
 
-- **模块**：`xgent_ui/src/resize.rs`（`ResizePlugin`）。两条竖向手柄插在主区行布局的面板之间，鼠标拖拽改变相邻面板宽度。
-- **数据驱动**：`PanelWidths` Resource（`file_panel`/`side_view` 显式像素宽度），`ActiveResize` Resource（当前激活边界）。`apply_panel_widths` 据资源写面板宽度（折叠态下文件面板置 0）；`handle_resize_drag` 处理拖拽逻辑。
-- **拖拽状态机**：手柄 `Interaction::Pressed` + `ButtonInput<MouseButton>::pressed(Left)` 触发启动 → 持续期间据 `AccumulatedMouseMotion.delta.x` 增量更新宽度 → 鼠标释放清除。不引入 `bevy_picking`（默认未启用，会拉重依赖），用 `Interaction` + `ButtonInput` 手搓状态机。
-- **钳制**：据 `MainAreaMarker` 的 `ComputedNode.size` × `inverse_scale_factor`（物理→逻辑像素）得主区宽，按 `FILE_PANEL_MIN`(160)/`SIDE_VIEW_MIN`(200)/`CHAT_MIN`(240) 钳制，保证对话主区总有最小空间。
-- **视觉**：手柄默认透明（`Color::NONE`），hover/拖拽时变色高亮（`HANDLE_ACTIVE_COLOR`）。右手柄初始 `display:none`（分屏默认收起）。
-- **B0001 规避**：`toggle_panel_visibility` 与 `apply_panel_widths` 都写 `&mut Node` 于面板，用 `.after()` 排序；同系统内 `q_file`/`q_side`/`q_handles` 加交叉 `Without` 过滤器证明不相交（`With<A>` 不隐含 `Without<B>`）。
+- **模块**：`xgent_ui/src/resize.rs`（`ResizePlugin`）。右手柄拖拽改变上下文面板宽度；左手柄已随文件面板抽屉化移除（`ResizeEdge::Left` 删除）。
+- **数据驱动**：`PanelWidths`（仅 `side_view`）、`ActiveResize`。`apply_panel_widths` 据资源写面板宽度。
+- **钳制**：纯函数 `clamp_side_view(w, available)`（单测覆盖）：下限 `SIDE_VIEW_MIN=380`、上限 = 主区宽 − `CHAT_MIN=520`；启动/缩窗统一钳制（`clamp_on_window_resize`），双击右手柄复位 720（`CONTEXT_W_DEFAULT`）。
+- **视觉**：手柄透明，hover/拖拽 → `accent_glow` 底 + 2px `accent_interactive` 竖线。
 
-### 5.13 UI 原型对齐（A-H 已落地，D 待实现）
+### 5.12.1 v7 视觉体系（kit/fonts/theme）
 
-对照 `doc/design/ui-prototype.html` 原型图的差距分阶段实现，详见 `doc/design/ui-gap-plan.md`：
-- **A-主题（已落地）**：`Theme` 加状态色 5 色 + 语法高亮色 7 色（`theme.rs`）；`FILE_PANEL_W` 改 240。
-- **B-文件树（已落地）**：`file_panel.rs` 加 `fp-head` 标题头 + 折叠按钮；`spawn_entry` 重写为箭头/图标/名称分离的 row；选中/悬停态（`FileSelectedMarker` + `update_file_entry_style`）；`handle_dir_click` 用 `ParamSet` 避免双 `&mut Text` query 冲突（B0001）。**文件系统变更自动刷新**：`mark_file_tree_dirty_on_fs_change` 订阅 `FileChangedEvent`（daemon 文件监听）置 `FileTreeDirty`，`rebuild_file_tree` 据此重建树并从 `ExpandedDirs` 恢复展开状态；`is_ignored` 过滤构建产物 + dotfile（`.env`/`.gitignore` 等白名单保留）。
-- **C-对话视觉（已落地）**：`chat_panel.rs` 加 `viewtabs`（对话标签 + 会话信息）+ 消息气泡 role 行（头像 + 角色名）+ `input-meta` 快捷键提示栏。
-- **E-状态栏分段（已落地）**：`status_bar.rs` 改 row 容器（`StatusDotMarker` + provider + 状态 + token + 编码），状态点忙时脉冲。
-- **F-顶栏品牌+caret（已落地）**：`top_bar.rs` 品牌 + provider Button（点击打开设置面板）+ 新建会话 + ⚙。
-- **G-预览头+高亮（已落地）**：`file_panel.rs` `spawn_file_preview` 加 `fv-head`（路径 + `FilePreviewMetaMarker` 字节数 + ✕）+ `fv-body`；`.rs` 文件用 `xui::highlight` 高亮。**异步读取**：非代码文件预览经 `PreviewIoRuntime`（tokio task）异步读取，`handle_file_click` 发 oneshot → `poll_preview_read_results` 每帧 `try_recv` → `apply_preview_read_result` 填充 `fv-body`；无 runtime 时降级同步 IO（`commands.write_message`）。`PreviewIoRuntime` 由 `xgent_app` 注入 tokio handle。**过期结果丢弃**：`CurrentPreviewPath` resource 追踪当前预览文件，`apply_preview_read_result` 检查 `SideViewContent == Preview` 且路径匹配才处理，避免用户切换视图后过期异步结果污染预览区。预览元信息（加载中/字节数/错误）走 i18n（`preview-loading`/`preview-bytes`/`preview-read-error`）。`list_dir` 跳过符号链接防循环递归；折叠目录时 `retain` 清理 `ExpandedDirs` 中所有子孙路径。
-- **H-确认弹窗 diff（已落地）**：`confirm_dialog.rs` 重写为 modal（head/body/foot + 行级 diff）；`ConfirmRequest` 加 `old_content`/`new_content`，`Tool::preview_diff` 提供 diff 数据。
-- **本轮修补（已落地，2026-07-20）**：流式光标迁到助手气泡正文末尾；工具卡片 pending/deny 态（`ToolCardMarker.tool_call_id` + `update_tool_pending` + `ToolResult.denied`）；`update_token_hint` 系统含 Aborting 态。
-- **D-markdown/代码块（待实现）**：助手消息纯文本，原型含代码块+高亮。详见 `ui-gap-plan.md`。
+- **`kit.rs`（业务层小件库）**：`IconAssets`（`assets/icons/*.png` 白描边 2x PNG，ImageNode 乘法染色）+ `icon()`；`HoverTint` 数据驱动 hover 三态（单一 `hover_tint_system` 全局处理，禁止逐组件写 hover 系统）；`Tooltip`（悬停 500ms 延迟浮现）；构造器 `ghost_button/primary_button/icon_button/pill/kbd/section_label`；`ToastMessage` + `show_toast`（底部居中浮层，`tooltip_bg` 恒暗底，2.2s TTL 自动消隐，全局唯一节点替换式刷新）。
+- **`fonts.rs`**：`UiFonts{ui,mono}`（Inter Variable 直读模式 + Menlo，由 `xgent_app/startup.rs` 加载注入）；文本构造器 `ui_text(text,size,weight,color,line_height)` / `mono_text(_weighted)(...)`——**全部业务文本经构造器**（M6-T6 清点后仅 2 处例外：kit section_label 需 LetterSpacing、editor 行号列 editor_theme 动态字号）。
+- **`theme.rs`**：v3 字段全量（Linear 令牌：表面明度阶梯 bg/surface/elevated/code_bg、四级文字、靛紫 accent 组、Radix 状态色、warm 陪伴例外、tooltip 反色）；`size` 常量（TOP_BAR_H 52/STATUS_BAR_H 32/RAIL_W 52/CONTEXT_W_* /DRAWER_W 320）；`type_scale` 排版阶梯 8 档；`radius` 圆角阶梯。
+- **图标管线**：`doc/design/icons/export_png.py`（cairosvg，`currentColor`→`#FFFFFF` 强制）→ `crates/xgent_app/assets/icons/{name}@2x.png`。
+
+### 5.12.2 上下文条与 welcome（v7）
+
+- **`context_scope.rs`**：会话区顶部只读 chips（数据源=编辑器 tabs 的 `EditorBuffer.path`），「+ 添加」打开文件抽屉；标签/添加钮跨重建保留（签名比对）。
+- **`welcome.rs`**：会话空态欢迎页（品牌块 + 3 快捷卡 + 最近会话，进空态发 `ListSessionsMessage`，点击 `RestoreSessionMessage` 恢复，首条输入即隐藏）。
+
+### 5.12.3 截图工具（ui-snapshot）
+
+`xgent_app/startup.rs`：`XGENT_SHOT=<路径>` 环境变量启动 3 秒后自动截图一次；F12 随时截到 `target/snapshots/`（期验收对照原型用）。
 
 
 ---
 
-### 5.14 插件系统（WASM 组件模型）
+### 5.13 插件系统（WASM 组件模型）
 
 插件系统已落地：WASM Component + wasmtime 29，插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider。设计文档 `doc/design/plugin-system-design.md` v3 + 偏差修正（见 `local://plugin-system-impl-plan.md`）。
 
