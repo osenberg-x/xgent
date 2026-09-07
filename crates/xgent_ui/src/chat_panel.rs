@@ -22,7 +22,6 @@ use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::kit::{HoverTint, icon};
 use crate::layout::ChatPanelMarker;
-use crate::status_bar::TokenUsage;
 use crate::theme::{Theme, radius, space, type_scale};
 /// 历史消息容器（消息列表，可滚动）。
 #[derive(Component, Default)]

@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
-use crate::layout::{ActivityBarMarker, FilePanelCollapsed, SideViewCollapsed};
+use crate::layout::{ActivityBarMarker, FileDrawerOpen, SideViewCollapsed};
 use crate::status_bar::CompanionOn;
 use crate::theme::{Theme, space};
 
@@ -199,7 +199,7 @@ fn handle_rail_click(
     q_expand: Query<&Interaction, (With<ExpandPanelButtonMarker>, Changed<Interaction>)>,
     q_companion: Query<&Interaction, (With<CompanionButtonMarker>, Changed<Interaction>)>,
     mut active: ResMut<ActiveActivity>,
-    mut file_collapsed: ResMut<FilePanelCollapsed>,
+    mut drawer_open: ResMut<FileDrawerOpen>,
     mut side_collapsed: ResMut<SideViewCollapsed>,
     mut content: ResMut<crate::editor::SideViewContent>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
@@ -214,11 +214,12 @@ fn handle_rail_click(
         }
         match item.kind {
             ActivityKind::Chat => {
-                // 对话为默认视图：取消其他活跃项即可（抽屉化后此处负责关抽屉）
+                // 对话为默认视图：关闭文件抽屉
+                drawer_open.0 = false;
                 active.0 = ActivityKind::Chat;
             }
             ActivityKind::Files => {
-                file_collapsed.0 = !file_collapsed.0;
+                drawer_open.0 = !drawer_open.0;
                 active.0 = ActivityKind::Files;
             }
             ActivityKind::History => {

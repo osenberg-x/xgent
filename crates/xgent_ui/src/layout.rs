@@ -1,7 +1,7 @@
-//! 三区布局：顶栏 + 活动栏 + 侧栏 + 主区（对话 + 分屏）+ 状态栏。
+//! 布局：顶栏 + 主区（图标轨 + 对话 + 分隔条 + 上下文面板）+ 状态栏。
 //!
-//! v2 重构：引入 ActivityBar（48px 窄条），将文件/编辑器/终端/设置入口
-//! 抽象为图标导航。主区为对话 + SideView（编辑器/预览/终端互斥子视图）。
+//! v7 目标形态（M5-T6 起）：文件面板抽屉化（`FileDrawerOpen` + 左侧 overlay），
+//! 主区收四列——图标轨 → 对话主区 → 右手柄 → 上下文面板。
 //!
 //! 各区域挂 marker 组件，供子系统在启动时向其挂子节点。
 
@@ -41,9 +41,9 @@ pub struct StatusBarMarker;
 #[derive(Component, Default)]
 pub struct MainAreaMarker;
 
-/// 文件面板折叠状态。
+/// 文件抽屉开关（v7 抽屉化：左侧 overlay，rail 文件钮 / `filepanel.toggle` 切换）。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct FilePanelCollapsed(pub bool);
+pub struct FileDrawerOpen(pub bool);
 
 /// 右侧分屏（上下文面板）折叠状态。
 ///
@@ -58,7 +58,7 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Theme>()
-            .init_resource::<FilePanelCollapsed>()
+            .init_resource::<FileDrawerOpen>()
             .init_resource::<SideViewCollapsed>()
             .init_resource::<crate::resize::PanelWidths>()
             .add_systems(Startup, spawn_layout)
@@ -107,7 +107,7 @@ pub(crate) fn spawn_layout(
                 TopBarMarker,
             ));
 
-            // ===== 主区（活动栏 + 侧栏 + 对话 + 分屏）=====
+            // ===== 主区（图标轨 + 对话 + 分屏；文件面板已抽屉化）=====
             root.spawn((
                 Node {
                     width: Val::Percent(100.0),
@@ -120,7 +120,7 @@ pub(crate) fn spawn_layout(
                 MainAreaMarker,
             ))
             .with_children(|main| {
-                // 活动栏（48px 固定宽度）
+                // 活动栏（52px 固定宽度）
                 main.spawn((
                     Node {
                         width: px(size::RAIL_W),
@@ -136,27 +136,6 @@ pub(crate) fn spawn_layout(
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.line),
                     ActivityBarMarker,
-                ));
-
-                // 文件面板（侧栏）
-                main.spawn((
-                    Node {
-                        width: px(widths.file_panel),
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        flex_shrink: 0.0,
-                        overflow: Overflow::clip_y(),
-                        border: UiRect::right(px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme.surface),
-                    BorderColor::all(theme.line),
-                    FilePanelMarker,
-                ));
-
-                // 左拖拽手柄
-                main.spawn(crate::resize::handle_bundle(
-                    crate::resize::ResizeEdge::Left,
                 ));
 
                 // 对话主区
@@ -178,7 +157,6 @@ pub(crate) fn spawn_layout(
                 main.spawn(crate::resize::handle_bundle(
                     crate::resize::ResizeEdge::Right,
                 ));
-
                 // 上下文面板（预览/差异/终端；默认展开，宽度走 PanelWidths）
                 main.spawn((
                     Node {
@@ -217,52 +195,26 @@ pub(crate) fn spawn_layout(
         });
 }
 
-/// 折叠状态变化时更新面板宽度与手柄显隐。
+/// 上下文面板折叠状态变化时更新面板与右手柄显隐（文件抽屉显隐由 file_panel 模块自理）。
 pub(crate) fn toggle_panel_visibility(
-    file_collapsed: Res<FilePanelCollapsed>,
     side_collapsed: Res<SideViewCollapsed>,
-    mut q_file: Query<&mut Node, (With<FilePanelMarker>, Without<SideViewMarker>)>,
-    mut q_side: Query<&mut Node, (With<SideViewMarker>, Without<FilePanelMarker>)>,
-    mut q_handles: Query<
-        (&crate::resize::ResizeEdgeMarker, &mut Node),
-        (Without<FilePanelMarker>, Without<SideViewMarker>),
-    >,
+    mut q_side: Query<&mut Node, With<SideViewMarker>>,
+    mut q_handles: Query<(&crate::resize::ResizeEdgeMarker, &mut Node), Without<SideViewMarker>>,
 ) {
-    let file_changed = file_collapsed.is_changed();
-    let side_changed = side_collapsed.is_changed();
-    if !file_changed && !side_changed {
+    if !side_collapsed.is_changed() {
         return;
     }
-    if file_changed {
-        if file_collapsed.0 {
-            if let Ok(mut node) = q_file.single_mut() {
-                node.width = Val::Px(0.0);
-            }
-        }
-        let display = if file_collapsed.0 {
-            Display::None
-        } else {
-            Display::Flex
-        };
-        for (marker, mut node) in q_handles.iter_mut() {
-            if marker.0 == crate::resize::ResizeEdge::Left {
-                node.display = display;
-            }
-        }
+    let display = if side_collapsed.0 {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    if let Ok(mut node) = q_side.single_mut() {
+        node.display = display;
     }
-    if side_changed {
-        let display = if side_collapsed.0 {
-            Display::None
-        } else {
-            Display::Flex
-        };
-        if let Ok(mut node) = q_side.single_mut() {
+    for (marker, mut node) in q_handles.iter_mut() {
+        if marker.0 == crate::resize::ResizeEdge::Right {
             node.display = display;
-        }
-        for (marker, mut node) in q_handles.iter_mut() {
-            if marker.0 == crate::resize::ResizeEdge::Right {
-                node.display = display;
-            }
         }
     }
 }

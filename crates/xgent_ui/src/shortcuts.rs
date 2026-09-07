@@ -15,7 +15,8 @@ use crate::confirm_dialog::ConfirmDialogMarker;
 use crate::editor::tabs::CycleTabRequest;
 use crate::editor::{EditorView, SideViewContent};
 use crate::i18n::tr;
-use crate::layout::FilePanelCollapsed;
+use crate::layout::FileDrawerOpen;
+
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
 
@@ -124,7 +125,7 @@ pub(crate) fn handle_hotkey_triggers(
     mut reader: MessageReader<HotkeyTriggered>,
     mut palette: ResMut<CommandPaletteState>,
     mut abort_writer: MessageWriter<AbortMessage>,
-    mut file_panel: ResMut<FilePanelCollapsed>,
+    mut file_drawer: ResMut<FileDrawerOpen>,
     mut side_view: ResMut<crate::layout::SideViewCollapsed>,
     mut view: ResMut<EditorView>,
     mut content: ResMut<SideViewContent>,
@@ -173,7 +174,7 @@ pub(crate) fn handle_hotkey_triggers(
                 palette.query = "settings".into();
             }
             "filepanel.toggle" => {
-                file_panel.0 = !file_panel.0;
+                file_drawer.0 = !file_drawer.0;
             }
             "sideview.toggle" => {
                 // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）

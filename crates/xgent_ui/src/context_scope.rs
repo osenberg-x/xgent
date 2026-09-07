@@ -134,7 +134,7 @@ fn rebuild_context_chips(
     let Ok(row) = q_row.single() else {
         return;
     };
-    let Ok(children) = q_children.single() else {
+    let Ok(_children) = q_children.single() else {
         return;
     };
 
@@ -195,14 +195,14 @@ fn rebuild_context_chips(
     }
 }
 
-/// 「添加上下文」点击 → 打开文件面板。
+/// 「添加上下文」点击 → 打开文件抽屉（M5-T6 抽屉化）。
 fn handle_add_click(
     q: Query<&Interaction, (With<ContextAddMarker>, Changed<Interaction>)>,
-    mut file_collapsed: ResMut<crate::layout::FilePanelCollapsed>,
+    mut drawer: ResMut<crate::layout::FileDrawerOpen>,
 ) {
     for interaction in q.iter() {
-        if *interaction == Interaction::Pressed && file_collapsed.0 {
-            file_collapsed.0 = false;
+        if *interaction == Interaction::Pressed {
+            drawer.0 = true;
         }
     }
 }

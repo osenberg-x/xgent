@@ -13,7 +13,7 @@ use crate::diff::{DiffKind, line_diff};
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::tabs::EditorTabs;
 use crate::i18n::tr;
-use crate::theme::{space, type_scale, Theme};
+use crate::theme::{Theme, space, type_scale};
 
 /// 差异页容器标记（挂 `crate::layout::SideViewMarker`，显隐由
 /// `apply_editor_view_visibility` 据 `SideViewContent::Diff` 控制）。
@@ -116,11 +116,25 @@ pub(crate) fn rebuild_diff_view(
         .and_then(|idx| tabs.tabs.get(idx).copied())
         .or_else(|| tabs.tabs.last().copied());
     let Some(buf_entity) = active else {
-        show_empty(&mut commands, &view, children, &empties, &rows, &tr(&loc, "diff-empty-nobuffer"));
+        show_empty(
+            &mut commands,
+            &view,
+            children,
+            &empties,
+            &rows,
+            &tr(&loc, "diff-empty-nobuffer"),
+        );
         return;
     };
     let (Ok(buffer), Ok(editor)) = (buffers.get(buf_entity), editors.get(buf_entity)) else {
-        show_empty(&mut commands, &view, children, &empties, &rows, &tr(&loc, "diff-empty-nobuffer"));
+        show_empty(
+            &mut commands,
+            &view,
+            children,
+            &empties,
+            &rows,
+            &tr(&loc, "diff-empty-nobuffer"),
+        );
         return;
     };
 
@@ -134,7 +148,14 @@ pub(crate) fn rebuild_diff_view(
     let new_text = editor.rope.to_string();
     let diff = line_diff(&buffer.disk_content, &new_text);
     if !diff.iter().any(|l| l.kind != DiffKind::Context) {
-        show_empty(&mut commands, &view, children, &empties, &rows, &tr(&loc, "diff-empty-clean"));
+        show_empty(
+            &mut commands,
+            &view,
+            children,
+            &empties,
+            &rows,
+            &tr(&loc, "diff-empty-clean"),
+        );
         return;
     }
 

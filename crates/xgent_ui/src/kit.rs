@@ -7,7 +7,7 @@
 
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::prelude::*;
-use bevy::text::{FontFeatureTag, FontFeatures, FontSize, FontWeight, LetterSpacing, LineHeight};
+use bevy::text::{FontSize, FontWeight, LetterSpacing, LineHeight};
 use std::collections::HashMap;
 
 use crate::fonts::{UiFonts, mono_text, ui_text};

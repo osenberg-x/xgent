@@ -14,9 +14,9 @@
 
 pub mod at_syntax;
 pub mod buffer;
-pub mod diff_view;
 pub mod command;
 pub mod conflict;
+pub mod diff_view;
 pub mod io;
 pub mod state;
 pub mod tabs;
@@ -327,18 +327,14 @@ pub fn handle_editor_save_requests(
         });
     }
 }
-/// 据右侧分屏内容（`SideViewContent`）+ 编辑器视图（`EditorView`）切换
-/// `EditorViewMarker` 与 `FilePreviewMarker` 的显隐，并展开分屏。
+/// 据右侧分屏内容（`SideViewContent`）切换 `EditorViewMarker` 的显隐，并展开分屏。
 ///
-/// 由本系统统一写两个容器的 `Node.display`，避免 [`crate::file_panel::handle_file_click`]
-/// 也写同一组件导致 B0001 query 冲突。
+/// `EditorViewMarker` 即 v7 上下文面板的「预览页」主体（M5-T2 归一）；由本系统
+/// 统一写 `Node.display`，避免多系统并发写同一组件（B0001）。
 pub fn apply_editor_view_visibility(
     content: Res<SideViewContent>,
     mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
-    mut q: ParamSet<(
-        Query<&mut Node, With<EditorViewMarker>>,
-        Query<&mut Node, With<crate::file_panel::FilePreviewMarker>>,
-    )>,
+    mut q: Query<&mut Node, With<EditorViewMarker>>,
 ) {
     // 有内容时展开分屏；None 时不主动收（收起由返回按钮/Ctrl+\ 触发）
     if *content != SideViewContent::None && collapsed.0 {
@@ -349,19 +345,9 @@ pub fn apply_editor_view_visibility(
     } else {
         Display::None
     };
-    for mut node in &mut q.p0() {
+    for mut node in &mut q {
         if node.display != editor_display {
             node.display = editor_display;
-        }
-    }
-    let preview_display = if *content == SideViewContent::Preview {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    for mut node in &mut q.p1() {
-        if node.display != preview_display {
-            node.display = preview_display;
         }
     }
 }
@@ -627,7 +613,6 @@ pub fn handle_pending_goto(
             .remove::<crate::editor::buffer::PendingGoTo>();
     }
 }
-
 
 // ===== 上下文面板页签（M5-T1）=====
 

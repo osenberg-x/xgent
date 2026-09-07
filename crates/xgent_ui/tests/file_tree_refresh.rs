@@ -49,7 +49,13 @@ fn file_tree_shows_top_level_files() {
     fs::write(root.join("beta.rs"), "fn main() {}").expect("写文件");
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<bevy::image::Image>()
+        .init_asset::<bevy::text::Font>()
+        .insert_resource(xgent_ui::fonts::UiFonts {
+            ui: Handle::default(),
+            mono: Handle::default(),
+        })
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::input_focus::InputFocusPlugin,
@@ -58,6 +64,7 @@ fn file_tree_shows_top_level_files() {
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
@@ -87,7 +94,13 @@ fn file_tree_refreshes_on_file_changed_event() {
     fs::write(root.join("existing.txt"), "old").expect("写文件");
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<bevy::image::Image>()
+        .init_asset::<bevy::text::Font>()
+        .insert_resource(xgent_ui::fonts::UiFonts {
+            ui: Handle::default(),
+            mono: Handle::default(),
+        })
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::input_focus::InputFocusPlugin,
@@ -96,6 +109,7 @@ fn file_tree_refreshes_on_file_changed_event() {
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
@@ -147,7 +161,13 @@ fn expanded_dirs_preserved_across_rebuild() {
     fs::write(root.join("top.txt"), "top").expect("写文件");
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<bevy::image::Image>()
+        .init_asset::<bevy::text::Font>()
+        .insert_resource(xgent_ui::fonts::UiFonts {
+            ui: Handle::default(),
+            mono: Handle::default(),
+        })
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::input_focus::InputFocusPlugin,
@@ -156,6 +176,7 @@ fn expanded_dirs_preserved_across_rebuild() {
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
@@ -219,7 +240,13 @@ fn ignored_dirs_excluded_from_tree() {
     fs::write(root.join("visible.txt"), "visible").expect("写文件");
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<bevy::image::Image>()
+        .init_asset::<bevy::text::Font>()
+        .insert_resource(xgent_ui::fonts::UiFonts {
+            ui: Handle::default(),
+            mono: Handle::default(),
+        })
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::input_focus::InputFocusPlugin,
@@ -228,6 +255,7 @@ fn ignored_dirs_excluded_from_tree() {
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
@@ -272,7 +300,13 @@ fn selected_marker_preserved_across_rebuild() {
     fs::write(root.join("beta.rs"), "fn main() {}").expect("写文件");
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<bevy::image::Image>()
+        .init_asset::<bevy::text::Font>()
+        .insert_resource(xgent_ui::fonts::UiFonts {
+            ui: Handle::default(),
+            mono: Handle::default(),
+        })
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::input_focus::InputFocusPlugin,
@@ -281,6 +315,7 @@ fn selected_marker_preserved_across_rebuild() {
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()

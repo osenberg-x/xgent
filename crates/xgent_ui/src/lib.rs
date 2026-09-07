@@ -9,9 +9,9 @@
 pub mod activity_bar;
 pub mod chat_panel;
 pub mod command_palette;
-pub mod diff;
 pub mod confirm_dialog;
 pub mod context_scope;
+pub mod diff;
 pub mod editor;
 pub mod file_panel;
 pub mod fonts;

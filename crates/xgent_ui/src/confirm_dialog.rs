@@ -33,7 +33,7 @@ fn px(v: f32) -> Val {
     Val::Px(v)
 }
 
-use crate::diff::{DiffKind, DiffLine, line_diff};
+use crate::diff::{DiffKind, line_diff};
 
 /// 收到 ConfirmRequestMessage 时弹出确认窗口。
 fn show_on_request(

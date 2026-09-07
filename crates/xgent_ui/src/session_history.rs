@@ -16,6 +16,11 @@ use xgent_settings::Localizer;
 use crate::i18n::{tr, tr_with};
 use crate::theme::{Theme, space};
 
+/// 抽屉/浮层 z 基准：历史抽屉占用 40，文件抽屉（M5-T6）同层共享。
+///
+/// 文件抽屉=40 遮罩 /41 面板；确认弹窗=50（最高，见 confirm_dialog）。
+pub const DRAWER_Z: i32 = 40;
+
 /// 会话历史面板状态（open/close）。
 #[derive(Resource, Default)]
 pub struct SessionHistoryState {

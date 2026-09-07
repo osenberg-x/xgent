@@ -166,7 +166,6 @@ fn main() {
     let notif_rx = ipc.subscribe();
     // 终端复用 agent bridge 的 tokio runtime handle（bridge 在下方 insert_resource 移动）
     let terminal_rt_handle = bridge.runtime.handle().clone();
-    let preview_rt_handle = bridge.runtime.handle().clone();
     let plugin_rt_handle = bridge.runtime.handle().clone();
     // 插件系统组装（照设计文档 §13 Step P4）：
     // 1. 创建 PluginHostProxy + WasmHost + PluginHost（event_rx 持有，注入 ECS）
@@ -239,10 +238,6 @@ fn main() {
         terminal_rt_handle,
         xgent_terminal::LocalPtyBackend::new(),
     ))
-    .insert_resource(xgent_ui::file_panel::PreviewIoRuntime::new(
-        preview_rt_handle,
-    ))
-    .insert_resource(bridge)
     .insert_resource(IpcClientResource {
         client: ipc.clone(),
     })
