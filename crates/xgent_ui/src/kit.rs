@@ -444,13 +444,114 @@ impl UiKit<'_> {
     }
 }
 
-/// kit 插件：图标资源 + hover/tooltip 全局系统。
+// ===== toast =====
+
+/// toast 消息队列（M6-T1）：任何系统写入即触发底部居中浮层。
+///
+/// 连续写入叠加排队；每条 2.2s 自动消失（原型 §`.toast`）。
+#[derive(Message, Debug, Clone)]
+pub struct ToastMessage {
+    /// 展示文案
+    pub text: String,
+}
+
+/// toast 浮层节点标记。
+#[derive(Component, Default)]
+pub struct ToastMarker;
+
+/// toast 剩余存活秒数。
+#[derive(Component)]
+struct ToastTtl(f32);
+
+/// toast 存活时长（秒，原型 2.2s）。
+const TOAST_TTL_SECS: f32 = 2.2;
+
+/// toast 文本子节点标记（替换文案用）。
+#[derive(Component, Default)]
+pub struct ToastTextMarker;
+
+/// 展示 toast：写入 [`ToastMessage`] 即出浮层（底部居中，2.2s 自动消失）。
+///
+/// 全局唯一 toast 节点：已有 toast 在场时，新消息替换文案并重置计时。
+pub fn show_toast(
+    mut reader: MessageReader<ToastMessage>,
+    mut q_ttl: Query<&mut ToastTtl>,
+    mut q_text: Query<&mut Text, With<ToastTextMarker>>,
+    mut commands: Commands,
+    theme: Res<Theme>,
+    fonts: Res<UiFonts>,
+) {
+    let Some(latest) = reader.read().last() else {
+        return;
+    };
+    // 已有 toast：替换文案 + 重置计时
+    if let Ok(mut ttl) = q_ttl.single_mut() {
+        ttl.0 = TOAST_TTL_SECS;
+        if let Ok(mut t) = q_text.single_mut() {
+            t.0 = latest.text.clone();
+        }
+        return;
+    }
+    // 原型 .toast：bottom 50px、水平居中；tooltip_bg 恒暗底 + border + 圆角 8
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(50.0),
+                left: Val::Percent(50.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect::horizontal(px(space::LG)),
+                border_radius: BorderRadius::all(px(radius::CARD)),
+                border: UiRect::all(px(1.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(theme.tooltip_bg),
+            BorderColor::all(theme.border),
+            GlobalZIndex(400),
+            ToastMarker,
+            ToastTtl(TOAST_TTL_SECS),
+        ))
+        .with_children(|t| {
+            t.spawn((
+                mono_text(
+                    &fonts,
+                    latest.text.clone(),
+                    type_scale::BODY_SM,
+                    theme.tooltip_text,
+                    type_scale::line_height::UI,
+                ),
+                ToastTextMarker,
+            ));
+        });
+}
+
+/// toast 计时消隐。
+pub fn toast_ttl_system(
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut ToastTtl)>,
+    mut commands: Commands,
+) {
+    for (entity, mut ttl) in q.iter_mut() {
+        ttl.0 -= time.delta_secs();
+        if ttl.0 <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// kit 插件：图标资源 + hover/tooltip/toast 全局系统。
 pub struct KitPlugin;
 
 impl Plugin for KitPlugin {
     fn build(&self, app: &mut App) {
         let server = app.world().resource::<AssetServer>().clone();
         app.insert_resource(IconAssets::load(&server))
-            .add_systems(Update, (hover_tint_system, tooltip_system));
+            .add_message::<ToastMessage>()
+            .add_systems(
+                Update,
+                (show_toast, toast_ttl_system, hover_tint_system, tooltip_system),
+            );
     }
 }

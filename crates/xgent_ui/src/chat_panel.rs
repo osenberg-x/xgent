@@ -957,14 +957,19 @@ fn handle_qa_chips(
     }
 }
 
-/// agent 历史消息复制钮（M4-T2）：写系统剪贴板。
+/// agent 历史消息复制钮（M4-T2）：写系统剪贴板 + toast 反馈（原型「已复制」）。
 fn update_msg_actions(
     mut q: Query<(&Interaction, &CopyActionMarker), (Changed<Interaction>, With<Button>)>,
     mut clipboard: ResMut<Clipboard>,
+    loc: Res<xgent_settings::Localizer>,
+    mut toast: MessageWriter<crate::kit::ToastMessage>,
 ) {
     for (interaction, action) in q.iter_mut() {
         if *interaction == Interaction::Pressed {
             let _ = clipboard.set_text(action.text.clone());
+            toast.write(crate::kit::ToastMessage {
+                text: crate::i18n::tr(&loc, "toast-copied"),
+            });
         }
     }
 }

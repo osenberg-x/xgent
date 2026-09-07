@@ -160,3 +160,5 @@ welcome-card-refactor = 重构代码
 welcome-card-refactor-desc = 改善代码结构和可读性
 welcome-card-test = 生成测试
 welcome-card-test-desc = 为当前上下文生成单元测试
+
+toast-copied = 已复制到剪贴板
