@@ -238,6 +238,7 @@ fn main() {
         terminal_rt_handle,
         xgent_terminal::LocalPtyBackend::new(),
     ))
+    .insert_resource(bridge)
     .insert_resource(IpcClientResource {
         client: ipc.clone(),
     })
