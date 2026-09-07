@@ -9,7 +9,7 @@ use xgent_settings::Localizer;
 use xgent_tools::confirm::ConfirmDecision;
 
 use crate::i18n::tr;
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, radius, space, type_scale};
 
 /// 确认弹窗根节点标记。
 #[derive(Component, Default)]
@@ -81,14 +81,14 @@ fn show_on_request(
                         max_height: Val::Percent(80.0),
                         flex_direction: FlexDirection::Column,
                         border: UiRect::all(px(1.0)),
-                        border_radius: BorderRadius::all(px(8.0)),
+                        border_radius: BorderRadius::all(px(radius::PANEL)),
                         ..default()
                     },
                     BackgroundColor(theme.elevated),
                     BorderColor::all(theme.border),
                 ))
                 .with_children(|modal| {
-                    // modal-head：确认执行 + ✕
+                    // modal-head：icon 块（st_pending_bg/st_pending）+ 确认执行 + ✕
                     modal
                         .spawn((
                             Node {
@@ -104,14 +104,43 @@ fn show_on_request(
                             BorderColor::all(theme.border),
                         ))
                         .with_children(|head| {
-                            head.spawn((
-                                Text::new(tr(&loc, "confirm-title")),
-                                TextFont {
-                                    font_size: FontSize::Px(font + 1.0),
-                                    ..default()
-                                },
-                                TextColor(theme.text),
-                            ));
+                            // 左组：icon 块 + 标题
+                            head.spawn((Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: px(space::SM),
+                                ..default()
+                            },))
+                                .with_children(|left| {
+                                    left.spawn((
+                                        Node {
+                                            width: px(36.0),
+                                            height: px(36.0),
+                                            align_items: AlignItems::Center,
+                                            justify_content: JustifyContent::Center,
+                                            border_radius: BorderRadius::all(px(radius::CTRL)),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        },
+                                        BackgroundColor(theme.st_pending_bg),
+                                        Text::new("!"),
+                                        TextFont {
+                                            font_size: FontSize::Px(type_scale::BODY),
+                                            weight: FontWeight(590),
+                                            ..default()
+                                        },
+                                        TextColor(theme.st_pending),
+                                    ));
+                                    left.spawn((
+                                        Text::new(tr(&loc, "confirm-title")),
+                                        TextFont {
+                                            font_size: FontSize::Px(type_scale::H3),
+                                            weight: FontWeight(590),
+                                            ..default()
+                                        },
+                                        TextColor(theme.text),
+                                    ));
+                                });
                             head.spawn((
                                 Button,
                                 Node {
@@ -162,7 +191,7 @@ fn show_on_request(
                                         font_size: FontSize::Px(font - 2.0),
                                         ..default()
                                     },
-                                    TextColor(theme.text_dim),
+                                    TextColor(theme.text_faint),
                                 ));
                                 let lines = line_diff(old, new);
                                 body.spawn((
@@ -173,7 +202,7 @@ fn show_on_request(
                                         overflow: Overflow::clip_y(),
                                         padding: UiRect::vertical(px(space::SM)),
                                         border: UiRect::all(px(1.0)),
-                                        border_radius: BorderRadius::all(px(4.0)),
+                                        border_radius: BorderRadius::all(px(radius::SMALL)),
                                         ..default()
                                     },
                                     BackgroundColor(theme.code_bg),
@@ -182,10 +211,14 @@ fn show_on_request(
                                 ))
                                 .with_children(|diff| {
                                     for line in &lines {
-                                        let (prefix, color) = match line.kind {
-                                            DiffKind::Add => ("+ ", theme.st_ok),
-                                            DiffKind::Del => ("- ", theme.st_fail),
-                                            DiffKind::Context => ("  ", theme.text_dim),
+                                        let (prefix, color, bg) = match line.kind {
+                                            DiffKind::Add => ("+ ", theme.st_ok, theme.st_ok_bg),
+                                            DiffKind::Del => {
+                                                ("- ", theme.st_fail, theme.st_fail_bg)
+                                            }
+                                            DiffKind::Context => {
+                                                ("  ", theme.text_dim, Color::NONE)
+                                            }
                                         };
                                         diff.spawn((
                                             Node {
@@ -193,6 +226,7 @@ fn show_on_request(
                                                 padding: UiRect::horizontal(px(space::MD)),
                                                 ..default()
                                             },
+                                            BackgroundColor(bg),
                                             Text::new(format!("{prefix}{}", line.text)),
                                             TextFont {
                                                 font_size: FontSize::Px(mono),
@@ -230,40 +264,52 @@ fn show_on_request(
                             BorderColor::all(theme.border),
                         ))
                         .with_children(|foot| {
+                            // 拒绝 = ghost（透明底 + border）
                             foot.spawn((
                                 Button,
                                 Node {
-                                    padding: UiRect::all(px(space::SM)),
-                                    border: UiRect::all(px(1.0)),
-                                    border_radius: BorderRadius::all(px(4.0)),
+                                    padding: UiRect {
+                                        left: px(space::LG),
+                                        right: px(space::LG),
+                                        top: px(space::SM + 1.0),
+                                        bottom: px(space::SM + 1.0),
+                                    },
+                                    border_radius: BorderRadius::all(px(radius::CTRL)),
                                     ..default()
                                 },
-                                BackgroundColor(theme.st_fail),
-                                BorderColor::all(theme.st_fail),
+                                BackgroundColor(Color::NONE),
+                                BorderColor::all(Color::NONE),
                                 Text::new(format!("{} (Esc)", tr(&loc, "confirm-deny"))),
                                 TextFont {
-                                    font_size: FontSize::Px(font),
+                                    font_size: FontSize::Px(type_scale::BODY_SM),
+                                    weight: FontWeight(510),
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(theme.text_dim),
                                 ConfirmDenyMarker,
                             ));
+                            // 确认 = accent 底白字
                             foot.spawn((
                                 Button,
                                 Node {
-                                    padding: UiRect::all(px(space::SM)),
-                                    border: UiRect::all(px(1.0)),
-                                    border_radius: BorderRadius::all(px(4.0)),
+                                    padding: UiRect {
+                                        left: px(space::LG),
+                                        right: px(space::LG),
+                                        top: px(space::SM + 1.0),
+                                        bottom: px(space::SM + 1.0),
+                                    },
+                                    border_radius: BorderRadius::all(px(radius::CTRL)),
                                     ..default()
                                 },
                                 BackgroundColor(theme.accent),
-                                BorderColor::all(theme.accent),
+                                BorderColor::all(Color::NONE),
                                 Text::new(format!("{} (Enter)", tr(&loc, "confirm-allow"))),
                                 TextFont {
-                                    font_size: FontSize::Px(font),
+                                    font_size: FontSize::Px(type_scale::BODY_SM),
+                                    weight: FontWeight(510),
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(theme.accent_text),
                                 ConfirmAllowMarker,
                             ));
                         });

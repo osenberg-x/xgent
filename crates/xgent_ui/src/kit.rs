@@ -551,7 +551,12 @@ impl Plugin for KitPlugin {
             .add_message::<ToastMessage>()
             .add_systems(
                 Update,
-                (show_toast, toast_ttl_system, hover_tint_system, tooltip_system),
+                (
+                    show_toast,
+                    toast_ttl_system,
+                    hover_tint_system,
+                    tooltip_system,
+                ),
             );
     }
 }
