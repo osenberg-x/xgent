@@ -77,7 +77,7 @@ async fn proxy_op_registers_tool_to_executor() {
     let proxy = Arc::new(PluginHostProxy::new());
     let (manifest, plugin) = load_git_plugin(proxy.clone()).await;
     let tool_defs = plugin.call_tool_register().await.expect("register");
-    assert_eq!(tool_defs.len(), 3);
+    assert_eq!(tool_defs.len(), 4, "git 插件注册 git_diff/git_log/git_status/git_commit 四工具");
 
     let op_rx = register_proxy_impls(&proxy);
     proxy
