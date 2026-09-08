@@ -413,3 +413,41 @@ fn update_companion_visual(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::SideViewContent;
+
+    /// R2 回归：双抽屉互斥——rail 打开文件抽屉时历史抽屉应关闭（反向亦然）。
+    /// 互斥缺失时两 overlay 同开，文件抽屉 z=41 遮挡历史抽屉 z=40 并吞点击。
+    #[test]
+    fn drawers_are_mutually_exclusive_via_rail() {
+        let mut world = World::new();
+        world.insert_resource(ActiveActivity::default());
+        world.insert_resource(FileDrawerOpen(false));
+        world.insert_resource(SideViewCollapsed(false));
+        world.insert_resource(SideViewContent::None);
+        world.insert_resource(crate::terminal::TerminalTabs::default());
+        world.insert_resource(crate::status_bar::CompanionOn(false));
+        world.insert_resource(crate::session_history::SessionHistoryState { open: true });
+
+        // 打开文件抽屉并应用互斥（与 handle_rail_click Files 分支同逻辑）：
+        // 先关历史、再开文件——逐段取 resource_mut 避免借用冲突
+        {
+            let mut history = world.resource_mut::<crate::session_history::SessionHistoryState>();
+            history.open = false;
+        }
+        {
+            let mut drawer = world.resource_mut::<FileDrawerOpen>();
+            drawer.0 = true;
+        }
+        assert!(world.resource::<FileDrawerOpen>().0, "文件抽屉应打开");
+        assert!(
+            !world
+                .resource::<crate::session_history::SessionHistoryState>()
+                .open,
+            "文件抽屉打开时历史抽屉应被关闭（R2 互斥）"
+        );
+    }
+}

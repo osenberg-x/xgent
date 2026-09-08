@@ -7,7 +7,6 @@ use xgent_settings::Localizer;
 
 use xgent_ui::layout::LayoutPlugin;
 use xgent_ui::layout::{ChatPanelMarker, MainAreaMarker, StatusBarMarker, TopBarMarker, UiRoot};
-use xgent_ui::theme::Theme;
 
 /// 测试布局：启动后各区域 marker 节点存在。
 #[test]
@@ -67,10 +66,4 @@ fn file_drawer_panel_spawns_with_plugin() {
         bevy::ui::Display::None,
         "抽屉初始应隐藏（FileDrawerOpen 默认 false）"
     );
-}
-
-/// 测试主题默认是暗色。
-#[test]
-fn theme_default_is_dark() {
-    let _theme = Theme::dark();
 }

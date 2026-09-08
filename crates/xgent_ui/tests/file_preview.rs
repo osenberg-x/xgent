@@ -202,11 +202,15 @@ fn clicking_file_closes_drawer_and_opens_preview() {
     app.update();
 
     click_file(&mut app, &path);
+    // 两帧：handle_file_click（写 Resource）与 handle_drawer_visibility（写
+    // Node.display）无显式排序，第二帧保证显示层跟上
+    app.update();
     app.update();
 
-    // 抽屉应关闭 + 预览页应打开
-    let drawer_open = app.world().resource::<FileDrawerOpen>().0;
-    assert!(!drawer_open, "点击文件后抽屉应自动关闭");
+    // R4：显示层断言（Resource 已关但 display 未跟上时该断言失败）
+    let (panel, overlay) = drawer_displays(&mut app);
+    assert_eq!(panel, Display::None, "点击文件后抽屉面板应隐藏");
+    assert_eq!(overlay, Display::None, "点击文件后抽屉遮罩应隐藏");
     assert_eq!(
         *app.world().resource::<SideViewContent>(),
         SideViewContent::Editor,
@@ -214,7 +218,7 @@ fn clicking_file_closes_drawer_and_opens_preview() {
     );
 }
 
-/// 大文件也走编辑器链路：点击后进入预览页且不 panic（截断逻辑属编辑器）。
+/// 大文件端到端加载：点击后内容应异步读入 buffer（消费者可观察 rope 行数）。
 #[test]
 fn large_file_click_enters_preview_page() {
     let dir = tempfile::tempdir().expect("创建临时目录");
@@ -237,4 +241,17 @@ fn large_file_click_enters_preview_page() {
         "大文件点击后应进入预览页"
     );
     assert_eq!(editor_view_display(&mut app), Display::Flex);
+
+    // R4：内容加载断言——rope 行数 = 5000 数据行（+ 末行换行产生的空行）
+    use xgent_ui::editor::buffer::EditorBuffer;
+    let mut q = app.world_mut().query_filtered::<&EditorBuffer, ()>();
+    let buf = q
+        .iter(app.world())
+        .next()
+        .expect("大文件应产生 buffer 实体");
+    assert_eq!(
+        buf.disk_content.lines().count(),
+        5000,
+        "大文件内容应完整加载（无静默截断）"
+    );
 }

@@ -516,3 +516,74 @@ fn spawn_history_message_row(
             });
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xui::i18n_bridge::Strings;
+    use xui_i18n::StringSource;
+
+    /// 空 StringSource（测试不关心 i18n 文案）。
+    struct NoopStrings;
+    impl StringSource for NoopStrings {
+        fn get(&self, key: &str, _args: &[(&str, String)]) -> String {
+            key.to_string()
+        }
+        fn current_lang(&self) -> &str {
+            "zh-CN"
+        }
+    }
+
+    /// 最小 App：R1-P0 回归——overlay 生命周期不依赖 Interaction 变化。
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::app::ScheduleRunnerPlugin::default())
+            .init_resource::<Theme>()
+            .init_resource::<Localizer>()
+            .init_resource::<CachedSessionList>()
+            .init_resource::<SessionHistoryState>()
+            .insert_resource(Strings(Box::new(NoopStrings)))
+            .add_message::<ListSessionsMessage>()
+            .add_message::<RestoreSessionMessage>()
+            .add_systems(Update, session_history_overlay_systems);
+        app
+    }
+
+    fn overlay_count(app: &mut App) -> usize {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<SessionHistoryOverlayMarker>>();
+        q.iter(app.world()).count()
+    }
+
+    /// R1-P0 回归：打开后不动鼠标（Interaction 不变化），overlay 不应重复 spawn；
+    /// 关闭后不应残留僵尸遮罩。
+    #[test]
+    fn overlay_lifecycle_without_interaction_changes() {
+        let mut app = test_app();
+        app.world_mut().resource_mut::<SessionHistoryState>().open = true;
+        app.update();
+        assert_eq!(overlay_count(&mut app), 1, "打开后应有 1 个 overlay");
+
+        // 旧 bug：Changed<Interaction> 过滤使存在性检查误判「不存在」，
+        // 每帧重复 spawn（跑 5 帧应恒为 1，旧实现会递增到 6）
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(
+            overlay_count(&mut app),
+            1,
+            "不动鼠标跑多帧 overlay 不应重复 spawn（R1-P0 回归）"
+        );
+
+        // 关闭：despawn 不应被 Changed 过滤跳过（旧 bug 残留僵尸遮罩）
+        app.world_mut().resource_mut::<SessionHistoryState>().open = false;
+        app.update();
+        assert_eq!(overlay_count(&mut app), 0, "关闭后 overlay 应被清除");
+
+        // 再开：恰好 1 个
+        app.world_mut().resource_mut::<SessionHistoryState>().open = true;
+        app.update();
+        assert_eq!(overlay_count(&mut app), 1, "重开后应恰有 1 个 overlay");
+    }
+}
