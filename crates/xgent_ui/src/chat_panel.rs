@@ -227,35 +227,35 @@ pub(crate) fn spawn_chat_panel(
                 .with_children(|hint| {
                     hint.spawn((ui_text(
                         crate::i18n::tr(&loc, "hint-send"),
-                        type_scale::TINY,
+                        type_scale::MICRO,
                         400,
                         theme.text_muted,
                         type_scale::line_height::UI,
                     ),));
                     hint.spawn((ui_text(
                         crate::i18n::tr(&loc, "hint-abort"),
-                        type_scale::TINY,
+                        type_scale::MICRO,
                         400,
                         theme.text_muted,
                         type_scale::line_height::UI,
                     ),));
                     hint.spawn((ui_text(
                         crate::i18n::tr(&loc, "hint-palette"),
-                        type_scale::TINY,
+                        type_scale::MICRO,
                         400,
                         theme.text_muted,
                         type_scale::line_height::UI,
                     ),));
                     hint.spawn((ui_text(
                         crate::i18n::tr(&loc, "hint-toggle-sideview"),
-                        type_scale::TINY,
+                        type_scale::MICRO,
                         400,
                         theme.text_muted,
                         type_scale::line_height::UI,
                     ),));
                     hint.spawn((ui_text(
                         crate::i18n::tr(&loc, "hint-terminal"),
-                        type_scale::TINY,
+                        type_scale::MICRO,
                         400,
                         theme.text_muted,
                         type_scale::line_height::UI,
@@ -272,7 +272,7 @@ pub(crate) fn spawn_chat_panel(
                     right.spawn((
                         ui_text(
                             crate::i18n::tr(&loc, "status-ready"),
-                            type_scale::TINY,
+                            type_scale::MICRO,
                             400,
                             theme.text_muted,
                             type_scale::line_height::UI,
@@ -313,7 +313,7 @@ pub(crate) fn spawn_chat_panel(
             .with_children(|c| {
                 c.spawn(ui_text(
                     tr(&loc, label_key).to_string(),
-                    type_scale::MICRO,
+                    type_scale::CAPTION,
                     510,
                     theme.text_muted,
                     type_scale::line_height::UI,
@@ -432,7 +432,7 @@ fn spawn_user_message(
                         BackgroundColor(theme.icon_bg),
                         ui_text(
                             crate::i18n::tr(&loc, "role-user"),
-                            type_scale::CAPTION,
+                            type_scale::BODY_SM,
                             590,
                             theme.text_dim,
                             type_scale::line_height::UI,
@@ -552,8 +552,8 @@ fn finalize_on_done(
                     .with_children(|body| {
                         body.spawn((ui_text(
                             crate::i18n::tr(&loc, "role-assistant"),
-                            type_scale::CAPTION,
-                            400,
+                            type_scale::BODY_SM,
+                            510,
                             theme.text,
                             type_scale::line_height::UI,
                         ),));

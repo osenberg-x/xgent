@@ -167,7 +167,7 @@ fn spawn_file_panel(
                 // 标题（资源管理器，大写小字体）
                 head.spawn(crate::fonts::ui_text(
                     crate::i18n::tr(&loc, "file-panel-title").to_uppercase(),
-                    11.0,
+                    crate::theme::type_scale::MICRO,
                     510,
                     theme.text_dim,
                     crate::theme::type_scale::line_height::UI,
@@ -314,7 +314,7 @@ fn spawn_entry(
                         align_items: AlignItems::Center,
                         column_gap: px(space::XS),
                         padding: UiRect::all(px(space::XS)),
-                        border_radius: BorderRadius::all(px(crate::theme::radius::MICRO)),
+                        border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
                         ..default()
                     },
                     DirEntry {
@@ -379,7 +379,7 @@ fn spawn_entry(
                 align_items: AlignItems::Center,
                 column_gap: px(space::XS),
                 padding: UiRect::all(px(space::XS)),
-                border_radius: BorderRadius::all(px(crate::theme::radius::MICRO)),
+                border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
                 ..default()
             },
             FileEntry {

@@ -203,7 +203,7 @@ fn show_on_request(
                                         overflow: Overflow::clip_y(),
                                         padding: UiRect::vertical(px(space::SM)),
                                         border: UiRect::all(px(1.0)),
-                                        border_radius: BorderRadius::all(px(radius::SMALL)),
+                                        border_radius: BorderRadius::all(px(radius::CTRL)),
                                         ..default()
                                     },
                                     BackgroundColor(theme.code_bg),
@@ -285,7 +285,7 @@ fn show_on_request(
                                     format!("{} (Esc)", tr(&loc, "confirm-deny")),
                                     type_scale::BODY_SM,
                                     510,
-                                    theme.text_dim,
+                                    theme.text_muted,
                                     type_scale::line_height::CTRL,
                                 ),
                                 ConfirmDenyMarker,

@@ -144,8 +144,8 @@ fn spawn_tool_card(
                             // 工具名
                             header.spawn((ui_text(
                                 ev.tool_id.clone(),
-                                type_scale::CAPTION,
-                                400,
+                                type_scale::SMALL,
+                                510,
                                 theme.text,
                                 type_scale::line_height::UI,
                             ),));
@@ -157,9 +157,9 @@ fn spawn_tool_card(
                                 },
                                 ui_text(
                                     summary,
-                                    type_scale::MICRO,
+                                    type_scale::CAPTION,
                                     400,
-                                    theme.text_dim,
+                                    theme.text_muted,
                                     type_scale::line_height::UI,
                                 ),
                             ));
@@ -191,7 +191,7 @@ fn spawn_tool_card(
                                         ui_text(
                                             tr(&loc, "tool-running"),
                                             type_scale::MICRO,
-                                            400,
+                                            510,
                                             theme.text_dim,
                                             type_scale::line_height::UI,
                                         ),
@@ -210,10 +210,10 @@ fn spawn_tool_card(
                             ScrollPosition::default(),
                             ui_text(
                                 String::new(),
-                                font - 1.5,
+                                type_scale::CAPTION,
                                 400,
                                 theme.text_dim,
-                                type_scale::line_height::UI,
+                                type_scale::line_height::CTRL,
                             ),
                             ToolResultTextMarker,
                         ));

@@ -481,7 +481,6 @@ pub fn show_toast(
     mut q_text: Query<&mut Text, With<ToastTextMarker>>,
     mut commands: Commands,
     theme: Res<Theme>,
-    fonts: Res<UiFonts>,
 ) {
     let Some(latest) = reader.read().last() else {
         return;
@@ -503,7 +502,12 @@ pub fn show_toast(
                 left: Val::Percent(50.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                padding: UiRect::horizontal(px(space::LG)),
+                padding: UiRect {
+                    left: px(space::LG),
+                    right: px(space::LG),
+                    top: px(space::SM),
+                    bottom: px(space::SM),
+                },
                 border_radius: BorderRadius::all(px(radius::CARD)),
                 border: UiRect::all(px(1.0)),
                 flex_shrink: 0.0,
@@ -517,10 +521,10 @@ pub fn show_toast(
         ))
         .with_children(|t| {
             t.spawn((
-                mono_text(
-                    &fonts,
+                ui_text(
                     latest.text.clone(),
                     type_scale::BODY_SM,
+                    510,
                     theme.tooltip_text,
                     type_scale::line_height::UI,
                 ),

@@ -178,7 +178,7 @@ fn spawn_overlay(
                         .spawn((
                             Node {
                                 width: Val::Percent(100.0),
-                                padding: UiRect::all(Val::Px(space::SM)),
+                                padding: UiRect::all(Val::Px(space::MD)),
                                 flex_direction: FlexDirection::Row,
                                 justify_content: JustifyContent::SpaceBetween,
                                 align_items: AlignItems::Center,
@@ -190,8 +190,8 @@ fn spawn_overlay(
                         .with_children(|head| {
                             head.spawn(ui_text(
                                 tr(loc, "history-title"),
-                                type_scale::BODY,
-                                400,
+                                type_scale::H3,
+                                590,
                                 theme.text,
                                 type_scale::line_height::UI,
                             ));
@@ -300,7 +300,7 @@ fn spawn_session_item(
                     info.spawn(ui_text(
                         title,
                         type_scale::BODY_SM,
-                        400,
+                        510,
                         theme.text,
                         type_scale::line_height::UI,
                     ));
@@ -308,7 +308,7 @@ fn spawn_session_item(
                         format!("{date} · {msg_count}"),
                         type_scale::MICRO,
                         400,
-                        theme.text_muted,
+                        theme.text_faint,
                         type_scale::line_height::UI,
                     ));
                 });
@@ -318,7 +318,7 @@ fn spawn_session_item(
                 Node {
                     padding: UiRect::horizontal(Val::Px(space::SM)),
                     border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
                     ..default()
                 },
                 BackgroundColor(theme.elevated),
@@ -326,7 +326,7 @@ fn spawn_session_item(
                 ui_text(
                     tr(loc, "history-restore"),
                     type_scale::CAPTION,
-                    400,
+                    510,
                     theme.text,
                     type_scale::line_height::UI,
                 ),

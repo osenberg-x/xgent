@@ -172,9 +172,12 @@ fn spawn_conflict_dialog(
                 BorderColor::all(border),
             ))
             .with_children(|card| {
-                card.spawn((
-                    Text::new(format!("{title}\n\n{body_path}\n{body_dirty}")),
-                    TextColor(Color::WHITE),
+                card.spawn(crate::fonts::ui_text(
+                    format!("{title}\n\n{body_path}\n{body_dirty}"),
+                    crate::theme::type_scale::BODY_SM,
+                    400,
+                    theme.text_dim,
+                    crate::theme::type_scale::line_height::UI,
                 ));
                 card.spawn((Node {
                     flex_direction: FlexDirection::Row,
@@ -189,8 +192,13 @@ fn spawn_conflict_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new(discard_label),
-                            TextColor(Color::WHITE),
+                            crate::fonts::ui_text(
+                                discard_label,
+                                crate::theme::type_scale::BODY_SM,
+                                510,
+                                theme.accent_text,
+                                crate::theme::type_scale::line_height::UI,
+                            ),
                             ConflictDiscardMarker,
                         ));
                         btns.spawn((
@@ -200,8 +208,13 @@ fn spawn_conflict_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new(keep_label),
-                            TextColor(Color::WHITE),
+                            crate::fonts::ui_text(
+                                keep_label,
+                                crate::theme::type_scale::BODY_SM,
+                                510,
+                                theme.accent_text,
+                                crate::theme::type_scale::line_height::UI,
+                            ),
                             ConflictKeepLocalMarker,
                         ));
                         btns.spawn((
@@ -211,8 +224,13 @@ fn spawn_conflict_dialog(
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new(diff_label),
-                            TextColor(Color::WHITE),
+                            crate::fonts::ui_text(
+                                diff_label,
+                                crate::theme::type_scale::BODY_SM,
+                                510,
+                                theme.accent_text,
+                                crate::theme::type_scale::line_height::UI,
+                            ),
                             ConflictDiffMarker,
                         ));
                     });

@@ -462,9 +462,12 @@ fn spawn_dirty_close_dialog(
                 BorderColor::all(border),
             ))
             .with_children(|card| {
-                card.spawn((
-                    Text::new(format!("{title}\n\n{body}")),
-                    TextColor(Color::WHITE),
+                card.spawn(crate::fonts::ui_text(
+                    format!("{title}\n\n{body}"),
+                    crate::theme::type_scale::BODY_SM,
+                    400,
+                    theme.text_dim,
+                    crate::theme::type_scale::line_height::UI,
                 ));
                 card.spawn((Node {
                     flex_direction: FlexDirection::Row,
@@ -476,22 +479,39 @@ fn spawn_dirty_close_dialog(
                             Button,
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
+                                border_radius: BorderRadius::all(Val::Px(
+                                    crate::theme::radius::CTRL,
+                                )),
                                 ..default()
                             },
                             BackgroundColor(danger),
-                            Text::new(discard_label),
-                            TextColor(Color::WHITE),
+                            crate::fonts::ui_text(
+                                discard_label,
+                                crate::theme::type_scale::BODY_SM,
+                                510,
+                                // st_fail 底白字（主题无 fail_text 令牌，语义=accent_text）
+                                bevy::prelude::Color::WHITE,
+                                crate::theme::type_scale::line_height::UI,
+                            ),
                             DirtyCloseDiscardMarker,
                         ));
                         btns.spawn((
                             Button,
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
+                                border_radius: BorderRadius::all(Val::Px(
+                                    crate::theme::radius::CTRL,
+                                )),
                                 ..default()
                             },
                             BackgroundColor(accent),
-                            Text::new(cancel_label),
-                            TextColor(Color::WHITE),
+                            crate::fonts::ui_text(
+                                cancel_label,
+                                crate::theme::type_scale::BODY_SM,
+                                510,
+                                theme.accent_text,
+                                crate::theme::type_scale::line_height::UI,
+                            ),
                             DirtyCloseCancelMarker,
                         ));
                     });
