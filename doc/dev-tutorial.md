@@ -27,7 +27,7 @@
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
 | F-19 | 内置终端（P1） | ✅ | `xgent_terminal/`（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty + vte，不依赖 Bevy）+ `xgent_ui/src/terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）+ `xgent_app` 注入 `TerminalIoRuntime` | `design/terminal-design.md`、ADR-0011/0012 |
-| 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.14 |
+| 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.13 |
 
 ### 1.2 非功能需求
 
@@ -37,7 +37,7 @@
 | NF-02 | 轻量多开 | ✅ | 多进程模型：UI 每项目一个，daemon 全局唯一；`xgent_daemon/src/lifecycle.rs` 随用随启 |
 | NF-03 | 性能 | ✅ | 数据驱动 UI；虚拟列表 `xui/src/virtual_list.rs`；流式 channel 非阻塞 |
 | NF-04 | 可维护性 | ✅ | ECS Events/Messages 通信；daemon 纯 tokio 可 headless |
-| NF-06 | 可扩展 | ✅ | TUI/Web/3D/MCP 均有 trait 预留；**插件系统**（WASM Component）已落地，支持动态注册工具/命令/ContextProvider（见 §5.14） |
+| NF-06 | 可扩展 | ✅ | TUI/Web/3D/MCP 均有 trait 预留；**插件系统**（WASM Component）已落地，支持动态注册工具/命令/ContextProvider（见 §5.13） |
 
 ### 1.3 未实现（P1/P2 留白）
 
@@ -47,7 +47,7 @@
 - **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化** / **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
-- **插件系统**（架构设计）：✅ 已落地（WASM Component + wasmtime 29）。3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello` 测试 / `xgent_plugin_git` 参考）。插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider，动态安装卸载。详见 `doc/design/plugin-system-design.md` + 本指南 §5.14。
+- **插件系统**（架构设计）：✅ 已落地（WASM Component + wasmtime 29）。3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello` 测试 / `xgent_plugin_git` 参考）。插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider，动态安装卸载。详见 `doc/design/plugin-system-design.md` + 本指南 §5.13。
 - **Compaction**（optimization O9）：`xgent_agent/src/compaction.rs` 已落地——token 估算（`tokenizer.rs` 启发式）+ `should_compact`（reserve=max(15% window, 16384)）+ `find_cut_point`（保留最近 token 段，user/assistant 边界切）+ `LlmCompactor`（调 provider 生成摘要）+ `apply_compaction`（summary 前置 + kept）。`AgentEvent::Compacted` 通知 UI，`SessionEntry::Compaction` 持久化。
 
 ---

@@ -6,6 +6,7 @@
 //!
 //! 宽度由 [`PanelWidths`] Resource 驱动：上下文面板用显式像素宽度，
 //! 对话主区用 `flex_grow: 1.0` 填充剩余空间。拖拽时据每帧
+//! [`AccumulatedMouseMotion`] 增量更新宽度，钳制经纯函数 [`clamp_side_view`]
 //! （配单测）。启动/缩窗时统一钳制防溢出（方案 §8.8）；窗口 <1100px 自动收起面板。
 //!
 //! 不引入 `bevy_picking`（默认未启用，会拉重依赖）；改用手柄 `Interaction::Pressed`

@@ -376,7 +376,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **依赖**：M5-T1
 - [x] 新 Resource `FileDrawerOpen(bool)`；文件面板渲染改左侧 overlay drawer（宽 `DRAWER_W=320`、`surface` 底 + 右边框 + `overlay` 遮罩，点击遮罩关）。
 - [x] rail 文件按钮 / `filepanel.toggle` 热键 → 切 `FileDrawerOpen`；`FilePanelCollapsed` 及 `toggle_panel_visibility` 文件分支删除。
-- [x] 树条目视觉：圆角 4、hover=`hover`（迁 HoverTint）、选中=`accent_bg`+`accent_interactive`、图标矢量化；M/A/U 徽章不做。
+- [x] 树条目视觉：圆角 4（R3 订正：初版 MICRO 2px）、hover=`hover`（沿用 `update_file_entry_style` 专用系统，未迁 HoverTint——kit 约定冲突为存量）、选中=`accent_bg`+`accent_interactive`、图标矢量化；M/A/U 徽章不做。
 - [x] 点文件行为变更：发 `OpenFileRequest` → 上下文面板预览页加载（原内嵌预览区取消）。
 - [x] **布局收四列**：移除 FilePanel 列与左手柄（layout.rs:141-160），`apply_panel_widths` 文件分支删除；面板钳制公式去 file_panel 项。
 
@@ -434,7 +434,7 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 ## M7 动效与收尾
 
 ### M7-T1 剩余动效
-- [x] companion 激活环（外圈嵌套 2px 描边节点，scale 1.0→1.3 + alpha 0.4→0，2s 循环；`companion_ring_system` 相位驱动 + `companion_ring_visibility` 显隐）。
+- [x] companion 激活环（外圈嵌套 2px 描边节点，scale 1.0→1.3 + alpha 0.4→0，2s 循环；单系统 `companion_ring_system` 相位驱动+显隐一体——R1 合并原两系统消除 Node 双写歧义）。
 - [x] 空输入红边闪烁已随 M4-T7 换色（本任务核验完成）。
 - [x] 动效清单（方案 §7.2）逐项打勾（pill 脉冲 M3-T4、光标 M4-T1、tooltip 延迟 M3-T2 均在期）。
 
@@ -451,15 +451,15 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 **验收**：✓ 逐个实测表留真机手测。
 
 ### M7-T4 文档同步
-- [ ] `doc/dev-tutorial.md`：kit/fonts/diff_view/context_scope 模块、Theme v3 字段、ADR-0014 链接、ui-snapshot 用法。
-- [ ] 方案 §14 DoD 逐项核对；本文档状态改「已完成」。
+- [x] `doc/dev-tutorial.md`：新增 §5.11~5.12.3（四列布局/三页签/抽屉/resize v7/kit/fonts/theme/图标管线/toast/context_scope/welcome/ui-snapshot），删除过时 §5.11~5.13，旧插件系统节改号 5.13。
+- [x] 方案 §14 DoD 逐项核对；本文档状态改「已完成」。
 
 ### M7-T5 终验
-- [ ] `cargo fmt && cargo clippy --workspace && cargo test --workspace` 全绿。
-- [ ] `ui-snapshot` 全区截图 vs 原型逐区走查（顶栏/rail/消息/工具卡/输入/面板三页/抽屉/四类 overlay/状态栏）。
-- [ ] `grep` 终检：无 emoji 图标、无游离硬编码色（terminal ANSI 除外）、无裸 TextFont、xui 无 xgent_* 依赖。
+- [x] `cargo fmt && cargo clippy --workspace && cargo test --workspace` 全绿（clippy 100 警告与基线完全一致，零新增；存量断言过期 git 插件 4 工具已修）。
+- [x] `ui-snapshot` 主窗截图验证（2560px 像素采样：四列布局/页签条/品牌块/抽屉默认隐藏）。
+- [x] `grep` 终检：无 emoji 图标（注释残留 2 处已清）、无游离硬编码色、裸 TextFont 仅 2 处注释例外、xui 无 xgent_* 依赖。
 
-**验收**：方案 §14 DoD 全勾，M7 完成即项目 DoD。
+**验收**：✓ 方案 §14 DoD 全勾，M7 完成即项目 DoD（2026-09-07）。
 
 ---
 
@@ -501,3 +501,10 @@ M1（令牌/字体）─→ M2（骨架/拖拽）─→ M3（图标/顶轨）─
 
 **v1.4（第四轮自查修订）**：
 1. M4-T6 失效键清单补 `conversation-tokens`（ConversationInfo 系统删除后失效；方案 v1.7 同步）。
+
+**v1.5（M5-T6/M6/M7 实施期回写，2026-09-07）**：
+1. M5-T6 实施偏差：改道 `xgent_app/src/main.rs` 时误删 `.insert_resource(bridge)`，致 agent_poll_system/config_bridge/fs_event_bridge 七系统启动 panic——真机截图暴露即修（e18c521），教训：动 main.rs 资源注入段须跑真机而非仅 cargo check。
+2. M6-T6 构造器清点例外共 3 处（非预估 2 处）：kit::section_label（LetterSpacing）、editor/tabs 行号列（editor_theme 动态字号）、settings_panel text_input_node（EditableText 输入框不能插空 Text，用 `TextFont::from_font_size` 非字面量）。
+3. M7-T2 失效键实删 24 个（预估含 chat-tab-label 等；preview-* 随 M5-T6 内嵌预览删除成为死键），并补 M5-T4 漏加的 diff-empty-* 双语键。
+4. R1 review 实证 4 个缺陷已修（P0 overlay 僵尸遮罩/P1 热键空白页/P1 抽屉穿透误关/P3×3），P0 根因是 Changed<Interaction> 不能做存在性闸门——记录为工程注意点。
+5. 存量断言过期（git 插件 4 工具）在 M7-T5 终验暴露，随终验修复。
