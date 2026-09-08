@@ -11,6 +11,7 @@ pub mod chat_panel;
 pub mod command_palette;
 pub mod confirm_dialog;
 pub mod context_scope;
+pub mod cursor;
 pub mod diff;
 pub mod editor;
 pub mod file_panel;
@@ -52,6 +53,7 @@ impl Plugin for XgentUiPlugin {
             settings_panel::SettingsPanelPlugin,
         ))
         .add_plugins((
+            cursor::CursorStylePlugin,
             session_history::SessionHistoryPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,

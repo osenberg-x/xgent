@@ -316,6 +316,9 @@ pub fn handle_open_file_requests(
                         path: req.path.clone(),
                         line: req.line,
                     },
+                    // 编辑区 → 竖线 I-beam 指针
+                    crate::cursor::CursorStyle::Text,
+                    crate::cursor::CursorHit::default(),
                 ))
                 .with_children(|p| {
                     // 虚拟化占位节点：高度 = 行数 × 行高（撑出滚动范围）

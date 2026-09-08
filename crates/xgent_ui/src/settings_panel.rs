@@ -427,6 +427,9 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
         BorderColor::all(theme.border),
         TextFont::from_font_size(font),
         marker,
+        // 文本输入 → 竖线 I-beam 指针
+        crate::cursor::CursorStyle::Text,
+        crate::cursor::CursorHit::default(),
         EditableText::default(),
     )
 }

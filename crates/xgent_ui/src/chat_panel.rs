@@ -201,6 +201,9 @@ pub(crate) fn spawn_chat_panel(
             AutoFocus,
             ChatInputMarker,
             ChatInputBorderMarker,
+            // 文本输入 → 竖线 I-beam 指针
+            crate::cursor::CursorStyle::Text,
+            crate::cursor::CursorHit::default(),
         ))
         .id();
 

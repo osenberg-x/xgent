@@ -171,6 +171,9 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                         ChatInput::single_line(),
                         AutoFocus,
                         PaletteInputMarker,
+                        // 文本输入 → 竖线 I-beam 指针
+                        crate::cursor::CursorStyle::Text,
+                        crate::cursor::CursorHit::default(),
                     ));
                     // 命令列表
                     panel.spawn((

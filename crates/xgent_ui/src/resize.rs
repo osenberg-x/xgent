@@ -104,6 +104,9 @@ pub fn handle_bundle(edge: ResizeEdge) -> impl Bundle {
         BorderColor::all(Color::NONE),
         Button,
         ResizeEdgeMarker(edge),
+        // 拖拽手柄 → 左右箭头指针
+        crate::cursor::CursorStyle::EwResize,
+        crate::cursor::CursorHit::default(),
     )
 }
 
