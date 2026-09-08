@@ -78,6 +78,10 @@ pub struct TerminalOutputMarker;
 #[derive(Component, Default)]
 pub struct TerminalInputMarker;
 
+/// 终端输入行块状光标标记（1s 周期闪烁）。
+#[derive(Component, Default)]
+pub struct TerminalInputCaretMarker;
+
 /// 终端状态栏标记（tv-statusbar，显示运行状态/shell/cwd）。
 #[derive(Component, Default)]
 pub struct TerminalStatusBarMarker;
@@ -231,6 +235,7 @@ impl Plugin for TerminalPlugin {
                     output::update_status_bar,
                     handle_close_button,
                     handle_new_tab_button,
+                    input::update_input_caret,
                 )
                     .chain(),
             );
@@ -365,6 +370,7 @@ fn spawn_terminal_view(
                 StickToBottom::default(),
                 BackgroundColor(theme.bg),
                 TerminalOutputMarker,
+                output::RenderedCursor::default(),
             ));
 
             // tv-inputline：行编辑输入框
@@ -406,6 +412,17 @@ fn spawn_terminal_view(
                         type_scale::line_height::TERM,
                     ),
                     TerminalInputMarker,
+                ));
+                // 块状光标（1s 周期闪烁；终端激活时才显示，见 caret 系统）
+                line.spawn((
+                    mono_text(
+                        &fonts,
+                        "\u{2588}",
+                        type_scale::BODY,
+                        theme.accent_interactive,
+                        type_scale::line_height::TERM,
+                    ),
+                    TerminalInputCaretMarker,
                 ));
             });
 
@@ -499,7 +516,7 @@ fn handle_new_tab_button(
             let cwd = project_root
                 .as_deref()
                 .map(|r| r.path.clone())
-                .unwrap_or_else(|| std::env::temp_dir());
+                .unwrap_or_else(std::env::temp_dir);
             writer.write(tabs::SpawnTabRequest { cwd });
         }
     }

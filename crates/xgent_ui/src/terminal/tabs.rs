@@ -62,6 +62,7 @@ pub fn handle_spawn_tab_requests(
         return;
     };
     for req in reader.read() {
+        tracing::debug!(cwd = %req.cwd.display(), "收到终端 tab spawn 请求");
         tabs.next_seq = tabs.next_seq.saturating_add(1);
         let seq = tabs.next_seq;
         // 单一 shell 来源：从 SpawnRequest 取，避免 statusbar 标签与实际 spawn 不一致

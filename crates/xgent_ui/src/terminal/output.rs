@@ -69,114 +69,159 @@ pub fn append_output_chunks(
     }
 }
 
-/// 重建激活 tab 的输出节点：despawn 旧行 + spawn 新行。
+/// 已渲染到的行游标（挂于输出容器，增量渲染：只追加新行，不全量重建）。
 ///
-/// MVP 非虚拟滚动——直接渲染所有行。行数大时（>1k）可能卡顿，虚拟化留后续
-/// （对齐 chat_panel 的 VirtualList 接入策略）。
-pub fn update_output_visibility(
-    tabs: Res<TerminalTabs>,
-    q_hist: Query<&RenderHistory>,
-    q_hist_changed: Query<&RenderHistory, Changed<RenderHistory>>,
-    q_output: Query<Entity, With<crate::terminal::TerminalOutputMarker>>,
-    theme: Res<Theme>,
-    mut commands: Commands,
-    q_line_children: Query<(Entity, &ChildOf), With<OutputLineMarker>>,
-    fonts: Res<UiFonts>,
-) {
-    let Ok(output_container) = q_output.single() else {
-        return;
-    };
-    let Some(active) = tabs.active_entity() else {
-        // 无 tab：清空容器
-        for (entity, _) in q_line_children.iter() {
-            commands.entity(entity).despawn();
-        }
-        return;
-    };
-    let Ok(hist) = q_hist.get(active) else {
-        return;
-    };
-    // 历史变化或激活 tab 切换时重建
-    let hist_changed = q_hist_changed.get(active).is_ok();
-    if !hist_changed && !tabs.is_changed() {
-        return;
-    }
-    // despawn 旧行
-    for (entity, _) in q_line_children.iter() {
-        commands.entity(entity).despawn();
-    }
-    let font = theme.font_size;
-    commands.entity(output_container).with_children(|c| {
-        for line in &hist.lines {
-            if line.spans.is_empty() {
-                c.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: px(font * 1.4),
-                        ..default()
-                    },
-                    OutputLineMarker,
-                ));
-                continue;
-            }
-            c.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    ..default()
-                },
-                OutputLineMarker,
-            ))
-            .with_children(|row| {
-                for span in &line.spans {
-                    row.spawn((
-                        mono_text(
-                            &fonts,
-                            span.text.clone(),
-                            type_scale::MONO,
-                            map_color(span.style.fg, &theme),
-                            type_scale::line_height::TERM,
-                        ),
-                        OutputSpanMarker,
-                    ));
-                }
-            });
-        }
-        // 追加渲染未结束的当前行（PTY 正在输出的行，无尾随 \n）。
-        // shell prompt 行和正在输入的命令行都属于此——不渲染则用户看不到。
-        let current = hist.parser.current_line();
-        if !current.spans.is_empty() {
-            c.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    ..default()
-                },
-                OutputLineMarker,
-            ))
-            .with_children(|row| {
-                for span in &current.spans {
-                    row.spawn((
-                        mono_text(
-                            &fonts,
-                            span.text.clone(),
-                            type_scale::MONO,
-                            map_color(span.style.fg, &theme),
-                            type_scale::line_height::TERM,
-                        ),
-                        OutputSpanMarker,
-                    ));
-                }
-            });
-        }
-    });
+/// 切 tab / 清屏时重置为 0 并清空容器（全量重建仅这两条路径）。
+#[derive(Component, Debug, Default)]
+pub struct RenderedCursor {
+    /// 已渲染的 `hist.lines` 行数。
+    pub lines: usize,
+    /// 已渲染的 current_line 版本（内容串签名，检测 prompt/输入行变化）。
+    pub current_sig: u64,
 }
 
 /// 单行输出节点标记（用于 despawn 重建）。
 #[derive(Component, Default)]
 pub struct OutputLineMarker;
+
+/// 当前未 flush 行（prompt / 正在输入的命令行）节点标记——每次内容变化
+/// 整行 despawn 重 spawn，保证 shell 回显实时可见。
+#[derive(Component, Default)]
+pub struct OutputCurrentMarker;
+
+/// 渲染一行（空行占位 或 span 行）。
+///
+/// `is_current` 为 true 时额外挂 [`OutputCurrentMarker`]（current 行定位用）。
+fn spawn_line(
+    c: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    line: &RenderLine,
+    font: f32,
+    theme: &Theme,
+    fonts: &UiFonts,
+    is_current: bool,
+) {
+    let mut e = c.spawn((Node {
+        width: Val::Percent(100.0),
+        height: if line.spans.is_empty() {
+            px(font * 1.4)
+        } else {
+            Val::Auto
+        },
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::Wrap,
+        ..default()
+    },));
+    e.insert(OutputLineMarker);
+    if is_current {
+        e.insert(OutputCurrentMarker);
+    }
+    if line.spans.is_empty() {
+        return;
+    }
+    e.with_children(|row| {
+        for span in &line.spans {
+            row.spawn((
+                mono_text(
+                    fonts,
+                    span.text.clone(),
+                    type_scale::MONO,
+                    map_color(span.style.fg, theme),
+                    type_scale::line_height::TERM,
+                ),
+                OutputSpanMarker,
+            ));
+        }
+    });
+}
+
+/// 增量渲染激活 tab 的输出（R-终端 修复：替代原全量重建）。
+///
+/// 原实现每次 `RenderHistory` 变化就全量 despawn+respawn 所有行，且
+/// `current_line`（未 flush 的 prompt/输入行）的内容变化**不触发**
+/// `RenderHistory` change detection——首次唤起时 PTY 横幅已在后台到达并
+/// 渲染，但 prompt 行永远停留在首帧状态，视觉上「tty 没有显示」；而旧
+/// 实现对 `tabs.is_changed()` 也全量重建，与流式输出交叠时产生行重复。
+///
+/// 新策略：
+/// - 常态只追加 `hist.lines[rendered..]` 新行 + 重渲 current 行（签名变化时）；
+/// - 全量重建仅发生在 tab 切换 / 清屏（游标重置）；
+/// - current 行单独用一个节点（`OutputCurrentMarker`），每次签名变化 despawn
+///   重 spawn——prompt/输入行始终实时。
+pub fn update_output_visibility(
+    tabs: Res<TerminalTabs>,
+    q_hist: Query<(&RenderHistory, &TerminalTab)>,
+    mut q_output: Query<(Entity, &mut RenderedCursor), With<crate::terminal::TerminalOutputMarker>>,
+    q_current_node: Query<Entity, With<OutputCurrentMarker>>,
+    theme: Res<Theme>,
+    fonts: Res<UiFonts>,
+    mut commands: Commands,
+    q_line_children: Query<Entity, With<OutputLineMarker>>,
+) {
+    let Ok((output_container, mut cursor)) = q_output.single_mut() else {
+        return;
+    };
+    let Some(active) = tabs.active_entity() else {
+        // 无 tab：清空容器 + 游标归零
+        for entity in q_line_children.iter() {
+            commands.entity(entity).despawn();
+        }
+        for entity in q_current_node.iter() {
+            commands.entity(entity).despawn();
+        }
+        cursor.lines = 0;
+        cursor.current_sig = 0;
+        return;
+    };
+    let Ok((hist, tab)) = q_hist.get(active) else {
+        return;
+    };
+
+    // tab 切换 / 清屏（游标 > 当前行数 = 行被清掉）→ 全量重建
+    let full_rebuild = cursor.lines > hist.lines.len() || tabs.is_changed();
+    if full_rebuild {
+        for entity in q_line_children.iter() {
+            commands.entity(entity).despawn();
+        }
+        for entity in q_current_node.iter() {
+            commands.entity(entity).despawn();
+        }
+        cursor.lines = 0;
+        cursor.current_sig = 0;
+    }
+
+    let font = theme.font_size;
+    // 追加新增的完整行
+    if cursor.lines < hist.lines.len() {
+        let start = cursor.lines;
+        commands.entity(output_container).with_children(|c| {
+            for line in &hist.lines[start..] {
+                spawn_line(c, line, font, &theme, &fonts, false);
+            }
+        });
+        cursor.lines = hist.lines.len();
+    }
+
+    // current 行（prompt / 正在输入的命令，未 flush 进 lines）：
+    // 内容签名变化 → despawn 旧行重 spawn，保证始终实时显示
+    let current = hist.parser.current_line();
+    let mut hasher = std::hash::DefaultHasher::new();
+    for span in &current.spans {
+        std::hash::Hash::hash(&span.text, &mut hasher);
+    }
+    std::hash::Hash::hash(&current.spans.len(), &mut hasher);
+    let sig = std::hash::Hasher::finish(&hasher);
+    if sig != cursor.current_sig {
+        for entity in q_current_node.iter() {
+            commands.entity(entity).despawn();
+        }
+        if !current.spans.is_empty() {
+            commands.entity(output_container).with_children(|c| {
+                spawn_line(c, &current, font, &theme, &fonts, true);
+            });
+        }
+        cursor.current_sig = sig;
+    }
+}
 
 /// 单 span 标记。
 #[derive(Component, Default)]
@@ -356,4 +401,68 @@ pub fn handle_terminal_resize(
         cols,
         rows,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// R-终端 回归：current 行内容变化必须反映到渲染签名。
+    ///
+    /// 旧实现仅据 `RenderHistory`（lines）change detection 重建，prompt 行
+    /// （存在于 parser.current_line，未 flush 进 lines）永远停留在首帧——
+    /// 首次唤起时 tty 「没有显示」的根因。新实现以内容签名驱动 current 行重渲。
+    #[test]
+    fn current_line_signature_tracks_content() {
+        let mut hist = RenderHistory::default();
+        // 首帧：PTY 输出 "user@host ~ "（prompt，无尾随 \n → 留在 current）
+        hist.feed(b"user@host ~ ");
+        let sig1 = {
+            let current = hist.parser.current_line();
+            let mut hasher = std::hash::DefaultHasher::new();
+            for span in &current.spans {
+                std::hash::Hash::hash(&span.text, &mut hasher);
+            }
+            std::hash::Hash::hash(&current.spans.len(), &mut hasher);
+            std::hash::Hasher::finish(&hasher)
+        };
+        // 用户输入 "ls"（回显进 current，仍无 \n）
+        hist.feed(b"ls");
+        let sig2 = {
+            let current = hist.parser.current_line();
+            let mut hasher = std::hash::DefaultHasher::new();
+            for span in &current.spans {
+                std::hash::Hash::hash(&span.text, &mut hasher);
+            }
+            std::hash::Hash::hash(&current.spans.len(), &mut hasher);
+            std::hash::Hasher::finish(&hasher)
+        };
+        assert_ne!(sig1, sig2, "current 行内容变化应改变签名（触发重渲）");
+
+        // 回车后 prompt 行 flush 进 lines：lines 增长 → 增量追加路径触发
+        hist.feed(b"\n");
+        assert_eq!(hist.lines.len(), 1, "回车后 current 行应 flush 为完整行");
+        assert!(hist.lines[0].plain_text().contains("ls"));
+    }
+
+    /// 增量游标契约：RenderedCursor 记录已渲染行数，新行只追加不重建。
+    #[test]
+    fn rendered_cursor_appends_without_rebuild() {
+        let mut cursor = RenderedCursor::default();
+        let mut hist = RenderHistory::default();
+        hist.feed(b"line1\nline2\n");
+        assert_eq!(hist.lines.len(), 2);
+
+        // 首次渲染：游标 0 → 2
+        cursor.lines = hist.lines.len();
+        // 又来一行：只追加 1 行（游标差 = 新增行数，非全量）
+        hist.feed(b"line3\n");
+        let appended = hist.lines.len() - cursor.lines;
+        assert_eq!(appended, 1, "增量渲染应只追加新行");
+        cursor.lines = hist.lines.len();
+
+        // 清屏：lines 清空 → 游标 > 行数 → 全量重建分支（游标归零）
+        hist.clear();
+        assert!(cursor.lines > hist.lines.len(), "清屏应触发全量重建分支");
+    }
 }

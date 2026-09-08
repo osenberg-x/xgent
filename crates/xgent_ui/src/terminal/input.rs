@@ -15,8 +15,8 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 
 use crate::editor::SideViewContent;
-use crate::terminal::TerminalTabs;
 use crate::terminal::io::TerminalInput;
+use crate::terminal::{TerminalInputCaretMarker, TerminalTab, TerminalTabStatus, TerminalTabs};
 
 /// 终端键盘透传处理：终端视图激活且无输入框聚焦时捕获 `KeyboardInput` 事件，
 /// 把按键转为原始字节直接发 [`TerminalInput`]（经 `handle_terminal_input` 送 PTY）。
@@ -164,6 +164,35 @@ pub fn handle_terminal_keyboard(
                     }
                 }
             }
+        }
+    }
+}
+
+/// 终端输入行块状光标闪烁（1s 周期：0.5s 显 / 0.5s 隐）。
+///
+/// 终端视图激活（`SideViewContent::Terminal`）且激活 tab 处于 Running 态时
+/// 显示闪烁；非激活视图 / tab 退出（shell 结束，无输入意义）时隐藏。
+/// 用 `Text` 内容切换（block 字符显隐）而非 `Display`——保持行内布局占位稳定。
+pub fn update_input_caret(
+    content: Res<SideViewContent>,
+    tabs: Res<TerminalTabs>,
+    q_tabs: Query<&TerminalTab>,
+    time: Res<Time>,
+    mut q_caret: Query<&mut Text, With<TerminalInputCaretMarker>>,
+) {
+    let active = *content == SideViewContent::Terminal
+        && tabs
+            .active_entity()
+            .and_then(|e| q_tabs.get(e).ok())
+            .is_some_and(|t| t.status == TerminalTabStatus::Running);
+    let want = if active && (time.elapsed().as_secs_f64() % 1.0) < 0.5 {
+        "\u{2588}"
+    } else {
+        ""
+    };
+    for mut text in q_caret.iter_mut() {
+        if text.0 != want {
+            text.0 = want.to_string();
         }
     }
 }
