@@ -103,6 +103,7 @@ pub fn handle_close_tab_requests(
     rt: Res<TerminalIoRuntime>,
     q_tabs: Query<&TerminalTab>,
     mut content: ResMut<SideViewContent>,
+    mut line_buf: ResMut<crate::terminal::input::TerminalLineBuf>,
     mut commands: Commands,
 ) {
     let (handle_opt, backend_opt) = (rt.handle.as_ref(), rt.backend.as_ref());
@@ -118,6 +119,7 @@ pub fn handle_close_tab_requests(
             }
         }
         if let Some((entity, _)) = tabs.close(req.tab) {
+            line_buf.clear();
             commands.entity(entity).despawn();
             // 关闭后无剩余标签 → 收起分屏（仅在真正关闭一个 tab 时触发，
             // 不能放在循环外每帧检查，否则 TerminalTabs 默认空时会持续
@@ -133,10 +135,14 @@ pub fn handle_close_tab_requests(
 pub fn handle_switch_tab_requests(
     mut reader: MessageReader<SwitchTabRequest>,
     mut tabs: ResMut<TerminalTabs>,
+    mut line_buf: ResMut<crate::terminal::input::TerminalLineBuf>,
 ) {
     for req in reader.read() {
         if let Some(idx) = tabs.tabs.iter().position(|&e| e == req.tab) {
             tabs.active = Some(idx);
+            // 切 tab：本地输入行清空（buffer 是全局的，非 per-tab——MVP 简化，
+            // 未提交的输入不跨 tab 保留）
+            line_buf.clear();
         }
     }
 }

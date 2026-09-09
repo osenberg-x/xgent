@@ -208,6 +208,7 @@ impl Plugin for TerminalPlugin {
             .add_message::<io::TerminalExited>()
             .init_resource::<TerminalTabs>()
             .init_resource::<TerminalIoRuntime>()
+            .init_resource::<input::TerminalLineBuf>()
             .init_resource::<output::TerminalResizeTracker>()
             .insert_resource(bridge_tx)
             .insert_resource(bridge_rx)
@@ -231,6 +232,8 @@ impl Plugin for TerminalPlugin {
                     apply_terminal_view_visibility,
                     tabs::rebuild_terminal_tabs,
                     input::handle_terminal_keyboard,
+                    input::update_input_line,
+                    input::update_input_after,
                     output::update_output_visibility,
                     output::update_status_bar,
                     handle_close_button,
@@ -397,13 +400,8 @@ fn spawn_terminal_view(
                     theme.accent,
                     type_scale::line_height::TERM,
                 ),));
-                // 输入文本节点（由 input 模块更新内容）
+                // 输入文本节点（光标前部分，input 模块本地行编辑更新）
                 line.spawn((
-                    Node {
-                        flex_grow: 1.0,
-                        min_width: Val::ZERO,
-                        ..default()
-                    },
                     mono_text(
                         &fonts,
                         "",
@@ -413,7 +411,8 @@ fn spawn_terminal_view(
                     ),
                     TerminalInputMarker,
                 ));
-                // 块状光标（1s 周期闪烁；终端激活时才显示，见 caret 系统）
+                // 块状光标（accent_interactive，1s 周期闪烁；随输入右移——
+                // 其左侧文本节点增长把它推后，天然随字符宽度移动）
                 line.spawn((
                     mono_text(
                         &fonts,
@@ -423,6 +422,17 @@ fn spawn_terminal_view(
                         type_scale::line_height::TERM,
                     ),
                     TerminalInputCaretMarker,
+                ));
+                // 光标后文本节点（光标在行中编辑时显示右侧内容）
+                line.spawn((
+                    mono_text(
+                        &fonts,
+                        "",
+                        type_scale::BODY,
+                        theme.text,
+                        type_scale::line_height::TERM,
+                    ),
+                    input::TerminalInputAfterMarker,
                 ));
             });
 

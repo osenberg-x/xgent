@@ -340,9 +340,16 @@ impl TerminalBackend for LocalPtyBackend {
 
 /// 据 [`ShellSpec`] 构造 shell 命令。
 fn build_shell_command(shell: ShellSpec, cwd: &PathBuf) -> CommandBuilder {
+    // 显式 exe 启动（非 new_default_prog）：portable-pty 的 default_prog 会以
+    // argv0 前缀 `-` 把 shell 起成 **login shell**，zsh/bash 每次启动都打印
+    // "Last login: ..." + MOTD——多 tab 场景每个新 tab 都弹三行横幅。
+    // 非交互式读取 $SHELL 显式启动，无 login 横幅，跨 tab 干净一致。
     let mut cmd = match shell {
         ShellSpec::Powershell => CommandBuilder::new("powershell.exe"),
-        ShellSpec::FromEnv => CommandBuilder::new_default_prog(),
+        ShellSpec::FromEnv => {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            CommandBuilder::new(shell)
+        }
     };
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
