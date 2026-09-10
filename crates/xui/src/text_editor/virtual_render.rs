@@ -26,7 +26,7 @@ use crate::text_editor::TextEditor;
 use crate::text_editor::highlight::{HighlightSpan, spans_for_line};
 use crate::text_editor::render::EditorTheme;
 use bevy::prelude::*;
-use bevy::text::LineHeight;
+use bevy::text::{LineBreak, LineHeight, TextLayout};
 
 /// 滚动内容占位节点标记（撑高滚动范围，其下挂可见行 Text 节点）。
 #[derive(Component, Default)]
@@ -159,6 +159,12 @@ pub fn update_virtual_lines(
                             ..default()
                         },
                         Text::new(String::new()),
+                        // NoWrap：虚拟化数学的前提是「一逻辑行 = 一视觉行 =
+                        // line_height 像素」。默认 LineBreak::WordBoundary 软换行
+                        // 把长逻辑行折成多个视觉行，内容总高 > 占位高度，
+                        // 行号列（每逻辑行一个号）对不上内容——"尾部内容没有
+                        // 行号"的根因。超宽行由 buffer 容器 overflow:Hidden 裁剪。
+                        TextLayout::linebreak(LineBreak::NoWrap),
                         TextFont {
                             font_size: FontSize::Px(theme.font_size),
                             ..default()
@@ -241,6 +247,7 @@ pub fn update_virtual_lines(
                 &theme,
                 theme.text,
                 FontSize::Px(theme.font_size),
+                line_height,
             );
         }
     }
@@ -251,6 +258,10 @@ pub fn update_virtual_lines(
 /// 把 rope 的 `[start, end)` 行逐行调 `spans_for_line`，行间插入 `\n`，
 /// 生成 `(文本片段, SpanKind)` 序列，每个片段 spawn 为一个 TextSpan 子节点
 /// （带对应颜色）。Plain 片段用 default_color。
+///
+/// `line_height_px`：精确像素行高，写入每个 TextSpan 的 `LineHeight`。
+/// LineHeight 不从 Text 根级联到 TextSpan，必须显式传入与虚拟化数学
+/// （`TextEditor.line_height`）一致的值，否则滚动定位错位。
 fn rebuild_visible_spans(
     commands: &mut Commands,
     text_entity: Entity,
@@ -261,6 +272,7 @@ fn rebuild_visible_spans(
     theme: &EditorTheme,
     default_color: Color,
     font_size: FontSize,
+    line_height_px: f32,
 ) {
     if start >= end {
         return;
@@ -303,6 +315,11 @@ fn rebuild_visible_spans(
                         font_size,
                         ..default()
                     },
+                    // 行高必须与虚拟化数学一致（TextEditor.line_height）：
+                    // LineHeight 不从 Text 根级联到 TextSpan，Bevy 默认 1.2×字号，
+                    // 若不显式覆盖，实际渲染行高 < 占位/定位行高，滚动越深行号
+                    // 与内容错位越大——"尾部内容旁无行号"的根因。
+                    LineHeight::Px(line_height_px),
                     TextColor(c),
                 ));
             }
@@ -320,6 +337,7 @@ fn rebuild_visible_spans(
                 font_size,
                 ..default()
             },
+            LineHeight::Px(line_height_px),
             TextColor(cur_color),
         ));
     }
@@ -450,6 +468,7 @@ mod tests {
             &crate::text_editor::render::EditorTheme::default(),
             Color::WHITE,
             FontSize::Px(12.5),
+            19.0,
         );
         drop(commands);
         // app.update 让 MinimalPlugins 的 apply_deferred flush 命令
@@ -469,5 +488,103 @@ mod tests {
                 f.font_size
             );
         }
+    }
+
+    /// TextSpan 子节点必须带显式 LineHeight（与虚拟化数学一致的像素行高）。
+    ///
+    /// 修复前：TextSpan 不设 LineHeight，Bevy `#[require(LineHeight)]` 自动补
+    /// 默认 `RelativeToFont(1.2)`，实际渲染行高（1.2×字号）小于虚拟化定位行高
+    /// （`TextEditor.line_height`），滚动越深行号与内容错位越大——
+    /// "滚动到文件尾部，内容有但行号没有"的根因。
+    #[test]
+    fn rebuild_visible_spans_text_span_has_explicit_line_height() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::text_editor::render::EditorTheme>();
+        let text_entity = app.world_mut().spawn((Text::new(String::new()),)).id();
+        let rope = ropey::Rope::from_str("a\nb\nc");
+        let mut commands = app.world_mut().commands();
+        rebuild_visible_spans(
+            &mut commands,
+            text_entity,
+            &rope,
+            &[],
+            0,
+            3,
+            &crate::text_editor::render::EditorTheme::default(),
+            Color::WHITE,
+            FontSize::Px(12.5),
+            19.0,
+        );
+        drop(commands);
+        app.update();
+        // 只断言 TextSpan 子节点：根 Text 实体自身带默认 LineHeight，不参与断言
+        let mut q = app
+            .world_mut()
+            .query::<(&bevy::prelude::TextSpan, &bevy::text::LineHeight)>();
+        let mut checked = 0;
+        for (_, lh) in q.iter(app.world()) {
+            assert_eq!(
+                *lh,
+                bevy::text::LineHeight::Px(19.0),
+                "TextSpan 行高应为 Px(19.0)，实际 {lh:?}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "应至少存在一个 TextSpan 子节点");
+    }
+
+    /// 虚拟内容 Text 节点必须 NoWrap（禁软换行）。
+    ///
+    /// 修复前：Text 节点用默认 `TextLayout`（`LineBreak::WordBoundary`），长逻辑行
+    /// 被软换行折成多个视觉行，内容总高 > 占位高度（行数×line_height），
+    /// 行号列与内容错位——"长文件（如 165 行的 CONTEXT.md）尾部一大段内容
+    /// 没有行号"的根因。NoWrap 下内容 Text 的视觉行数恒等于拼接的行数。
+    #[test]
+    fn virtual_text_node_disables_soft_wrap() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::text_editor::render::EditorTheme>()
+            .add_systems(Update, update_virtual_lines);
+
+        let content = app
+            .world_mut()
+            .spawn((Node::default(), VirtualContentMarker))
+            .id();
+        let _buffer = app
+            .world_mut()
+            .spawn((
+                Node {
+                    height: Val::Percent(100.0),
+                    overflow: Overflow {
+                        x: OverflowAxis::Hidden,
+                        y: OverflowAxis::Scroll,
+                    },
+                    ..default()
+                },
+                ScrollPosition::default(),
+                crate::text_editor::TextEditor {
+                    // 超长行：软换行下会折成多个视觉行
+                    rope: ropey::Rope::from_str(&"x".repeat(2000)),
+                    ..Default::default()
+                },
+                crate::text_editor::HighlightCache::default(),
+            ))
+            .add_child(content)
+            .id();
+
+        app.update();
+        app.update();
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&TextLayout, With<VirtualTextMarker>>();
+        let layout = q.single(app.world()).expect("应存在 VirtualTextMarker");
+        assert_eq!(
+            layout.linebreak,
+            bevy::text::LineBreak::NoWrap,
+            "虚拟内容 Text 应禁软换行，实际 {:?}",
+            layout.linebreak
+        );
     }
 }

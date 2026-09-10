@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use bevy::text::LineHeight;
 
 use crate::editor::buffer::EditorBuffer;
 
@@ -266,6 +267,12 @@ pub fn handle_open_file_requests(
         } else {
             // spawn 新 buffer：滚动容器 + 虚拟化占位 + 行号列 + 光标条。
             // 文本显示走 `update_virtual_lines` 动态 spawn 可见行；
+            // 行高与 xui 虚拟化渲染同源：font_size × ratio 取整（见
+            // sync_editor_theme / update_virtual_lines）。buffer 初始 line_height
+            // 须用同值，避免首帧（update_virtual_lines 尚未写入派生值前）
+            // 虚拟化数学用旧默认 20.0 造成行号/内容错位。
+            let editor_line_height =
+                (editor_theme.font_size * editor_theme.line_height_ratio).round();
             let line_num_entity = commands
                 .spawn((
                     Text::new(String::new()),
@@ -274,6 +281,11 @@ pub fn handle_open_file_requests(
                         font_size: FontSize::Px(editor_theme.font_size),
                         ..default()
                     },
+                    // 行高与虚拟化内容一致（Px 派生值）：LineHeight 不从 Text 根
+                    // 级联，默认 1.2×字号会让行号列比正文密，滚动后与内容错位。
+                    LineHeight::Px(editor_line_height),
+                    // NoWrap 与虚拟内容一致：禁软换行，行号 ↔ 逻辑行一一对应。
+                    TextLayout::linebreak(LineBreak::NoWrap),
                     TextColor(editor_theme.text_dim),
                     xui::LineNumbersMarker,
                     Node {
@@ -305,7 +317,10 @@ pub fn handle_open_file_requests(
                     xui::ScrollArea::vertical(),
                     xui::Scrollbar::default(),
                     crate::editor::buffer::EditorBuffer::from_disk(req.path.clone(), String::new()),
-                    xui::TextEditor::default(),
+                    xui::TextEditor {
+                        line_height: editor_line_height,
+                        ..default()
+                    },
                     xui::HighlightCache::default(),
                     xui::TextEditorChildren {
                         line_numbers: Some(line_num_entity),

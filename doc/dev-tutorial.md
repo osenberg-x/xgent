@@ -426,6 +426,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - `xui::TextEditor` 是通用裸件（纯依赖 bevy + xui_i18n + tree-sitter），多标签/文件 IO/冲突协调在业务层 `xgent_ui::editor`。
 - **字号跟随主题**：`EditorTheme`（xui）的 `font_size`/`text`/`text_dim`/`line_height_ratio` 由 `xgent_ui::editor::sync_editor_theme` 系统（跑在 `xui::TextEditorUpdateSet` 前）从 `Theme` 同步——编辑器正文字号跟随 `Theme::font_size` 单一可配源（未来接入 settings 即可「跟随系统/用户偏好」调整），行高比默认 1.5（对齐 zed `buffer_line_height = comfortable`）。
 - **系统字体**：`xgent_app::startup::load_system_font` 在 Startup 加载 macOS 系统 Menlo 字体（`/System/Library/Fonts/Menlo.ttc`）覆盖 `Assets<Font>` 的 `AssetId::default()`，替代 Bevy 内置 FiraMono——Menlo 度量紧凑、抗锯齿清晰，与 zed/VSCode 视觉一致；非 macOS 静默回退 FiraMono。
+- **行高一致性（硬约束）**：编辑器虚拟化渲染（`xui::text_editor::virtual_render`）的定位数学——占位高度 `行数×line_height`、可见区间、Text 节点 `top` 偏移——全部基于 `TextEditor.line_height`（= `font_size × line_height_ratio` 取整）。Bevy 的 `LineHeight` 组件**不从 `Text` 根级联到 `TextSpan` 子节点**（每个 span 自带 required 组件，默认 `RelativeToFont(1.2)`），故虚拟内容 span 与行号列都必须**显式**写 `LineHeight::Px(line_height)`；新 spawn 的 `TextEditor` 初始 `line_height` 也要用同源派生值（见 `xgent_ui::editor::tabs`），否则滚动越深行号与内容错位越大。
 - 外部文件变更冲突：未脏静默重载 / 脏弹窗三选（丢弃本地 / 保留本地 / 对比合并）。
 
 ### 5.10 检索升级路径（ADR-0010）
