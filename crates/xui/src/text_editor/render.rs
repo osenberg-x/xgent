@@ -155,8 +155,10 @@ impl EditorTheme {
 /// 更新行号列：根据当前文本行数重建。
 ///
 /// 只在文本变化（`HighlightCache` 变）时重建。
-/// 行数从 `TextEditor.rope.len_lines()` 取，兼容编辑态（有 `EditableText`）
-/// 与虚拟化只读态（无 `EditableText`，文本在 rope 中）。
+/// 行数从 [`TextEditor::display_line_count`] 取——排除文件尾部换行产生的
+/// 幽灵空行（`"a\n"` 只显示行号 1），与虚拟化内容行数一致。
+/// 兼容编辑态（有 `EditableText`）与虚拟化只读态（无 `EditableText`，
+/// 文本在 rope 中）。
 pub fn update_line_numbers(
     q: Query<(&TextEditor, &HighlightCache, &TextEditorChildren), Changed<HighlightCache>>,
     mut q_num: Query<&mut Text, With<LineNumbersMarker>>,
@@ -168,7 +170,7 @@ pub fn update_line_numbers(
         let Ok(mut num_text) = q_num.get_mut(num_entity) else {
             continue;
         };
-        let line_count = editor.rope.len_lines().max(1);
+        let line_count = editor.display_line_count();
         let nums = (1..=line_count)
             .map(|i| format!("{i:>4}"))
             .collect::<Vec<_>>()
@@ -205,7 +207,41 @@ pub fn update_cursor_bar(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::text_editor::highlight::{SpanKind, span_color_for};
+
+    /// 行号列总数与显示行数一致：文件尾部换行不产生幽灵行号
+    /// （回归：单行文件 `"x\n"` 曾显示行号 1、2）。
+    #[test]
+    fn line_numbers_exclude_trailing_empty_line() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, update_line_numbers);
+
+        let num = app
+            .world_mut()
+            .spawn((Text::new(String::new()), LineNumbersMarker))
+            .id();
+        let _editor = app
+            .world_mut()
+            .spawn((
+                TextEditor {
+                    rope: ropey::Rope::from_str("fn main() {}\n"),
+                    ..TextEditor::readonly()
+                },
+                HighlightCache::default(),
+                TextEditorChildren {
+                    line_numbers: Some(num),
+                    ..default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let text = &app.world().entity(num).get::<Text>().unwrap().0;
+        assert_eq!(text, "   1", "单行内容+尾部换行只显示行号 1");
+    }
 
     #[test]
     fn span_color_plain_is_white() {

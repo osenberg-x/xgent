@@ -7,6 +7,9 @@
 //!
 //! 业务解耦：命令面板、快捷键只发触发事件，不执行业务逻辑，调用方订阅事件实现。
 
+// Bevy 系统签名固有的大参数量与复杂 Query/ParamSet 类型，Bevy 生态惯例整体豁免。
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod command_palette;
 pub mod hotkeys;
 pub mod i18n_bridge;
@@ -33,8 +36,8 @@ pub use text_editor::render::{
     CursorBarMarker, HighlightLayerMarker, LineNumbersMarker, TextEditorChildren,
 };
 pub use text_editor::{
-    EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope, TextEditor,
-    TextEditorPlugin, TextEditorUpdateSet,
+    EditorActive, EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope,
+    TextEditor, TextEditorPlugin, TextEditorUpdateSet,
 };
 pub use virtual_list::{VirtualItemBuilder, VirtualList, VirtualListPlugin};
 

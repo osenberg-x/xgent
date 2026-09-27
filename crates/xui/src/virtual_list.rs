@@ -79,11 +79,16 @@ pub fn compute_visible_range(
 /// 每帧读视口大小与滚动位置，更新可见区间。
 fn update_virtual_list(mut q: Query<(&mut VirtualList, &ComputedNode)>) {
     for (mut list, node) in &mut q {
+        // ComputedNode.size / scroll_position 是物理像素，item_height 是逻辑
+        // 像素，须乘 inverse_scale_factor 转换——否则 HiDPI（Retina）下
+        // first_visible 偏移约一倍、visible_count 约 2 倍，渲染错窗口的 item
+        // （同 text_editor/virtual_render.rs、scroll_area.rs 的处理）。
+        let scale = node.inverse_scale_factor();
         let (first, count) = compute_visible_range(
             list.item_count,
             list.item_height,
-            node.size.y,
-            node.scroll_position.y,
+            node.size.y * scale,
+            node.scroll_position.y * scale,
             2,
         );
         list.first_visible = first;

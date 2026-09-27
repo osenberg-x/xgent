@@ -113,12 +113,35 @@ impl TextEditor {
             ..Self::default()
         }
     }
+
+    /// 显示行数：行号列与虚拟化内容渲染的行数。
+    ///
+    /// ropey 的 [`Rope::len_lines`] = 换行数 + 1——文件以 `\n` 结尾时会把末尾
+    /// 换行之后的空行也计为一行（幽灵行）。主流编辑器（VSCode/zed）不为该
+    /// 幽灵行显示行号，故此处约定：末行为空（由尾部换行产生）时不计数，
+    /// `"a\n"` 显示 1 行、行号只到 1。空文本 `""` 仍显示 1 行。
+    ///
+    /// 注意：只影响显示，不修改 rope——光标仍可定位到幽灵行（len_lines 行）。
+    pub fn display_line_count(&self) -> usize {
+        let len = self.rope.len_lines();
+        if len > 1 && self.rope.line(len - 1).len_chars() == 0 {
+            len - 1
+        } else {
+            len
+        }
+    }
 }
 #[derive(Message)]
 pub struct EditorSaveRequested {
     /// 触发保存的编辑器实体
     pub entity: Entity,
 }
+
+/// 激活 buffer 标记：宿主（多 tab 场景）把它挂在当前激活 tab 的编辑器
+/// 实体上并随切换增删。编辑器快捷键（Cmd+S/Z/F/H）只作用于带此标记的
+/// buffer——否则 Cmd+S 会保存所有打开的 tab。
+#[derive(Component, Default)]
+pub struct EditorActive;
 
 /// 编辑器脏标志变化（dirty true→false 或 false→true）。
 #[derive(Message)]
@@ -164,8 +187,14 @@ impl Plugin for TextEditorPlugin {
 ///
 /// MVP 简化：仅响应 `Cmd/Ctrl+` 组合键（字母键单按由 EditableText 处理）。
 /// undo/redo 从 [`UndoStack`] 取快照恢复文本。
+///
+/// 只处理带 [`EditorActive`] 标记的 buffer（宿主负责标注当前激活 tab）：
+/// 否则 Cmd+S 会保存所有打开的 buffer，Cmd+Z 作用于非激活 buffer。
+///
+/// Cmd+S 只发保存请求，不乐观清脏——写成功由宿主的 save-result 路径
+/// 回写 dirty=false，写失败保持脏标记（界面与磁盘一致）。
 pub fn handle_editor_keys(
-    mut q: Query<(Entity, &mut TextEditor, &mut HighlightCache)>,
+    mut q: Query<(Entity, &mut TextEditor, &mut HighlightCache), With<EditorActive>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut save_writer: MessageWriter<EditorSaveRequested>,
     mut dirty_writer: MessageWriter<EditorDirtyChanged>,
@@ -179,16 +208,9 @@ pub fn handle_editor_keys(
         if editor.readonly {
             continue;
         }
-        // Cmd+S：保存
+        // Cmd+S：保存（非乐观清脏，见函数文档）
         if keys.just_pressed(K::KeyS) {
             save_writer.write(EditorSaveRequested { entity });
-            if editor.dirty {
-                editor.dirty = false;
-                dirty_writer.write(EditorDirtyChanged {
-                    entity,
-                    dirty: false,
-                });
-            }
             continue;
         }
         // Cmd+Z / Cmd+Shift+Z：undo / redo（恢复 rope + 清 cache 触发重解析）
@@ -238,21 +260,29 @@ pub fn update_syntax_highlight(
     )>,
 ) {
     for (mut editor, mut cache, editable) in q.iter_mut() {
-        // 文本源：有 EditableText 从它同步；无则用 rope 当前内容
-        let text_owned: Option<String> = editable.map(|e| e.value().to_string());
-        let cur_hash = match &text_owned {
-            Some(t) => hash_text(t),
-            None => hash_text(&editor.rope.to_string()),
+        // 文本源：有 EditableText 从它同步；无则用 rope 当前内容。
+        //
+        // rope 分支逐 chunk 哈希（等价于对拼接全文哈希）：此前每帧
+        // `rope.to_string()` 做全量分配+拷贝只为算一个"内容没变"的哈希，
+        // 大文件 × 每帧 × 每个打开的 tab 开销显著。两分支各自内部一致
+        // （同一 buffer 不切换文本源），不要求跨分支哈希值一致。
+        let cur_hash = match &editable {
+            Some(e) => hash_text(&e.value().to_string()),
+            None => hash_rope(&editor.rope),
         };
-        if cur_hash == cache.0 && !editor.spans.is_empty() {
+        // cache.0 == 0 是 HighlightCache::default 的"从未解析"哨兵（正常内容
+        // 哈希非 0）。此前条件带 `!spans.is_empty()`，空文件（spans 恒空）
+        // 会每帧重跑 tree-sitter。
+        if cur_hash == cache.0 && cache.0 != 0 {
             continue;
         }
         cache.0 = cur_hash;
-        if let Some(t) = &text_owned {
+        if let Some(e) = editable {
             // EditableText 文本变化：重建 rope
+            let t = e.value().to_string();
             editor.rope = Rope::from(t.as_str());
             if !editor.readonly {
-                editor.undo.push(TextSnapshot { text: t.clone() });
+                editor.undo.push(TextSnapshot { text: t });
                 if !editor.dirty {
                     editor.dirty = true;
                 }
@@ -268,6 +298,17 @@ pub fn update_syntax_highlight(
 #[derive(Component, Default)]
 pub struct HighlightCache(pub u64);
 
+/// rope 内容哈希：逐 chunk 写入同一 hasher（等价于对拼接全文哈希，
+/// 避免 O(文件大小) 的 String 分配）。
+fn hash_rope(rope: &Rope) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for chunk in rope.chunks() {
+        chunk.hash(&mut h);
+    }
+    h.finish()
+}
+
 fn hash_text(s: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -279,6 +320,32 @@ fn hash_text(s: &str) -> u64 {
 mod tests {
     use super::*;
     use bevy::text::EditableText;
+
+    /// 显示行数排除尾部换行产生的幽灵空行——行号必须与文件实际行数一致
+    /// （回归：`"a\n"` 曾显示行号 1、2，比内容多一行）。
+    #[test]
+    fn display_line_count_excludes_ghost_trailing_line() {
+        let cases: Vec<(&str, usize)> = vec![
+            ("", 1),       // 空文件 → 1 行
+            ("a", 1),      // 无换行 → 1 行
+            ("a\n", 1),    // 尾部换行 → 幽灵行不计
+            ("\n", 1),     // 仅一个换行 → 1 行（空行）
+            ("a\r\n", 1),  // CRLF 尾部 → 1 行
+            ("a\nb", 2),   // 无尾部换行 → 2 行
+            ("a\nb\n", 2), // 尾部换行 → 2 行
+            ("a\n\n", 2),  // 中间空行计数、尾部幽灵行不计
+            ("a\n\nb", 3), // 中间空行计数
+        ];
+        for (content, expected) in cases {
+            let mut editor = TextEditor::readonly();
+            editor.rope = Rope::from_str(content);
+            assert_eq!(
+                editor.display_line_count(),
+                expected,
+                "content={content:?} 显示行数应为 {expected}"
+            );
+        }
+    }
 
     /// smoke：update_syntax_highlight 从 EditableText 同步文本到 rope + 生成 spans。
     ///

@@ -113,7 +113,10 @@ fn spawn_scrollbar_nodes(
 /// 为本帧最新值。`ScrollPosition` 与 `ComputedNode` 物理量需乘 `inverse_scale_factor`
 /// 转逻辑像素。
 fn update_scrollbar_thumb(
-    q: Query<(&Scrollbar, &ScrollPosition, &ComputedNode, &Children), With<ScrollbarTrack>>,
+    // 注意过滤的是容器标记 `Scrollbar`（`Scrollbar`/`ScrollPosition`/`ComputedNode`
+    // 都在滚动容器上，`ScrollbarTrack` 在其子轨道节点上——此前过滤 Track 导致
+    // 查询永假，滑块从不更新）
+    q: Query<(&Scrollbar, &ScrollPosition, &ComputedNode, &Children), With<Scrollbar>>,
     q_track: Query<&Children, With<ScrollbarTrack>>,
     mut q_thumb: Query<&mut Node, With<ScrollbarThumb>>,
 ) {

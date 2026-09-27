@@ -77,17 +77,34 @@ impl FindState {
                 }
             }
         } else {
-            let needle_l = needle.to_lowercase();
-            let hay_l = haystack.to_lowercase();
-            while let Some(pos) = hay_l[start..].find(&needle_l) {
-                let abs = start + pos;
-                self.matches.push(FindMatch {
-                    start: abs,
-                    end: abs + needle.len(),
-                });
-                start = abs + needle.len().max(1);
-                if start >= haystack.len() {
-                    break;
+            // 大小写不敏感：逐字符折叠比较。不能在小写串上 find 后把字节
+            // 偏移回切原文——`to_lowercase` 可能改变字节长度（如 `İ`
+            // U+0130 → 2 字符），偏移错位且可能切在非字符边界 panic。
+            let needle_chars: Vec<char> = needle.to_lowercase().chars().collect();
+            if !needle_chars.is_empty() {
+                let chars: Vec<(usize, char)> = haystack.char_indices().collect();
+                let mut skip_until = 0usize;
+                for (i, &(abs, _)) in chars.iter().enumerate() {
+                    if abs < skip_until {
+                        continue; // 与大小写敏感路径一致：匹配不重叠
+                    }
+                    let mut matched = true;
+                    let mut end = abs;
+                    for (k, nc) in needle_chars.iter().enumerate() {
+                        match chars.get(i + k) {
+                            Some(&(_, tc)) if tc.to_lowercase().eq(nc.to_lowercase()) => {
+                                end += tc.len_utf8();
+                            }
+                            _ => {
+                                matched = false;
+                                break;
+                            }
+                        }
+                    }
+                    if matched {
+                        self.matches.push(FindMatch { start: abs, end });
+                        skip_until = end;
+                    }
                 }
             }
         }
@@ -146,7 +163,7 @@ impl FindState {
         // 从后向前替换，避免偏移失效
         let mut out = text.to_string();
         let mut to_replace: Vec<FindMatch> = self.matches.clone();
-        to_replace.sort_by(|a, b| b.start.cmp(&a.start));
+        to_replace.sort_by_key(|m| std::cmp::Reverse(m.start));
         for m in to_replace {
             out.replace_range(m.start..m.end, &self.replace);
         }
@@ -160,8 +177,10 @@ mod tests {
 
     #[test]
     fn find_all_case_insensitive_default() {
-        let mut f = FindState::default();
-        f.find = "foo".into();
+        let mut f = FindState {
+            find: "foo".into(),
+            ..Default::default()
+        };
         let n = f.find_all("Foo bar foo FOO");
         assert_eq!(n, 3);
         assert_eq!(f.matches[0].start, 0);
@@ -171,26 +190,73 @@ mod tests {
 
     #[test]
     fn find_all_case_sensitive() {
-        let mut f = FindState::default();
-        f.find = "foo".into();
-        f.case_sensitive = true;
+        let mut f = FindState {
+            find: "foo".into(),
+            case_sensitive: true,
+            ..Default::default()
+        };
         let n = f.find_all("Foo bar foo FOO");
         assert_eq!(n, 1);
         assert_eq!(f.matches[0].start, 8);
     }
 
+    /// 非 ASCII 文本的大小写不敏感查找：偏移必须是原文的字符边界字节位
+    /// （回归：旧实现在小写串上 find 后回切原文，非 ASCII 时错位且可能
+    /// 切在非字符边界 panic）。
+    #[test]
+    fn find_all_case_insensitive_non_ascii_boundaries() {
+        let mut f = FindState {
+            find: "ö".into(),
+            ..Default::default()
+        };
+        // "schön schön"：ö 每处 2 字节；匹配区间必须是原文字符边界
+        let n = f.find_all("schön schön");
+        assert_eq!(n, 2);
+        for m in &f.matches {
+            assert!(
+                "schön schön".is_char_boundary(m.start) && "schön schön".is_char_boundary(m.end),
+                "匹配区间必须是字符边界: {m:?}"
+            );
+        }
+        assert_eq!(&"schön schön"[f.matches[0].start..f.matches[0].end], "ö");
+        assert_eq!(&"schön schön"[f.matches[1].start..f.matches[1].end], "ö");
+    }
+
+    /// 中文文本查找不 panic 且偏移正确（多字节字符边界回归）。
+    #[test]
+    fn find_all_chinese_text() {
+        let mut f = FindState {
+            find: "世界".into(),
+            ..Default::default()
+        };
+        let n = f.find_all("你好，世界！hello 世界");
+        assert_eq!(n, 2);
+        assert_eq!(
+            &"你好，世界！hello 世界"[f.matches[0].start..f.matches[0].end],
+            "世界"
+        );
+        assert_eq!(
+            &"你好，世界！hello 世界"[f.matches[1].start..f.matches[1].end],
+            "世界"
+        );
+    }
+
     #[test]
     fn find_all_empty_needle_returns_zero() {
-        let mut f = FindState::default();
-        f.find = "".into();
+        let mut f = FindState {
+            find: "".into(),
+            ..Default::default()
+        };
         assert_eq!(f.find_all("abc"), 0);
         assert!(f.matches.is_empty());
     }
 
     #[test]
     fn next_match_wraps_around() {
-        let mut f = FindState::default();
-        f.find = "a".into();
+        let mut f = FindState {
+            find: "a".into(),
+            ..Default::default()
+        };
         f.find_all("a a a");
         // find_all 后 current = Some(0)（第一个匹配 start=0）
         // next_match 跳到下一个：(0+1)%3 = 1 → matches[1].start = 2
@@ -205,8 +271,10 @@ mod tests {
 
     #[test]
     fn prev_match_wraps_around() {
-        let mut f = FindState::default();
-        f.find = "a".into();
+        let mut f = FindState {
+            find: "a".into(),
+            ..Default::default()
+        };
         f.find_all("a a a");
         let m = f.prev_match().unwrap();
         assert_eq!(m.start, 4); // 默认从最后一个的前一个
@@ -216,9 +284,11 @@ mod tests {
 
     #[test]
     fn replace_current_returns_new_text() {
-        let mut f = FindState::default();
-        f.find = "foo".into();
-        f.replace = "bar".into();
+        let mut f = FindState {
+            find: "foo".into(),
+            replace: "bar".into(),
+            ..Default::default()
+        };
         f.find_all("foo baz foo");
         // current = 第一个 (start=0)
         let out = f.replace_current("foo baz foo").unwrap();
@@ -227,9 +297,11 @@ mod tests {
 
     #[test]
     fn replace_all_replaces_all() {
-        let mut f = FindState::default();
-        f.find = "foo".into();
-        f.replace = "bar".into();
+        let mut f = FindState {
+            find: "foo".into(),
+            replace: "bar".into(),
+            ..Default::default()
+        };
         f.find_all("foo foo foo");
         let out = f.replace_all("foo foo foo").unwrap();
         assert_eq!(out, "bar bar bar");
@@ -237,9 +309,11 @@ mod tests {
 
     #[test]
     fn replace_all_empty_matches_returns_none() {
-        let mut f = FindState::default();
-        f.find = "xyz".into();
-        f.replace = "bar".into();
+        let mut f = FindState {
+            find: "xyz".into(),
+            replace: "bar".into(),
+            ..Default::default()
+        };
         f.find_all("abc");
         assert!(f.replace_all("abc").is_none());
     }

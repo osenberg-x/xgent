@@ -41,6 +41,9 @@ pub struct VirtualTextMarker {
     pub start_row: usize,
     /// 当前渲染的区间结束行（exclusive）。与 start_row 一起判断是否需重建内容。
     pub end_row: usize,
+    /// 渲染时的内容哈希（`HighlightCache.0`）。内容重载（外部修改静默
+    /// reload）行数不变、区间不变时，仅凭区间判断会漏重建、持续显示旧文本。
+    pub content_hash: u64,
 }
 
 /// 可见行 overscan 缓冲行数（上下各加），减少快速滚动时的空白。
@@ -67,13 +70,19 @@ pub fn visible_row_range(
 }
 
 /// 每帧更新虚拟化行渲染：
-/// 1. 更新占位节点高度 = `rope.len_lines() * line_height`（撑滚动范围）
+/// 1. 更新占位节点高度 = `display_line_count × line_height`（撑滚动范围）
 /// 2. 计算可见行区间
 /// 3. 若区间变化 → 重建 VirtualTextMarker 的 TextSpan 子树（可见行拼接 + 高亮）
 /// 4. 始终更新 Text 节点的 `top` 偏移 = `-(start × line_height)`（让可见行对齐视口）
 pub fn update_virtual_lines(
     mut q: Query<
-        (&mut TextEditor, &ScrollPosition, &ComputedNode, &Children),
+        (
+            &mut TextEditor,
+            &ScrollPosition,
+            &ComputedNode,
+            &Children,
+            &HighlightCache,
+        ),
         With<HighlightCache>,
     >,
     mut q_content: Query<&mut Node, (With<VirtualContentMarker>, Without<VirtualTextMarker>)>,
@@ -88,7 +97,7 @@ pub fn update_virtual_lines(
     mut commands: Commands,
     theme: Res<EditorTheme>,
 ) {
-    for (mut editor, scroll, node, children) in q.iter_mut() {
+    for (mut editor, scroll, node, children, cache) in q.iter_mut() {
         // 行高：font_size × line_height_ratio 派生。
         // 关键：LineHeight::Px(line_height) 让 parley 给每行精确像素高度，
         // 软换行的视觉行也在该行行盒内，不溢出到下一逻辑行——
@@ -99,7 +108,8 @@ pub fn update_virtual_lines(
             editor.line_height = target_lh;
         }
         let line_height = editor.line_height;
-        let line_count = editor.rope.len_lines();
+        // 显示行数与行号列同源（排除尾部换行幽灵空行），保证行号 ↔ 内容一一对应。
+        let line_count = editor.display_line_count();
         // ComputedNode.size 是物理像素，ScrollPosition.y 与 line_height 是逻辑像素，
         // 须乘 inverse_scale_factor 转换，否则 HiDPI 下 visible_raw 算成 2 倍行数。
         let scale = node.inverse_scale_factor();
@@ -174,6 +184,7 @@ pub fn update_virtual_lines(
                         VirtualTextMarker {
                             start_row: 0,
                             end_row: 0,
+                            content_hash: cache.0,
                         },
                     ))
                     .id();
@@ -216,9 +227,9 @@ pub fn update_virtual_lines(
             }
         }
 
-        // 5. 区间变化 → 重建 TextSpan 子树
+        // 5. 区间或内容变化 → 重建 TextSpan 子树
         let need_rebuild = if let Ok(marker) = q_text_marker.get(text_entity) {
-            marker.start_row != start || marker.end_row != end
+            marker.start_row != start || marker.end_row != end || marker.content_hash != cache.0
         } else {
             false
         };
@@ -235,6 +246,7 @@ pub fn update_virtual_lines(
             commands.entity(text_entity).insert(VirtualTextMarker {
                 start_row: start,
                 end_row: end,
+                content_hash: cache.0,
             });
             // spawn 新 TextSpan 子节点（可见行拼接 + 高亮 span 切分）
             rebuild_visible_spans(
@@ -286,9 +298,13 @@ fn rebuild_visible_spans(
             .unwrap_or_default();
         let line_spans = spans_for_line(global_spans, &line_text, row, rope);
         if line_spans.is_empty() {
-            // 空行：放一个空串占位 + 换行（让 parley 产生空行行盒）
+            // 空行：放一个空串占位（让 parley 产生空行行盒）。
+            // 仅当后面还有行时才补换行——末行补换行会把 parley 尾部分裂出
+            // 一个幽灵视觉行（内容比行号多一行），造成行号/内容总数错位。
             segments.push((String::new(), default_color));
-            segments.push(("\n".to_string(), default_color));
+            if row + 1 < end {
+                segments.push(("\n".to_string(), default_color));
+            }
         } else {
             for (seg, kind) in line_spans {
                 segments.push((seg, theme.span_color(kind)));
@@ -345,7 +361,78 @@ fn rebuild_visible_spans(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::drop_non_drop)] // drop(commands) 仅用于结束 &mut World 借用
     use super::*;
+
+    /// 拼接可见行 TextSpan 子节点文本（按子节点顺序）。
+    fn join_span_text(app: &mut App, text_entity: Entity) -> String {
+        let Some(children) = app.world().entity(text_entity).get::<Children>() else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for c in children.iter() {
+            if let Some(span) = app.world().entity(c).get::<TextSpan>() {
+                out.push_str(&span.0);
+            }
+        }
+        out
+    }
+
+    /// 重建内容不得带尾部幽灵换行：内容视觉行数必须与行号数一致
+    /// （回归：`"a\nb\n"` 曾拼成 `"a\nb\n\n"`，parley 尾部分裂出多余空行）。
+    #[test]
+    fn rebuild_visible_spans_excludes_phantom_trailing_line() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::text_editor::render::EditorTheme>();
+        let text_entity = app.world_mut().spawn((Text::new(String::new()),)).id();
+        // len_lines = 3（"a"、"b"、尾部幽灵空行）；显示行数 = 2 → end = 2
+        let rope = ropey::Rope::from_str("a\nb\n");
+        let mut commands = app.world_mut().commands();
+        rebuild_visible_spans(
+            &mut commands,
+            text_entity,
+            &rope,
+            &[],
+            0,
+            2,
+            &crate::text_editor::render::EditorTheme::default(),
+            Color::WHITE,
+            FontSize::Px(12.5),
+            19.0,
+        );
+        drop(commands);
+        app.update();
+        let joined = join_span_text(&mut app, text_entity);
+        assert_eq!(joined, "a\nb", "重建内容不应带尾部幽灵换行");
+    }
+
+    /// 空行拼接保序：中间空行保留（`"a\n\nb\n"` 显示 3 行 → "a\n\nb"）。
+    #[test]
+    fn rebuild_visible_spans_keeps_interior_empty_line() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::text_editor::render::EditorTheme>();
+        let text_entity = app.world_mut().spawn((Text::new(String::new()),)).id();
+        let rope = ropey::Rope::from_str("a\n\nb\n");
+        let mut commands = app.world_mut().commands();
+        rebuild_visible_spans(
+            &mut commands,
+            text_entity,
+            &rope,
+            &[],
+            0,
+            3,
+            &crate::text_editor::render::EditorTheme::default(),
+            Color::WHITE,
+            FontSize::Px(12.5),
+            19.0,
+        );
+        drop(commands);
+        app.update();
+        let joined = join_span_text(&mut app, text_entity);
+        assert_eq!(joined, "a\n\nb", "中间空行应保留、尾部幽灵行应剔除");
+    }
 
     #[test]
     fn visible_range_clamps_to_line_count() {
