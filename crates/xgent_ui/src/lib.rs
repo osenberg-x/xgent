@@ -6,6 +6,9 @@
 //! 通过 [`xui`] 获取通用组件（虚拟列表、命令面板、输入增强、快捷键、i18n 桥接）。
 //! 通过 [`xgent_agent`] 的事件契约与 agent 交互（禁止直接调用 agent 方法）。
 
+// Bevy 系统签名固有的大参数量与复杂 Query/ParamSet 类型，Bevy 生态惯例整体豁免。
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod activity_bar;
 pub mod chat_panel;
 pub mod command_palette;

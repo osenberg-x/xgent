@@ -357,13 +357,32 @@ fn hide_on_decision(
 /// 对齐原型 modal-foot 按钮标注 (Esc)/(Enter)。弹窗 overlay 为全局遮罩
 /// （GlobalZIndex 50），激活时独占键盘。Esc 的 chat.abort 冲突由
 /// [`shortcuts::handle_hotkey_triggers`] 查弹窗存在性跳过解决。
+///
+/// 两类焦点守卫（KeyboardInput 是全局消息，弹窗存在时其他视图的 Enter
+/// 也会到达，若不拦截会把"输入框回车发消息/终端回车提交命令"静默变成
+/// "允许工具调用"，绕过人工确认闸门）：
+/// - 焦点在任意 `EditableText` 输入框（chat/palette/settings）→ 跳过；
+/// - 右侧分屏为终端视图（终端独占键盘、InputFocus 被清空）→ 跳过。
 fn handle_confirm_keyboard(
     mut reader: MessageReader<bevy::input::keyboard::KeyboardInput>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
+    focus: Res<bevy::input_focus::InputFocus>,
+    q_editable: Query<(), With<bevy::text::EditableText>>,
+    side_view: Res<crate::editor::SideViewContent>,
     mut commands: Commands,
     mut writer: MessageWriter<ConfirmDecisionMessage>,
 ) {
     if q_dialog.single().is_err() {
+        return;
+    }
+    // 焦点在文本输入框：Enter 语义属于输入框，不触发决策
+    if let Some(focused) = focus.get()
+        && q_editable.contains(focused)
+    {
+        return;
+    }
+    // 终端视图独占键盘（terminal/mod.rs 切视图时清空 InputFocus）
+    if *side_view == crate::editor::SideViewContent::Terminal {
         return;
     }
     for ev in reader.read() {

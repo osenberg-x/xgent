@@ -12,7 +12,7 @@ use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
 use crate::confirm_dialog::ConfirmDialogMarker;
-use crate::editor::tabs::CycleTabRequest;
+use crate::editor::tabs::{CloseTabRequest, CycleTabRequest};
 use crate::editor::{EditorView, SideViewContent};
 use crate::i18n::tr;
 use crate::layout::FileDrawerOpen;
@@ -131,6 +131,8 @@ pub(crate) fn handle_hotkey_triggers(
     mut view: ResMut<EditorView>,
     mut content: ResMut<SideViewContent>,
     mut cycle_writer: MessageWriter<CycleTabRequest>,
+    mut close_tab_writer: MessageWriter<CloseTabRequest>,
+    editor_tabs: Res<crate::editor::tabs::EditorTabs>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
     q_confirm: Query<(), With<ConfirmDialogMarker>>,
@@ -208,7 +210,15 @@ pub(crate) fn handle_hotkey_triggers(
                 side_view.0 = true;
             }
             "editor.close_tab" => {
-                // 关闭当前标签：MVP 留给 UI 按钮处理
+                // 关闭当前激活标签（此前是空操作，× 按钮是唯一关闭入口）
+                if let Some(active) = editor_tabs.active
+                    && let Some(&entity) = editor_tabs.tabs.get(active)
+                {
+                    close_tab_writer.write(CloseTabRequest {
+                        entity,
+                        force: false,
+                    });
+                }
             }
             "editor.cycle_tab" => {
                 cycle_writer.write(CycleTabRequest { forward: true });

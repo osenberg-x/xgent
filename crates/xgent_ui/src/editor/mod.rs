@@ -145,6 +145,9 @@ impl Plugin for EditorPlugin {
                         update_editor_state_snapshot,
                         rebuild_editor_tabs,
                         handle_editor_tab_click,
+                        // 编辑器/预览顶栏与页签条的「返回对话」按钮（此前
+                        // 定义了系统却从未注册，按钮点击无响应）
+                        handle_back_button_click,
                         handle_file_changed,
                         handle_conflict_decision,
                         handle_dirty_close_decision,
@@ -438,6 +441,15 @@ pub fn rebuild_editor_tabs(
         commands.entity(entity).despawn();
     }
     let active_idx = tabs.active;
+    // 维护 xui::EditorActive 标记：编辑器快捷键（Cmd+S/Z/F/H）只作用于
+    // 带标记的激活 buffer，否则 Cmd+S 会保存所有打开的 tab
+    for (i, &buf_entity) in tabs.tabs.iter().enumerate() {
+        if Some(i) == active_idx {
+            commands.entity(buf_entity).insert(xui::EditorActive);
+        } else {
+            commands.entity(buf_entity).remove::<xui::EditorActive>();
+        }
+    }
     for (i, &buf_entity) in tabs.tabs.iter().enumerate() {
         let Ok(buf) = q_buffers.get(buf_entity) else {
             continue;
@@ -523,18 +535,23 @@ pub fn rebuild_editor_tabs(
 }
 
 /// 处理 tab 项点击：切换激活 tab；处理关闭×点击：发 CloseTabRequest。
+///
+/// × 按钮实体只挂 `EditorTabCloseMarker`（`EditorTabMarker{buffer}` 在其父
+/// tab 节点上），经 `ChildOf` 回溯父实体取 buffer。× 是 `Button`
+/// （`FocusPolicy::Block`），点击时捕获 Interaction、父 tab 不会同时
+/// Pressed，两查询天然互斥。
 pub fn handle_editor_tab_click(
     q_tabs: Query<(&EditorTabMarker, &Interaction), Changed<Interaction>>,
-    q_close: Query<
-        (&EditorTabMarker, &Interaction, &ChildOf),
-        (With<EditorTabCloseMarker>, Changed<Interaction>),
-    >,
+    q_close: Query<(&Interaction, &ChildOf), (With<EditorTabCloseMarker>, Changed<Interaction>)>,
+    q_tab_marker: Query<&EditorTabMarker>,
     mut tabs: ResMut<EditorTabs>,
     mut close_writer: MessageWriter<CloseTabRequest>,
 ) {
     // 关闭× 优先
-    for (marker, interaction, _parent) in q_close.iter() {
-        if *interaction == Interaction::Pressed {
+    for (interaction, parent) in q_close.iter() {
+        if *interaction == Interaction::Pressed
+            && let Ok(marker) = q_tab_marker.get(parent.0)
+        {
             close_writer.write(CloseTabRequest {
                 entity: marker.buffer,
                 force: false,

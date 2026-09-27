@@ -31,10 +31,10 @@ impl EditorTabs {
         buffers: &Query<&EditorBuffer>,
     ) -> Option<Entity> {
         for &e in &self.tabs {
-            if let Ok(buf) = buffers.get(e) {
-                if buf.path() == path {
-                    return Some(e);
-                }
+            if let Ok(buf) = buffers.get(e)
+                && buf.path() == path
+            {
+                return Some(e);
             }
         }
         None
@@ -152,85 +152,6 @@ pub struct CloseTabRequest {
 pub struct CycleTabRequest {
     /// true=下一个，false=上一个
     pub forward: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn open_sets_active() {
-        let mut t = EditorTabs::default();
-        let e1 = Entity::from_raw_u32(1).unwrap();
-        let e2 = Entity::from_raw_u32(2).unwrap();
-        t.open(e1);
-        assert_eq!(t.active, Some(0));
-        t.open(e2);
-        assert_eq!(t.active, Some(1));
-        // 重复 open 已存在实体，激活回到它
-        t.open(e1);
-        assert_eq!(t.active, Some(0));
-    }
-
-    #[test]
-    fn close_returns_entity_and_new_active() {
-        let mut t = EditorTabs::default();
-        let e1 = Entity::from_raw_u32(1).unwrap();
-        let e2 = Entity::from_raw_u32(2).unwrap();
-        t.open(e1);
-        t.open(e2);
-        let r = t.close(e2).unwrap();
-        assert_eq!(r.0, e2);
-        assert_eq!(r.1, Some(0));
-        assert_eq!(t.len(), 1);
-    }
-
-    #[test]
-    fn close_last_tab_clears_active() {
-        let mut t = EditorTabs::default();
-        let e1 = Entity::from_raw_u32(1).unwrap();
-        t.open(e1);
-        let r = t.close(e1).unwrap();
-        assert_eq!(r.0, e1);
-        assert_eq!(r.1, None);
-        assert!(t.is_empty());
-    }
-
-    #[test]
-    fn next_wraps_around() {
-        let mut t = EditorTabs::default();
-        let e1 = Entity::from_raw_u32(1).unwrap();
-        let e2 = Entity::from_raw_u32(2).unwrap();
-        t.open(e1);
-        t.open(e2);
-        t.next();
-        assert_eq!(t.active, Some(0)); // (1+1)%2 = 0
-        t.next();
-        assert_eq!(t.active, Some(1));
-    }
-
-    #[test]
-    fn prev_wraps_around() {
-        let mut t = EditorTabs::default();
-        let e1 = Entity::from_raw_u32(1).unwrap();
-        let e2 = Entity::from_raw_u32(2).unwrap();
-        t.open(e1);
-        t.open(e2);
-        // active = Some(1)（e2）。prev: (1+2-1)%2 = 0 → e1
-        t.prev();
-        assert_eq!(t.active, Some(0));
-        // 再 prev: (0+2-1)%2 = 1 → e2（wrap）
-        t.prev();
-        assert_eq!(t.active, Some(1));
-    }
-
-    #[test]
-    fn active_entity_returns_correct() {
-        let mut t = EditorTabs::default();
-        let e1 = Entity::from_raw_u32(1).unwrap();
-        t.open(e1);
-        assert_eq!(t.active_entity(), Some(e1));
-    }
 }
 
 /// 处理打开文件请求：若已打开则激活，否则 spawn 新 buffer + TextEditor。
@@ -384,22 +305,15 @@ pub fn handle_close_tab_requests(
 ) {
     for req in reader.read() {
         // 脏 buffer + 非强制：弹确认或等待已有弹窗处理，绝不静默关闭
-        if !req.force {
-            if let Ok(buf) = q_buffers.get(req.entity) {
-                if buf.state.is_dirty() {
-                    // 无弹窗才弹新窗；已有弹窗则静默跳过（等用户处理完当前确认）
-                    if q_dialog.single().is_err() {
-                        spawn_dirty_close_dialog(
-                            &mut commands,
-                            req.entity,
-                            buf.path(),
-                            &theme,
-                            &loc,
-                        );
-                    }
-                    continue;
-                }
+        if !req.force
+            && let Ok(buf) = q_buffers.get(req.entity)
+            && buf.state.is_dirty()
+        {
+            // 无弹窗才弹新窗；已有弹窗则静默跳过（等用户处理完当前确认）
+            if q_dialog.single().is_err() {
+                spawn_dirty_close_dialog(&mut commands, req.entity, buf.path(), &theme, &loc);
             }
+            continue;
         }
         // 清理该 buffer 的 pending 写入，避免写完成后误匹配
         rt.cancel_pending_writes(req.entity);
@@ -446,7 +360,7 @@ fn spawn_dirty_close_dialog(
     let body = crate::i18n::tr_with(
         loc,
         "dirty-close-body",
-        &[("path", path.display().to_string().into())],
+        &[("path", path.display().to_string())],
     );
     let discard_label = crate::i18n::tr(loc, "dirty-close-discard");
     let cancel_label = crate::i18n::tr(loc, "dirty-close-cancel");
@@ -559,5 +473,84 @@ pub fn handle_dirty_close_decision(
         commands.entity(dialog).despawn();
     } else if cancel {
         commands.entity(dialog).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_sets_active() {
+        let mut t = EditorTabs::default();
+        let e1 = Entity::from_raw_u32(1).unwrap();
+        let e2 = Entity::from_raw_u32(2).unwrap();
+        t.open(e1);
+        assert_eq!(t.active, Some(0));
+        t.open(e2);
+        assert_eq!(t.active, Some(1));
+        // 重复 open 已存在实体，激活回到它
+        t.open(e1);
+        assert_eq!(t.active, Some(0));
+    }
+
+    #[test]
+    fn close_returns_entity_and_new_active() {
+        let mut t = EditorTabs::default();
+        let e1 = Entity::from_raw_u32(1).unwrap();
+        let e2 = Entity::from_raw_u32(2).unwrap();
+        t.open(e1);
+        t.open(e2);
+        let r = t.close(e2).unwrap();
+        assert_eq!(r.0, e2);
+        assert_eq!(r.1, Some(0));
+        assert_eq!(t.len(), 1);
+    }
+
+    #[test]
+    fn close_last_tab_clears_active() {
+        let mut t = EditorTabs::default();
+        let e1 = Entity::from_raw_u32(1).unwrap();
+        t.open(e1);
+        let r = t.close(e1).unwrap();
+        assert_eq!(r.0, e1);
+        assert_eq!(r.1, None);
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn next_wraps_around() {
+        let mut t = EditorTabs::default();
+        let e1 = Entity::from_raw_u32(1).unwrap();
+        let e2 = Entity::from_raw_u32(2).unwrap();
+        t.open(e1);
+        t.open(e2);
+        t.next();
+        assert_eq!(t.active, Some(0)); // (1+1)%2 = 0
+        t.next();
+        assert_eq!(t.active, Some(1));
+    }
+
+    #[test]
+    fn prev_wraps_around() {
+        let mut t = EditorTabs::default();
+        let e1 = Entity::from_raw_u32(1).unwrap();
+        let e2 = Entity::from_raw_u32(2).unwrap();
+        t.open(e1);
+        t.open(e2);
+        // active = Some(1)（e2）。prev: (1+2-1)%2 = 0 → e1
+        t.prev();
+        assert_eq!(t.active, Some(0));
+        // 再 prev: (0+2-1)%2 = 1 → e2（wrap）
+        t.prev();
+        assert_eq!(t.active, Some(1));
+    }
+
+    #[test]
+    fn active_entity_returns_correct() {
+        let mut t = EditorTabs::default();
+        let e1 = Entity::from_raw_u32(1).unwrap();
+        t.open(e1);
+        assert_eq!(t.active_entity(), Some(e1));
     }
 }

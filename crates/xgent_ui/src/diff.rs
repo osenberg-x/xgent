@@ -40,30 +40,30 @@ pub fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
     }
     let mut out = Vec::new();
     // 前缀上下文
-    for i in 0..prefix {
+    for text in old_lines.iter().take(prefix) {
         out.push(DiffLine {
             kind: DiffKind::Context,
-            text: old_lines[i].into(),
+            text: (*text).into(),
         });
     }
     // 中间：先删后增
-    for i in prefix..old_lines.len() - suffix {
+    for text in old_lines.iter().take(old_lines.len() - suffix).skip(prefix) {
         out.push(DiffLine {
             kind: DiffKind::Del,
-            text: old_lines[i].into(),
+            text: (*text).into(),
         });
     }
-    for i in prefix..new_lines.len() - suffix {
+    for text in new_lines.iter().take(new_lines.len() - suffix).skip(prefix) {
         out.push(DiffLine {
             kind: DiffKind::Add,
-            text: new_lines[i].into(),
+            text: (*text).into(),
         });
     }
     // 后缀上下文
-    for i in old_lines.len() - suffix..old_lines.len() {
+    for text in old_lines.iter().skip(old_lines.len() - suffix) {
         out.push(DiffLine {
             kind: DiffKind::Context,
-            text: old_lines[i].into(),
+            text: (*text).into(),
         });
     }
     out

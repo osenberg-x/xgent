@@ -633,10 +633,10 @@ fn update_file_entry_style(
         } else {
             none_color
         };
-        if let Ok(mut bg) = q_bg.get_mut(entity) {
-            if *bg != want {
-                *bg = want;
-            }
+        if let Ok(mut bg) = q_bg.get_mut(entity)
+            && *bg != want
+        {
+            *bg = want;
         }
     }
 }

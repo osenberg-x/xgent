@@ -122,10 +122,10 @@ fn spawn_activity_bar(
     };
 
     let mut companion_star: Option<Entity> = None;
-    commands.entity(bar).with_children(|mut p| {
-        rail_button(&mut p, &kit, ActivityKind::Chat, "chat", "对话");
-        rail_button(&mut p, &kit, ActivityKind::Files, "folder", "文件");
-        rail_button(&mut p, &kit, ActivityKind::History, "clock", "历史会话");
+    commands.entity(bar).with_children(|p| {
+        rail_button(p, &kit, ActivityKind::Chat, "chat", "对话");
+        rail_button(p, &kit, ActivityKind::Files, "folder", "文件");
+        rail_button(p, &kit, ActivityKind::History, "clock", "历史会话");
         // 分隔线
         p.spawn((
             Node {
@@ -136,7 +136,7 @@ fn spawn_activity_bar(
             },
             BackgroundColor(theme.border),
         ));
-        rail_button(&mut p, &kit, ActivityKind::Terminal, "terminal", "终端");
+        rail_button(p, &kit, ActivityKind::Terminal, "terminal", "终端");
         // spacer
         p.spawn((Node {
             flex_grow: 1.0,
@@ -355,10 +355,10 @@ fn update_active_indicators(
             theme.text_muted
         };
         for child in children.iter() {
-            if let Ok(mut img) = q_icon.get_mut(child) {
-                if img.color != icon_color {
-                    img.color = icon_color;
-                }
+            if let Ok(mut img) = q_icon.get_mut(child)
+                && img.color != icon_color
+            {
+                img.color = icon_color;
             }
         }
     }
@@ -405,10 +405,10 @@ fn update_companion_visual(
     }
     for children in companions.iter() {
         for child in children.iter() {
-            if let Ok(mut img) = q_icon.get_mut(child) {
-                if img.color != star_color {
-                    img.color = star_color;
-                }
+            if let Ok(mut img) = q_icon.get_mut(child)
+                && img.color != star_color
+            {
+                img.color = star_color;
             }
         }
     }

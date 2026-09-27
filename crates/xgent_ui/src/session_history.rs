@@ -269,7 +269,7 @@ fn spawn_session_item(
     let msg_count = tr_with(
         loc,
         "history-message-count",
-        &[("count", session.message_count.to_string().into())],
+        &[("count", session.message_count.to_string())],
     )
     .to_string();
 

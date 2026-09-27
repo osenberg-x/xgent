@@ -463,7 +463,7 @@ pub struct ToastMarker;
 
 /// toast 剩余存活秒数。
 #[derive(Component)]
-struct ToastTtl(f32);
+pub struct ToastTtl(f32);
 
 /// toast 存活时长（秒，原型 2.2s）。
 const TOAST_TTL_SECS: f32 = 2.2;

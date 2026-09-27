@@ -145,6 +145,34 @@ pub fn handle_file_read_requests(
     }
 }
 
+/// 原子写盘：先写同目录临时文件再 rename。
+///
+/// 直接 `fs::write` 截断重写在进程崩溃/磁盘满时会把目标文件截断损坏，
+/// 原内容不可恢复；同目录 rename 在同一文件系统上原子。临时名带 pid
+/// 避免并发写同一文件时互相抢临时文件。
+async fn atomic_write_async(path: &std::path::Path, content: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension(format!("xgent-tmp.{}", std::process::id()));
+    let r = async {
+        tokio::fs::write(&tmp, content).await?;
+        tokio::fs::rename(&tmp, path).await
+    }
+    .await;
+    if r.is_err() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    r
+}
+
+/// [`atomic_write_async`] 的同步版本（降级 IO 路径用）。
+fn atomic_write_sync(path: &std::path::Path, content: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension(format!("xgent-tmp.{}", std::process::id()));
+    let r = std::fs::write(&tmp, content).and_then(|_| std::fs::rename(&tmp, path));
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r
+}
+
 /// 处理文件写入请求：spawn tokio task，把 receiver 存入 pending 列表。
 ///
 /// 结果由 [`poll_io_results`] 系统每帧非阻塞 poll。
@@ -163,7 +191,7 @@ pub fn handle_file_write_requests(
             let path = req.path.clone();
             let content = req.content.clone();
             handle.spawn(async move {
-                let result = tokio::fs::write(&path, content.as_bytes())
+                let result = atomic_write_async(&path, content.as_bytes())
                     .await
                     .map_err(|e| format!("{}: {e}", path.display()));
                 let _ = tx.send(result);
@@ -171,7 +199,7 @@ pub fn handle_file_write_requests(
             rt.pending_writes.lock().push((req.clone(), rx));
         } else {
             // 降级同步 IO：成功发 BufferSavedEvent，失败记 warn
-            match std::fs::write(&req.path, req.content.as_bytes()) {
+            match atomic_write_sync(&req.path, req.content.as_bytes()) {
                 Ok(()) => {
                     saved_writer.write(BufferSavedEvent {
                         entity: req.entity,

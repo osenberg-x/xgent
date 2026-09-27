@@ -180,10 +180,11 @@ fn toggle_panel(
 
     if state.open && !panel_exists {
         spawn_panel(&mut commands, &theme, &loc);
-    } else if !state.open && panel_exists {
-        if let Ok(entity) = q_panel.single() {
-            commands.entity(entity).despawn();
-        }
+    } else if !state.open
+        && panel_exists
+        && let Ok(entity) = q_panel.single()
+    {
+        commands.entity(entity).despawn();
     }
 }
 

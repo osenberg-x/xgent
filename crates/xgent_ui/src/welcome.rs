@@ -338,7 +338,7 @@ fn rebuild_recent_sessions(
 
 /// 点击最近会话 → 发恢复请求。
 fn handle_recent_click(
-    mut q: Query<(&Interaction, &RecentItemMarker), (Changed<Interaction>, With<Button>)>,
+    q: Query<(&Interaction, &RecentItemMarker), (Changed<Interaction>, With<Button>)>,
     mut restore: MessageWriter<RestoreSessionMessage>,
 ) {
     for (interaction, item) in q.iter() {

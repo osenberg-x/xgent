@@ -407,6 +407,11 @@ fn spawn_user_message(
     };
     let font = theme.font_size;
     for ev in reader.read() {
+        // 只渲染 chat 输入框自己的提交（命令面板复用 ChatInput，其提交
+        // 不是聊天消息）——与 forward_input_submission 同一守卫
+        if Some(ev.entity) != entities.input {
+            continue;
+        }
         if ev.text.is_empty() {
             continue;
         }
@@ -473,6 +478,9 @@ fn spawn_user_message(
     }
 }
 /// 订阅 DeltaMessage，累加到当前助手消息节点。
+///
+/// 流式光标由 [`update_streaming_cursor`] 维护在文本末尾，delta 追加前
+/// 先弹掉，避免光标字符被埋进正文（会污染历史副本与复制内容）。
 fn accumulate_delta(
     mut reader: MessageReader<DeltaMessage>,
     mut q: Query<&mut Text, With<CurrentAssistantText>>,
@@ -481,7 +489,7 @@ fn accumulate_delta(
         return;
     };
     for ev in reader.read() {
-        if text.0.ends_with('▍') {
+        if text.0.ends_with(STREAM_CURSOR) {
             text.0.pop();
         }
         text.0.push_str(&ev.text);
@@ -509,7 +517,11 @@ fn finalize_on_done(
     let Ok(text) = q.get(current) else {
         return;
     };
-    let content = text.0.trim_end_matches('▍').to_string();
+    let content = text
+        .0
+        // 兼容旧版本可能残留的 '▍'（历史上光标字符曾用过两种写法）
+        .trim_end_matches([STREAM_CURSOR, '▍'])
+        .to_string();
     if content.is_empty() {
         return;
     }
@@ -638,21 +650,17 @@ fn show_retry_status(
             crate::i18n::tr_with(
                 &loc,
                 "retry-attempt-infinite",
-                &[("n", ev.attempt.to_string().into())],
+                &[("n", ev.attempt.to_string())],
             )
             .to_string()
         } else {
-            crate::i18n::tr_with(
-                &loc,
-                "retry-attempt",
-                &[("n", ev.attempt.to_string().into())],
-            )
-            .to_string()
+            crate::i18n::tr_with(&loc, "retry-attempt", &[("n", ev.attempt.to_string())])
+                .to_string()
         };
         let last_error = crate::i18n::tr_with(
             &loc,
             "retry-last-error",
-            &[("error", ev.last_error.clone().into())],
+            &[("error", ev.last_error.clone())],
         );
         commands.entity(entity).insert((
             Text::new(format!("{label}\n{last_error}")),
@@ -678,7 +686,7 @@ fn show_compacted_notice(
         let notice = crate::i18n::tr_with(
             &loc,
             "compaction-notice",
-            &[("before", before.into()), ("after", after.into())],
+            &[("before", before), ("after", after)],
         );
         commands.entity(list).with_children(|p| {
             p.spawn((Node {
@@ -717,6 +725,12 @@ pub fn forward_input_submission(
     mut commands: Commands,
 ) {
     for ev in reader.read() {
+        // 只消费 chat 输入框自己的提交：命令面板输入框复用 ChatInput，
+        // 其 Enter（执行命令）也会发 ChatInputSubmitted——不过滤会把查询串
+        // 当用户消息发给 agent 并渲染到对话流（同一次 Enter 双触发）。
+        if Some(ev.entity) != entities.input {
+            continue;
+        }
         if ev.text.is_empty() {
             if let Some(input) = entities.input {
                 commands.entity(input).insert(InputBusyMarker {
@@ -773,7 +787,11 @@ fn update_input_border(
         border.set_all(theme.border);
     }
 }
-/// 流式光标：会话进行中时，在当前助手消息文本末尾闪烁 `▋`。
+/// 流式光标字符（全文唯一约定：`accumulate_delta` 弹它、
+/// `update_streaming_cursor` 闪它、`finalize_on_done` trim 它）。
+const STREAM_CURSOR: char = '▋';
+
+/// 流式光标：会话进行中时，在当前助手消息文本末尾闪烁光标字符。
 fn update_streaming_cursor(
     conv: Res<Conversation>,
     time: Res<Time>,
@@ -785,15 +803,15 @@ fn update_streaming_cursor(
     let is_busy =
         conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error;
     if !is_busy {
-        if text.0.ends_with('▋') {
+        if text.0.ends_with(STREAM_CURSOR) {
             text.0.pop();
         }
         return;
     }
     let show = (time.elapsed().as_secs_f64() % 1.0) < 0.5;
-    let has_cursor = text.0.ends_with('▋');
+    let has_cursor = text.0.ends_with(STREAM_CURSOR);
     if show && !has_cursor {
-        text.0.push('▋');
+        text.0.push(STREAM_CURSOR);
     } else if !show && has_cursor {
         text.0.pop();
     }

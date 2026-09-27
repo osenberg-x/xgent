@@ -75,7 +75,7 @@ fn spawn_tool_card(
     let Ok(list) = q_list.single() else {
         return;
     };
-    let font = theme.font_size;
+    let _font = theme.font_size;
     for ev in reader.read() {
         let summary = format_tool_summary(&ev.tool_id, &ev.input);
         commands.entity(list).with_children(|p| {
@@ -283,7 +283,7 @@ fn update_tool_result(
             let fold_text = crate::i18n::tr_with(
                 &loc,
                 "tool-fold-result",
-                &[("lines", line_count.to_string().into())],
+                &[("lines", line_count.to_string())],
             );
             card.expanded = true;
             {
@@ -397,26 +397,23 @@ fn apply_tool_card_visibility(
                     Val::Px(0.0)
                 };
             }
-            if let Ok(mut text) = q_fold.get_mut(child) {
-                if !text.0.is_empty() {
-                    let prefix = if card.expanded { "▾" } else { "▸" };
-                    let label_key = if card.expanded {
-                        "tool-fold-result"
-                    } else {
-                        "tool-unfold-result"
-                    };
-                    let lines = text
-                        .0
-                        .split_whitespace()
-                        .find(|s| s.parse::<usize>().is_ok())
-                        .unwrap_or("0");
-                    let new_text = crate::i18n::tr_with(
-                        &loc,
-                        label_key,
-                        &[("lines", lines.to_string().into())],
-                    );
-                    text.0 = format!("{prefix} {new_text}");
-                }
+            if let Ok(mut text) = q_fold.get_mut(child)
+                && !text.0.is_empty()
+            {
+                let prefix = if card.expanded { "▾" } else { "▸" };
+                let label_key = if card.expanded {
+                    "tool-fold-result"
+                } else {
+                    "tool-unfold-result"
+                };
+                let lines = text
+                    .0
+                    .split_whitespace()
+                    .find(|s| s.parse::<usize>().is_ok())
+                    .unwrap_or("0");
+                let new_text =
+                    crate::i18n::tr_with(&loc, label_key, &[("lines", lines.to_string())]);
+                text.0 = format!("{prefix} {new_text}");
             }
         }
     }

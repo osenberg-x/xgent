@@ -90,21 +90,12 @@ pub struct TerminalStatusBarMarker;
 ///
 /// `backend` 默认注入 [`LocalPtyBackend`]；若未注入，终端功能不可用（spawn 请求
 /// 静默丢弃并记 warn）。对齐 [`crate::editor::io::EditorIoRuntime`] 的注入模式。
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct TerminalIoRuntime {
     /// tokio runtime handle。
     pub handle: Option<tokio::runtime::Handle>,
     /// PTY 后端实例（`Arc` 共享给 spawn 的 task）。
     pub backend: Option<std::sync::Arc<dyn TerminalBackend>>,
-}
-
-impl Default for TerminalIoRuntime {
-    fn default() -> Self {
-        Self {
-            handle: None,
-            backend: None,
-        }
-    }
 }
 
 impl TerminalIoRuntime {

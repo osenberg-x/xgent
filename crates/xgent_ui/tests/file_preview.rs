@@ -136,6 +136,57 @@ fn click_non_code_file_keeps_preview_page_visible() {
     }
 }
 
+/// 行号列与文件实际行数一致（回归：尾部换行曾产生幽灵行号）。
+#[test]
+fn line_numbers_match_file_line_count() {
+    // 单行 + 尾部换行 → 只显示行号 1
+    let mut tmp = tempfile::NamedTempFile::with_suffix(".rs").expect("创建临时文件");
+    writeln!(tmp, "fn main() {{}}").expect("写入临时文件");
+    tmp.flush().expect("flush");
+    let path = tmp.path().to_path_buf();
+
+    let mut app = test_app();
+    click_file(&mut app, &path);
+    for _ in 0..10 {
+        app.update();
+    }
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&Text, With<xui::LineNumbersMarker>>();
+    let texts: Vec<String> = q.iter(app.world()).map(|t| t.0.clone()).collect();
+    assert_eq!(
+        texts,
+        vec!["   1".to_string()],
+        "单行文件（带尾部换行）行号列应只显示行号 1"
+    );
+}
+
+/// 多行文件（带尾部换行）行号数与实际行数一致。
+#[test]
+fn line_numbers_match_multiline_file_line_count() {
+    let mut tmp = tempfile::NamedTempFile::with_suffix(".rs").expect("创建临时文件");
+    writeln!(tmp, "fn a() {{}}\nfn b() {{}}\nfn c() {{}}").expect("写入临时文件");
+    tmp.flush().expect("flush");
+    let path = tmp.path().to_path_buf();
+
+    let mut app = test_app();
+    click_file(&mut app, &path);
+    for _ in 0..10 {
+        app.update();
+    }
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&Text, With<xui::LineNumbersMarker>>();
+    let texts: Vec<String> = q.iter(app.world()).map(|t| t.0.clone()).collect();
+    assert_eq!(
+        texts,
+        vec!["   1\n   2\n   3".to_string()],
+        "三行文件行号列应显示 1..3（尾部幽灵行不计数）"
+    );
+}
+
 /// 文件抽屉开关链路：FileDrawerOpen 切换时抽屉与遮罩显隐联动。
 #[test]
 fn file_drawer_visibility_toggles() {

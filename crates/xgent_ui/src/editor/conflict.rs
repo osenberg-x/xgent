@@ -136,7 +136,7 @@ fn spawn_conflict_dialog(
     let body_path = crate::i18n::tr_with(
         loc,
         "conflict-body",
-        &[("path", path.display().to_string().into())],
+        &[("path", path.display().to_string())],
     );
     let body_dirty = crate::i18n::tr(loc, "conflict-body-dirty");
     let discard_label = crate::i18n::tr(loc, "conflict-discard");

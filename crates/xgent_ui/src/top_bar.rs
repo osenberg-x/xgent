@@ -94,7 +94,7 @@ fn spawn_top_bar(
     let mut new_session_btn: Option<Entity> = None;
     let mut palette_btn: Option<Entity> = None;
     let mut settings_btn: Option<Entity> = None;
-    commands.entity(bar).with_children(|mut p| {
+    commands.entity(bar).with_children(|p| {
         // ① 品牌块：28×28 `accent` 底白字 "X"（圆角 8）+ "XGent"（H3/590）
         p.spawn((Node {
             flex_direction: FlexDirection::Row,
@@ -154,7 +154,7 @@ fn spawn_top_bar(
             });
 
         // ③ 新建会话 ghost 钮
-        new_session_btn = Some(kit.ghost_button(&mut p, &tr(&loc, "topbar-new-session"), "plus"));
+        new_session_btn = Some(kit.ghost_button(p, &tr(&loc, "topbar-new-session"), "plus"));
 
         // ④ spacer
         p.spawn((Node {
@@ -163,7 +163,7 @@ fn spawn_top_bar(
         },));
 
         // ⑤ agent 状态 pill（M3-T4）
-        spawn_agent_pill(&mut p, &theme, &loc);
+        spawn_agent_pill(p, &theme, &loc);
 
         // ⑥ provider/model pill（点击开设置；chevron 指示下拉）
         p.spawn((
@@ -215,10 +215,10 @@ fn spawn_top_bar(
         });
 
         // ⑧ 命令面板图标钮
-        palette_btn = Some(kit.icon_button(&mut p, "command", "命令面板"));
+        palette_btn = Some(kit.icon_button(p, "command", "命令面板"));
 
         // ⑨ 设置图标钮（常驻入口，rail 不放设置）
-        settings_btn = Some(kit.icon_button(&mut p, "gear", "设置"));
+        settings_btn = Some(kit.icon_button(p, "gear", "设置"));
     });
     // 标记插入（闭包外，避免与 with_children 的 commands 可变借用冲突）
     if let Some(e) = new_session_btn {
@@ -379,15 +379,15 @@ fn update_agent_pill(
     }
 
     // 文本（变更检测避免每帧分配）
-    if conv.is_changed() || loc.is_changed() {
-        if let Ok((mut text, mut color)) = q.p2().single_mut() {
-            let label = tr(&loc, key).to_string();
-            if text.0 != label {
-                text.0 = label;
-            }
-            if color.0 != text_color {
-                color.0 = text_color;
-            }
+    if (conv.is_changed() || loc.is_changed())
+        && let Ok((mut text, mut color)) = q.p2().single_mut()
+    {
+        let label = tr(&loc, key).to_string();
+        if text.0 != label {
+            text.0 = label;
+        }
+        if color.0 != text_color {
+            color.0 = text_color;
         }
     }
 }

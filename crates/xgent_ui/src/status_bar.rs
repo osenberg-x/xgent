@@ -207,16 +207,16 @@ fn update_status_segments(
             text.0 = label;
         }
     }
-    if tokens.is_changed() {
-        if let Ok(mut text) = q.p1().single_mut() {
-            let label = if tokens.total > 0 {
-                format!("↑ {} tokens", format_tokens(tokens.total))
-            } else {
-                String::new()
-            };
-            if text.0 != label {
-                text.0 = label;
-            }
+    if tokens.is_changed()
+        && let Ok(mut text) = q.p1().single_mut()
+    {
+        let label = if tokens.total > 0 {
+            format!("↑ {} tokens", format_tokens(tokens.total))
+        } else {
+            String::new()
+        };
+        if text.0 != label {
+            text.0 = label;
         }
     }
 }
@@ -241,10 +241,7 @@ fn update_session_text(
     let label = crate::i18n::tr_with(
         &loc,
         "status-session",
-        &[
-            ("id", conv.id.to_string().into()),
-            ("rounds", rounds.to_string().into()),
-        ],
+        &[("id", conv.id.to_string()), ("rounds", rounds.to_string())],
     );
     if text.0 != label {
         text.0 = label.to_string();

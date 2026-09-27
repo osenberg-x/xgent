@@ -26,18 +26,25 @@ pub struct RenderHistory {
     pub lines: Vec<RenderLine>,
     /// 增量解析器（持有跨 feed 的未结束行状态）。
     pub parser: TerminalParser,
+    /// 累计产生行数（含已被 `MAX_LINES` 裁剪掉的头部）。
+    ///
+    /// 渲染游标按它对齐——封顶裁剪后 `lines.len()` 恒为上限，若游标只比
+    /// `lines.len()`，裁剪后的新行永远不渲染（输出冻结）。
+    pub total: usize,
 }
 
 impl RenderHistory {
     /// 清空历史 + 重置解析器。
     pub fn clear(&mut self) {
         self.lines.clear();
+        self.total = 0;
         self.parser = TerminalParser::new();
     }
 
     /// 喂入 PTY 字节流，累积进 lines。
     pub fn feed(&mut self, bytes: &[u8]) {
         let new_lines = self.parser.feed(bytes);
+        self.total = self.total.saturating_add(new_lines.len());
         self.lines.extend(new_lines);
         // 上限裁剪：超丢头部
         if self.lines.len() > MAX_LINES {
@@ -71,10 +78,12 @@ pub fn append_output_chunks(
 
 /// 已渲染到的行游标（挂于输出容器，增量渲染：只追加新行，不全量重建）。
 ///
-/// 切 tab / 清屏时重置为 0 并清空容器（全量重建仅这两条路径）。
+/// `lines` 是**累计渲染行数**（对齐 `RenderHistory.total`，含已被上限裁剪
+/// 掉的头部行），不是 `hist.lines` 的下标；渲染起点按滑窗换算。
+/// 切 tab / 清屏时重置并清空容器（全量重建仅这几条路径）。
 #[derive(Component, Debug, Default)]
 pub struct RenderedCursor {
-    /// 已渲染的 `hist.lines` 行数。
+    /// 已渲染的累计行数（对齐 `RenderHistory.total` 语义）。
     pub lines: usize,
     /// 已渲染的 current_line 版本（内容串签名，检测 prompt/输入行变化）。
     pub current_sig: u64,
@@ -172,12 +181,19 @@ pub fn update_output_visibility(
         cursor.current_sig = 0;
         return;
     };
-    let Ok((hist, tab)) = q_hist.get(active) else {
+    let Ok((hist, _tab)) = q_hist.get(active) else {
         return;
     };
 
-    // tab 切换 / 清屏（游标 > 当前行数 = 行被清掉）→ 全量重建
-    let full_rebuild = cursor.lines > hist.lines.len() || tabs.is_changed();
+    // tab 切换 / 清屏 / 窗口滑过游标（封顶裁剪丢掉了未渲染行）→ 全量重建
+    //
+    // `cursor.lines` 语义是「累计渲染到的行数」（对齐 hist.total），不是
+    // `hist.lines` 的下标——封顶裁剪后 len 恒为上限，若比 len，新输出永远
+    // 不渲染（输出冻结）。清屏检测：cursor > total（渲染过的比累计产生的
+    // 还多，说明历史被重置）。渲染起点 = cursor.lines − 窗口起始累计行号。
+    let window_start = hist.total.saturating_sub(hist.lines.len());
+    let full_rebuild =
+        cursor.lines > hist.total || cursor.lines < window_start || tabs.is_changed();
     if full_rebuild {
         for entity in q_line_children.iter() {
             commands.entity(entity).despawn();
@@ -185,20 +201,21 @@ pub fn update_output_visibility(
         for entity in q_current_node.iter() {
             commands.entity(entity).despawn();
         }
-        cursor.lines = 0;
+        // 游标回退到窗口起点，其后按增量补齐窗口内剩余行
+        cursor.lines = window_start;
         cursor.current_sig = 0;
     }
 
     let font = theme.font_size;
-    // 追加新增的完整行
-    if cursor.lines < hist.lines.len() {
-        let start = cursor.lines;
+    // 追加新增的完整行（按累计行号对齐滑窗内下标）
+    if cursor.lines < hist.total {
+        let start = cursor.lines - window_start;
         commands.entity(output_container).with_children(|c| {
             for line in &hist.lines[start..] {
                 spawn_line(c, line, font, &theme, &fonts, false);
             }
         });
-        cursor.lines = hist.lines.len();
+        cursor.lines = hist.total;
     }
 
     // current 行（prompt / 正在输入的命令，未 flush 进 lines）：
@@ -453,16 +470,67 @@ mod tests {
         hist.feed(b"line1\nline2\n");
         assert_eq!(hist.lines.len(), 2);
 
-        // 首次渲染：游标 0 → 2
-        cursor.lines = hist.lines.len();
+        // 首次渲染：游标 0 → 2（未封顶时 total == lines.len()）
+        cursor.lines = hist.total;
         // 又来一行：只追加 1 行（游标差 = 新增行数，非全量）
         hist.feed(b"line3\n");
-        let appended = hist.lines.len() - cursor.lines;
+        let appended = hist.total - cursor.lines;
         assert_eq!(appended, 1, "增量渲染应只追加新行");
-        cursor.lines = hist.lines.len();
+        cursor.lines = hist.total;
 
-        // 清屏：lines 清空 → 游标 > 行数 → 全量重建分支（游标归零）
+        // 清屏：total/lines 清零 → 游标 > total → 全量重建分支（游标归零）
         hist.clear();
-        assert!(cursor.lines > hist.lines.len(), "清屏应触发全量重建分支");
+        assert!(cursor.lines > hist.total, "清屏应触发全量重建分支");
+    }
+
+    /// 封顶裁剪后新输出仍需可渲染（回归：游标只比 `lines.len()` 时，
+    /// 10k 行封顶后新行永久冻结，仅 current 行随签名刷新）。
+    ///
+    /// 游标语义改为累计行数（对齐 `total`），渲染起点 = 游标 − 窗口起点。
+    #[test]
+    fn feed_keeps_total_after_cap() {
+        let mut cursor = RenderedCursor::default();
+        let mut hist = RenderHistory::default();
+        let n = MAX_LINES + 500;
+        for i in 0..n {
+            hist.feed(format!("line {i}\n").as_bytes());
+        }
+        assert_eq!(hist.lines.len(), MAX_LINES, "lines 应封顶在 MAX_LINES");
+        assert_eq!(hist.total, n, "total 应为累计行数（含被裁剪的头部）");
+
+        // 封顶前把游标推到 cap（正常逐帧渲染）
+        cursor.lines = hist.total - 500;
+
+        // 滑窗判定：游标未落后窗口起点（window_start = total - len = 500），
+        // 不触发全量重建；增量渲染起点 = 游标 − 窗口起点
+        let window_start = hist.total - hist.lines.len();
+        assert!(cursor.lines >= window_start, "正常逐帧渲染不应落后一个窗口");
+        assert!(!(cursor.lines > hist.total), "封顶后不应误判为清屏");
+        let start = cursor.lines - window_start;
+        // 剩余 500 行全部可增量渲染，且最后一条是最新内容
+        assert_eq!(hist.lines.len() - start, 500);
+        assert!(
+            hist.lines
+                .last()
+                .unwrap()
+                .plain_text()
+                .contains(&format!("line {}", n - 1)),
+            "最新行应保留在窗口尾部"
+        );
+
+        // 渲染完 backlog（游标追上 total）后再来一行：只增量 1 行
+        // （旧实现此处 appended 恒为 0 → 输出永久冻结）
+        cursor.lines = hist.total;
+        hist.feed(b"tail line\n");
+        assert_eq!(hist.total - cursor.lines, 1, "封顶后新行仍应可增量渲染");
+    }
+
+    #[test]
+    fn clear_resets_total() {
+        let mut hist = RenderHistory::default();
+        hist.feed(b"a\nb\nc\n");
+        assert_eq!(hist.total, 3);
+        hist.clear();
+        assert_eq!(hist.total, 0, "清屏应同时重置累计行数");
     }
 }

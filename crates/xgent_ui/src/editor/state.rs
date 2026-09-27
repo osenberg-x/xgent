@@ -70,11 +70,11 @@ pub fn update_editor_state_snapshot(
         snapshot.buffers.push((buf.path.clone(), status));
     }
 
-    if let Some(active) = tabs.active_entity() {
-        if let Ok((buf, editor)) = q_buffers.get(active) {
-            snapshot.active_path = Some(buf.path.clone());
-            snapshot.cursor = Some(editor.cursor);
-        }
+    if let Some(active) = tabs.active_entity()
+        && let Ok((buf, editor)) = q_buffers.get(active)
+    {
+        snapshot.active_path = Some(buf.path.clone());
+        snapshot.cursor = Some(editor.cursor);
     }
 }
 
@@ -92,28 +92,34 @@ mod tests {
 
     #[test]
     fn trait_impl_active_path() {
-        let mut s = EditorStateSnapshot::default();
-        s.active_path = Some(PathBuf::from("/x/main.rs"));
+        let s = EditorStateSnapshot {
+            active_path: Some(PathBuf::from("/x/main.rs")),
+            ..Default::default()
+        };
         assert_eq!(s.active_path(), Some(Path::new("/x/main.rs")));
     }
 
     #[test]
     fn trait_impl_cursor() {
-        let mut s = EditorStateSnapshot::default();
-        s.cursor = Some((3, 5));
+        let s = EditorStateSnapshot {
+            cursor: Some((3, 5)),
+            ..Default::default()
+        };
         assert_eq!(s.cursor(), Some((3, 5)));
     }
 
     #[test]
     fn trait_impl_buffer_status() {
-        let mut s = EditorStateSnapshot::default();
-        s.buffers.push((
-            PathBuf::from("/x"),
-            BufferStatus {
-                open: true,
-                dirty: true,
-            },
-        ));
+        let s = EditorStateSnapshot {
+            buffers: vec![(
+                PathBuf::from("/x"),
+                BufferStatus {
+                    open: true,
+                    dirty: true,
+                },
+            )],
+            ..Default::default()
+        };
         let st = s.buffer_status(Path::new("/x")).unwrap();
         assert!(st.open);
         assert!(st.dirty);
