@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
-use xgent_core::chat::{ChatEvent, ChatMessage, ChatRequest, TokenUsage};
+use xgent_core::chat::{ChatEvent, ChatRequest, TokenUsage};
 use xgent_core::ids::StreamId;
 
 use crate::provider::{ChatStream, LlmProvider, ModelInfo, ProviderError};
@@ -45,17 +45,32 @@ pub struct AnthropicProvider {
     api_key: String,
     /// 复用的 HTTP 客户端
     client: Client,
+    /// 非流式请求与建流（time-to-headers）的超时。
+    ///
+    /// 不设在 Client 整体上——那会杀死长流式响应；流式 body 由
+    /// first/idle 超时兜底（见 run_stream）。
+    request_timeout: Duration,
 }
 
 impl AnthropicProvider {
     /// 构造适配器。
     pub fn new(id: String, api_base: String, api_key: String) -> Self {
-        let client = Client::new();
+        Self::with_timeout(id, api_base, api_key, 60)
+    }
+
+    /// 指定非流式请求超时秒数构造（daemon 用配置的 `timeout_secs`）。
+    pub fn with_timeout(id: String, api_base: String, api_key: String, timeout_secs: u64) -> Self {
+        let client = Client::builder()
+            // 只限制连接建立，防止半开连接在握手阶段永久挂起
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
         Self {
             id,
             api_base,
             api_key,
             client,
+            request_timeout: Duration::from_secs(timeout_secs),
         }
     }
 
@@ -66,6 +81,7 @@ impl AnthropicProvider {
             api_base,
             api_key,
             client,
+            request_timeout: Duration::from_secs(60),
         }
     }
 
@@ -124,11 +140,10 @@ impl AnthropicProvider {
                         // 合并到上一条 user 消息（Anthropic 要求连续 tool_result 在同一 user 消息）
                         if let Some(last) = messages.last_mut()
                             && last["role"] == "user"
+                            && let Some(arr) = last["content"].as_array_mut()
                         {
-                            if let Some(arr) = last["content"].as_array_mut() {
-                                arr.push(tr);
-                                continue;
-                            }
+                            arr.push(tr);
+                            continue;
                         }
                         // 否则新建 user 消息
                         messages.push(json!({"role": "user", "content": [tr]}));
@@ -223,6 +238,7 @@ impl LlmProvider for AnthropicProvider {
             .get(self.models_url())
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .timeout(self.request_timeout)
             .send()
             .await?;
         let status = resp.status();
@@ -245,9 +261,7 @@ impl LlmProvider for AnthropicProvider {
                 Some(ModelInfo {
                     name,
                     id,
-                    context_window: m["context_window"]
-                        .as_u64()
-                        .map(|n| n as u32),
+                    context_window: m["context_window"].as_u64().map(|n| n as u32),
                 })
             })
             .collect();
@@ -263,14 +277,25 @@ impl LlmProvider for AnthropicProvider {
         }
 
         let body = self.build_messages_body(&req);
-        let resp = self
-            .client
-            .post(self.messages_url())
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .json(&body)
-            .send()
-            .await?;
+        // 建流（等待响应头）限时：半开连接下 send() 可能永久挂起，而
+        // first/idle 超时要等流建立后才生效。timeout 只覆盖 send() 本身，
+        // 响应头返回后 body 流式不受影响。
+        let resp = timeout(self.request_timeout, async {
+            self.client
+                .post(self.messages_url())
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .json(&body)
+                .send()
+                .await
+        })
+        .await
+        .map_err(|_| {
+            ProviderError::Network(format!(
+                "建流超时（{}s 无响应）",
+                self.request_timeout.as_secs()
+            ))
+        })??;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -348,7 +373,8 @@ async fn run_anthropic_stream_with_timeout<S>(
     let mut text_started = false;
     let mut finished = false;
     // 当前 tool_use 块的累积器（Anthropic 一次只有一个 tool_use 块在流中）
-    let mut tool_accum: Option<ToolUseAccum> = None;
+    let mut tool_accum: std::collections::HashMap<u32, ToolUseAccum> =
+        std::collections::HashMap::new();
 
     // 流开始：先发 Start（model 可能从 message_start 更新）
     let _ = tx.send(ChatEvent::Start { model }).await;
@@ -371,7 +397,15 @@ async fn run_anthropic_stream_with_timeout<S>(
         }
     };
 
-    if !handle_anthropic_item(first, &tx, &mut text_started, &mut finished, &mut tool_accum).await {
+    if !handle_anthropic_item(
+        first,
+        &tx,
+        &mut text_started,
+        &mut finished,
+        &mut tool_accum,
+    )
+    .await
+    {
         return;
     }
 
@@ -412,12 +446,11 @@ async fn handle_anthropic_item(
     tx: &mpsc::Sender<ChatEvent>,
     text_started: &mut bool,
     finished: &mut bool,
-    tool_accum: &mut Option<ToolUseAccum>,
+    tool_accum: &mut std::collections::HashMap<u32, ToolUseAccum>,
 ) -> bool {
     match item {
         Ok(v) => {
-            if let Err(e) =
-                handle_anthropic_chunk(&v, tx, text_started, finished, tool_accum).await
+            if let Err(e) = handle_anthropic_chunk(&v, tx, text_started, finished, tool_accum).await
             {
                 let _ = tx
                     .send(ChatEvent::Error {
@@ -441,12 +474,21 @@ async fn handle_anthropic_item(
     }
 }
 
-/// Anthropic tool_use 块累积器。
+/// Anthropic tool_use 块累积器（按 content block index 聚合）。
+///
+/// `id`/`name` 已随 `ToolCallStart` 事件发出，此处只需聚合 args。
+/// 并行 tool_use 时一条消息含多个 tool_use 块，故用 HashMap 按 index 累积。
 struct ToolUseAccum {
-    index: u32,
-    id: String,
-    name: String,
     args: String,
+}
+
+/// 解析工具调用聚合 args；畸形 JSON 保留为带标记的错误对象而非空 `{}`
+/// （与 OpenAI 适配器同语义，见 openai_compat::parse_tool_args）。
+fn parse_tool_args(args: &str) -> Value {
+    if args.is_empty() {
+        return json!({});
+    }
+    serde_json::from_str(args).unwrap_or_else(|_| json!({ "__parse_error": args }))
 }
 
 /// 处理单个 Anthropic SSE 事件 JSON。
@@ -455,7 +497,7 @@ async fn handle_anthropic_chunk(
     tx: &mpsc::Sender<ChatEvent>,
     text_started: &mut bool,
     finished: &mut bool,
-    tool_accum: &mut Option<ToolUseAccum>,
+    tool_accum: &mut std::collections::HashMap<u32, ToolUseAccum>,
 ) -> Result<(), ProviderError> {
     let event_type = v["type"].as_str().unwrap_or("");
 
@@ -482,19 +524,11 @@ async fn handle_anthropic_chunk(
                         .as_str()
                         .unwrap_or("")
                         .to_string();
-                    *tool_accum = Some(ToolUseAccum {
-                        index,
-                        id,
-                        name,
-                        args: String::new(),
-                    });
-                    let _ = tx
-                        .send(ChatEvent::ToolCallStart {
-                            index,
-                            id: v["content_block"]["id"].as_str().unwrap_or("").to_string(),
-                            name: v["content_block"]["name"].as_str().unwrap_or("").to_string(),
-                        })
-                        .await;
+                    // 并行 tool_use：一条消息可含多个 tool_use content block，
+                    // 按 index 各自累积（单累积器会覆盖前一个，导致第一个
+                    // 工具调用的 args 丢失、ToolCallEnd 永不发射）。
+                    tool_accum.insert(index, ToolUseAccum { args: String::new() });
+                    let _ = tx.send(ChatEvent::ToolCallStart { index, id, name }).await;
                 }
                 _ => {}
             }
@@ -517,11 +551,12 @@ async fn handle_anthropic_chunk(
                 }
                 "input_json_delta" => {
                     if let Some(partial) = v["delta"]["partial_json"].as_str() {
-                        if let Some(accum) = tool_accum {
+                        let index = v["index"].as_u64().unwrap_or(0) as u32;
+                        if let Some(accum) = tool_accum.get_mut(&index) {
                             accum.args.push_str(partial);
                             let _ = tx
                                 .send(ChatEvent::ToolCallDelta {
-                                    index: accum.index,
+                                    index,
                                     partial_json: partial.to_string(),
                                 })
                                 .await;
@@ -534,23 +569,11 @@ async fn handle_anthropic_chunk(
         "content_block_stop" => {
             let index = v["index"].as_u64().unwrap_or(0) as u32;
             // 判断是文本块还是 tool_use 块结束
-            if let Some(accum) = tool_accum.take() {
-                if accum.index == index {
-                    let args_val: Value = if accum.args.is_empty() {
-                        json!({})
-                    } else {
-                        serde_json::from_str(&accum.args).unwrap_or(json!({}))
-                    };
-                    let _ = tx
-                        .send(ChatEvent::ToolCallEnd {
-                            index: accum.index,
-                            args: args_val,
-                        })
-                        .await;
-                } else {
-                    // index 不匹配，放回
-                    *tool_accum = Some(accum);
-                }
+            if let Some(accum) = tool_accum.remove(&index) {
+                let args_val = parse_tool_args(&accum.args);
+                let _ = tx
+                    .send(ChatEvent::ToolCallEnd { index, args: args_val })
+                    .await;
             } else if *text_started {
                 *text_started = false;
                 let _ = tx.send(ChatEvent::TextEnd).await;
@@ -568,18 +591,11 @@ async fn handle_anthropic_chunk(
                     *text_started = false;
                     let _ = tx.send(ChatEvent::TextEnd).await;
                 }
-                // tool_use 块结束（若有未关闭的）
-                if let Some(accum) = tool_accum.take() {
-                    let args_val: Value = if accum.args.is_empty() {
-                        json!({})
-                    } else {
-                        serde_json::from_str(&accum.args).unwrap_or(json!({}))
-                    };
+                // tool_use 块结束（若有未关闭的，如 Length 截断）：逐个补发 End
+                for (index, accum) in tool_accum.drain() {
+                    let args_val = parse_tool_args(&accum.args);
                     let _ = tx
-                        .send(ChatEvent::ToolCallEnd {
-                            index: accum.index,
-                            args: args_val,
-                        })
+                        .send(ChatEvent::ToolCallEnd { index, args: args_val })
                         .await;
                 }
                 let _ = tx
@@ -594,17 +610,16 @@ async fn handle_anthropic_chunk(
         "message_stop" => {
             // 已由 message_delta 处理
         }
-        "ping" | "error" => {
+        "ping" | "error"
             // ping: 心跳跳过
             // error: Anthropic 流中错误事件
-            if event_type == "error" {
+            if event_type == "error" => {
                 let msg = v["error"]["message"]
                     .as_str()
                     .unwrap_or("unknown anthropic stream error")
                     .to_string();
                 return Err(ProviderError::Stream(msg));
             }
-        }
         _ => {}
     }
 
@@ -670,6 +685,7 @@ mod tests {
     use super::*;
     use eventsource_stream::Event;
     use futures::stream;
+    use xgent_core::chat::ChatMessage;
 
     fn ev(data: &str) -> Result<Event, std::io::Error> {
         Ok(Event {
@@ -684,11 +700,19 @@ mod tests {
     async fn anthropic_text_stream() {
         let events = stream::iter(vec![
             ev(r#"{"type":"message_start","message":{"model":"claude-3"}}"#),
-            ev(r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#),
-            ev(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#),
-            ev(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}"#),
+            ev(
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}"#,
+            ),
             ev(r#"{"type":"content_block_stop","index":0}"#),
-            ev(r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":5}}"#),
+            ev(
+                r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":5}}"#,
+            ),
             ev(r#"{"type":"message_stop"}"#),
         ]);
         let stream = parse_sse_events(events);
@@ -726,11 +750,19 @@ mod tests {
     async fn anthropic_tool_use_stream() {
         let events = stream::iter(vec![
             ev(r#"{"type":"message_start","message":{"model":"claude-3"}}"#),
-            ev(r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"read_file"}}"#),
-            ev(r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}"#),
-            ev(r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"test.rs\"}"}}"#),
+            ev(
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"read_file"}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"test.rs\"}"}}"#,
+            ),
             ev(r#"{"type":"content_block_stop","index":0}"#),
-            ev(r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":5}}"#),
+            ev(
+                r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":5}}"#,
+            ),
             ev(r#"{"type":"message_stop"}"#),
         ]);
         let stream = parse_sse_events(events);
@@ -759,6 +791,57 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// 并行 tool_use：两个 tool_use content block 交错到达，各自的 args
+    /// 不得互相覆盖，ToolCallEnd 各按 index 发射（回归：单累积器会丢失
+    /// 第一个工具调用）。
+    #[tokio::test]
+    async fn anthropic_parallel_tool_use_stream() {
+        let events = stream::iter(vec![
+            ev(r#"{"type":"message_start","message":{"model":"claude-3"}}"#),
+            ev(
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"read_file"}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_2","name":"search"}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a.rs\"}"}}"#,
+            ),
+            ev(
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"x\"}"}}"#,
+            ),
+            ev(r#"{"type":"content_block_stop","index":0}"#),
+            ev(r#"{"type":"content_block_stop","index":1}"#),
+            ev(
+                r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":5}}"#,
+            ),
+            ev(r#"{"type":"message_stop"}"#),
+        ]);
+        let stream = parse_sse_events(events);
+        let (tx, mut rx) = mpsc::channel(64);
+        run_anthropic_stream(stream, "claude-3".into(), tx).await;
+
+        let mut events = Vec::new();
+        while let Some(ev) = rx.recv().await {
+            events.push(ev);
+        }
+
+        let ends: Vec<&ChatEvent> = events
+            .iter()
+            .filter(|e| matches!(e, ChatEvent::ToolCallEnd { .. }))
+            .collect();
+        assert_eq!(ends.len(), 2, "应有两个 ToolCallEnd，实际: {events:?}");
+        let (end0, end1) = match (ends[0], ends[1]) {
+            (
+                ChatEvent::ToolCallEnd { index: 0, args: a0 },
+                ChatEvent::ToolCallEnd { index: 1, args: a1 },
+            ) => (a0, a1),
+            _ => panic!("ToolCallEnd 的 index 或顺序不对: {events:?}"),
+        };
+        assert_eq!(end0["path"], "a.rs", "第一个工具调用 args 不得被覆盖");
+        assert_eq!(end1["query"], "x");
     }
 
     #[test]

@@ -39,6 +39,11 @@ pub struct OpenAiCompatProvider {
     api_key: String,
     /// 复用的 HTTP 客户端（自带连接池）
     client: Client,
+    /// 非流式请求与建流（time-to-headers）的超时。
+    ///
+    /// 不设在 Client 整体上——那会杀死长流式响应；流式 body 由
+    /// first/idle 超时兜底（见 run_stream）。
+    request_timeout: Duration,
 }
 
 impl OpenAiCompatProvider {
@@ -46,12 +51,22 @@ impl OpenAiCompatProvider {
     ///
     /// `api_base` 不含尾部 `/`，方法内部拼接路径。
     pub fn new(id: String, api_base: String, api_key: String) -> Self {
-        let client = Client::new();
+        Self::with_timeout(id, api_base, api_key, 60)
+    }
+
+    /// 指定非流式请求超时秒数构造（daemon 用配置的 `timeout_secs`）。
+    pub fn with_timeout(id: String, api_base: String, api_key: String, timeout_secs: u64) -> Self {
+        let client = Client::builder()
+            // 只限制连接建立（TCP+TLS 握手），防止半开连接在握手阶段永久挂起
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
         Self {
             id,
             api_base,
             api_key,
             client,
+            request_timeout: Duration::from_secs(timeout_secs),
         }
     }
 
@@ -62,6 +77,7 @@ impl OpenAiCompatProvider {
             api_base,
             api_key,
             client,
+            request_timeout: Duration::from_secs(60),
         }
     }
 
@@ -207,6 +223,7 @@ impl LlmProvider for OpenAiCompatProvider {
             .client
             .get(self.models_url())
             .bearer_auth(&self.api_key)
+            .timeout(self.request_timeout)
             .send()
             .await?;
         let status = resp.status();
@@ -240,13 +257,24 @@ impl LlmProvider for OpenAiCompatProvider {
             return Err(ProviderError::Config("api_base 未配置".into()));
         }
         let body = self.build_chat_body(&req);
-        let resp = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await?;
+        // 建流（等待响应头）限时：半开连接下 send() 可能永久挂起，而
+        // first/idle 超时要等流建立后才生效。timeout 只覆盖 send() 本身，
+        // 响应头返回后 body 流式不受影响。
+        let resp = timeout(self.request_timeout, async {
+            self.client
+                .post(self.chat_url())
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send()
+                .await
+        })
+        .await
+        .map_err(|_| {
+            ProviderError::Network(format!(
+                "建流超时（{}s 无响应）",
+                self.request_timeout.as_secs()
+            ))
+        })??;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -318,12 +346,7 @@ async fn run_stream_with_timeout<S>(
     use xgent_core::chat::ErrorKind;
 
     let mut s = Box::pin(stream);
-    // 工具调用按 index 聚合（OpenAI 分块到达）
-    let mut tool_calls: Vec<ToolCallAccum> = Vec::new();
-    // 跟踪是否已发 TextStart（跨 chunk 状态）
-    let mut text_started = false;
-    // 标记是否已发过 finish（避免重复 Done）
-    let mut finished = false;
+    let mut st = StreamState::default();
 
     // 流开始
     let _ = tx.send(ChatEvent::Start { model }).await;
@@ -333,7 +356,7 @@ async fn run_stream_with_timeout<S>(
         Ok(Some(item)) => item,
         // 流在首事件前就结束：当作正常空流，走收尾逻辑
         Ok(None) => {
-            finish_stream(&tx, &mut text_started, finished).await;
+            st.finish(&tx).await;
             return;
         }
         Err(_) => {
@@ -348,15 +371,7 @@ async fn run_stream_with_timeout<S>(
     };
 
     // 处理首事件
-    if !handle_item(
-        first,
-        &tx,
-        &mut tool_calls,
-        &mut text_started,
-        &mut finished,
-    )
-    .await
-    {
+    if !handle_item(first, &tx, &mut st).await {
         return;
     }
 
@@ -364,8 +379,7 @@ async fn run_stream_with_timeout<S>(
     loop {
         match timeout(idle_timeout, s.next()).await {
             Ok(Some(item)) => {
-                if !handle_item(item, &tx, &mut tool_calls, &mut text_started, &mut finished).await
-                {
+                if !handle_item(item, &tx, &mut st).await {
                     return;
                 }
             }
@@ -383,21 +397,78 @@ async fn run_stream_with_timeout<S>(
         }
     }
 
-    // 流自然结束，补 Done（若未发过）
-    finish_stream(&tx, &mut text_started, finished).await;
+    // 流自然结束，统一收尾（Done 延迟到此处发射，带上最后看到的 usage）
+    st.finish(&tx).await;
+}
+
+/// 流式解析跨 chunk 状态。
+#[derive(Default)]
+struct StreamState {
+    /// 工具调用按 index 聚合（OpenAI 分块到达）
+    tool_calls: Vec<ToolCallAccum>,
+    /// 是否已发 TextStart
+    text_started: bool,
+    /// 最后一次看到的 usage。
+    ///
+    /// OpenAI 协议中 usage 携带在空 choices 的独立 chunk 里，且在
+    /// finish_reason chunk **之后**到达——Done 统一延迟到流末尾发射，
+    /// 才能带上真实 usage（否则恒为 0，token 统计与 compaction 触发失真）。
+    last_usage: Option<TokenUsage>,
+    /// finish_reason 映射的 StopReason
+    stop_reason: Option<xgent_core::chat::StopReason>,
+}
+
+impl StreamState {
+    /// 流末尾统一收尾：补 TextEnd + 发 Done（带最后看到的 usage）。
+    async fn finish(&mut self, tx: &mpsc::Sender<ChatEvent>) {
+        if self.text_started {
+            self.text_started = false;
+            let _ = tx.send(ChatEvent::TextEnd).await;
+        }
+        let _ = tx
+            .send(ChatEvent::Done {
+                reason: self
+                    .stop_reason
+                    .unwrap_or(xgent_core::chat::StopReason::Stop),
+                usage: self.last_usage.clone().unwrap_or_default(),
+            })
+            .await;
+    }
+}
+
+/// 提取流中 `{"error": {...}}` 数据帧的错误消息（OpenAI 兼容服务的
+/// mid-stream 错误形态）。无错误返回 None。
+fn extract_stream_error(v: &Value) -> Option<String> {
+    let err = v.get("error")?;
+    if err.is_null() {
+        return None;
+    }
+    let msg = err["message"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| err.to_string());
+    Some(msg)
 }
 
 /// 处理单个流 item，返回 false 表示应终止流（已发 Error）。
 async fn handle_item(
     item: Result<Value, ProviderError>,
     tx: &mpsc::Sender<ChatEvent>,
-    tool_calls: &mut Vec<ToolCallAccum>,
-    text_started: &mut bool,
-    finished: &mut bool,
+    st: &mut StreamState,
 ) -> bool {
     match item {
         Ok(v) => {
-            if let Err(e) = handle_chunk(&v, tx, tool_calls, text_started).await {
+            // 流内 error 数据帧：不处理会被静默跳过，半截文本被当完整回复
+            if let Some(msg) = extract_stream_error(&v) {
+                let _ = tx
+                    .send(ChatEvent::Error {
+                        kind: xgent_core::chat::ErrorKind::ProviderError,
+                        message: msg,
+                    })
+                    .await;
+                return false;
+            }
+            if let Err(e) = handle_chunk(&v, tx, st).await {
                 let _ = tx
                     .send(ChatEvent::Error {
                         kind: e.to_error_kind(),
@@ -405,16 +476,6 @@ async fn handle_item(
                     })
                     .await;
                 return false;
-            }
-            // 检测是否已发 Done（finish_reason 处理过）
-            if !*finished
-                && v["choices"]
-                    .as_array()
-                    .and_then(|c| c.first())
-                    .and_then(|c| c["finish_reason"].as_str())
-                    .is_some()
-            {
-                *finished = true;
             }
             true
         }
@@ -430,66 +491,28 @@ async fn handle_item(
     }
 }
 
-/// 流收尾：若文本块未结束补 TextEnd；若未发 Done 补 Done{Stop}。
-async fn finish_stream(tx: &mpsc::Sender<ChatEvent>, text_started: &mut bool, finished: bool) {
-    if !finished {
-        if *text_started {
-            let _ = tx.send(ChatEvent::TextEnd).await;
-        }
-        let _ = tx
-            .send(ChatEvent::Done {
-                reason: xgent_core::chat::StopReason::Stop,
-                usage: TokenUsage::default(),
-            })
-            .await;
-    }
-}
-
-/// 工具调用累积器（按 index 聚合分块，发射 ToolCallStart/Delta/End）。
-#[derive(Default, Clone)]
-struct ToolCallAccum {
-    /// 是否已发射 ToolCallStart
-    started: bool,
-    id: String,
-    name: String,
-    args: String,
-}
-
-/// 把 OpenAI finish_reason 映射为 StopReason。
-fn map_stop_reason(reason: &str) -> xgent_core::chat::StopReason {
-    use xgent_core::chat::StopReason;
-    match reason {
-        "stop" => StopReason::Stop,
-        "tool_calls" => StopReason::ToolUse,
-        "length" => StopReason::Length,
-        _ => StopReason::Stop,
-    }
-}
-
 /// 处理单个 SSE chunk，转换为细粒度 [`ChatEvent`] 发送。
 ///
 /// 事件发射规则（对齐 ADR-0006）：
 /// - 文本：首个非空 content 发 `TextStart`，后续 `TextDelta`，finish 时 `TextEnd`
 /// - 工具调用：按 index 首次见发 `ToolCallStart`，参数片段发 `ToolCallDelta`，finish 时 `ToolCallEnd`（全量 args）
-/// - finish_reason：映射 StopReason 后发 `Done{reason, usage}`
-///
-/// `text_started` 跟踪是否已发 TextStart（跨 chunk 状态）。
+/// - finish_reason：只记录 StopReason 到状态，**不发 Done**——usage chunk
+///   可能在其后到达，Done 统一由 [`StreamState::finish`] 在流末尾发射
 ///
 /// 返回 `Err` 表示致命解析错误，应终止流。
 async fn handle_chunk(
     v: &Value,
     tx: &mpsc::Sender<ChatEvent>,
-    tool_calls: &mut Vec<ToolCallAccum>,
-    text_started: &mut bool,
+    st: &mut StreamState,
 ) -> Result<(), ProviderError> {
-    let usage = extract_usage(v);
+    // 每帧都提取 usage（含空 choices 的纯 usage chunk）
+    if let Some(u) = extract_usage(v) {
+        st.last_usage = Some(u);
+    }
 
-    let choices: &[Value] = match v["choices"].as_array() {
-        Some(c) if !c.is_empty() => c,
-        _ => {
-            // 无 choices 或空 choices（纯 usage chunk）——usage 留到 finish 时发
-            return Ok(());
-        }
+    let Some(choices) = v["choices"].as_array().filter(|c| !c.is_empty()) else {
+        // 无 choices 或空 choices（纯 usage chunk）——usage 已提取
+        return Ok(());
     };
 
     for choice in choices {
@@ -497,10 +520,10 @@ async fn handle_chunk(
         if let Some(tc_arr) = choice["delta"]["tool_calls"].as_array() {
             for tc in tc_arr {
                 let idx = tc["index"].as_u64().unwrap_or(0) as usize;
-                if idx >= tool_calls.len() {
-                    tool_calls.resize(idx + 1, ToolCallAccum::default());
+                if idx >= st.tool_calls.len() {
+                    st.tool_calls.resize(idx + 1, ToolCallAccum::default());
                 }
-                let accum = &mut tool_calls[idx];
+                let accum = &mut st.tool_calls[idx];
 
                 // 首次见该 index：提取 id/name，发 ToolCallStart
                 if !accum.started {
@@ -539,8 +562,8 @@ async fn handle_chunk(
         if let Some(content) = choice["delta"]["content"].as_str()
             && !content.is_empty()
         {
-            if !*text_started {
-                *text_started = true;
+            if !st.text_started {
+                st.text_started = true;
                 let _ = tx.send(ChatEvent::TextStart).await;
             }
             let _ = tx
@@ -550,22 +573,18 @@ async fn handle_chunk(
                 .await;
         }
 
-        // finish_reason
+        // finish_reason：记录 StopReason，Done 延迟到流末尾
         if let Some(reason) = choice["finish_reason"].as_str() {
             // 文本块结束（若已开始）
-            if *text_started {
-                *text_started = false;
+            if st.text_started {
+                st.text_started = false;
                 let _ = tx.send(ChatEvent::TextEnd).await;
             }
 
             // 工具调用结束：发 ToolCallEnd（聚合 args 解析为 JSON）
-            for (idx, accum) in tool_calls.drain(..).enumerate() {
+            for (idx, accum) in st.tool_calls.drain(..).enumerate() {
                 if accum.started {
-                    let args_val: Value = if accum.args.is_empty() {
-                        json!({})
-                    } else {
-                        serde_json::from_str(&accum.args).unwrap_or(json!({}))
-                    };
+                    let args_val = parse_tool_args(&accum.args);
                     let _ = tx
                         .send(ChatEvent::ToolCallEnd {
                             index: idx as u32,
@@ -575,18 +594,41 @@ async fn handle_chunk(
                 }
             }
 
-            // 流结束
-            let stop_reason = map_stop_reason(reason);
-            let _ = tx
-                .send(ChatEvent::Done {
-                    reason: stop_reason,
-                    usage: usage.clone().unwrap_or_default(),
-                })
-                .await;
+            st.stop_reason = Some(map_stop_reason(reason));
         }
     }
 
     Ok(())
+}
+
+/// 解析工具调用聚合 args；畸形 JSON 保留为带标记的错误对象而非空 `{}`，
+/// 让调用方拿到「参数解析失败」的明确信号（空 `{}` 会误导 LLM 以缺参重试）。
+fn parse_tool_args(args: &str) -> Value {
+    if args.is_empty() {
+        return json!({});
+    }
+    serde_json::from_str(args).unwrap_or_else(|_| json!({ "__parse_error": args }))
+}
+
+/// 工具调用累积器（按 index 聚合分块，发射 ToolCallStart/Delta/End）。
+#[derive(Default, Clone)]
+struct ToolCallAccum {
+    /// 是否已发射 ToolCallStart
+    started: bool,
+    id: String,
+    name: String,
+    args: String,
+}
+
+/// 把 OpenAI finish_reason 映射为 StopReason。
+fn map_stop_reason(reason: &str) -> xgent_core::chat::StopReason {
+    use xgent_core::chat::StopReason;
+    match reason {
+        "stop" => StopReason::Stop,
+        "tool_calls" => StopReason::ToolUse,
+        "length" => StopReason::Length,
+        _ => StopReason::Stop,
+    }
 }
 
 /// 从 chunk 提取 usage（OpenAI 在最后一个 chunk 带 usage）。
@@ -640,18 +682,15 @@ mod tests {
     #[tokio::test]
     async fn handle_chunk_text_emits_text_start_delta_end() {
         let (tx, mut rx) = mpsc::channel::<ChatEvent>(16);
-        let mut tool_calls = Vec::new();
-        let mut text_started = false;
+        let mut st = StreamState::default();
         // 文本 chunk
         let v1 = chunk(r#"{"choices":[{"delta":{"content":"Hello"}}]}"#);
-        handle_chunk(&v1, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v1, &tx, &mut st).await.unwrap();
         // finish chunk
         let v2 = chunk(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
-        handle_chunk(&v2, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v2, &tx, &mut st).await.unwrap();
+        // 流末尾统一收尾
+        st.finish(&tx).await;
         drop(tx);
 
         // 期望序列：TextStart, TextDelta("Hello"), TextEnd, Done{Stop}
@@ -750,12 +789,10 @@ mod tests {
     #[tokio::test]
     async fn handle_chunk_finish_stop_sends_done() {
         let (tx, mut rx) = mpsc::channel::<ChatEvent>(8);
-        let mut tool_calls = Vec::new();
-        let mut text_started = false;
+        let mut st = StreamState::default();
         let v = chunk(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
-        handle_chunk(&v, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v, &tx, &mut st).await.unwrap();
+        st.finish(&tx).await;
         let ev = recv(&mut rx).await;
         assert!(matches!(
             ev,
@@ -769,12 +806,10 @@ mod tests {
     #[tokio::test]
     async fn handle_chunk_finish_length_maps_stop_reason() {
         let (tx, mut rx) = mpsc::channel::<ChatEvent>(8);
-        let mut tool_calls = Vec::new();
-        let mut text_started = false;
+        let mut st = StreamState::default();
         let v = chunk(r#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#);
-        handle_chunk(&v, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v, &tx, &mut st).await.unwrap();
+        st.finish(&tx).await;
         let ev = recv(&mut rx).await;
         assert!(matches!(
             ev,
@@ -785,30 +820,52 @@ mod tests {
         ));
     }
 
+    /// Done 延迟到流末尾发射：finish_reason 之后的独立 usage chunk（空 choices）
+    /// 必须计入 Done.usage（回归：OpenAI include_usage 的 usage 恒为 0）。
+    #[tokio::test]
+    async fn handle_chunk_usage_chunk_after_finish_is_kept() {
+        let (tx, mut rx) = mpsc::channel::<ChatEvent>(8);
+        let mut st = StreamState::default();
+        let v1 = chunk(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        handle_chunk(&v1, &tx, &mut st).await.unwrap();
+        // 尾部 usage chunk：choices 为空
+        let v2 = chunk(r#"{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}"#);
+        handle_chunk(&v2, &tx, &mut st).await.unwrap();
+        st.finish(&tx).await;
+        let ev = recv(&mut rx).await;
+        assert!(
+            matches!(
+                &ev,
+                ChatEvent::Done {
+                    usage: TokenUsage {
+                        prompt: 11,
+                        completion: 7
+                    },
+                    ..
+                }
+            ),
+            "Done 应带尾部 usage chunk 的真实用量，实际: {ev:?}"
+        );
+    }
+
     #[tokio::test]
     async fn handle_chunk_tool_call_emits_start_delta_end() {
         let (tx, mut rx) = mpsc::channel::<ChatEvent>(32);
-        let mut tool_calls = Vec::new();
-        let mut text_started = false;
+        let mut st = StreamState::default();
         // 第一块：tool_call 开始 + 参数片段
         let v1 = chunk(
             r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}"#,
         );
-        handle_chunk(&v1, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v1, &tx, &mut st).await.unwrap();
         // 第二块：arguments 继续
         let v2 = chunk(
             r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"/x\"}"}}]}}]}"#,
         );
-        handle_chunk(&v2, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v2, &tx, &mut st).await.unwrap();
         // 第三块：finish
         let v3 = chunk(r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#);
-        handle_chunk(&v3, &tx, &mut tool_calls, &mut text_started)
-            .await
-            .unwrap();
+        handle_chunk(&v3, &tx, &mut st).await.unwrap();
+        st.finish(&tx).await;
         drop(tx);
 
         // 期望序列：ToolCallStart{0,"call_1","read_file"},

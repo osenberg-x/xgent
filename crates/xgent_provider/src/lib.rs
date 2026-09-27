@@ -24,16 +24,20 @@ use xgent_settings_core::{ProviderConfig, ProviderKind};
 /// 据 [`ProviderKind`] 选择适配器；Ollama 兼容模式复用 `OpenAiCompatProvider`。
 pub fn build_provider(id: &str, cfg: &ProviderConfig) -> Box<dyn LlmProvider> {
     match cfg.kind {
-        ProviderKind::OpenAiCompat | ProviderKind::Ollama => Box::new(OpenAiCompatProvider::new(
-            id.to_string(),
-            cfg.api_base.clone(),
-            cfg.api_key.clone(),
-        )),
+        ProviderKind::OpenAiCompat | ProviderKind::Ollama => {
+            Box::new(OpenAiCompatProvider::with_timeout(
+                id.to_string(),
+                cfg.api_base.clone(),
+                cfg.api_key.clone(),
+                cfg.timeout_secs,
+            ))
+        }
         ProviderKind::ResponseApi => Box::new(ResponseApiProvider::new(id.to_string())),
-        ProviderKind::Anthropic => Box::new(AnthropicProvider::new(
+        ProviderKind::Anthropic => Box::new(AnthropicProvider::with_timeout(
             id.to_string(),
             cfg.api_base.clone(),
             cfg.api_key.clone(),
+            cfg.timeout_secs,
         )),
         ProviderKind::Custom => Box::new(CustomApiProvider::new(id.to_string())),
     }
