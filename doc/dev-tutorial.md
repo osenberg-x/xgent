@@ -529,6 +529,19 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 23. **已标注的 MVP 限制**（深度 review，设计文档 §10.4/§14 D-P7~D-P9）：配置不热更新（`HostState.config` 快照，需 reload）、WASM 纯计算死循环致 task 永驻（`drain_pending_drop` 不 kill task）、on_update 流式回灌未接通（`ToolUpdateCallback` 签名限制）、PluginOp channel 无背压（proxy trait 同步约束）。
 
+24. **全面评审修复（2026-09-27，10 轮）**——契约级变更须知：
+   - **`provider.listModels` 支持可选 override 参数**（`kind`/`api_base`/`api_key`）：设置面板用编辑中的草稿凭据探测模型列表，daemon 临时构造 provider 直连、不写配置不进池（此前经 `config.write` 永久落盘草稿）；向后兼容（无 override 走池缓存）。
+   - **`peer.fileChanged` 通知参数为完整 `FileChanged`**（`project_root`/`path`/`kind`）：UI 统一按 `FileChanged` 反序列化，此前 `{"path"}` 会被静默丢弃、多开同步失效。
+   - **`xui::EditorActive` 组件约定**：多 tab 宿主须在激活 buffer 实体上增删该标记，编辑器快捷键（Cmd+S/Z/F/H）只作用于带标记者（`xgent_ui::editor::rebuild_editor_tabs` 维护）。
+   - **UI 进程 Startup 订阅 `fs.watch`**（`xgent_app::startup::open_project`，经 bridge runtime spawn）：daemon 只向订阅者推 `fs.changed`，漏订阅则编辑器冲突检测收不到任何通知。
+   - **agent loop 停等期迟到 StartLoop 上返回顶层循环**（`bridge.rs::run_agent_loop` 返回 `Option<(ChatRequest, editor_queries)>`）：ECS Done 置 Idle 后的新输入走 StartLoop，旧实现在外层 `recv()` 把它吞掉、会话永久卡 Thinking。
+   - **Anthropic 并行 tool_use 按 index 聚合**（`HashMap<u32, ToolUseAccum>`）：单累积器会覆盖第一个工具调用的 args、其 `ToolCallEnd` 永不发射。
+   - **OpenAI 流 Done 延迟到流末尾发射**（`StreamState::finish`）：`include_usage` 的 usage chunk 在 finish_reason 之后到达，旧的 finish 即发 Done 使 usage 恒 0。
+   - **PTY `Exited` 由独立 wait 线程权威上报**（`local_pty.rs`）：shell 退出但 grandchild 持 slave 时 reader 永不 EOF，仅靠 reader EOF 检测会漏报 Exited；且多线程 wait 同一 child 会 ECHILD 丢退出码——reader/Kill 路径均不再 wait。
+   - **配置/编辑器写盘均原子化**（同目录临时文件 + rename）：`GlobalConfigStore`/`ProjectConfigStore`/`xgent_ui::editor::io`/`write_file` 工具；崩溃断电不再产生截断 TOML（曾会致 daemon 拒绝启动）。
+   - **确认弹窗键盘守卫**（`confirm_dialog.rs`）：焦点在 `EditableText` 或终端视图独占键盘时，Enter/Esc 不触发弹窗决策（否则聊天输入回车会静默放行工具调用）。
+   - **安全策略动态升级生效**（`security.rs::resolve_policy`）：配置 approved 后仍执行 `approval_for(input)`，危险命令（`rm -rf`/`sudo`）动态 tier 升级会退回 `NeedsConfirmation`（`ToolTier::severity()` 定义危险度序）。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 1. **阅读背景**：开始任务前读 `AGENTS.md`、`doc/design/`、`doc/plans/` 中相关 step 文件；编码时按需查 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。

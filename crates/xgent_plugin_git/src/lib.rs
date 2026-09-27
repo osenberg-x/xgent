@@ -45,10 +45,22 @@ impl Extension for GitPlugin {
 
     fn register_commands(&mut self) -> Vec<WitCommandDef> {
         vec![
-            WitCommandDef { id: "diff".into(), label: "Git: 查看 Diff".into() },
-            WitCommandDef { id: "log".into(), label: "Git: 提交历史".into() },
-            WitCommandDef { id: "status".into(), label: "Git: 状态".into() },
-            WitCommandDef { id: "commit".into(), label: "Git: 提交".into() },
+            WitCommandDef {
+                id: "diff".into(),
+                label: "Git: 查看 Diff".into(),
+            },
+            WitCommandDef {
+                id: "log".into(),
+                label: "Git: 提交历史".into(),
+            },
+            WitCommandDef {
+                id: "status".into(),
+                label: "Git: 状态".into(),
+            },
+            WitCommandDef {
+                id: "commit".into(),
+                label: "Git: 提交".into(),
+            },
         ]
     }
 
@@ -84,9 +96,7 @@ impl Extension for GitPlugin {
                 let n_str = limit.to_string();
                 run_git_via_host_command(tool_id, vec!["log", &format!("-n{n_str}"), "--oneline"])
             }
-            "git_status" => {
-                run_git_via_host_command(tool_id, vec!["status", "--short"])
-            }
+            "git_status" => run_git_via_host_command(tool_id, vec!["status", "--short"]),
             "git_commit" => {
                 let message = input_val
                     .get("message")
@@ -132,7 +142,11 @@ impl Extension for GitPlugin {
         };
         let out = xgent_plugin_api::host::run_command(&req)
             .map_err(|e| format!("git log 失败: {:?}", e))?;
-        let content = if !out.stdout.is_empty() { out.stdout } else { out.stderr };
+        let content = if !out.stdout.is_empty() {
+            out.stdout
+        } else {
+            out.stderr
+        };
         let chunk = xgent_plugin_api::WitContextChunk {
             path: "git_history".into(),
             content,

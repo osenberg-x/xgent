@@ -116,7 +116,8 @@ impl PluginManifest {
         if !SchemaVersion::SUPPORTED.contains(&self.schema_version.0) {
             return Err(ManifestError::Invalid(format!(
                 "schema_version: 支持 {:?}，实际 {}",
-                SchemaVersion::SUPPORTED, self.schema_version.0
+                SchemaVersion::SUPPORTED,
+                self.schema_version.0
             )));
         }
         validate_id(&self.id).map_err(|e| ManifestError::Invalid(format!("id: {e}")))?;
@@ -145,7 +146,10 @@ fn validate_tier(tier: &str, label: &str) -> Result<(), ManifestError> {
 }
 
 /// 批量校验多个 id，失败时附前缀标签。
-fn validate_ids<'a>(ids: impl IntoIterator<Item = &'a String>, label: &str) -> Result<(), ManifestError> {
+fn validate_ids<'a>(
+    ids: impl IntoIterator<Item = &'a String>,
+    label: &str,
+) -> Result<(), ManifestError> {
     for id in ids {
         validate_id(id).map_err(|e| ManifestError::Invalid(format!("{label}: {e}")))?;
     }

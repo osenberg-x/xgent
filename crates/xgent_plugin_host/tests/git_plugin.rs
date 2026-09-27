@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use xgent_plugin::{PluginHostProxy, WasmCallError, WasmHost};
 use xgent_plugin::manifest::PluginManifest;
+use xgent_plugin::{PluginHostProxy, WasmCallError, WasmHost};
 
 use xgent_plugin_host::tool::PluginTool;
 use xgent_tools::tool::Tool;
@@ -108,7 +108,12 @@ async fn git_plugin_execute_git_status() {
 
     // 调 git_status 工具（经 host.run_command 执行真实 git status）
     let result = plugin
-        .call_tool_execute("git_status", "{}", tokio_util::sync::CancellationToken::new(), None)
+        .call_tool_execute(
+            "git_status",
+            "{}",
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
         .await
         .expect("execute git_status");
     // 解析返回的 JSON ToolResult
@@ -149,6 +154,11 @@ async fn git_plugin_cancel_returns_aborted() {
     // 先 cancel，再调用——验证 dispatch select! biased 优先 cancelled 分支
     let token = tokio_util::sync::CancellationToken::new();
     token.cancel();
-    let result = plugin.call_tool_execute("git_status", "{}", token, None).await;
-    assert!(matches!(result, Err(WasmCallError::Aborted)), "应返回 Aborted, got: {result:?}");
+    let result = plugin
+        .call_tool_execute("git_status", "{}", token, None)
+        .await;
+    assert!(
+        matches!(result, Err(WasmCallError::Aborted)),
+        "应返回 Aborted, got: {result:?}"
+    );
 }

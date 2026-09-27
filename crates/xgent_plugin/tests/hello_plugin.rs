@@ -79,7 +79,12 @@ async fn load_and_call_hello_plugin() {
 
     // execute 应返回 Ok（JSON 含 output 字段）
     let result = plugin
-        .call_tool_execute("hello", r#"{"name":"world"}"#, tokio_util::sync::CancellationToken::new(), None)
+        .call_tool_execute(
+            "hello",
+            r#"{"name":"world"}"#,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
         .await
         .expect("execute");
     assert!(

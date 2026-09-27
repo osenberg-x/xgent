@@ -47,7 +47,6 @@ pub enum WasmCallError {
     Failed(String),
 }
 
-
 /// 校验插件 API 版本（计划 Step 3.2 + 偏差修正）。
 ///
 /// 扫 WASM component 的 custom section `xgent:api-version`，反解 6 字节
@@ -65,15 +64,14 @@ fn validate_api_version(wasm_bytes: &[u8]) -> Result<(), WasmCallError> {
                 continue;
             }
         };
-        if let wasmparser::Payload::CustomSection(cs) = payload {
-            if cs.name() == "xgent:api-version" {
-                if cs.data().len() == 6 {
-                    let mut buf = [0u8; 6];
-                    buf.copy_from_slice(cs.data());
-                    found = Some(buf);
-                    break;
-                }
-            }
+        if let wasmparser::Payload::CustomSection(cs) = payload
+            && cs.name() == "xgent:api-version"
+            && cs.data().len() == 6
+        {
+            let mut buf = [0u8; 6];
+            buf.copy_from_slice(cs.data());
+            found = Some(buf);
+            break;
         }
     }
     let bytes = found
@@ -109,7 +107,9 @@ fn wasm_engine() -> Result<&'static Engine, WasmCallError> {
             Engine::new(&config)
                 .map_err(|e| WasmCallError::Failed(format!("wasmtime Engine 构造失败: {e}")))
         });
-    ENGINE.as_ref().map_err(|e| WasmCallError::Failed(e.to_string()))
+    ENGINE
+        .as_ref()
+        .map_err(|e| WasmCallError::Failed(e.to_string()))
 }
 
 /// 构造 WASI ctx：preopen 插件 work_dir 为 `.`，inherit stdio，env。
@@ -231,13 +231,16 @@ impl WasmPlugin {
             while let Some(call) = rx.recv().await {
                 call(&mut bindings, &mut store).await;
             }
-            drop(bindings);
             drop(store);
         });
         Self { tx, in_flight }
     }
 
-    async fn dispatch<F, R>(&self, cancel_token: CancellationToken, build: F) -> Result<R, WasmCallError>
+    async fn dispatch<F, R>(
+        &self,
+        cancel_token: CancellationToken,
+        build: F,
+    ) -> Result<R, WasmCallError>
     where
         F: FnOnce(CancellationToken, oneshot::Sender<Result<R, WasmCallError>>) -> PluginCall
             + Send
@@ -479,9 +482,7 @@ fn map_tool_result(
 ///
 /// command.run / context-provider.retrieve 的 WIT 返回 `result<T, string>`，
 /// 外层是 wasmtime trap。统一映射避免各处手写。
-fn map_result_string<T>(
-    result: wasmtime::Result<Result<T, String>>,
-) -> Result<T, WasmCallError> {
+fn map_result_string<T>(result: wasmtime::Result<Result<T, String>>) -> Result<T, WasmCallError> {
     match result {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(WasmCallError::Failed(e)),

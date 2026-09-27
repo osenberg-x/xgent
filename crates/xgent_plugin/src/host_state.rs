@@ -50,7 +50,8 @@ impl WasiView for HostState {
 impl crate::wasm_host::xgent::plugin::host::Host for HostState {
     async fn read_file(&mut self, path: String) -> wasmtime::Result<Result<String, String>> {
         // 规范化校验（防 .. 穿越与 symlink 逃逸，见 check_fs_perm）
-        let abs = match self.resolve_and_check(&path, &self.manifest.permissions.fs_read, "fs-read") {
+        let abs = match self.resolve_and_check(&path, &self.manifest.permissions.fs_read, "fs-read")
+        {
             Ok(p) => p,
             Err(e) => return Ok(Err(e)),
         };
@@ -65,10 +66,11 @@ impl crate::wasm_host::xgent::plugin::host::Host for HostState {
         path: String,
         content: String,
     ) -> wasmtime::Result<Result<(), String>> {
-        let abs = match self.resolve_and_check(&path, &self.manifest.permissions.fs_write, "fs-write") {
-            Ok(p) => p,
-            Err(e) => return Ok(Err(e)),
-        };
+        let abs =
+            match self.resolve_and_check(&path, &self.manifest.permissions.fs_write, "fs-write") {
+                Ok(p) => p,
+                Err(e) => return Ok(Err(e)),
+            };
         match tokio::fs::write(&abs, content).await {
             Ok(()) => Ok(Ok(())),
             Err(e) => Ok(Err(format!("写入文件失败: {e}"))),
@@ -113,17 +115,26 @@ impl crate::wasm_host::xgent::plugin::host::Host for HostState {
         >,
     > {
         use crate::wasm_host::xgent::plugin::host::{CommandError, CommandOutput};
-        if !self.manifest.permissions.command.iter().any(|c| c == &cmd.program) {
+        if !self
+            .manifest
+            .permissions
+            .command
+            .iter()
+            .any(|c| c == &cmd.program)
+        {
             return Ok(Err(CommandError::PermissionDenied));
         }
         let cwd = match cmd.cwd.as_deref() {
-            Some(p) => match self.resolve_and_check(p, &self.manifest.permissions.fs_read, "cwd(fs-read)") {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(plugin = %self.manifest.id, error = %e, "run_command cwd 权限校验失败");
-                    return Ok(Err(CommandError::PermissionDenied));
+            Some(p) => {
+                match self.resolve_and_check(p, &self.manifest.permissions.fs_read, "cwd(fs-read)")
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(plugin = %self.manifest.id, error = %e, "run_command cwd 权限校验失败");
+                        return Ok(Err(CommandError::PermissionDenied));
+                    }
                 }
-            },
+            }
             None => self.project_root.clone(),
         };
         let mut command = tokio::process::Command::new(&cmd.program);
@@ -197,7 +208,10 @@ impl HostState {
         perm_name: &str,
     ) -> Result<PathBuf, String> {
         // 1. 拒绝含 .. 的输入（防 ../ 穿越沙箱边界）
-        if Path::new(input).components().any(|c| c == std::path::Component::ParentDir) {
+        if Path::new(input)
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
             return Err(format!("{perm_name}: 路径含 .. 被拒绝（沙箱边界）"));
         }
         // 2. 绝对路径必须在 project_root 内
@@ -205,7 +219,11 @@ impl HostState {
         if p.is_absolute() && !p.starts_with(&self.project_root) {
             return Err(format!("{perm_name}: 绝对路径不在项目根内"));
         }
-        let joined = if p.is_absolute() { p.to_path_buf() } else { self.project_root.join(input) };
+        let joined = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            self.project_root.join(input)
+        };
         // 3. canonicalize（跟随 symlink，解析 ..）后再 starts_with 校验
         //    路径不存在时 canonicalize 父目录（write_file 目标可能未创建）
         let canonical = match std::fs::canonicalize(&joined) {
@@ -220,7 +238,10 @@ impl HostState {
             }
         };
         if !canonical.starts_with(&self.project_root) {
-            return Err(format!("{perm_name}: 规范化路径不在项目根内: {}", canonical.display()));
+            return Err(format!(
+                "{perm_name}: 规范化路径不在项目根内: {}",
+                canonical.display()
+            ));
         }
         if patterns.is_empty() {
             return Err(format!("插件未声明 {perm_name} 权限"));

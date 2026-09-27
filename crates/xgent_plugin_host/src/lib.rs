@@ -163,9 +163,24 @@ fn handle_plugin_event(world: &mut World, ev: PluginEvent) {
         }
         PluginEvent::Unregister { plugin_id } => {
             // 清理 ToolExecutor/CommandRegistry/ContextHub（remove_by_prefix）
-            execute_op(PluginOp::UnregisterTools { plugin_id: plugin_id.clone() }, world);
-            execute_op(PluginOp::UnregisterCommands { plugin_id: plugin_id.clone() }, world);
-            execute_op(PluginOp::UnregisterProviders { plugin_id: plugin_id.clone() }, world);
+            execute_op(
+                PluginOp::UnregisterTools {
+                    plugin_id: plugin_id.clone(),
+                },
+                world,
+            );
+            execute_op(
+                PluginOp::UnregisterCommands {
+                    plugin_id: plugin_id.clone(),
+                },
+                world,
+            );
+            execute_op(
+                PluginOp::UnregisterProviders {
+                    plugin_id: plugin_id.clone(),
+                },
+                world,
+            );
             world
                 .resource_mut::<Messages<PluginUnregisterMessage>>()
                 .write(PluginUnregisterMessage { plugin_id });

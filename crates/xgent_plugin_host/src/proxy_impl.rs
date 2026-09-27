@@ -166,10 +166,7 @@ impl PluginContextProxy for PluginContextProxyImpl {
 /// 在主线程 system 内执行一个 PluginOp（操作 ToolExecutor/CommandRegistry/ContextHub）。
 ///
 /// 由 `plugin_poll_system` 调用，传入 `&mut World` 取用 Resources。
-pub fn execute_op(
-    op: PluginOp,
-    world: &mut bevy::prelude::World,
-) {
+pub fn execute_op(op: PluginOp, world: &mut bevy::prelude::World) {
     match op {
         PluginOp::RegisterTools {
             manifest,

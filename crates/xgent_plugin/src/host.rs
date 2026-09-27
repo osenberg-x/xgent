@@ -57,7 +57,6 @@ pub struct PluginHost {
     /// reload_all 据此过滤：disabled 的已安装插件不加载。
     enabled: Mutex<std::collections::BTreeMap<String, bool>>,
     watcher_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-
 }
 
 impl PluginHost {
@@ -140,9 +139,8 @@ impl PluginHost {
         // 优先 symlink（设计 §8.5），失败回退复制（跨平台兼容）
         if let Err(e) = symlink_dir(src, &dst) {
             tracing::warn!(plugin = %plugin_id, error = %e, "symlink 创建失败，回退复制目录");
-            copy_dir_recursive(src, &dst).map_err(|e| {
-                PluginHostError::Load(format!("复制 dev 插件目录失败: {e}"))
-            })?;
+            copy_dir_recursive(src, &dst)
+                .map_err(|e| PluginHostError::Load(format!("复制 dev 插件目录失败: {e}")))?;
         }
         self.reload_all().await
     }
@@ -180,25 +178,29 @@ impl PluginHost {
         std::thread::spawn(move || {
             use notify::event::{AccessKind, AccessMode};
             use notify::{EventKind, RecursiveMode, Watcher};
-            let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(ev) = res {
-                    // 仅 .wasm 文件的写后关闭事件（避免部分写入时加载损坏 WASM）
-                    let is_wasm_close = matches!(
-                        ev.kind,
-                        EventKind::Access(AccessKind::Close(AccessMode::Write))
-                    ) && ev.paths.iter().any(|p| p.extension().is_some_and(|e| e == "wasm"));
-                    if is_wasm_close {
-                        let _ = ev_tx.send(());
+            let mut watcher =
+                match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                    if let Ok(ev) = res {
+                        // 仅 .wasm 文件的写后关闭事件（避免部分写入时加载损坏 WASM）
+                        let is_wasm_close = matches!(
+                            ev.kind,
+                            EventKind::Access(AccessKind::Close(AccessMode::Write))
+                        ) && ev
+                            .paths
+                            .iter()
+                            .any(|p| p.extension().is_some_and(|e| e == "wasm"));
+                        if is_wasm_close {
+                            let _ = ev_tx.send(());
+                        }
                     }
-                }
-            }) {
+                }) {
                     Ok(w) => w,
                     Err(e) => {
                         tracing::warn!(error = %e, "插件目录文件监听启动失败");
                         return;
                     }
                 };
-            let _ = watcher.watch(&installed_dir.as_path(), RecursiveMode::Recursive);
+            let _ = watcher.watch(installed_dir.as_path(), RecursiveMode::Recursive);
             // 阻塞至 stop 信号；watcher 在闭包末尾 Drop 清理 notify 句柄。
             let _ = stop_rx.blocking_recv();
         });
@@ -214,7 +216,9 @@ impl PluginHost {
             let mut last = std::time::Instant::now();
             let mut pending = false;
             loop {
-                match tokio::time::timeout(std::time::Duration::from_millis(200), ev_rx.recv()).await {
+                match tokio::time::timeout(std::time::Duration::from_millis(200), ev_rx.recv())
+                    .await
+                {
                     Ok(Some(())) => {
                         pending = true;
                         last = std::time::Instant::now();
@@ -285,7 +289,11 @@ impl PluginHost {
         let new_ids: std::collections::HashSet<String> =
             manifests.iter().map(|m| m.id.clone()).collect();
         let old_ids: std::collections::HashSet<String> = {
-            self.loaded.lock().iter().map(|(m, _)| m.id.clone()).collect()
+            self.loaded
+                .lock()
+                .iter()
+                .map(|(m, _)| m.id.clone())
+                .collect()
         };
 
         // 卸载移除的
@@ -309,14 +317,17 @@ impl PluginHost {
         Ok(())
     }
 
-
     /// 扫描 installed/ 目录，解析所有 plugin.toml 为清单（失败跳过+warn）。
     fn scan_installed_manifests(&self) -> Vec<Arc<PluginManifest>> {
         let mut out = Vec::new();
         if !self.installed_dir.exists() {
             return out;
         }
-        for entry in std::fs::read_dir(&self.installed_dir).into_iter().flatten().flatten() {
+        for entry in std::fs::read_dir(&self.installed_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let dir = entry.path();
             if !dir.is_dir() {
                 continue;
@@ -335,10 +346,10 @@ impl PluginHost {
 
     /// 持久化插件索引到 index.json（失败 warn 不阻断）。
     fn persist_index(&self, manifests: &[Arc<PluginManifest>]) {
-        if let Some(parent) = self.index_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                tracing::warn!(error = %e, "创建 index.json 父目录失败");
-            }
+        if let Some(parent) = self.index_path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!(error = %e, "创建 index.json 父目录失败");
         }
         let index = PluginIndex {
             plugins: manifests
@@ -346,23 +357,24 @@ impl PluginHost {
                 .map(|m| {
                     (
                         m.id.as_str().into(),
-                        PluginIndexEntry { manifest: (**m).clone(), dev: false, enabled: true },
+                        PluginIndexEntry {
+                            manifest: (**m).clone(),
+                            dev: false,
+                            enabled: true,
+                        },
                     )
                 })
                 .collect(),
         };
-        if let Ok(bytes) = index.to_json() {
-            if let Err(e) = std::fs::write(&self.index_path, bytes) {
-                tracing::warn!(error = %e, "写 index.json 失败");
-            }
+        if let Ok(bytes) = index.to_json()
+            && let Err(e) = std::fs::write(&self.index_path, bytes)
+        {
+            tracing::warn!(error = %e, "写 index.json 失败");
         }
     }
 
     /// 加载单个插件：读 wasm + instantiate + register 扩展点。
-    async fn load_plugin(
-        &self,
-        manifest: Arc<PluginManifest>,
-    ) -> Result<(), PluginHostError> {
+    async fn load_plugin(&self, manifest: Arc<PluginManifest>) -> Result<(), PluginHostError> {
         let wasm_plugin = self.instantiate_plugin(&manifest).await?;
         self.register_extensions(&manifest, &wasm_plugin).await;
         // 发加载完成事件（ECS 侧刷新插件管理面板，§4.3）
@@ -417,7 +429,12 @@ impl PluginHost {
         }
     }
 
-    fn register_tool_proxy(&self, manifest: &Arc<PluginManifest>, plugin: &Arc<WasmPlugin>, defs: Vec<WitToolDef>) {
+    fn register_tool_proxy(
+        &self,
+        manifest: &Arc<PluginManifest>,
+        plugin: &Arc<WasmPlugin>,
+        defs: Vec<WitToolDef>,
+    ) {
         let pid = &manifest.id;
         if let Err(e) = self
             .proxy
@@ -428,7 +445,12 @@ impl PluginHost {
         }
     }
 
-    fn register_command_proxy(&self, manifest: &Arc<PluginManifest>, plugin: &Arc<WasmPlugin>, defs: Vec<WitCommandDef>) {
+    fn register_command_proxy(
+        &self,
+        manifest: &Arc<PluginManifest>,
+        plugin: &Arc<WasmPlugin>,
+        defs: Vec<WitCommandDef>,
+    ) {
         let pid = &manifest.id;
         if let Err(e) = self
             .proxy
@@ -439,14 +461,17 @@ impl PluginHost {
         }
     }
 
-    fn register_provider_proxy(&self, manifest: &Arc<PluginManifest>, plugin: &Arc<WasmPlugin>, defs: Vec<WitContextProviderDef>) {
+    fn register_provider_proxy(
+        &self,
+        manifest: &Arc<PluginManifest>,
+        plugin: &Arc<WasmPlugin>,
+        defs: Vec<WitContextProviderDef>,
+    ) {
         let pid = &manifest.id;
         let project_root = self.wasm_host.project_root().to_path_buf();
-        if let Err(e) = self
-            .proxy
-            .context()
-            .and_then(|p| p.register_providers(manifest.clone(), plugin.clone(), defs, project_root))
-        {
+        if let Err(e) = self.proxy.context().and_then(|p| {
+            p.register_providers(manifest.clone(), plugin.clone(), defs, project_root)
+        }) {
             tracing::warn!(plugin = %pid, error = %PluginHostError::from(e), "注册 ContextProvider 失败");
         }
     }
@@ -469,17 +494,17 @@ impl PluginHost {
                 None => None,
             }
         };
-        if let Some(plugin) = removed {
-            if plugin.in_flight() > 0 {
-                // 入 pending_drop，等 in-flight=0 后 drop；
-                // 60s 超时强制移除——drop WasmPlugin 只 drop tx channel，
-                // 残留 in-flight 调用 oneshot 返回 Failed（不 panic，见 drain_pending_drop）
-                self.pending_drop
-                    .lock()
-                    .push((plugin, std::time::Instant::now()));
-            }
-            // in_flight=0 时直接 drop（Plugin 已无引用，Store drop）
+        if let Some(plugin) = removed
+            && plugin.in_flight() > 0
+        {
+            // 入 pending_drop，等 in-flight=0 后 drop；
+            // 60s 超时强制移除——drop WasmPlugin 只 drop tx channel，
+            // 残留 in-flight 调用 oneshot 返回 Failed（不 panic，见 drain_pending_drop）
+            self.pending_drop
+                .lock()
+                .push((plugin, std::time::Instant::now()));
         }
+        // in_flight=0 时直接 drop（Plugin 已无引用，Store drop）
     }
 
     /// 卸载插件（用户命令入口）：删目录 + reload。
@@ -585,5 +610,8 @@ fn symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 #[cfg(not(any(unix, windows)))]
 fn symlink_dir(_src: &Path, _dst: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "symlink 不支持此平台"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "symlink 不支持此平台",
+    ))
 }

@@ -118,7 +118,6 @@ impl Tool for PluginTool {
     /// approval_for / preview_diff：MVP 裁决（设计 §5.3 289 行）暂不接 WIT，
     /// 回退 trait 默认（approval_for = tier()，preview_diff = None）。
     /// 确认弹窗对插件工具退化为纯文本 summary（与内建只读工具一致）。
-
     async fn execute(
         &self,
         input: Value,
