@@ -176,7 +176,12 @@ fn drain_pending_refresh(
             let params = serde_json::to_value(&read_req).unwrap_or(serde_json::Value::Null);
             let dp = match ipc.call_ok(methods::CONFIG_READ, params).await {
                 Ok(v) => v.as_str().map(|s| s.to_string()).unwrap_or_default(),
-                Err(_) => String::new(),
+                // 读失败 ≠ "未配置"：IPC 抖动/断连时保留现有 ProviderInfo，
+                // 否则空 dp 会把 UI 重置成"配置全部丢失"的假象
+                Err(e) => {
+                    tracing::warn!("config.read default_provider 失败，跳过刷新: {e}");
+                    return;
+                }
             };
             if dp.is_empty() {
                 let _ = tx
@@ -292,28 +297,16 @@ fn fetch_models(
         let tx = ml_tx.0.clone();
 
         bridge.runtime.handle().spawn(async move {
-            // 先确保 provider 配置已写入 daemon（临时写入，不打扰用户全局配置）
-            let fields: [(&str, serde_json::Value); 3] = [
-                (
-                    "kind",
-                    serde_json::to_value(kind).unwrap_or(serde_json::Value::Null),
-                ),
-                ("api_base", serde_json::Value::String(api_base)),
-                ("api_key", serde_json::Value::String(api_key)),
-            ];
-            for (field, value) in fields {
-                let key = format!("providers.{provider_id}.{field}");
-                let req = ConfigWriteRequest {
-                    scope: ConfigScope::Global,
-                    key,
-                    value,
-                };
-                let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
-                let _ = ipc.call_ok(methods::CONFIG_WRITE, params).await;
-            }
-
-            // 调 provider.listModels
-            let req = serde_json::json!({ "provider": provider_id });
+            // 编辑中的草稿凭据经 listModels 参数直传 daemon（临时构造 provider
+            // 实例探测），不写全局配置——此前经 CONFIG_WRITE 永久持久化，用户
+            // 拉取模型却放弃保存时草稿已落盘；api_key 输入框为空时还会把已
+            // 保存的 key 清空（provider 变 not ready）。
+            let req = serde_json::json!({
+                "provider": provider_id,
+                "kind": serde_json::to_value(kind).unwrap_or(serde_json::Value::Null),
+                "api_base": api_base,
+                "api_key": api_key,
+            });
             let result = ipc.call_ok(methods::PROVIDER_LIST_MODELS, req).await;
             match result {
                 Ok(v) => {

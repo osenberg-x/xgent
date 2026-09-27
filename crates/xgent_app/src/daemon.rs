@@ -46,12 +46,17 @@ fn spawn_daemon_process(_socket_path: &Path) -> Result<()> {
         .unwrap_or_else(|| "xgent_daemon".to_string());
 
     tracing::info!("拉起 daemon: {exe}");
-    std::process::Command::new(&exe)
+    let mut child = std::process::Command::new(&exe)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
         .with_context(|| format!("无法启动 daemon 进程: {exe}"))?;
+    // 收尸线程：daemon 退出后 wait 防止僵尸进程占进程表（Child 句柄
+    // 即弃的话，Unix 下 daemon 死后一直留在 zombie 态直到 app 退出）
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
     Ok(())
 }
 

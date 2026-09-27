@@ -15,16 +15,12 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use clap::Parser;
 use xgent_agent::bridge::{AgentBridge, AgentBridgeConfig};
-use xgent_context::{ContextHub, OnDemandContextProvider, XgentContextPlugin};
+use xgent_context::{ContextHub, OnDemandContextProvider};
 use xgent_plugin::{PluginHost, PluginHostProxy, WasmHost};
-use xgent_plugin_host::{
-    PluginEventRx, PluginHostPlugin, PluginHostResource, register_proxy_impls,
-};
-use xgent_settings::Localizer;
+use xgent_plugin_host::{PluginEventRx, PluginHostResource, register_proxy_impls};
 use xgent_settings_core::paths::{daemon_socket_path, plugins_dir};
 use xgent_settings_core::store::{GlobalConfigStore, ProjectConfigStore};
 use xgent_tools::{ToolExecutor, ToolExecutorResource};
-use xui::i18n_bridge::Strings;
 
 use crate::daemon::connect_or_spawn_daemon;
 use crate::fs_event_bridge::{IpcClientResource, NotifPump};
@@ -267,8 +263,24 @@ fn main() {
             }
         });
     }
-    app.add_systems(Startup, crate::startup::load_fonts);
+    app.add_systems(
+        Startup,
+        (crate::startup::load_fonts, crate::startup::open_project),
+    );
     app.add_systems(Update, crate::startup::ui_screenshot_tool);
+    // ===== 临时诊断探测（XGENT_AUTOPLAY=<项目相对路径>）=====
+    // 自动开文件 → 模拟持续滚轮 → 阶段性截图 + 每 60 帧打帧耗时 → 自动退出。
+    // 仅用于定位预览区滚动卡顿与行号错位，诊断完成后删除。
+    if let Ok(rel) = std::env::var("XGENT_AUTOPLAY") {
+        tracing::info!("autoplay 诊断启用: {rel}");
+        app.insert_resource(AutoplayProbe {
+            rel: rel.into(),
+            opened: false,
+            frame: 0,
+        });
+        app.add_systems(Update, autoplay_probe);
+        app.add_systems(Last, autoplay_cpu_probe);
+    }
 
     // 清理提示：退出时 daemon 末个客户端退出后自退出
     let socket_path = daemon_socket_path();
@@ -283,4 +295,91 @@ fn main() {
 /// UI 侧据此判断未配置状态并提示用户设置 provider。
 fn derive_provider_model(provider_id: Option<String>, model: Option<String>) -> (String, String) {
     (provider_id.unwrap_or_default(), model.unwrap_or_default())
+}
+
+// ===== 临时诊断探测（用后即删）=====
+
+/// 探测参数。
+#[derive(Resource)]
+struct AutoplayProbe {
+    rel: std::path::PathBuf,
+    opened: bool,
+    frame: u32,
+}
+
+/// 探测序列（60fps 假设）：
+/// - frame 90：打开目标文件（走真实 OpenFileRequest → io → 高亮 → 渲染链路）
+/// - frame 330..1000：每帧 `ScrollPosition.y += 8` 模拟持续滚轮（约 5.4k 像素）
+/// - frame 300/660/1020：截图（顶部 / 滚动中 / 底部）
+/// - 每 60 帧打印帧耗时（定位停滞帧与停滞阶段）
+/// - frame 1240 自动退出
+fn autoplay_probe(
+    mut state: ResMut<AutoplayProbe>,
+    mut commands: Commands,
+    time: Res<Time>,
+    project_root: Res<xgent_ui::file_panel::ProjectRoot>,
+    mut open_writer: MessageWriter<xgent_ui::editor::tabs::OpenFileRequest>,
+    mut q_scroll: Query<&mut bevy::ui::ScrollPosition, With<xui::TextEditor>>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+
+    state.frame += 1;
+    let f = state.frame;
+
+    if f == 90 && !state.opened {
+        state.opened = true;
+        open_writer.write(xgent_ui::editor::tabs::OpenFileRequest {
+            path: project_root.path.join(&state.rel),
+            line: None,
+        });
+    }
+
+    if (330..850).contains(&f) {
+        for mut sp in q_scroll.iter_mut() {
+            sp.y += 8.0;
+        }
+    }
+
+    for (frame, path) in [
+        (300u32, "target/autoplay_top.png"),
+        (600, "target/autoplay_mid.png"),
+        (880, "target/autoplay_end.png"),
+    ] {
+        if f == frame {
+            let p = path.to_string();
+            tracing::info!("autoplay: 截图 {p}");
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(p));
+        }
+    }
+
+    // 每帧打 dt（与各系统 xperf 日志对齐，定位停滞系统）
+    tracing::info!(
+        target: "xperf",
+        "frame {f} dt={:.1}",
+        time.delta().as_secs_f64() * 1000.0
+    );
+
+    if f >= 880 {
+        tracing::info!("autoplay: 诊断结束，自动退出");
+        app_exit.write(AppExit::Success);
+    }
+}
+
+/// 帧 CPU 耗时探针（Last 调度）：上一帧 Last 到本帧 Last 的墙钟间隔。
+/// 与 `time.delta()`（帧间隔）对比：CPU ≈ dt → 全程在算；CPU ≪ dt → 在等（渲染/睡眠）。
+fn autoplay_cpu_probe(mut last: Local<Option<std::time::Instant>>, mut c: Local<u32>) {
+    let now = std::time::Instant::now();
+    if let Some(prev) = *last {
+        tracing::info!(
+            target: "xperf",
+            "cpu-frame {} cpu={:.1}ms",
+            *c,
+            now.duration_since(prev).as_secs_f64() * 1000.0
+        );
+    }
+    *last = Some(now);
+    *c += 1;
 }

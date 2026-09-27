@@ -35,6 +35,10 @@ enum PtyCmd {
     Kill {
         reply: oneshot::Sender<Result<(), TerminalError>>,
     },
+    /// wait 线程：子进程已退出且 Exited 已上报，关闭 master 解除 reader
+    /// 阻塞（reader 的 fd 是 dup，仅 Windows 上 drop master 能解除阻塞；
+    /// Unix 上 reader 若被存活的 grandchild 钉住则等其退出后自然 EOF）。
+    CloseMaster,
 }
 
 /// 单个 PTY 会话的命令通道（write/resize/kill 经此发）。
@@ -143,7 +147,6 @@ impl TerminalBackend for LocalPtyBackend {
             // 填入共享 slot 供 PtySession/Drop kill
             *killer_slot_for_blocking.lock() = Some(killer);
             let child = Arc::new(std::sync::Mutex::new(child));
-            let child_for_read = child.clone();
             let output_tx_for_read = output_tx.clone();
 
             // 同步 channel：tokio 侧 cmd_rx → 命令循环线程的 cmd_rx_sync
@@ -151,7 +154,10 @@ impl TerminalBackend for LocalPtyBackend {
             // 读循环线程：阻塞读 reader，直接经 tokio mpsc Sender::blocking_send
             // 发给 ECS 侧（blocking_send 专为非 async 线程设计，不会冻结 runtime）。
             // 同时检测 DSR（光标位置查询 \x1b[6n）并回复，避免 shell 卡死等待。
-            // reader EOF 后在此线程 wait 子进程取退出码，再发 Exited。
+            // 注意：本线程不 wait 子进程、不发 Exited——wait 线程是唯一权威
+            // （shell 退出但 grandchild 持 slave 时 reader 永不 EOF，若由
+            // reader 负责则 Exited 永不上报；且多线程 wait 同一 child 会
+            // ECHILD 竞争丢失退出码）。
             std::thread::spawn(move || {
                 let mut reader = reader;
                 let mut buf = [0u8; 4096];
@@ -198,15 +204,27 @@ impl TerminalBackend for LocalPtyBackend {
                         Err(_) => break,
                     }
                 }
-                // reader EOF = PTY 输出结束。wait 取退出码（与 kill 路径竞争——
-                // wait 幂等，任一线程先 wait 另一线程得已退出状态）。
-                let code = if let Ok(mut c) = child_for_read.lock() {
-                    c.wait().ok().map(|s| s.exit_code() as i32)
-                } else {
-                    None
-                };
-                let _ = output_tx_for_read.blocking_send(TerminalEvent::Exited(code));
+                // reader EOF：正常退出路径（slave 全关）。不 wait、不发
+                // Exited——由 wait 线程统一上报，避免竞争。
             });
+
+            // wait 线程：Exited 的唯一权威来源。阻塞等子进程退出并上报退出码，
+            // 然后关 master 解除 reader 阻塞（shell 退出但 grandchild 持 slave
+            // 时 master read 不会 EOF，仅靠 reader EOF 检测会永久漏报 Exited）。
+            {
+                let child_for_wait = child.clone();
+                let output_tx_for_wait = output_tx;
+                let cmd_tx_for_wait = cmd_tx_sync.clone();
+                std::thread::spawn(move || {
+                    let code = if let Ok(mut c) = child_for_wait.lock() {
+                        c.wait().ok().map(|s| s.exit_code() as i32)
+                    } else {
+                        None
+                    };
+                    let _ = output_tx_for_wait.blocking_send(TerminalEvent::Exited(code));
+                    let _ = cmd_tx_for_wait.send(PtyCmd::CloseMaster);
+                });
+            }
 
             // 命令循环线程：收 cmd_rx_sync，执行 write/resize/kill
             let killer_slot_for_cmd = killer_slot_for_blocking.clone();
@@ -241,13 +259,20 @@ impl TerminalBackend for LocalPtyBackend {
                             // 这是预期行为，忽略即可。对齐 portable-pty 自身
                             // WinChild::kill 的 .ok() 模式。take 保证幂等（Drop
                             // 再 take 得 None）。
+                            //
+                            // 不在此 wait：wait 线程是唯一权威（多线程 wait 同一
+                            // child 会 ECHILD 竞争丢失退出码）。kill 后 break，
+                            // master drop → reader 解除阻塞。
                             if let Some(mut k) = killer_slot_for_cmd.lock().take() {
                                 let _ = k.kill();
                             }
                             let _ = reply.send(Ok(()));
-                            if let Ok(mut c) = child.lock() {
-                                let _ = c.wait();
-                            }
+                            break;
+                        }
+                        Ok(PtyCmd::CloseMaster) => {
+                            // wait 线程上报 Exited 后触发：drop master 关闭 master fd，
+                            // 解除 reader 线程的阻塞 read
+                            drop(master);
                             break;
                         }
                         Err(_) => break,

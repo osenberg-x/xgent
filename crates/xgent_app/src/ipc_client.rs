@@ -73,6 +73,10 @@ impl IpcClient {
                         }
                     }
                 }
+                // 读循环退出（EOF/错误）＝ IPC 通道已断：清空 pending 表，
+                // 让所有在途 call() 立即收到"响应通道关闭"错误而非永久挂起
+                // （oneshot sender 残留在表里时，等待方 rx.await 永不返回）。
+                pending.lock().await.clear();
             });
         }
 
@@ -98,10 +102,18 @@ impl IpcClient {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
 
-        {
+        let write_result = async {
             let mut writer = self.writer.lock().await;
             writer.write_all(line.as_bytes()).await?;
             writer.write_all(b"\n").await?;
+            Ok::<_, tokio::io::Error>(())
+        }
+        .await;
+        if let Err(e) = write_result {
+            // 写失败（断连必然 BrokenPipe）：移除自己的 pending 条目，
+            // 否则 oneshot 泄漏在表里，rx.await 永久挂起
+            self.pending.lock().await.remove(&id);
+            return Err(anyhow::Error::new(e).context(format!("IPC 写请求 {method} 失败")));
         }
 
         let resp = rx.await.map_err(|_| anyhow::anyhow!("响应通道关闭"))?;

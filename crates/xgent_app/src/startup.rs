@@ -2,18 +2,27 @@
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use xgent_agent::AgentBridge;
 use xgent_settings_core::store::ProjectConfigStore;
+use xgent_ui::file_panel::ProjectRoot;
 use xgent_ui::fonts::UiFonts;
 
 use crate::fs_event_bridge::IpcClientResource;
 
-/// 启动序列：打开项目（订阅文件监听、加载会话）。
-pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
-    let project_root = args.project.clone();
-    tracing::info!("打开项目: {}", project_root.display());
+/// 启动序列：打开项目（订阅文件监听）。
+///
+/// daemon 仅向 `fs.watch` 订阅者推送 `fs.changed`，漏订阅则编辑器的
+/// 文件冲突检测收不到任何变更通知。IPC 是 tokio IO，不能在 Bevy 系统
+/// 线程上下文直接 await，故经 bridge 的 tokio runtime 异步发起。
+pub fn open_project(
+    project_root: Res<ProjectRoot>,
+    bridge: Res<AgentBridge>,
+    ipc: Res<IpcClientResource>,
+) {
+    tracing::info!("打开项目: {}", project_root.path.display());
 
     // 重新加载项目配置（Startup 系统里确认）
-    if let Ok(cfg) = ProjectConfigStore::load(&project_root) {
+    if let Ok(cfg) = ProjectConfigStore::load(&project_root.path) {
         tracing::debug!(
             "项目配置: provider_override={:?}, strategy={:?}",
             cfg.provider_override,
@@ -23,12 +32,17 @@ pub fn open_project(args: Res<crate::Args>, ipc: Res<IpcClientResource>) {
 
     // 订阅 fs.watch（异步 task，不阻塞 Startup）
     let ipc = ipc.client.clone();
-    let root = project_root.clone();
-    bevy::tasks::block_on(async move {
-        let params = serde_json::to_value(&xgent_core::fs::WatchRequest {
+    let root = project_root.path.clone();
+    bridge.runtime.spawn(async move {
+        let params = match serde_json::to_value(&xgent_core::fs::WatchRequest {
             project_root: root.clone(),
-        })
-        .unwrap();
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("序列化 WatchRequest 失败: {e}");
+                return;
+            }
+        };
         if let Err(e) = ipc.call_ok(xgent_core::methods::FS_WATCH, params).await {
             tracing::warn!("订阅 fs.watch 失败: {e}");
         } else {

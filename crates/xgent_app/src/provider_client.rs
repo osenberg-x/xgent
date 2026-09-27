@@ -81,10 +81,18 @@ impl ProviderClient for IpcProviderClient {
                             }
                             _ => None,
                         };
-                        if let Some(ev) = ev
-                            && tx.send(ev).await.is_err()
-                        {
-                            break;
+                        if let Some(ev) = ev {
+                            let terminated =
+                                matches!(ev, ChatEvent::Done { .. } | ChatEvent::Error { .. });
+                            if tx.send(ev).await.is_err() {
+                                break;
+                            }
+                            if terminated {
+                                // Done/Error 是流的终止事件（chat.rs 事件序列约定）：
+                                // 转发后退出，否则 task 常驻挂到 IpcClient drop
+                                // （每次对话泄漏一个 task，并加剧 broadcast Lagged）
+                                break;
+                            }
                         }
                     }
                     // Lagged：订阅者消费慢于生产者，溢出了一批旧通知。
