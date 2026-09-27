@@ -47,6 +47,9 @@ impl SessionStore {
     }
 
     /// 读取全部 entry（每行反序列化）。空行跳过。
+    ///
+    /// 坏行（崩溃/断电导致的尾部半行很常见）跳过并告警——一行损坏不应
+    /// 让整个会话不可用。
     pub fn load_all(&self) -> io::Result<Vec<SessionEntry>> {
         if !self.path.exists() {
             return Ok(Vec::new());
@@ -55,18 +58,24 @@ impl SessionStore {
         let reader = BufReader::new(file);
         let mut out = Vec::new();
         for (i, line) in reader.lines().enumerate() {
-            let line = line?;
+            let Ok(line) = line else {
+                // IO 错误（多为尾部半行）：停止读取，保留已解析部分
+                break;
+            };
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let entry: SessionEntry = serde_json::from_str(trimmed).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("第 {} 行反序列化失败: {e}", i + 1),
-                )
-            })?;
-            out.push(entry);
+            match serde_json::from_str::<SessionEntry>(trimmed) {
+                Ok(entry) => out.push(entry),
+                Err(e) => {
+                    eprintln!(
+                        "[session] {} 第 {} 行损坏，跳过: {e}",
+                        self.path.display(),
+                        i + 1
+                    );
+                }
+            }
         }
         Ok(out)
     }
@@ -107,7 +116,10 @@ pub fn list_sessions() -> Vec<SessionSummary> {
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
-        let stem = path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string());
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string());
         let Some(stem) = stem else {
             continue;
         };
@@ -144,44 +156,54 @@ pub fn list_sessions() -> Vec<SessionSummary> {
         }
     }
     // 按时间倒序
-    summaries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    summaries.sort_by_key(|s| std::cmp::Reverse(s.timestamp));
     summaries
 }
 
 /// 从 JSONL 文件恢复会话消息历史。
 ///
 /// 读取 `session_id` 对应的 JSONL，重建 `AgentMessage` 列表。
-/// Compaction entry 之后的历史为压缩后保留的消息。
+/// Compaction entry：其前缀消息替换为摘要，`first_kept_id` 起的 kept 消息
+/// 保留（与内存侧 apply_compaction 语义一致——kept 消息的 entry 写在
+/// Compaction entry 之前，恢复时若全部丢弃会让历史比内存少 kept 段）。
 /// Error entry 不进消息历史。
 pub fn restore_session(session_id: &str) -> Option<Vec<xgent_core::chat::AgentMessage>> {
     let path = session_file_path(session_id);
     let store = SessionStore::open(path).ok()?;
     let entries = store.load_all().ok()?;
 
-    let mut messages = Vec::new();
+    // (entry_id, message) 对：compaction 锚点按 id 定位
+    let mut messages: Vec<(String, xgent_core::chat::AgentMessage)> = Vec::new();
     for entry in &entries {
         match entry {
             xgent_core::session::SessionEntry::Header(_) => {}
             xgent_core::session::SessionEntry::Message(m) => {
-                messages.push(m.message.clone());
+                messages.push((m.id.clone(), m.message.clone()));
             }
             xgent_core::session::SessionEntry::Compaction(c) => {
-                // 遇到 compaction：用摘要替换之前的所有消息
-                messages.clear();
-                messages.push(xgent_core::chat::AgentMessage::User(
-                    xgent_core::chat::UserMessage {
+                // first_kept_id 起保留，其前缀替换为摘要
+                let kept = match messages.iter().position(|(id, _)| *id == c.first_kept_id) {
+                    Some(pos) => messages.split_off(pos),
+                    // 锚点缺失（找不到对应消息）：退化为纯摘要
+                    None => Vec::new(),
+                };
+                let mut rebuilt = vec![(
+                    format!("compaction-{}", c.id),
+                    xgent_core::chat::AgentMessage::User(xgent_core::chat::UserMessage {
                         content: vec![xgent_core::chat::ContentBlock::Text {
                             text: format!("[前序对话摘要]\n{}", c.summary),
                         }],
                         timestamp: c.timestamp,
-                    },
-                ));
+                    }),
+                )];
+                rebuilt.extend(kept);
+                messages = rebuilt;
             }
             xgent_core::session::SessionEntry::ModelChange(_) => {}
             xgent_core::session::SessionEntry::Error(_) => {}
         }
     }
-    Some(messages)
+    Some(messages.into_iter().map(|(_, m)| m).collect())
 }
 
 /// 计算会话 JSONL 文件路径：`<agent_dir>/sessions/<session_id>.jsonl`。

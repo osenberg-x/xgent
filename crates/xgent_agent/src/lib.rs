@@ -3,6 +3,9 @@
 //! 通过 tokio channel 桥接异步逻辑到 Bevy 系统；对话状态作为 Resource；
 //! 与 UI 仅通过 Events 通信（禁止直接方法调用）。
 
+// agent_loop 系统签名的 MessageWriter/Reader ParamSet 是 Bevy 惯例，豁免复杂度告警。
+#![allow(clippy::type_complexity)]
+
 pub mod agent_loop;
 pub mod bridge;
 pub mod compaction;
@@ -30,7 +33,9 @@ pub use conversation::{Conversation, ConversationStatus};
 pub use events::*;
 pub use format::build_request;
 pub use provider_state::{ContextState, ProviderInfo};
-pub use session_store::{SessionStore, SessionSummary, list_sessions, restore_session, session_file_path};
+pub use session_store::{
+    SessionStore, SessionSummary, list_sessions, restore_session, session_file_path,
+};
 
 use bevy::prelude::*;
 

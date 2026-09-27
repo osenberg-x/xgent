@@ -414,7 +414,7 @@ fn session_jsonl_persists_header_and_assistant_message() {
     let conv = app.world().resource::<crate::conversation::Conversation>();
     assert_eq!(conv.status, ConversationStatus::Idle);
 
-    // 读取 JSONL，断言包含 1 条 Header + 1 条 Assistant Message
+    // 读取 JSONL，断言包含 1 条 Header + 1 条 User Message + 1 条 Assistant Message
     // 用 SessionStore 固化的 path（避免并发测试 env 覆盖导致路径错乱）
     let path = conv
         .session_store
@@ -424,7 +424,11 @@ fn session_jsonl_persists_header_and_assistant_message() {
     assert!(path.exists(), "会话 JSONL 应存在: {:?}", path);
     let store = crate::session_store::SessionStore::open(path).expect("open");
     let entries = store.load_all().expect("load_all");
-    assert_eq!(entries.len(), 2, "应包含 1 Header + 1 Message entry");
+    assert_eq!(
+        entries.len(),
+        3,
+        "应包含 1 Header + 1 User Message + 1 Assistant Message entry"
+    );
 
     use xgent_core::session::SessionEntry;
     assert!(
@@ -434,12 +438,22 @@ fn session_jsonl_persists_header_and_assistant_message() {
     match &entries[1] {
         SessionEntry::Message(m) => {
             assert!(
-                matches!(m.message, xgent_core::chat::AgentMessage::Assistant(_)),
-                "Message entry 应承载 Assistant 消息"
+                matches!(m.message, xgent_core::chat::AgentMessage::User(_)),
+                "第二条应为 User 消息 entry（push_user 即落盘）"
             );
             assert!(m.parent_id.is_none(), "MVP parent_id 为 None");
         }
         _ => panic!("第二条应为 Message entry"),
+    }
+    match &entries[2] {
+        SessionEntry::Message(m) => {
+            assert!(
+                matches!(m.message, xgent_core::chat::AgentMessage::Assistant(_)),
+                "第三条应为 Assistant 消息 entry"
+            );
+            assert!(m.parent_id.is_none(), "MVP parent_id 为 None");
+        }
+        _ => panic!("第三条应为 Message entry"),
     }
 }
 

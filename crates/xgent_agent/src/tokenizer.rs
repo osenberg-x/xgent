@@ -3,8 +3,8 @@
 //! 借鉴 omp `estimateTokens`：compaction 只需粗略估算（threshold 带 15% reserve
 //! 缓冲，误差容忍）。不引入 tiktoken 重依赖，改用启发式：
 //!
-//! - 文本：`max(chars, bytes/4)`——英文约 4 char/token，中文 UTF-8 3 字节/字
-//!   约等效 1.5 char/token，取两者最大值偏保守（宁可早压缩）。
+//! - 文本：`max(bytes/4, 非 ASCII 字符数)`——英文/代码约 4 字节/token；
+//!   中文按字数计偏保守（宁可早压缩）。
 //! - ToolCall args：按 JSON 序列化字节 / 4 估算。
 //! - ToolResult content：同文本。
 //! - Image：固定 1200 token（对齐 omp `IMAGE_TOKEN_ESTIMATE`）。
@@ -54,11 +54,17 @@ fn estimate_block(block: &ContentBlock) -> u32 {
     }
 }
 
-/// 文本 token 估算：`max(chars, bytes/4)`，对中英文都偏保守。
+/// 文本 token 估算：`max(bytes/4, 非 ASCII 字符数)`。
+///
+/// - 英文/代码（ASCII）：约 4 字节 = 1 token，`bytes/4` 是标准估算；
+/// - 中文（UTF-8 3 字节/字）：现代分词器约 1-1.5 token/字，按字数计偏保守。
+///
+/// 旧实现 `max(chars, bytes/4)` 对英文恒等于 chars（1 char = 1 token），
+/// 系统性高估约 4 倍，导致 compaction 远早于真实阈值触发。
 fn estimate_text(text: &str) -> u32 {
-    let chars = text.chars().count() as u32;
+    let non_ascii = text.chars().filter(|c| !c.is_ascii()).count() as u32;
     let bytes = text.len() as u32 / 4;
-    chars.max(bytes)
+    non_ascii.max(bytes)
 }
 
 #[cfg(test)]
@@ -75,14 +81,14 @@ mod tests {
 
     #[test]
     fn english_text_approx_4_chars_per_token() {
-        // "hello world" = 11 chars → max(11, 11/4=2) = 11 + 4 overhead = 15
+        // "hello world" = 11 ASCII bytes → 11/4 = 2 tokens + 4 overhead = 6
         let m = user_text("hello world");
-        assert_eq!(estimate_message_tokens(&m), 15);
+        assert_eq!(estimate_message_tokens(&m), 6);
     }
 
     #[test]
     fn chinese_text_uses_char_count() {
-        // 12 个中文字 = 12 chars, 36 bytes → max(12, 9) = 12 + 4 = 16
+        // 12 个中文字 = 12 非 ASCII 字符, 36 bytes → max(12, 9) = 12 + 4 = 16
         let m = user_text("你好世界你好世界你好世界");
         assert_eq!(estimate_message_tokens(&m), 16);
     }
@@ -111,8 +117,8 @@ mod tests {
     #[test]
     fn sum_over_messages() {
         let msgs = vec![user_text("hi"), user_text("there")];
-        // (max(2,0)+4) + (max(5,1)+4) = 6 + 9 = 15
-        assert_eq!(estimate_messages_tokens(&msgs), 15);
+        // (max(0, 0)+4) + (max(0, 1)+4) = 4 + 5 = 9
+        assert_eq!(estimate_messages_tokens(&msgs), 9);
     }
 
     #[test]

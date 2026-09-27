@@ -360,58 +360,69 @@ async fn agent_loop_task(
         match cmd {
             AgentCommand::StartLoop {
                 mut req,
-                editor_queries,
+                mut editor_queries,
             } => {
-                // 每次对话创建独立的 cancel_token——CancellationToken 是一次性的，
-                // cancel() 后无法撤销。若跨对话复用，首次 Abort 后该 token 永远
-                // 处于已取消态，后续对话的 stream_llm_response 会立即命中
-                // cancel_token.cancelled() 分支，导致 agent 永久无法流式。
-                let cancel_token = tokio_util::sync::CancellationToken::new();
-                // 暴露给 ECS：Abort handler 直接 cancel（即时中断 confirm 等待）
-                *current_cancel.lock() = Some(cancel_token.clone());
-                // 上下文检索：ECS 系统同步无法 await，故在此异步侧检索并刷新
-                // req 的首条 system 消息（修复上下文从未注入的 bug）。
-                // 用最近一条 user 消息作为 query；检索失败不阻塞对话（用空结果）。
-                if let Some(user_text) = crate::format::last_user_text(&req.messages) {
-                    // 把 @ 引用查询转为 hints（File → 路径，Cursor → 描述）
-                    let hints: Vec<String> = editor_queries
-                        .iter()
-                        .map(|q| match q {
-                            xgent_core::EditorQuery::File { path } => {
-                                format!("@file:{}", path.display())
-                            }
-                            xgent_core::EditorQuery::Cursor => "@cursor".into(),
-                        })
-                        .collect();
-                    let query = xgent_context::provider::ContextQuery {
-                        user_message: user_text,
-                        current_file: editor_queries.iter().find_map(|q| match q {
-                            xgent_core::EditorQuery::File { path } => Some(path.clone()),
-                            _ => None,
-                        }),
-                        hints,
-                        max_tokens: 8_000,
-                    };
-                    let result = cfg.context.retrieve(&query).await;
-                    crate::format::refresh_system_message(&mut req, &result);
+                // run_agent_loop 可能在停等期收到迟到的新 StartLoop（ECS Done 置
+                // Idle 后的新用户输入）并上返回——此处循环接手，立即开新对话。
+                loop {
+                    // 每次对话创建独立的 cancel_token——CancellationToken 是一次性的，
+                    // cancel() 后无法撤销。若跨对话复用，首次 Abort 后该 token 永远
+                    // 处于已取消态，后续对话的 stream_llm_response 会立即命中
+                    // cancel_token.cancelled() 分支，导致 agent 永久无法流式。
+                    let cancel_token = tokio_util::sync::CancellationToken::new();
+                    // 暴露给 ECS：Abort handler 直接 cancel（即时中断 confirm 等待）
+                    *current_cancel.lock() = Some(cancel_token.clone());
+                    // 上下文检索：ECS 系统同步无法 await，故在此异步侧检索并刷新
+                    // req 的首条 system 消息（修复上下文从未注入的 bug）。
+                    // 用最近一条 user 消息作为 query；检索失败不阻塞对话（用空结果）。
+                    if let Some(user_text) = crate::format::last_user_text(&req.messages) {
+                        // 把 @ 引用查询转为 hints（File → 路径，Cursor → 描述）
+                        let hints: Vec<String> = editor_queries
+                            .iter()
+                            .map(|q| match q {
+                                xgent_core::EditorQuery::File { path } => {
+                                    format!("@file:{}", path.display())
+                                }
+                                xgent_core::EditorQuery::Cursor => "@cursor".into(),
+                            })
+                            .collect();
+                        let query = xgent_context::provider::ContextQuery {
+                            user_message: user_text,
+                            current_file: editor_queries.iter().find_map(|q| match q {
+                                xgent_core::EditorQuery::File { path } => Some(path.clone()),
+                                _ => None,
+                            }),
+                            hints,
+                            max_tokens: 8_000,
+                        };
+                        let result = cfg.context.retrieve(&query).await;
+                        crate::format::refresh_system_message(&mut req, &result);
+                    }
+                    let next = run_agent_loop(
+                        &cfg.provider,
+                        &cfg.executor,
+                        &tool_ctx,
+                        req,
+                        &event_tx,
+                        &shared_confirm,
+                        &cancel_token,
+                        &mut cmd_rx,
+                        &cfg.retry_config,
+                        cfg.compaction.as_ref(),
+                        cfg.context_window,
+                        &cfg.compaction_settings,
+                    )
+                    .await;
+                    // 对话结束：清除 current_cancel，ECS Abort 不再误触发
+                    *current_cancel.lock() = None;
+                    match next {
+                        Some((new_req, new_queries)) => {
+                            req = new_req;
+                            editor_queries = new_queries;
+                        }
+                        None => break,
+                    }
                 }
-                run_agent_loop(
-                    &cfg.provider,
-                    &cfg.executor,
-                    &tool_ctx,
-                    req,
-                    &event_tx,
-                    &shared_confirm,
-                    &cancel_token,
-                    &mut cmd_rx,
-                    &cfg.retry_config,
-                    cfg.compaction.as_ref(),
-                    cfg.context_window,
-                    &cfg.compaction_settings,
-                )
-                .await;
-                // 对话结束：清除 current_cancel，ECS Abort 不再误触发
-                *current_cancel.lock() = None;
             }
             AgentCommand::Abort => {
                 // Abort 在无活跃对话时到达（run_agent_loop 已返回）：
@@ -471,7 +482,7 @@ async fn run_agent_loop(
     compaction: Option<&Arc<dyn crate::compaction::CompactionProvider>>,
     context_window: u32,
     compaction_settings: &crate::compaction::CompactionSettings,
-) {
+) -> Option<(ChatRequest, Vec<xgent_core::EditorQuery>)> {
     use xgent_core::chat::{ContentBlock, Role};
     // 对话级快照：本对话期间配置固定，运行时刷新下次对话生效
     let retry_cfg = retry_config.read().clone();
@@ -499,10 +510,12 @@ async fn run_agent_loop(
                                 model: None,
                             })
                             .await;
-                        return;
+                        return None;
                     }
                     AgentCommand::FollowUp { .. } | AgentCommand::StartLoop { .. } => {
-                        // FollowUp 在外层处理，StartLoop 不应在运行中到达：MVP 忽略
+                        // 不可达：ECS 仅在 Idle 态发送 FollowUp/StartLoop，
+                        // 内层运行中 conv.status 必为 Thinking/ToolRunning。
+                        // 若未来放宽该守卫，此处丢弃会让会话卡死，须改为上返回。
                     }
                     AgentCommand::ConfirmDecision(_) => {}
                 }
@@ -521,7 +534,7 @@ async fn run_agent_loop(
                 Ok(o) => o,
                 Err((kind, message)) => {
                     let _ = event_tx.send(AgentEvent::Error { kind, message }).await;
-                    return;
+                    return None;
                 }
             };
 
@@ -554,8 +567,8 @@ async fn run_agent_loop(
             }
 
             // compaction 检查：每次 stream 完成后据 usage 判断
-            if let (Some(compactor), Some(usage)) = (compaction, outcome.usage.as_ref()) {
-                if let Some(new_messages) = maybe_compact(
+            if let (Some(compactor), Some(usage)) = (compaction, outcome.usage.as_ref())
+                && let Some(new_messages) = maybe_compact(
                     compactor,
                     &req.messages,
                     usage.prompt,
@@ -565,9 +578,8 @@ async fn run_agent_loop(
                     cancel_token,
                 )
                 .await
-                {
-                    req.messages = new_messages;
-                }
+            {
+                req.messages = new_messages;
             }
 
             if outcome.tool_calls.is_empty() {
@@ -576,7 +588,7 @@ async fn run_agent_loop(
                     // stream_llm_response 已发 Done，直接退出循环，避免走到外层
                     // select! 吞掉后续 StartLoop 命令（run_agent_loop 的外层等待
                     // 会消费并丢弃 StartLoop，导致下一次对话无法启动）。
-                    return;
+                    return None;
                 }
                 // LLM 停止、无工具调用：本轮结束，记下 usage/model 供 Done 事件。
                 //
@@ -798,7 +810,7 @@ async fn run_agent_loop(
                             model: None,
                         })
                         .await;
-                    return;
+                    return None;
                 }
                 has_tool_calls = true;
             }
@@ -815,6 +827,7 @@ async fn run_agent_loop(
 
         // 停止边界：先 try_recv steering（防止 steer 在 yield 点丢失，对齐 omp）
         let mut late_steer: Option<String> = None;
+        let mut pending_start: Option<(ChatRequest, Vec<xgent_core::EditorQuery>)> = None;
         while let Ok(cmd) = steering_rx.try_recv() {
             match cmd {
                 AgentCommand::Steering { text } => {
@@ -822,10 +835,23 @@ async fn run_agent_loop(
                     break;
                 }
                 AgentCommand::Abort => {
-                    return;
+                    return None;
+                }
+                AgentCommand::StartLoop {
+                    req,
+                    editor_queries,
+                } => {
+                    // Done 已发、ECS 即将 Idle：新对话请求可能已在本函数阻塞
+                    // 前入队。立即上返回顶层循环处理，不得丢弃（丢弃会让
+                    // ECS 已置 Thinking 的会话永久卡死）。
+                    pending_start = Some((req, editor_queries));
+                    break;
                 }
                 _ => {}
             }
+        }
+        if let Some(start) = pending_start {
+            return Some(start);
         }
         if let Some(text) = late_steer {
             req.messages
@@ -833,33 +859,46 @@ async fn run_agent_loop(
             continue;
         }
 
-        // 外层：等待 FollowUp 或 Abort
-        match steering_rx.recv().await {
-            Some(AgentCommand::FollowUp { text }) => {
-                req.messages
-                    .push(xgent_core::chat::ChatMessage::text(Role::User, text));
-                continue; // 继续外层循环
+        // 外层：等待 FollowUp / Steering / Abort / 新 StartLoop
+        loop {
+            match steering_rx.recv().await {
+                Some(AgentCommand::FollowUp { text }) => {
+                    req.messages
+                        .push(xgent_core::chat::ChatMessage::text(Role::User, text));
+                    break; // 继续外层对话循环
+                }
+                Some(AgentCommand::Steering { text }) => {
+                    // 外层等待期到达的 steering 也应继续对话
+                    req.messages
+                        .push(xgent_core::chat::ChatMessage::text(Role::User, text));
+                    break;
+                }
+                Some(AgentCommand::StartLoop {
+                    req: new_req,
+                    editor_queries,
+                }) => {
+                    // 新对话请求在停等期到达：ECS 收到 Done 置 Idle 后，新用户
+                    // 输入走 StartLoop。若在此丢弃，ECS 已置 Thinking 的会话
+                    // 永久卡死——上返回顶层循环立即开新对话。
+                    return Some((new_req, editor_queries));
+                }
+                Some(AgentCommand::Abort) | None => {
+                    // 中断对话：发 Done 通知 ECS 切回 Idle（修复前直接 return 不发 Done，
+                    // 导致 ECS 永久停留在 Aborting 态）
+                    cancel_token.cancel();
+                    let _ = event_tx
+                        .send(AgentEvent::Done {
+                            usage: None,
+                            model: None,
+                        })
+                        .await;
+                    return None;
+                }
+                Some(AgentCommand::ConfirmDecision(_)) => {
+                    // 迟到的确认决策（确认窗口已关闭）：忽略，继续等待
+                    continue;
+                }
             }
-            Some(AgentCommand::Steering { text }) => {
-                // 外层等待期到达的 steering 也应继续对话
-                req.messages
-                    .push(xgent_core::chat::ChatMessage::text(Role::User, text));
-                continue;
-            }
-            Some(AgentCommand::Abort) | None => {
-                // 中断对话：发 Done 通知 ECS 切回 Idle（修复前直接 return 不发 Done，
-                // 导致 ECS 永久停留在 Aborting 态）
-                cancel_token.cancel();
-                let _ = event_tx
-                    .send(AgentEvent::Done {
-                        usage: None,
-                        model: None,
-                    })
-                    .await;
-                return;
-            }
-            // StartLoop/ConfirmDecision 在外层等待时到达：MVP 忽略，退出
-            _ => return,
         }
     }
 }

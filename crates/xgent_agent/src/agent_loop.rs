@@ -144,6 +144,13 @@ pub fn agent_poll_system(
         if let Some(messages) = crate::session_store::restore_session(&ev.session_id) {
             conv.restore(&ev.session_id, messages.clone());
             session_restored.write(SessionRestoredMessage { messages });
+        } else {
+            // 恢复失败静默会让用户以为会话为空——显式报错（如文件全部损坏）
+            writers.p5().write(ErrorMessage {
+                kind: xgent_core::chat::ErrorKind::ProviderError,
+                message: format!("恢复会话 {} 失败：会话文件缺失或损坏", ev.session_id),
+            });
+            conv.status = ConversationStatus::Error;
         }
     }
 

@@ -87,6 +87,9 @@ impl Conversation {
             }],
             timestamp: crate::session_store::now_ms(),
         }));
+        // 用户消息立即落盘——只持久化 assistant 文本会让恢复出的会话
+        // 变成"assistant 独白"（用户问题、工具调用与结果全部缺失）
+        self.persist_message_at(self.messages.len() - 1);
     }
 
     /// 把累加的助手回复固化进历史。
@@ -141,13 +144,33 @@ impl Conversation {
         }
     }
 
-    /// 把最后一条 Assistant 消息持久化为 JSONL Message entry。
+    /// 把指定下标的消息持久化为 JSONL Message entry。
     ///
-    /// 在 `finalize_assistant` 之后调用。消息 id 用 `消息序号`，parent_id 为 None（MVP 线性）。
-    pub fn persist_last_assistant(&mut self) {
+    /// 消息 id 用 `<session>-msg-<idx>`（恢复端据此定位 compaction 锚点），
+    /// parent_id 为 None（MVP 线性）。
+    fn persist_message_at(&mut self, idx: usize) {
         let Some(store) = self.session_store.as_mut() else {
             return;
         };
+        let Some(msg) = self.messages.get(idx) else {
+            return;
+        };
+        let entry =
+            xgent_core::session::SessionEntry::Message(xgent_core::session::SessionMessage {
+                id: format!("{}-msg-{}", self.id, idx),
+                parent_id: None,
+                timestamp: crate::session_store::now_ms(),
+                message: msg.clone(),
+            });
+        if let Err(e) = store.append(&entry) {
+            eprintln!("[session] 写入 Message 失败: {e}");
+        }
+    }
+
+    /// 把最后一条 Assistant 消息持久化为 JSONL Message entry。
+    ///
+    /// 在 `finalize_assistant` 之后调用。
+    pub fn persist_last_assistant(&mut self) {
         // 找最后一条 Assistant 消息
         let Some(idx) = self
             .messages
@@ -156,24 +179,7 @@ impl Conversation {
         else {
             return;
         };
-        let AgentMessage::Assistant(msg) = &self.messages[idx] else {
-            return;
-        };
-        let entry =
-            xgent_core::session::SessionEntry::Message(xgent_core::session::SessionMessage {
-                id: format!("{}-msg-{}", self.id, idx),
-                parent_id: None,
-                timestamp: crate::session_store::now_ms(),
-                message: AgentMessage::Assistant(AssistantMessage {
-                    content: msg.content.clone(),
-                    model: msg.model.clone(),
-                    usage: msg.usage.clone(),
-                    timestamp: msg.timestamp,
-                }),
-            });
-        if let Err(e) = store.append(&entry) {
-            eprintln!("[session] 写入 Message 失败: {e}");
-        }
+        self.persist_message_at(idx);
     }
 
     /// 持久化 compaction 记录（append 一条 `CompactionEntry`，不重写历史）。
@@ -241,6 +247,7 @@ impl Conversation {
     /// Text 块前置，后接所有 ToolCall 块，组装成单条 AssistantMessage push 到
     /// messages，并清空 pending 与 current_assistant_text。对应 bridge 侧 req
     /// 回灌时「首个 tool_call 携带本轮文本块」的语义。
+    /// 把累积的 `pending_tool_calls` 固化为一条 AssistantMessage 并落盘。
     fn flush_pending_tool_calls(&mut self) {
         if self.pending_tool_calls.is_empty() {
             return;
@@ -250,7 +257,7 @@ impl Conversation {
             let text = std::mem::take(&mut self.current_assistant_text);
             content.push(ContentBlock::Text { text });
         }
-        content.extend(self.pending_tool_calls.drain(..));
+        content.append(&mut self.pending_tool_calls);
         self.messages
             .push(AgentMessage::Assistant(AssistantMessage {
                 content,
@@ -258,6 +265,7 @@ impl Conversation {
                 usage: None,
                 timestamp: crate::session_store::now_ms(),
             }));
+        self.persist_message_at(self.messages.len() - 1);
     }
 
     /// 追加工具结果消息（工具执行完成后调用）。
@@ -281,6 +289,7 @@ impl Conversation {
                 is_error,
                 timestamp: crate::session_store::now_ms(),
             }));
+        self.persist_message_at(self.messages.len() - 1);
     }
 
     /// 追加 UI-only 通知消息（不发给 LLM）。

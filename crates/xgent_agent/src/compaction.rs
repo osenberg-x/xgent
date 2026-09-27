@@ -94,7 +94,7 @@ pub fn resolve_threshold_tokens(context_window: u32, settings: &CompactionSettin
     let pct = settings
         .threshold_percent
         .unwrap_or(DEFAULT_THRESHOLD_PERCENT);
-    let clamped = pct.min(99).max(1) as u32;
+    let clamped = pct.clamp(1, 99) as u32;
     // 阈值 = window * pct/100，但不超过 window - reserve
     let by_percent = context_window * clamped / 100;
     let by_reserve =
@@ -156,8 +156,8 @@ pub fn find_cut_point(messages: &[AgentMessage], keep_recent_tokens: u32) -> usi
 
     // 从 overflow 处向后找最近的 user/assistant 边界（turn 起点）
     // 跳过 ToolResult（不能从工具结果中间切，会破坏 tool_use/tool_result 配对）
-    for i in overflow..messages.len() {
-        match &messages[i] {
+    for (i, msg) in messages.iter().enumerate().skip(overflow) {
+        match msg {
             AgentMessage::User(_) | AgentMessage::Assistant(_) => return i,
             _ => continue,
         }
