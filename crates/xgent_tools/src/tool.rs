@@ -91,6 +91,21 @@ pub enum ToolTier {
     UiOnly,
 }
 
+impl ToolTier {
+    /// 危险度序（数值越大越危险）：UiOnly < Read < Write < Exec。
+    ///
+    /// 供 `resolve_policy` 判断动态 `approval_for` 是否比静态 tier 升级
+    /// （枚举声明顺序与危险度无关，不能用派生 Ord）。
+    pub fn severity(self) -> u8 {
+        match self {
+            ToolTier::UiOnly => 0,
+            ToolTier::Read => 1,
+            ToolTier::Write => 2,
+            ToolTier::Exec => 3,
+        }
+    }
+}
+
 /// 工具执行错误。
 ///
 /// `Aborted` 透传给 agent loop 走 abort 路径；`Failed`/`Timeout` 视为

@@ -62,7 +62,7 @@ impl Tool for SearchFiles {
         &self,
         input: Value,
         ctx: &ToolCtx,
-        _signal: CancellationToken,
+        signal: CancellationToken,
         _on_update: Option<&ToolUpdateCallback>,
     ) -> Result<ToolResult, ToolError> {
         let Some(pattern) = input["pattern"].as_str() else {
@@ -88,7 +88,20 @@ impl Tool for SearchFiles {
 
         let mut matches = Vec::new();
         let mut count = 0usize;
-        walk(&start, &start, pattern, 0, &mut matches, &mut count).await;
+        walk(
+            &start,
+            &start,
+            pattern,
+            0,
+            &signal,
+            &mut matches,
+            &mut count,
+        )
+        .await;
+        // 取消检查：walk 只在边界响应，末尾兜底确保 Abort 不丢
+        if signal.is_cancelled() {
+            return Err(ToolError::Aborted);
+        }
 
         let mut output = if matches.is_empty() {
             format!("未找到匹配 “{pattern}”")
@@ -117,23 +130,29 @@ struct Match {
     line: String,
 }
 
-/// 递归遍历目录，收集匹配行。
+/// 单文件读取上限：超过直接跳过（lockfile、大 JSON、日志全量读入逐行
+/// 匹配既慢又无意义）。
+const MAX_FILE_BYTES: u64 = 1 << 20;
+
+/// 递归遍历目录，收集匹配行。取消信号在目录/文件边界响应——大仓库
+/// 搜索期间 Abort 必须能中断，不能跑到自然结束。
 async fn walk(
     root: &Path,
     dir: &Path,
     pattern: &str,
     depth: u32,
+    signal: &CancellationToken,
     matches: &mut Vec<Match>,
     count: &mut usize,
 ) {
-    if depth > MAX_DEPTH || *count >= MAX_RESULTS {
+    if depth > MAX_DEPTH || *count >= MAX_RESULTS || signal.is_cancelled() {
         return;
     }
     let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
         return;
     };
     while let Ok(Some(entry)) = rd.next_entry().await {
-        if *count >= MAX_RESULTS {
+        if *count >= MAX_RESULTS || signal.is_cancelled() {
             return;
         }
         let path = entry.path();
@@ -148,8 +167,23 @@ async fn walk(
                 continue;
             }
             // Box::pin 递归 async fn
-            Box::pin(walk(root, &path, pattern, depth + 1, matches, count)).await;
+            Box::pin(walk(
+                root,
+                &path,
+                pattern,
+                depth + 1,
+                signal,
+                matches,
+                count,
+            ))
+            .await;
         } else if ft.is_file() {
+            // 超大文件跳过
+            if let Ok(meta) = entry.metadata().await
+                && meta.len() > MAX_FILE_BYTES
+            {
+                continue;
+            }
             read_and_match(&path, root, pattern, matches, count).await;
         }
     }

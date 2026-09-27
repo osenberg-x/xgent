@@ -19,3 +19,7 @@ bevy = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+# run_command 取消/超时时 killpg 杀整个进程组（含孙进程）
+libc = "0.2"

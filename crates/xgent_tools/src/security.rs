@@ -17,6 +17,7 @@ use xgent_settings_core::project::ToolPolicyConfig;
 /// 4. 按 tier 推导默认：
 ///    - [`ToolTier::UiOnly`] → [`SecurityPolicy::Approved`]（仅 UI 状态变更，无副作用）
 ///    - `Read`/`Write`/`Exec` → [`SecurityPolicy::NeedsConfirmation`]（MVP 默认全需确认）
+///
 /// `tool` 参数用于调用 `approval_for`；`tier` 为工具静态分层（由调用方
 /// 传入 `tool.tier()`），保留为显式参数便于未来在 yolo 模式下按 tier
 /// 自动批准 Read 工具。
@@ -31,16 +32,28 @@ pub fn resolve_policy(
     if policy.denied.iter().any(|t| t == tool_id) {
         return SecurityPolicy::Denied;
     }
-    // 2. 配置显式 approved 次之
+    // 2. 配置显式 approved 次之，但动态升级仍生效：工具可对特定输入声明
+    //    更严格 tier（如 run_command 检测到 rm -rf/sudo）。若配置 approved
+    //    后忽略动态 tier，危险命令会免确认直接执行。
     if policy.approved.iter().any(|t| t == tool_id) {
+        let effective_tier = tool.approval_for(input);
+        if effective_tier.severity() > tier.severity() {
+            // 动态升级（更危险）→ 退回需确认
+            return SecurityPolicy::NeedsConfirmation;
+        }
         return SecurityPolicy::Approved;
     }
     // 3. 动态 approval_for（可能比静态 tier 更严格，如 run_command 危险命令）
-    let _effective_tier = tool.approval_for(input);
+    let effective_tier = tool.approval_for(input);
     // 4. 按 tier 推导默认策略：
     //    - `UiOnly`（编辑器动作，仅 UI 状态变更，无副作用）→ `Approved`
     //    - `Read`/`Write`/`Exec` → `NeedsConfirmation`（MVP 默认全需确认）
-    match tier {
+    let final_tier = if effective_tier.severity() > tier.severity() {
+        effective_tier
+    } else {
+        tier
+    };
+    match final_tier {
         ToolTier::UiOnly => SecurityPolicy::Approved,
         ToolTier::Read | ToolTier::Write | ToolTier::Exec => SecurityPolicy::NeedsConfirmation,
     }

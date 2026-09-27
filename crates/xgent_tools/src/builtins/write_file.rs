@@ -102,7 +102,18 @@ impl Tool for WriteFile {
                 side_effect: None,
             });
         }
-        match tokio::fs::write(&full, content).await {
+        // 原子写：先写同目录临时文件再 rename。直接覆盖在进程崩溃/磁盘满时
+        // 会把目标文件截断损坏且原内容不可恢复；同目录 rename 原子。
+        let tmp = full.with_extension("xgent-tmp");
+        if let Err(e) = tokio::fs::write(&tmp, &content).await {
+            return Ok(ToolResult {
+                output: format!("写入失败 {}: {e}", full.display()),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            });
+        }
+        match tokio::fs::rename(&tmp, &full).await {
             Ok(()) => {
                 let written = full.clone();
                 Ok(ToolResult {
@@ -112,12 +123,15 @@ impl Tool for WriteFile {
                     side_effect: Some(SideEffect::FileWritten(written)),
                 })
             }
-            Err(e) => Ok(ToolResult {
-                output: format!("写入失败 {}: {e}", full.display()),
-                is_error: true,
-                denied: false,
-                side_effect: None,
-            }),
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp).await; // 清理临时文件
+                Ok(ToolResult {
+                    output: format!("写入失败 {}: {e}", full.display()),
+                    is_error: true,
+                    denied: false,
+                    side_effect: None,
+                })
+            }
         }
     }
 }
