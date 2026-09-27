@@ -36,13 +36,12 @@ impl GlobalConfigStore {
         }
     }
 
-    /// 保存配置到指定路径（确保父目录存在）。
+    /// 保存配置到指定路径（确保父目录存在，原子替换）。
     pub fn save_to(cfg: &GlobalConfig, path: &Path) -> XgentResult<()> {
         ensure_parent_dir(path)?;
         let s = toml::to_string_pretty(cfg)
             .map_err(|e| XgentError::Config(format!("serialize: {e}")))?;
-        std::fs::write(path, s)?;
-        Ok(())
+        atomic_write(path, &s)
     }
 }
 
@@ -74,13 +73,12 @@ impl ProjectConfigStore {
         }
     }
 
-    /// 保存项目配置到指定路径（确保父目录存在）。
+    /// 保存项目配置到指定路径（确保父目录存在，原子替换）。
     pub fn save_to(cfg: &ProjectConfig, path: &Path) -> XgentResult<()> {
         ensure_parent_dir(path)?;
         let s = toml::to_string_pretty(cfg)
             .map_err(|e| XgentError::Config(format!("serialize: {e}")))?;
-        std::fs::write(path, s)?;
-        Ok(())
+        atomic_write(path, &s)
     }
 }
 
@@ -92,6 +90,29 @@ fn ensure_parent_dir(path: &Path) -> XgentResult<()> {
         std::fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+/// 原子写入：先写同目录临时文件再 rename 替换。
+///
+/// 直接 `fs::write` 截断重写在崩溃/断电时会留下截断的 TOML，导致
+/// daemon 拒绝启动。同目录 rename 在同一文件系统上原子。
+/// 临时名带进程内唯一序号：固定名在并发写（并行测试/多线程）下会
+/// A 写 B rename 把对方临时文件抢走的竞态（rename ENOENT）。
+fn atomic_write(path: &Path, content: &str) -> XgentResult<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("toml.tmp.{seq}"));
+    let result = (|| -> XgentResult<()> {
+        std::fs::write(&tmp, content)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        // 清理残留临时文件（rename 失败或写失败时）
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]

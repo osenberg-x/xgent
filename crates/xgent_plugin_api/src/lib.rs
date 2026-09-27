@@ -7,7 +7,10 @@
 //! 详见 `doc/design/plugin-system-design.md` §5.2 / §13 Step P1。
 //! 对标 `zed_extension_api`（Zed `crates/extension_api/src/extension_api.rs`）。
 
+// 生成代码（wit-bindgen 0.22）内部 unsafe fn 中直接调 unsafe，edition 2024 下
+// 触发 unsafe_op_in_unsafe_fn 警告，统一在 crate 级豁免（不改生成产物）。
 #![allow(clippy::too_many_arguments, clippy::missing_safety_doc)]
+#![allow(unsafe_op_in_unsafe_fn)]
 
 // 生成 guest 侧绑定。`skip: ["init-extension"]` 让本 crate 自行定义该导出
 // （register_plugin! 宏展开为 #[export_name = "init-extension"]），对齐 Zed
