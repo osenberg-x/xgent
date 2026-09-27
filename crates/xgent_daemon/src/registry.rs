@@ -60,6 +60,13 @@ impl ClientRegistry {
         }
     }
 
+    /// 注销某客户端的全部项目订阅（不移除客户端本身）。
+    pub fn unsubscribe(&mut self, id: ClientId) {
+        if let Some(entry) = self.clients.get_mut(&id) {
+            entry.subscribed_projects.clear();
+        }
+    }
+
     /// 获取某客户端已订阅的项目集合（克隆，避免持锁）。
     #[allow(dead_code)]
     pub fn subscribed(&self, id: ClientId) -> HashSet<PathBuf> {
@@ -100,8 +107,14 @@ impl ClientRegistry {
                 continue;
             }
             if entry.subscribed_projects.contains(project) {
-                // try_send：非阻塞，满了就跳过，避免阻塞广播循环
-                let _ = entry.sender.try_send(notif.clone());
+                // try_send：非阻塞，满了就跳过，避免阻塞广播循环。
+                // 满即丢是慢客户端下的静默数据丢失，必须可观测。
+                if let Err(e) = entry.sender.try_send(notif.clone()) {
+                    tracing::warn!(
+                        "通知通道满，丢弃发给客户端 {id} 的 {} 通知: {e}",
+                        notif.method
+                    );
+                }
             }
         }
     }
@@ -112,7 +125,12 @@ impl ClientRegistry {
             if Some(*id) == exclude {
                 continue;
             }
-            let _ = entry.sender.try_send(notif.clone());
+            if let Err(e) = entry.sender.try_send(notif.clone()) {
+                tracing::warn!(
+                    "通知通道满，丢弃发给客户端 {id} 的 {} 通知: {e}",
+                    notif.method
+                );
+            }
         }
     }
 }

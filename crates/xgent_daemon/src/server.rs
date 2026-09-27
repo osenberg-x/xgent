@@ -105,8 +105,19 @@ impl Daemon {
 #[cfg(unix)]
 async fn bind_and_serve(socket_path: &std::path::Path, shared: Shared) -> anyhow::Result<()> {
     use tokio::net::UnixListener;
-    // 清理可能残留的旧 socket 文件
-    let _ = std::fs::remove_file(socket_path);
+    if socket_path.exists() {
+        // 旧 socket 若仍可连上，说明已有存活 daemon（两个 UI 并发冷启动都会
+        // spawn daemon 的竞态）。此时必须报错退出，而不是摘除对方的 socket——
+        // 否则产生双 daemon：全局配置权威副本分裂、fs.watch 各管各的。
+        if tokio::net::UnixStream::connect(socket_path).await.is_ok() {
+            anyhow::bail!(
+                "已有 daemon 监听 {}，本实例退出（避免双实例分裂）",
+                socket_path.display()
+            );
+        }
+        // 连不上 = 残留死文件（daemon 崩溃未清理），安全移除后绑定
+        let _ = std::fs::remove_file(socket_path);
+    }
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -156,16 +167,24 @@ async fn bind_and_serve(pipe_name: &std::path::Path, shared: Shared) -> anyhow::
     tokio::spawn(async move {
         let mut listener = Some(first_server);
         loop {
-            // 取出待 accept 的 server 实例（首个或上轮预创建的）
-            let server = listener.take().expect("listener 应在循环顶部被填充");
+            // 取出待 accept 的 server 实例（首个或上轮预创建的）。
+            // 上轮预创建失败时 listener 为 None：带退避重试重建，accept task
+            // 绝不能退出——tokio spawn 的 panic 不会终止进程，若此处 expect/return
+            // 会表现为 daemon 存活但永久拒绝新连接。
+            let server = match listener.take() {
+                Some(s) => s,
+                None => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    listener = ServerOptions::new().create(&name).ok();
+                    continue;
+                }
+            };
 
             // 先预创建下一个 server 实例，以便后续客户端立即连接
-            let next = ServerOptions::new().create(&name);
-            match next {
+            match ServerOptions::new().create(&name) {
                 Ok(s) => listener = Some(s),
                 Err(e) => {
-                    tracing::warn!("创建 named pipe 实例失败: {e}");
-                    listener = None;
+                    tracing::warn!("创建 named pipe 实例失败（下轮重试）: {e}");
                 }
             }
 

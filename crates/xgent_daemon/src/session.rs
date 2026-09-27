@@ -8,7 +8,7 @@ use std::pin::Pin;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use xgent_core::config::{ConfigReadRequest, ConfigWriteRequest};
-use xgent_core::fs::WatchRequest;
+use xgent_core::fs::{FileChangeKind, FileChanged, WatchRequest};
 use xgent_core::methods;
 use xgent_core::notifications;
 use xgent_core::proto::{Notification, Request, Response, RpcError};
@@ -68,7 +68,7 @@ impl Session {
             // 把 out_tx 克隆一份作为该客户端的通知 sender
             reg.register(out_tx.clone().into_notification_sender())
         };
-        self.shared.lifecycle.on_connect();
+        self.shared.lifecycle.on_connect().await;
 
         // writer task：消费 out_rx，逐行写回 socket
         let writer_task = tokio::spawn(async move {
@@ -177,6 +177,19 @@ async fn config_read(req: Request, shared: &Shared) -> Response {
             );
         }
     };
+    // Project 作用域未实现：daemon 的 ConfigCoordinator 只有全局权威副本。
+    // 显式拒绝而非静默按 Global 处理——静默降级会让调用方误以为写到了项目
+    // 配置（字段语义两侧不一致）。
+    if params.scope == xgent_core::config::ConfigScope::Project {
+        return Response::err(
+            req.id,
+            RpcError::new(
+                xgent_core::proto::INVALID_PARAMS,
+                "config scope=project 未实现，当前仅支持 global".to_string(),
+                None,
+            ),
+        );
+    }
     let cfg = shared.config.read().await;
     let value = cfg.read(&params.key);
     Response::ok(req.id, value)
@@ -197,6 +210,17 @@ async fn config_write(
             );
         }
     };
+    // Project 作用域未实现：同 config_read，显式拒绝
+    if params.scope == xgent_core::config::ConfigScope::Project {
+        return Response::err(
+            req.id,
+            RpcError::new(
+                xgent_core::proto::INVALID_PARAMS,
+                "config scope=project 未实现，当前仅支持 global".to_string(),
+                None,
+            ),
+        );
+    }
     let changed = {
         let mut cfg = shared.config.write().await;
         match cfg.write(&params.key, params.value) {
@@ -209,6 +233,11 @@ async fn config_write(
             }
         }
     };
+    // 触碰 providers.* 时使 provider 池缓存失效：否则改 api_key/api_base 后
+    // 旧实例（旧凭据）继续被 chat/list_models 使用，直到 daemon 重启。
+    if params.key == "providers" || params.key.starts_with("providers.") {
+        shared.pool.invalidate().await;
+    }
     // 广播给所有客户端（排除来源）
     let notif = Notification::new(
         notifications::CONFIG_CHANGED,
@@ -235,6 +264,10 @@ async fn fs_watch(req: Request, shared: &Shared, client_id: xgent_core::ids::Cli
         reg.subscribe(client_id, params.project_root.clone());
     }
     if let Err(e) = shared.watcher.watch(params.project_root, client_id).await {
+        // watcher 注册失败：回滚 registry 订阅，否则客户端收得到 peer 广播
+        // 却永远收不到 fs.changed（订阅记录残留还会阻止后续重试注册 watch）
+        let mut reg = shared.registry.write().await;
+        reg.unsubscribe(client_id);
         return Response::err(
             req.id,
             RpcError::new(xgent_core::proto::INTERNAL_ERROR, e.to_string(), None),
@@ -264,26 +297,44 @@ async fn fs_notify(
             );
         }
     };
-    // 查找来源客户端订阅的项目，广播给同项目其他客户端（排除来源）
-    let notif = Notification::new(
-        notifications::PEER_FILE_CHANGED,
-        serde_json::json!({ "path": params.path }),
-    );
+    // 查找来源客户端订阅的项目，广播给同项目其他客户端（排除来源）。
+    // 通知参数必须是完整 FileChanged：UI 侧统一按 FileChanged 反序列化
+    // （fs.changed 与 peer.fileChanged 同一路由），缺 project_root/kind 会被
+    // 静默丢弃，多客户端文件同步整体失效。
     {
         let reg = shared.registry.read().await;
         let subscribed = reg.subscribed(client_id);
         for project in &subscribed {
-            reg.broadcast_to_project(project, notif.clone(), Some(client_id));
+            let fc = FileChanged {
+                project_root: project.clone(),
+                path: params.path.clone(),
+                kind: FileChangeKind::Modified,
+            };
+            let notif = Notification::new(
+                notifications::PEER_FILE_CHANGED,
+                serde_json::to_value(&fc).unwrap_or_default(),
+            );
+            reg.broadcast_to_project(project, notif, Some(client_id));
         }
     }
     Response::ok(req.id, serde_json::json!({"ok": true}))
 }
 
 /// provider.listModels
+///
+/// 支持可选的 `kind`/`api_base`/`api_key` override：UI 设置面板用**编辑中的
+/// 草稿凭据**探测模型列表，daemon 据此临时构造 provider 实例直连调用，
+/// 不写配置、不进池（写配置会把草稿永久持久化并广播 config.changed）。
 async fn provider_list_models(req: Request, shared: &Shared) -> Response {
     #[derive(serde::Deserialize)]
     struct Params {
         provider: String,
+        #[serde(default)]
+        kind: Option<xgent_settings_core::ProviderKind>,
+        #[serde(default)]
+        api_base: Option<String>,
+        #[serde(default)]
+        api_key: Option<String>,
     }
     let params: Params = match serde_json::from_value(req.params.clone()) {
         Ok(p) => p,
@@ -294,6 +345,27 @@ async fn provider_list_models(req: Request, shared: &Shared) -> Response {
             );
         }
     };
+    // 有任一 override → 临时实例直连（不缓存）
+    if params.kind.is_some() || params.api_base.is_some() || params.api_key.is_some() {
+        let cfg = shared.config.read().await;
+        let existing = cfg.config().providers.get(&params.provider).cloned();
+        drop(cfg);
+        let base = existing.unwrap_or_default();
+        let cfg = xgent_settings_core::ProviderConfig {
+            kind: params.kind.unwrap_or(base.kind),
+            api_base: params.api_base.unwrap_or(base.api_base),
+            api_key: params.api_key.unwrap_or(base.api_key),
+            ..base
+        };
+        let provider = xgent_provider::build_provider(&params.provider, &cfg);
+        return match provider.list_models().await {
+            Ok(models) => Response::ok(req.id, serde_json::to_value(models).unwrap_or_default()),
+            Err(e) => Response::err(
+                req.id,
+                RpcError::new(xgent_core::proto::INTERNAL_ERROR, e.to_string(), None),
+            ),
+        };
+    }
     match shared.pool.get(&params.provider).await {
         Ok(p) => match p.list_models().await {
             Ok(models) => Response::ok(req.id, serde_json::to_value(models).unwrap_or_default()),

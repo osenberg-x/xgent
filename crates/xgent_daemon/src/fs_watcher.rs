@@ -51,6 +51,10 @@ impl FsWatcher {
     }
 
     /// 订阅项目路径。同项目首次订阅才真正向 notify 注册 watch。
+    ///
+    /// notify 注册失败时回滚订阅记录——否则残留的"已订阅"状态会让后续
+    /// 客户端订阅时跳过注册（`was_empty == false`），该项目对所有客户端
+    /// 永久静默。
     pub async fn watch(&self, project: PathBuf, client: ClientId) -> notify::Result<()> {
         // 记录订阅
         let was_empty;
@@ -62,11 +66,24 @@ impl FsWatcher {
         }
         // 首次订阅该路径则注册 notify watch
         if was_empty {
-            let mut w = self.watcher.lock().await;
-            // notify 的 watch 是同步的，但持锁会阻塞 tokio 任务——
-            // 用 spawn_blocking 避免阻塞，但 RecommendedWatcher 非 Send 时不可。
-            // RecommendedWatcher 在主流平台 Send，此处直接调用（通常很快）。
-            w.watch(&project, notify::RecursiveMode::Recursive)?;
+            let watch_result = {
+                let mut w = self.watcher.lock().await;
+                // notify 的 watch 是同步的，但持锁会阻塞 tokio 任务——
+                // 用 spawn_blocking 避免阻塞，但 RecommendedWatcher 非 Send 时不可。
+                // RecommendedWatcher 在主流平台 Send，此处直接调用（通常很快）。
+                w.watch(&project, notify::RecursiveMode::Recursive)
+            };
+            if let Err(e) = watch_result {
+                // 回滚订阅记录（含清空空集合，保证下次订阅会重试注册）
+                let mut subs = self.subscriptions.write().await;
+                if let Some(set) = subs.get_mut(&project) {
+                    set.remove(&client);
+                    if set.is_empty() {
+                        subs.remove(&project);
+                    }
+                }
+                return Err(e);
+            }
         }
         Ok(())
     }
@@ -112,6 +129,12 @@ fn handle_notify_event(
     subs: &RwLock<HashMap<PathBuf, HashSet<ClientId>>>,
     tx: &mpsc::Sender<FsEvent>,
 ) {
+    // Access 事件（读文件产生的 atime/open）不代表内容变更：Linux inotify
+    // 下任何进程读项目内文件都会触发，映射成 Modified 会造成假"文件已变更"
+    // 风暴（触发 UI 冲突检测），直接过滤。
+    if matches!(ev.kind, notify::EventKind::Access(_)) {
+        return;
+    }
     let kind = notify_kind_to_file_kind(ev.kind);
     // notify 回调在 watcher 线程调用，blocking_read 避免异步上下文
     let subs = subs.blocking_read();
@@ -133,7 +156,7 @@ fn handle_notify_event(
     }
 }
 
-/// notify 事件类型 → FileChangeKind
+/// notify 事件类型 → FileChangeKind（Access 已在上游过滤）
 fn notify_kind_to_file_kind(kind: notify::EventKind) -> FileChangeKind {
     use notify::EventKind;
     match kind {

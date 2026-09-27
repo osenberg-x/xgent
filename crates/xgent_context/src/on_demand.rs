@@ -119,7 +119,9 @@ impl OnDemandContextProvider {
     async fn rg_search(&self, keywords: &[String]) -> Option<Vec<PathBuf>> {
         let pattern = keywords.join("|");
         let mut cmd = tokio::process::Command::new("rg");
-        cmd.args(["--files-with-matches", "--no-ignore", "-i"])
+        // 遵循 .gitignore（不加 --no-ignore）：否则 target/node_modules 等
+        // 构建产物成为候选，可能被读入上下文撑爆预算
+        cmd.args(["--files-with-matches", "-i"])
             .arg(&pattern)
             .arg(&self.project_root)
             .stdout(std::process::Stdio::piped())
@@ -131,6 +133,10 @@ impl OnDemandContextProvider {
         .await
         .ok()?
         .ok()?;
+        // rg exit 1 = 无匹配（正常），不算失败、不触发全量回退
+        if output.status.code() == Some(1) {
+            return Some(Vec::new());
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
         if !output.status.success() && stdout.is_empty() {
             return None;

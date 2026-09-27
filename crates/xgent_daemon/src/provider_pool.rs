@@ -46,7 +46,9 @@ impl ProviderPool {
     /// 获取或创建 provider 实例。
     ///
     /// 按 `id`（对应全局配置 `providers` map 的 key）查找；不存在则
-    /// 从配置构造并缓存。
+    /// 从配置构造并缓存。缓存可被 [`Self::invalidate`] 驱逐——config.write
+    /// 触碰 providers.* 时必须失效，否则改 api_key/api_base 后旧实例
+    /// （旧凭据）继续被使用，直到 daemon 重启。
     pub async fn get(&self, id: &str) -> Result<Arc<dyn LlmProvider>, String> {
         {
             let map = self.providers.read().await;
@@ -67,6 +69,11 @@ impl ProviderPool {
         let mut map = self.providers.write().await;
         map.insert(id.to_string(), provider.clone());
         Ok(provider)
+    }
+
+    /// 驱逐全部缓存的 provider 实例（下次 `get` 按最新配置重建）。
+    pub async fn invalidate(&self) {
+        self.providers.write().await.clear();
     }
 
     /// 流式对话：调用 `provider.chat()`，把每个 [`ChatEvent`] 转成

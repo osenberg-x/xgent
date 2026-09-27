@@ -109,11 +109,7 @@ impl ConfigCoordinator {
                 } else {
                     // 写入单个字段
                     let field = parts[2];
-                    let pc = self
-                        .config
-                        .providers
-                        .entry(id)
-                        .or_insert_with(ProviderConfig::default);
+                    let pc = self.config.providers.entry(id).or_default();
                     write_provider_field(pc, field, &value)?;
                 }
             }

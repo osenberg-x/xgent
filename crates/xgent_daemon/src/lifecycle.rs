@@ -33,12 +33,15 @@ impl Lifecycle {
     }
 
     /// 客户端连接。计数 +1，取消任何挂起的退出计时。
-    pub fn on_connect(&self) -> u64 {
+    ///
+    /// 临界区内无 await，`lock().await` 无死锁风险；不能用 `try_lock`——
+    /// 与 on_disconnect 并发时锁失败会静默跳过取消计时，daemon 会在仍有
+    /// 活跃客户端的情况下按 30s 计时退出。
+    pub async fn on_connect(&self) -> u64 {
         let n = self.client_count.fetch_add(1, Ordering::SeqCst) + 1;
         // 取消退出计时
-        if let Ok(mut guard) = self.shutdown_handle.try_lock()
-            && let Some(handle) = guard.take()
-        {
+        let mut guard = self.shutdown_handle.lock().await;
+        if let Some(handle) = guard.take() {
             handle.abort();
         }
         n
@@ -81,8 +84,8 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
         let lc = Lifecycle::new(tx);
         assert_eq!(lc.count(), 0);
-        assert_eq!(lc.on_connect(), 1);
-        assert_eq!(lc.on_connect(), 2);
+        assert_eq!(lc.on_connect().await, 1);
+        assert_eq!(lc.on_connect().await, 2);
         assert_eq!(lc.count(), 2);
         assert_eq!(lc.on_disconnect().await, 1);
         assert_eq!(lc.count(), 1);
@@ -96,7 +99,7 @@ mod tests {
         tokio::time::pause();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
         let lc = Lifecycle::new(tx);
-        lc.on_connect();
+        lc.on_connect().await;
         lc.on_disconnect().await; // 启动退出计时
         // 推进虚拟时间超过延迟
         tokio::time::advance(SHUTDOWN_DELAY * 2).await;
@@ -109,10 +112,10 @@ mod tests {
         tokio::time::pause();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
         let lc = Lifecycle::new(tx);
-        lc.on_connect();
+        lc.on_connect().await;
         lc.on_disconnect().await; // 启动退出计时
         // 模拟重连，取消计时
-        lc.on_connect();
+        lc.on_connect().await;
         // 推进时间远超延迟，确认不会收到关闭信号
         tokio::time::advance(SHUTDOWN_DELAY * 3).await;
         let received = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
