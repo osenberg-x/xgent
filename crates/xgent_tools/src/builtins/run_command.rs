@@ -34,13 +34,17 @@ const DANGER_PATTERNS: &[&str] = &["rm -rf", "sudo", "mkfs"];
 
 /// 把命令输出截断到 `MAX_OUTPUT_BYTES` 内：保留开头与结尾，中间以
 /// 截断标记衔接（结尾常是报错位置，比只留头部更有用）。
+///
+/// 进入截断分支的判据是**字节**数（`s.len()`），而头尾保留按**字符**数算：
+/// CJK 输出 65537 字节仅约 2.2 万字符，可能少于保留额（32768 字符），
+/// `total - keep` 会下溢（debug panic 会打死 agent 任务）——须双重判据。
 fn truncate_output(s: &str) -> String {
-    if s.len() <= MAX_OUTPUT_BYTES {
+    let keep = MAX_OUTPUT_BYTES / 2;
+    let total = s.chars().count();
+    if s.len() <= MAX_OUTPUT_BYTES || total <= keep {
         return s.to_string();
     }
     // 按字符边界截断，避免切在 UTF-8 中间
-    let keep = MAX_OUTPUT_BYTES / 2;
-    let total = s.chars().count();
     let head: String = s.chars().take(keep).collect();
     let tail: String = s.chars().skip(total - keep).collect();
     format!("{head}\n[... 输出过长，中间部分已截断 ...]\n{tail}")
@@ -169,9 +173,7 @@ impl Tool for RunCommand {
             _ = signal.cancelled() => {
                 // 中断：杀整个进程组（含孙进程）并等待退出
                 if let Some(c) = child_opt.as_mut() {
-                    if let Some(pid) = c.id() {
-                        kill_process_tree(pid);
-                    }
+                    kill_child(c);
                     let _ = c.wait().await;
                 }
                 return Err(ToolError::Aborted);
@@ -179,9 +181,7 @@ impl Tool for RunCommand {
             _ = tokio::time::sleep(std::time::Duration::from_secs(TIMEOUT_SECS)) => {
                 // 超时：杀整个进程组
                 if let Some(c) = child_opt.as_mut() {
-                    if let Some(pid) = c.id() {
-                        kill_process_tree(pid);
-                    }
+                    kill_child(c);
                     let _ = c.wait().await;
                 }
                 return Err(ToolError::Timeout(TIMEOUT_SECS));
@@ -230,19 +230,22 @@ impl Tool for RunCommand {
     }
 }
 
-/// 杀死 `pid` 所在进程组（Unix，配合 `process_group(0)`）。
+/// 取消/超时路径的击杀。
 ///
-/// 组已不存在（组长退出后进程组被回收）时 killpg 报错，属预期，忽略。
-#[cfg(unix)]
-fn kill_process_tree(pid: u32) {
-    // SIGKILL 整组：sh 的子进程与孙进程一并终止
-    unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
-}
-
-#[cfg(not(unix))]
-fn kill_process_tree(_pid: u32) {
-    // Windows：依赖 kill_on_drop 与 TerminateProcess（taskkill /T 复杂度高，
-    // MVP 不做孙进程清理）
+/// Unix：SIGKILL 整个进程组（配合 `process_group(0)`，`sh -c "a | b"` 的
+/// 子/孙进程一并终止；组已被回收时 killpg 报错，属预期忽略）。
+/// 非 Unix：退化为只杀直接子进程（Windows 无进程组 API，杀孙进程需
+/// taskkill /T，MVP 不做）。**绝不能是 no-op**——杀不掉则 `wait().await`
+/// 永久挂起，agent 卡死在 ToolRunning。
+fn kill_child(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
+        }
+    }
+    #[cfg(not(unix))]
+    child.start_kill();
 }
 
 #[cfg(test)]
