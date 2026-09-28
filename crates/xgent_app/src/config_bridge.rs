@@ -153,6 +153,7 @@ fn drain_pending_refresh(
     bridge: Res<AgentBridge>,
     mut config_changed: MessageReader<ConfigChangedMessage>,
     refresh_tx: Res<RefreshSender>,
+    mut loc: ResMut<xgent_settings::Localizer>,
 ) {
     // 1. drain 已完成的刷新结果（tokio mpsc::Receiver::try_recv 取 &self）
     while let Ok(r) = pending.rx.try_recv() {
@@ -164,7 +165,18 @@ fn drain_pending_refresh(
     }
 
     // 2. 处理 daemon 广播的配置变更（多开对端修改等）
-    for _ev in config_changed.read() {
+    for ev in config_changed.read() {
+        // 语言变更跨窗口同步：B 窗口切语言 → daemon 广播 → 本窗口 Localizer
+        // 跟随（此前只有本窗口 command_palette 路径会 switch，对端切换后
+        // 本窗口一直保持旧语言直到重启）
+        if let Ok(changed) =
+            serde_json::from_value::<xgent_core::config::ConfigChanged>(ev.0.clone())
+            && changed.key == "preferences.language"
+            && let Some(lang) = changed.value.as_str()
+        {
+            loc.switch(lang);
+            continue;
+        }
         let ipc = ipc.client.clone();
         let tx = refresh_tx.0.clone();
         bridge.runtime.handle().spawn(async move {

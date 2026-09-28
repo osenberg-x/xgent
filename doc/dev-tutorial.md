@@ -542,6 +542,12 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - **确认弹窗键盘守卫**（`confirm_dialog.rs`）：焦点在 `EditableText` 或终端视图独占键盘时，Enter/Esc 不触发弹窗决策（否则聊天输入回车会静默放行工具调用）。
    - **安全策略动态升级生效**（`security.rs::resolve_policy`）：配置 approved 后仍执行 `approval_for(input)`，危险命令（`rm -rf`/`sudo`）动态 tier 升级会退回 `NeedsConfirmation`（`ToolTier::severity()` 定义危险度序）。
 
+25. **评审回归修复（2026-09-28，第 2 批 3 轮）**——对第 24 条修复的回归审查 + 低覆盖模块补审：
+   - **run_command 截断下溢**：截断判据是字节数而头尾保留按字符数，CJK 大输出触发 `total - keep` usize 下溢（debug panic 会打死 agent 任务）——加字符数双重判据；非 Unix 击杀退化为 `start_kill`（原 no-op 会让取消/超时分支 `wait()` 永久挂起）。
+   - **确认弹窗键盘语义定稿**：spawn 时 `InputFocus` 移到弹窗、决策经 `close_dialog` 统一还原到 chat 输入框；**Esc 恒放行**（Deny 是安全方向，误拒无害误放行有害），Enter 保留 EditableText/终端守卫。
+   - **IPC 健壮性**：daemon 对无法解析的行回 `PARSE_ERROR/-32600` 错误响应（原静默丢弃，调用方永久挂死无痕迹）；UI `call()` 等响应限时 120s（> provider 最长请求超时）。
+   - **杂项**：registry 新增 `unsubscribe_project`（fs.watch 回滚只删本项目，不 clear 全部订阅）；lifecycle 计时器落地前锁内复查 `client_count==0`（防活跃会话被 30s 退出计时杀掉）；anthropic message_delta 兜底 drain 按 index 排序（HashMap 迭代序随机）；fs_watcher 注册成功后复查订阅集（补偿与 unwatch_client 的并发窗口）；provider_client 消费 task 加 180s 空闲兜底 + 事件反序列化失败 warn（版本偏差丢 Done 时不再滞留）；UI 全局配置损坏时打 error 日志（原静默回退默认，与 daemon 拒启行为不一致）；`preferences.language` 的 config.changed 跨窗口同步到本窗口 Localizer。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 1. **阅读背景**：开始任务前读 `AGENTS.md`、`doc/design/`、`doc/plans/` 中相关 step 文件；编码时按需查 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。

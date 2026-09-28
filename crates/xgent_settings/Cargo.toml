@@ -10,3 +10,4 @@ xgent_settings_core = { path = "../xgent_settings_core" }
 xui_i18n = { path = "../xui_i18n" }
 fluent = { workspace = true }
 unic-langid = { workspace = true }
+tracing = { workspace = true }

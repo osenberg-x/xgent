@@ -23,7 +23,20 @@ pub struct XgentSettingsPlugin;
 
 impl Plugin for XgentSettingsPlugin {
     fn build(&self, app: &mut App) {
-        let global = GlobalConfigStore::load().unwrap_or_default();
+        // daemon 对损坏配置拒启，UI 侧不能静默吞掉同一错误——那会表现为
+        // "配置全丢"假象（providers 为空、语言回退），用户无从知道根因是
+        // TOML 损坏。仍回退默认启动，但必须把文件路径打到日志。
+        let global = match GlobalConfigStore::load() {
+            Ok(g) => g,
+            Err(e) => {
+                let path = xgent_settings_core::paths::global_config_file();
+                tracing::error!(
+                    "全局配置加载失败（使用默认配置启动，请检查文件）: {}: {e}",
+                    path.display()
+                );
+                Default::default()
+            }
+        };
         let lang = if global.preferences.language.is_empty() {
             DEFAULT_LANG.to_string()
         } else {

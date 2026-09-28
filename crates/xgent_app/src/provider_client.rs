@@ -66,9 +66,28 @@ impl ProviderClient for IpcProviderClient {
         let (tx, chat_rx) = mpsc::channel::<ChatEvent>(64);
         let target_sid = stream_id.0;
         tokio::spawn(async move {
+            // 空闲兜底：daemon 侧流有 first(30s)/idle(60s) 超时，正常情况
+            // 90s 内必有事件。超限说明 daemon 侧异常终止且 Done/Error 丢失
+            // （如 UI/daemon 版本偏差导致事件反序列化失败被丢弃）——退出
+            // task，chat_rx 关闭让 agent 侧按流断开路径处理（StreamParse 重试）。
+            const IDLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(180);
             loop {
-                match rx.recv().await {
-                    Ok(notif) => {
+                match tokio::time::timeout(IDLE_LIMIT, rx.recv()).await {
+                    Err(_) => {
+                        tracing::warn!(
+                            "provider 事件流 180s 无事件，消费 task 退出（stream {target_sid}）"
+                        );
+                        break;
+                    }
+                    // Closed：所有 sender（ipc 读循环）已退出，流结束
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+                    // Lagged：订阅者消费慢于生产者，溢出了一批旧通知。
+                    // 不能退出循环——否则 provider 事件流静默断开，agent 侧
+                    // stream.recv() 返回 None 触发 StreamParse 重试，可能反复
+                    // Lagged 陷入死循环。改为 continue 接收后续新通知
+                    // （溢出的旧事件已丢，agent 侧若收到不完整流会自行重试）。
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+                    Ok(Ok(notif)) => {
                         let sid = notif.params["stream_id"].as_u64();
                         if sid != Some(target_sid) {
                             continue;
@@ -76,8 +95,17 @@ impl ProviderClient for IpcProviderClient {
                         let ev = match notif.method.as_str() {
                             // daemon 透传整个 ChatEvent JSON（见 ADR-0006），反序列化
                             notifications::PROVIDER_EVENT => {
-                                serde_json::from_value::<ChatEvent>(notif.params["event"].clone())
-                                    .ok()
+                                match serde_json::from_value::<ChatEvent>(
+                                    notif.params["event"].clone(),
+                                ) {
+                                    Ok(ev) => Some(ev),
+                                    Err(e) => {
+                                        // 未知事件类型（版本偏差）：丢弃但必须可观测，
+                                        // 否则丢的是 Done 时消费 task 永久滞留
+                                        tracing::warn!("provider 事件反序列化失败（忽略）: {e}");
+                                        None
+                                    }
+                                }
                             }
                             _ => None,
                         };
@@ -95,14 +123,6 @@ impl ProviderClient for IpcProviderClient {
                             }
                         }
                     }
-                    // Lagged：订阅者消费慢于生产者，溢出了一批旧通知。
-                    // 不能退出循环——否则 provider 事件流静默断开，agent 侧
-                    // stream.recv() 返回 None 触发 StreamParse 重试，可能反复
-                    // Lagged 陷入死循环。改为 continue 接收后续新通知
-                    // （溢出的旧事件已丢，agent 侧若收到不完整流会自行重试）。
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    // Closed：所有 sender（ipc 读循环）已退出，流结束。
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });

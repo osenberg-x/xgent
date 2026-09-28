@@ -591,8 +591,12 @@ async fn handle_anthropic_chunk(
                     *text_started = false;
                     let _ = tx.send(ChatEvent::TextEnd).await;
                 }
-                // tool_use 块结束（若有未关闭的，如 Length 截断）：逐个补发 End
-                for (index, accum) in tool_accum.drain() {
+                // tool_use 块结束（若有未关闭的，如 Length 截断）：逐个补发 End。
+                // HashMap 迭代序随机，按 index 排序保证 End 事件顺序确定
+                // （bridge 按 End 到达序重放 tool_call）
+                let mut unclosed: Vec<(u32, ToolUseAccum)> = tool_accum.drain().collect();
+                unclosed.sort_by_key(|(index, _)| *index);
+                for (index, accum) in unclosed {
                     let args_val = parse_tool_args(&accum.args);
                     let _ = tx
                         .send(ChatEvent::ToolCallEnd { index, args: args_val })

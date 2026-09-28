@@ -60,10 +60,11 @@ impl ClientRegistry {
         }
     }
 
-    /// 注销某客户端的全部项目订阅（不移除客户端本身）。
-    pub fn unsubscribe(&mut self, id: ClientId) {
+    /// 仅移除某客户端对单个项目的订阅（fs.watch 失败回滚用——
+    /// 全量 clear 会误伤该客户端此前成功订阅的其他项目）。
+    pub fn unsubscribe_project(&mut self, id: ClientId, project: &std::path::Path) {
         if let Some(entry) = self.clients.get_mut(&id) {
-            entry.subscribed_projects.clear();
+            entry.subscribed_projects.remove(project);
         }
     }
 

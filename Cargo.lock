@@ -9002,6 +9002,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "fluent",
+ "tracing",
  "unic-langid",
  "xgent_core",
  "xgent_settings_core",

@@ -116,7 +116,14 @@ impl IpcClient {
             return Err(anyhow::Error::new(e).context(format!("IPC 写请求 {method} 失败")));
         }
 
-        let resp = rx.await.map_err(|_| anyhow::anyhow!("响应通道关闭"))?;
+        // 等响应限时：socket 半开（daemon 存活但读循环死亡/版本偏差丢请求）
+        // 时响应永不到达，无超时则调用方永久挂起。上限取 120s——大于
+        // provider 侧最长请求超时（timeout_secs 默认 60s）+ 余量。
+        // oneshot::Receiver 本身实现 Future，直接交给 timeout。
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(120), rx)
+            .await
+            .map_err(|_| anyhow::anyhow!("IPC 请求 {method} 响应超时（120s）"))?
+            .map_err(|_| anyhow::anyhow!("响应通道关闭"))?;
         Ok(resp)
     }
 

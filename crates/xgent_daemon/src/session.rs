@@ -94,8 +94,30 @@ impl Session {
                     if let Ok(req) = serde_json::from_str::<Request>(trimmed) {
                         let resp = dispatch_request(req, &self.shared, client_id).await;
                         let _ = out_tx.send(Outgoing::Response(resp)).await;
+                    } else if let Ok(notif) = serde_json::from_str::<Notification>(trimmed) {
+                        // 通知（无 id）MVP 暂不处理
+                        let _ = notif;
+                    } else {
+                        // 非法行（版本偏差/坏客户端）：不回错误响应的话，调用方
+                        // 的请求会无响应挂死且无任何痕迹
+                        tracing::warn!("无法解析 IPC 行: {}", &trimmed[..trimmed.len().min(200)]);
+                        let id = serde_json::from_str::<serde_json::Value>(trimmed)
+                            .ok()
+                            .and_then(|v| v.get("id").and_then(|i| i.as_u64()));
+                        let err = Response::err(
+                            id.unwrap_or(0),
+                            RpcError::new(
+                                if id.is_some() {
+                                    xgent_core::proto::INVALID_REQUEST
+                                } else {
+                                    xgent_core::proto::PARSE_ERROR
+                                },
+                                "无法解析的 JSON-RPC 行".to_string(),
+                                None,
+                            ),
+                        );
+                        let _ = out_tx.send(Outgoing::Response(err)).await;
                     }
-                    // 通知（无 id）MVP 暂不处理
                 }
                 Err(e) => {
                     tracing::warn!("读取失败: {e}");
@@ -263,11 +285,15 @@ async fn fs_watch(req: Request, shared: &Shared, client_id: xgent_core::ids::Cli
         let mut reg = shared.registry.write().await;
         reg.subscribe(client_id, params.project_root.clone());
     }
-    if let Err(e) = shared.watcher.watch(params.project_root, client_id).await {
-        // watcher 注册失败：回滚 registry 订阅，否则客户端收得到 peer 广播
-        // 却永远收不到 fs.changed（订阅记录残留还会阻止后续重试注册 watch）
+    if let Err(e) = shared
+        .watcher
+        .watch(params.project_root.clone(), client_id)
+        .await
+    {
+        // watcher 注册失败：仅回滚本次项目的 registry 订阅（不能 clear 全部——
+        // 客户端此前成功订阅的其他项目会被误伤，收不到任何 fs.changed）
         let mut reg = shared.registry.write().await;
-        reg.unsubscribe(client_id);
+        reg.unsubscribe_project(client_id, &params.project_root);
         return Response::err(
             req.id,
             RpcError::new(xgent_core::proto::INTERNAL_ERROR, e.to_string(), None),

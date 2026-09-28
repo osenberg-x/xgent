@@ -48,6 +48,11 @@ impl Lifecycle {
     }
 
     /// 客户端断开。计数 -1，归零则启动延迟退出计时。
+    ///
+    /// 计时器落地前在锁内复查 `client_count == 0`：fetch_sub 之后、拿锁
+    /// 之前若有新客户端 on_connect（fetch_add + take 计时句柄），旧的
+    /// "归零"判断已失效——不复查会在仍有活跃客户端时启动 30s 退出计时，
+    /// 流式对话中途被杀。
     pub async fn on_disconnect(&self) -> u64 {
         let n = self.client_count.fetch_sub(1, Ordering::SeqCst);
         let n = n.saturating_sub(1);
@@ -59,11 +64,14 @@ impl Lifecycle {
             if let Some(h) = guard.take() {
                 h.abort();
             }
-            let handle = tokio::spawn(async move {
-                tokio::time::sleep(SHUTDOWN_DELAY).await;
-                let _ = tx.send(()).await;
-            });
-            *guard = Some(handle);
+            // 锁内复查：期间可能有客户端重连
+            if self.client_count.load(Ordering::SeqCst) == 0 {
+                let handle = tokio::spawn(async move {
+                    tokio::time::sleep(SHUTDOWN_DELAY).await;
+                    let _ = tx.send(()).await;
+                });
+                *guard = Some(handle);
+            }
         }
         n
     }

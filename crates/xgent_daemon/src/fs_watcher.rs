@@ -84,6 +84,23 @@ impl FsWatcher {
                 }
                 return Err(e);
             }
+            // 与 unwatch_client 的并发补偿：注册成功前可能有断连方清空了
+            // 订阅集（unwatch 已把项目从 map 移除）——复查，无订阅者则
+            // unwatch，避免残留一个无人消费的 notify watch
+            let now_empty = {
+                let subs = self.subscriptions.read().await;
+                subs.get(&project).is_none_or(|s| s.is_empty())
+            };
+            if now_empty {
+                let mut subs = self.subscriptions.write().await;
+                // 双检：并发 watch 可能刚插入了新订阅者
+                let still_empty = subs.get(&project).is_none_or(|s| s.is_empty());
+                if still_empty {
+                    subs.remove(&project);
+                    let mut w = self.watcher.lock().await;
+                    let _ = w.unwatch(&project);
+                }
+            }
         }
         Ok(())
     }
