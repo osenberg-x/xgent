@@ -7,6 +7,7 @@
 //! 固化为历史消息节点并清空当前。
 
 use bevy::clipboard::Clipboard;
+use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
@@ -203,6 +204,8 @@ pub(crate) fn spawn_chat_panel(
             TextInput,
             ChatInput::multiline(),
             AutoFocus,
+            // 点击重新聚焦（AutoFocus 只在 spawn 时生效；0.20 点击聚焦须 TabIndex）
+            TabIndex(0),
             ChatInputMarker,
             ChatInputBorderMarker,
             // 文本输入 → 竖线 I-beam 指针

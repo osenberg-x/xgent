@@ -38,6 +38,7 @@
 ### 1.4 文本/输入
 
 - `EditableText` 职责拆分：0.19 中它既是状态载体又是完整输入控件；0.20 起是纯状态载体（内部改为持有 `parley::PlainEditor`），**完整输入控件需同时挂 `TextInput`**（`bevy_ui_widgets`，`#[require(EditableText)]`，`TextInputPlugin` 已含于 DefaultPlugins）。`EditableText::new/allow_newlines/queue_edit` 等构造与编辑 API 兼容。
+- **点击聚焦改为 `TabIndex` 门控（本轮漏网，事后修）**：0.20 的链路是 `PointerFocusPlugin::click_to_focus` → 冒泡 `AcquireFocus` → `acquire_focus_tab_index` 解析，**只对带 `TabIndex` 的实体生效**；未命中 `TabIndex` 的请求一路冒泡到窗口被 `on_window_acquire_focus_clear` 清空（"点空白处失焦"）。故 `TextInput` 挂上也不等于能输入——缺 `TabIndex` 时键盘事件经 `InputDispatchPlugin` 无投递对象，表现为"输入框点了没反应、敲字全无"。`AutoFocus` 只在组件 add 时生效，救不了后续点击。官方 `standard_widgets` 示例同样靠 `TabIndex` 标可聚焦控件，属正统用法（`PointerFocusPlugin` 文档自称是 `PointerFocusable` 落地前的临时桥）。
 - `EditableText::viewport`（`TextViewport`）替代 `TextScroll`（xgent 未用 TextScroll）。
 - `TextFont::default()` 字号变为 `FontSize::Rem(1.)`（随 `RemSize` 缩放）；xgent 全部显式设 px 字号，不受影响。
 - `Val` 新增 `Em`/`Rem` 变体；`Val::resolve` 等签名新增 em/rem 参数（xgent 未直接调用 resolve）；`Node` 新增 `EmSize` 字段（有默认值，无需设置）。

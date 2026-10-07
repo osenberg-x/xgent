@@ -129,12 +129,6 @@ context-add = Add context
 welcome-title = Start a new session
 welcome-sub = Type a question, or start from a quick action
 welcome-recent = Recent sessions
-welcome-card-explain = Explain code
-welcome-card-explain-desc = Analyze logic and design of selected files
-welcome-card-refactor = Refactor code
-welcome-card-refactor-desc = Improve structure and readability
-welcome-card-test = Generate tests
-welcome-card-test-desc = Generate unit tests for the current context
 
 toast-copied = Copied to clipboard
 

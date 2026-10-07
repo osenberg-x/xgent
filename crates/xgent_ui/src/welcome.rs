@@ -1,5 +1,7 @@
-//! 欢迎空态（v7）：会话为空时覆盖对话区——品牌块 / 标题 / 快捷卡 / 最近会话
-//! （方案 §8.4）。快捷卡与 qa chips 共用 `QaChipMarker` 点击填入通路；
+//! 欢迎空态（v7）：会话为空时覆盖**消息流区域**——品牌块 / 标题 / 副标题 /
+//! 最近会话（方案 §8.4）。挂在 `MessageListMarker` 上而非对话主区，输入卡与
+//! 上下文条始终可见（原型 `.welcome` 是 `.conversation` 的子节点）。
+//! 提示词入口只保留输入框上方的 qa chips 行一处（空态不再重复摆快捷卡）；
 //! 最近会话数据复用 `ListSessionsMessage`/`SessionListMessage` 流。
 
 use bevy::picking::hover::Hovered;
@@ -12,11 +14,10 @@ use xgent_agent::{
 };
 use xgent_settings::Localizer;
 
-use crate::chat_panel::QaChipMarker;
+use crate::chat_panel::MessageListMarker;
 use crate::fonts::ui_text;
 use crate::i18n::tr;
-use crate::kit::{HoverTint, IconAssets, icon};
-use crate::layout::ChatPanelMarker;
+use crate::kit::HoverTint;
 use crate::theme::{Theme, space, type_scale};
 
 /// 欢迎覆盖层标记。
@@ -26,6 +27,10 @@ pub struct WelcomeMarker;
 /// 最近会话列表容器标记。
 #[derive(Component, Default)]
 pub struct WelcomeRecentMarker;
+
+/// 最近会话小标题标记（无历史会话时整行隐藏，避免空态出现孤立标题）。
+#[derive(Component, Default)]
+pub struct WelcomeRecentHeadMarker;
 
 /// 最近会话条目标记（携带会话 id）。
 #[derive(Component, Default)]
@@ -62,14 +67,16 @@ impl Plugin for WelcomePlugin {
 }
 
 /// 启动时 spawn 欢迎覆盖层（默认隐藏，`toggle_welcome` 控显隐）。
+///
+/// 父节点是消息流（`MessageListMarker`）而非对话主区：覆盖层为绝对定位铺满，
+/// 挂主区会一并盖住下方的输入卡，空态时输入框就看不见了。
 fn spawn_welcome(
     mut commands: Commands,
-    q_panel: Query<Entity, With<ChatPanelMarker>>,
+    q_list: Query<Entity, With<MessageListMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
-    icons: Res<IconAssets>,
 ) {
-    let Ok(panel) = q_panel.single() else {
+    let Ok(list) = q_list.single() else {
         return;
     };
 
@@ -77,13 +84,18 @@ fn spawn_welcome(
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                // 顶部对齐而非居中：下限窗口（1024x640）下消息流盒高仅约 340px，
+                // 字号放大或最近会话满 3 条时内容会高于盒高，居中会让品牌块溢出
+                // 顶部被裁；顶对齐只损失底部。原型 `.welcome` 同为顶对齐。
+                justify_content: JustifyContent::FlexStart,
                 row_gap: px(space::SM),
-                padding: UiRect::horizontal(px(space::XXXL)),
+                padding: UiRect::all(px(space::XXXL)),
                 display: Display::None,
                 flex_shrink: 0.0,
                 ..default()
@@ -131,98 +143,6 @@ fn spawn_welcome(
                 type_scale::line_height::BODY,
             ),));
 
-            // 快捷卡 ×3（点击经 QaChipMarker 填入输入框）
-            let cards = [
-                (
-                    "info",
-                    theme.st_info_bg,
-                    theme.st_info,
-                    "welcome-card-explain",
-                    "welcome-card-explain-desc",
-                    "qa-explain-prompt",
-                ),
-                (
-                    "edit",
-                    theme.accent_bg,
-                    theme.accent_interactive,
-                    "welcome-card-refactor",
-                    "welcome-card-refactor-desc",
-                    "qa-refactor-prompt",
-                ),
-                (
-                    "check",
-                    theme.st_ok_bg,
-                    theme.st_ok,
-                    "welcome-card-test",
-                    "welcome-card-test-desc",
-                    "qa-test-prompt",
-                ),
-            ];
-            w.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                justify_content: JustifyContent::Center,
-                column_gap: px(space::MD),
-                row_gap: px(space::SM),
-                margin: UiRect::top(px(space::MD)),
-                max_width: px(660.0),
-                ..default()
-            },))
-                .with_children(|row| {
-                    for (icon_name, tint_bg, tint_fg, title_key, desc_key, prompt_key) in cards {
-                        row.spawn((
-                            Button,
-                            Hovered::default(),
-                            Node {
-                                flex_direction: FlexDirection::Column,
-                                align_items: AlignItems::Start,
-                                row_gap: px(space::XS),
-                                padding: UiRect::all(px(space::MD)),
-                                width: px(200.0),
-                                border_radius: BorderRadius::all(px(8.0)),
-                                border: UiRect::all(px(1.0)),
-                                flex_shrink: 0.0,
-                                ..default()
-                            },
-                            BackgroundColor(theme.subtle),
-                            BorderColor::all(theme.border),
-                            HoverTint::standard(&theme),
-                            QaChipMarker { key: prompt_key },
-                        ))
-                        .with_children(|card| {
-                            card.spawn((
-                                Node {
-                                    width: px(32.0),
-                                    height: px(32.0),
-                                    border_radius: BorderRadius::all(px(6.0)),
-                                    align_items: AlignItems::Center,
-                                    justify_content: JustifyContent::Center,
-                                    margin: UiRect::bottom(px(space::XS)),
-                                    ..default()
-                                },
-                                BackgroundColor(tint_bg),
-                            ))
-                            .with_children(|blk| {
-                                blk.spawn(icon(&icons, icon_name, 16.0, tint_fg));
-                            });
-                            card.spawn((ui_text(
-                                tr(&loc, title_key).to_string(),
-                                type_scale::SMALL,
-                                590,
-                                theme.text,
-                                type_scale::line_height::UI,
-                            ),));
-                            card.spawn((ui_text(
-                                tr(&loc, desc_key).to_string(),
-                                type_scale::MICRO,
-                                400,
-                                theme.text_muted,
-                                type_scale::line_height::UI,
-                            ),));
-                        });
-                    }
-                });
-
             // 最近会话
             w.spawn((
                 ui_text(
@@ -233,6 +153,11 @@ fn spawn_welcome(
                     type_scale::line_height::UI,
                 ),
                 LetterSpacing::Px(0.5),
+                Node {
+                    margin: UiRect::top(px(space::LG)),
+                    ..default()
+                },
+                WelcomeRecentHeadMarker,
             ));
             w.spawn((
                 Node {
@@ -246,7 +171,7 @@ fn spawn_welcome(
             ));
         })
         .id();
-    commands.entity(panel).add_child(welcome);
+    commands.entity(list).add_child(welcome);
 }
 
 /// 会话为空 → 显示并触发一次会话列表拉取；非空 → 隐藏。
@@ -280,16 +205,25 @@ fn read_session_list(
     }
 }
 
-/// 最近会话数据变化时重建列表（≤3 条；点击恢复）。
+/// 最近会话数据变化时重建列表（≤3 条；点击恢复）。无会话时连小标题一起收起。
 fn rebuild_recent_sessions(
     mut commands: Commands,
     sessions: Res<WelcomeSessions>,
     theme: Res<Theme>,
     mut q: Query<(Entity, &Children), With<WelcomeRecentMarker>>,
     items: Query<(), With<RecentItemMarker>>,
+    mut q_head: Query<&mut Node, With<WelcomeRecentHeadMarker>>,
 ) {
     if !sessions.is_changed() {
         return;
+    }
+    // 空列表时隐藏孤立的「最近会话」标题
+    if let Ok(mut head) = q_head.single_mut() {
+        head.display = if sessions.0.is_empty() {
+            Display::None
+        } else {
+            Display::Flex
+        };
     }
     let Ok((container, children)) = q.single_mut() else {
         return;

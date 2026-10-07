@@ -130,12 +130,6 @@ context-add = 添加上下文
 welcome-title = 开始新会话
 welcome-sub = 输入问题，或从快捷操作开始
 welcome-recent = 最近会话
-welcome-card-explain = 解释代码
-welcome-card-explain-desc = 分析选中文件的逻辑和设计
-welcome-card-refactor = 重构代码
-welcome-card-refactor-desc = 改善代码结构和可读性
-welcome-card-test = 生成测试
-welcome-card-test-desc = 为当前上下文生成单元测试
 
 toast-copied = 已复制到剪贴板
 

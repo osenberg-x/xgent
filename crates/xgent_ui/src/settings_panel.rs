@@ -6,6 +6,7 @@
 //!
 //! 使用官方 `EditableText` 处理输入（光标/删除/IME 全由官方 text_input 系统）。
 
+use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -440,6 +441,9 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
         crate::cursor::CursorHit::default(),
         EditableText::default(),
         TextInput,
+        // 0.20 起点击聚焦只认 TabIndex（PointerFocusPlugin 的 AcquireFocus 解析器）：
+        // 缺它则点击输入框会把焦点清到窗口，键盘事件无处投递 → 无法输入
+        TabIndex(0),
     )
 }
 

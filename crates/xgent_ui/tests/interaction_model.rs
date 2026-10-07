@@ -12,6 +12,8 @@
 //! 4. **面板压遮罩**：0.20 中非 Button 子节点上的按下会**冒泡到 Button 祖先**
 //!    （本轮功能性 review 发现的回归面），面板须挂 [`xgent_ui::kit::block_press_bubbling`]
 //!    消费 `PointerPress`——验证：按在面板上遮罩不 Pressed；按在面板外遮罩 Pressed。
+//! 5. **点击聚焦**：文本输入框须挂 `TabIndex`，否则点击只会把焦点清到窗口，
+//!    键盘事件无处投递（设置面板「无法输入」的根因）。
 //!
 //! 另含一个边界观测：同帧 press+release（长帧吞快点的风险面，行为由上游决定）。
 //!
@@ -20,6 +22,7 @@
 
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::input::ButtonState;
+use bevy::input_focus::InputFocus;
 use bevy::math::Vec2;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
@@ -413,4 +416,84 @@ fn same_frame_press_release_behavior() {
     app.update();
     let count = app.world().resource::<PressCount>().0;
     println!("同帧 press+release 的 Added<Pressed> 触发次数：{count}");
+}
+
+/// 契约 5：点击文本输入框 → `InputFocus` 落在该实体（键盘事件此后投递给它）。
+///
+/// 回归面：0.20 的点击聚焦链路是 `PointerPress` → 冒泡 `AcquireFocus` →
+/// `acquire_focus_tab_index` 解析，**只对带 `TabIndex` 的实体生效**；缺 `TabIndex`
+/// 的请求会一路冒泡到窗口并被清空（等价"点空白处失焦"），输入框遂无法输入。
+#[test]
+fn click_focuses_text_input_with_tab_index() {
+    let mut app = test_app();
+    let focused = spawn_text_input(&mut app, true);
+    let unfocused = spawn_text_input(&mut app, false);
+    app.update();
+    app.update();
+
+    // 带 TabIndex：点击即聚焦
+    move_cursor(&mut app, Vec2::new(50.0, 20.0));
+    app.update();
+    assert_hovered(&app, focused);
+    click_left(&mut app, ButtonState::Pressed);
+    app.update();
+    assert_eq!(
+        app.world().resource::<InputFocus>().get(),
+        Some(focused),
+        "点击带 TabIndex 的输入框应聚焦它"
+    );
+
+    // 无 TabIndex：点击只会清空焦点（点空白处的既有语义）。
+    // 先断言悬停命中，排除"坐标落空导致焦点为 None"的假阳性。
+    move_cursor(&mut app, Vec2::new(50.0, 120.0));
+    app.update();
+    assert_hovered(&app, unfocused);
+    click_left(&mut app, ButtonState::Pressed);
+    app.update();
+    assert_eq!(
+        app.world().resource::<InputFocus>().get(),
+        None,
+        "缺 TabIndex 的输入框点不出焦点——正是设置面板无法输入的根因"
+    );
+}
+
+/// 断言指针当前命中该实体（`Hovered` 为真）。
+fn assert_hovered(app: &App, entity: Entity) {
+    let hovered = app
+        .world()
+        .get::<bevy::picking::hover::Hovered>(entity)
+        .expect("输入框应带 Hovered 组件（spawn 时插入）")
+        .get();
+    assert!(hovered, "指针须命中 {entity:?}，否则该用例的焦点断言无意义");
+}
+
+/// spawn 一个 300x40 的文本输入框（绝对定位于 `top`），返回实体。
+///
+/// 背景取 `input_bg` 同款低透明度（alpha 0.02），顺带验证 picking 后端不因
+/// 近透明背景而漏命中。
+fn spawn_text_input(app: &mut App, with_tab_index: bool) -> Entity {
+    let top = if with_tab_index { 0.0 } else { 100.0 };
+    let input = app
+        .world_mut()
+        .spawn((
+            Node {
+                position_type: bevy::ui::PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(top),
+                width: Val::Px(300.0),
+                height: Val::Px(40.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.02)),
+            bevy::picking::hover::Hovered::default(),
+            bevy::text::EditableText::default(),
+            bevy::ui_widgets::TextInput,
+        ))
+        .id();
+    if with_tab_index {
+        app.world_mut()
+            .entity_mut(input)
+            .insert(bevy::input_focus::tab_navigation::TabIndex(0));
+    }
+    input
 }

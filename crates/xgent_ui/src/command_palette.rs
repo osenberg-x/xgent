@@ -7,6 +7,7 @@
 use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::input_focus::AutoFocus;
+use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -174,6 +175,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                         TextInput,
                         ChatInput::single_line(),
                         AutoFocus,
+                        // 点击重新聚焦（0.20 点击聚焦须 TabIndex）
+                        TabIndex(0),
                         PaletteInputMarker,
                         // 文本输入 → 竖线 I-beam 指针
                         crate::cursor::CursorStyle::Text,

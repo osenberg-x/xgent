@@ -459,7 +459,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 ### 5.12.2 上下文条与 welcome（v7）
 
 - **`context_scope.rs`**：会话区顶部只读 chips（数据源=编辑器 tabs 的 `EditorBuffer.path`），「+ 添加」打开文件抽屉；标签/添加钮跨重建保留（签名比对）。
-- **`welcome.rs`**：会话空态欢迎页（品牌块 + 3 快捷卡 + 最近会话，进空态发 `ListSessionsMessage`，点击 `RestoreSessionMessage` 恢复，首条输入即隐藏）。
+- **`welcome.rs`**：会话空态欢迎页（品牌块 + 标题/副标题 + 最近会话，进空态发 `ListSessionsMessage`，点击 `RestoreSessionMessage` 恢复，首条输入即隐藏）。**不再摆 3 张"快捷卡"**：它们与输入框上方的 qa chips 行同义（都只把提示词填入输入框，对会话的呈现与处理毫无差别），双份入口既冗余又会被误读成"选会话类型"；提示词入口全局只留 chips 行一处。
 
 ### 5.12.3 截图工具（ui-snapshot）
 
@@ -475,6 +475,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - **悬停判定**：`Query<..., &Hovered>`（`.get()` 取 bool）或 `Has<Pressed>` 轮询。`Hovered` 由 picking 按 CSS `:hover` 后代语义维护——悬停按钮内文本/图标子节点时根节点也为 true（旧 `ui_focus_system` 靠 FocusPolicy 默认 Pass 穿透子节点实现同等效果；**`picking::hover::PickingInteraction` 无后代回溯，不能用于带子节点的交互根**，这是本次迁移踩过的坑）。
 - **穿透/阻断**：UI picking 后端忽略 `FocusPolicy`；无 `Pickable` 组件默认阻断下层（抽屉面板压遮罩防误触即依赖此默认），需要放行用 `bevy_picking::Pickable { should_block_lower: false, ..}`。
 - **文本输入**：可编辑实体 = `EditableText`（状态载体）+ `TextInput`（行为控件，`TextInputPlugin` 在 DefaultPlugins）成对挂载；编辑器（F-11）为虚拟化只读态，不挂 `EditableText`，文本在 `TextEditor.rope`。
+- **文本输入必须挂 `TabIndex`**（`bevy::input_focus::tab_navigation::TabIndex(0)`，硬性）：0.20 的点击聚焦链路是 `PointerPress` → 冒泡 `AcquireFocus` → `PointerFocusPlugin` 的 `acquire_focus_tab_index` 解析，**只对带 `TabIndex` 的实体生效**；缺它时点击会一路冒泡到窗口并被清空（等价"点空白处失焦"），键盘事件经 `InputDispatchPlugin` 投递时无处可去 → 输入框敲字全无反应（设置面板 provider 输入即栽在此）。`AutoFocus` 只在 spawn 那一帧生效，不能替代点击聚焦。回归网：`tests/interaction_model.rs`（机制，含无 `TabIndex` 的反例）+ `tests/settings_input_focus.rs`（开面板→点击→敲字端到端）。
+- **对话区空态覆盖层挂消息流，不挂对话主区**：`welcome::spawn_welcome` 的父节点是 `MessageListMarker`（绝对定位 inset 0 铺满 + 不透明底）。挂 `ChatPanelMarker` 会连下方输入卡一起盖住，空态时输入框看不见（原型 `.welcome` 亦是 `.conversation` 的子节点）。覆盖层内**顶对齐而非垂直居中**：下限窗口（1024x640）下消息流盒高仅约 340px，字号放大或最近会话满 3 条时内容会高于盒高，居中会让品牌块溢出顶部被裁，顶对齐只损失底部。
 - **后续优化路线**（rem 全局缩放 / 多开焦点 / BSN 与 feathers 采纳评估）见 `doc/notes/bevy-0.20-migration.md` §4。
 
 ### 5.13 插件系统（WASM 组件模型）
