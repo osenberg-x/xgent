@@ -71,12 +71,13 @@ fn editor_view_display(app: &mut App) -> Display {
         .unwrap_or(Display::None)
 }
 
-/// 模拟点击文件抽屉条目（spawn 带按下态 Interaction 的 FileEntry）。
+/// 模拟点击文件抽屉条目（spawn 带按下态 `Pressed` 的 FileEntry）。
 fn click_file(app: &mut App, path: &std::path::Path) {
     app.world_mut().spawn((
-        Button,
+        bevy::ui_widgets::Button,
+        bevy::picking::hover::Hovered::default(),
         Node::default(),
-        bevy::ui::Interaction::Pressed,
+        bevy::ui::Pressed,
         xgent_ui::file_panel::FileEntry {
             path: path.to_path_buf(),
         },

@@ -9,8 +9,11 @@
 
 use std::path::PathBuf;
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::LineHeight;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::editor::buffer::EditorBuffer;
 
@@ -409,6 +412,7 @@ fn spawn_dirty_close_dialog(
                     .with_children(|btns| {
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
                                 border_radius: BorderRadius::all(Val::Px(
@@ -429,6 +433,7 @@ fn spawn_dirty_close_dialog(
                         ));
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
                                 border_radius: BorderRadius::all(Val::Px(
@@ -455,16 +460,16 @@ fn spawn_dirty_close_dialog(
 /// 取消 → 仅关闭弹窗。
 pub fn handle_dirty_close_decision(
     q_dialog: Query<(Entity, &DirtyCloseDialogFor), With<DirtyCloseDialogMarker>>,
-    q_discard: Query<&Interaction, (With<DirtyCloseDiscardMarker>, Changed<Interaction>)>,
-    q_cancel: Query<&Interaction, (With<DirtyCloseCancelMarker>, Changed<Interaction>)>,
+    q_discard: Query<(), (With<DirtyCloseDiscardMarker>, Added<Pressed>)>,
+    q_cancel: Query<(), (With<DirtyCloseCancelMarker>, Added<Pressed>)>,
     mut close_writer: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
 ) {
     let Ok((dialog, for_buf)) = q_dialog.single() else {
         return;
     };
-    let discard = q_discard.iter().any(|i| *i == Interaction::Pressed);
-    let cancel = q_cancel.iter().any(|i| *i == Interaction::Pressed);
+    let discard = q_discard.iter().next().is_some();
+    let cancel = q_cancel.iter().next().is_some();
     if discard {
         close_writer.write(CloseTabRequest {
             entity: for_buf.buffer,

@@ -8,8 +8,11 @@
 
 use bevy::clipboard::Clipboard;
 use bevy::input_focus::{AutoFocus, InputFocus};
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::{Button, TextInput};
 
 use xgent_agent::{
     CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage,
@@ -197,6 +200,7 @@ pub(crate) fn spawn_chat_panel(
                 allow_newlines: true,
                 ..default()
             },
+            TextInput,
             ChatInput::multiline(),
             AutoFocus,
             ChatInputMarker,
@@ -300,6 +304,7 @@ pub(crate) fn spawn_chat_panel(
         let chip = commands
             .spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     padding: UiRect::horizontal(px(space::SM)),
                     margin: UiRect::right(px(space::XS)),
@@ -352,6 +357,7 @@ pub(crate) fn spawn_chat_panel(
     let back_to_bottom = commands
         .spawn((
             Button,
+            Hovered::default(),
             Node {
                 position_type: PositionType::Absolute,
                 bottom: px(150.0),
@@ -583,6 +589,7 @@ fn finalize_on_done(
                 // 操作栏（右上常显：复制到剪贴板；v7.1 悬停显隐留 span 重构）
                 row.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         position_type: PositionType::Absolute,
                         top: px(0.0),
@@ -924,7 +931,7 @@ fn update_back_to_bottom(
     entities: Res<ChatPanelEntities>,
     mut q_scroll: Query<&mut ScrollPosition, With<MessageListMarker>>,
     mut q_node: Query<&mut Node, With<BackToBottomMarker>>,
-    q_btn: Query<&Interaction, (With<BackToBottomMarker>, Changed<Interaction>)>,
+    q_btn: Query<(), (With<BackToBottomMarker>, Added<Pressed>)>,
 ) {
     let Some(list) = entities.message_list else {
         return;
@@ -941,16 +948,14 @@ fn update_back_to_bottom(
     {
         node.display = if show { Display::Flex } else { Display::None };
     }
-    for interaction in q_btn.iter() {
-        if *interaction == Interaction::Pressed {
-            scroll.y = 1.0e6; // bevy 滚动系统会钳到有效范围
-        }
+    for _ in q_btn.iter() {
+        scroll.y = 1.0e6; // bevy 滚动系统会钳到有效范围
     }
 }
 
 /// qa chips 点击（M4-T8）：清空输入框并填入提示词。
 fn handle_qa_chips(
-    mut q: Query<(&Interaction, &QaChipMarker), (Changed<Interaction>, With<Button>)>,
+    mut q: Query<&QaChipMarker, (Added<Pressed>, With<Button>)>,
     entities: Res<ChatPanelEntities>,
     loc: Res<xgent_settings::Localizer>,
     mut q_input: Query<&mut EditableText, With<ChatInputMarker>>,
@@ -958,10 +963,7 @@ fn handle_qa_chips(
     let Some(input) = entities.input else {
         return;
     };
-    for (interaction, marker) in q.iter_mut() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for marker in q.iter_mut() {
         if let Ok(mut editable) = q_input.get_mut(input) {
             editable.clear();
             editable.queue_edit(bevy::text::TextEdit::Insert(
@@ -973,17 +975,15 @@ fn handle_qa_chips(
 
 /// agent 历史消息复制钮（M4-T2）：写系统剪贴板 + toast 反馈（原型「已复制」）。
 fn update_msg_actions(
-    mut q: Query<(&Interaction, &CopyActionMarker), (Changed<Interaction>, With<Button>)>,
+    mut q: Query<&CopyActionMarker, (Added<Pressed>, With<Button>)>,
     mut clipboard: ResMut<Clipboard>,
     loc: Res<xgent_settings::Localizer>,
     mut toast: MessageWriter<crate::kit::ToastMessage>,
 ) {
-    for (interaction, action) in q.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            let _ = clipboard.set_text(action.text.clone());
-            toast.write(crate::kit::ToastMessage {
-                text: crate::i18n::tr(&loc, "toast-copied"),
-            });
-        }
+    for action in q.iter_mut() {
+        let _ = clipboard.set_text(action.text.clone());
+        toast.write(crate::kit::ToastMessage {
+            text: crate::i18n::tr(&loc, "toast-copied"),
+        });
     }
 }

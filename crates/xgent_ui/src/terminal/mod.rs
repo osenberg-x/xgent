@@ -26,7 +26,10 @@ pub mod tabs;
 
 use std::path::PathBuf;
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::editor::SideViewContent;
 use crate::fonts::{UiFonts, mono_text};
@@ -297,6 +300,7 @@ fn spawn_terminal_view(
                 // ＋ 新建 tab
                 head.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: px(24.0),
                         height: px(24.0),
@@ -317,6 +321,7 @@ fn spawn_terminal_view(
                 // 清屏
                 head.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: px(24.0),
                         height: px(24.0),
@@ -337,6 +342,7 @@ fn spawn_terminal_view(
                 // ✕ 关闭分屏
                 head.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: px(24.0),
                         height: px(24.0),
@@ -494,31 +500,27 @@ pub fn apply_terminal_view_visibility(
 
 /// 处理 ✕ 关闭分屏按钮：切回对话 + 收起分屏。
 fn handle_close_button(
-    q_btn: Query<&Interaction, (With<TerminalCloseButtonMarker>, Changed<Interaction>)>,
+    q_btn: Query<(), (With<TerminalCloseButtonMarker>, Added<Pressed>)>,
     mut content: ResMut<SideViewContent>,
     mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
 ) {
-    for interaction in q_btn.iter() {
-        if *interaction == Interaction::Pressed {
-            *content = SideViewContent::None;
-            collapsed.0 = true;
-        }
+    for _ in q_btn.iter() {
+        *content = SideViewContent::None;
+        collapsed.0 = true;
     }
 }
 
 /// 处理 ＋ 新建 tab 按钮：发 [`tabs::SpawnTabRequest`]。
 fn handle_new_tab_button(
-    q_btn: Query<&Interaction, (With<TerminalNewTabButtonMarker>, Changed<Interaction>)>,
+    q_btn: Query<(), (With<TerminalNewTabButtonMarker>, Added<Pressed>)>,
     mut writer: MessageWriter<tabs::SpawnTabRequest>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
-    for interaction in q_btn.iter() {
-        if *interaction == Interaction::Pressed {
-            let cwd = project_root
-                .as_deref()
-                .map(|r| r.path.clone())
-                .unwrap_or_else(std::env::temp_dir);
-            writer.write(tabs::SpawnTabRequest { cwd });
-        }
+    for _ in q_btn.iter() {
+        let cwd = project_root
+            .as_deref()
+            .map(|r| r.path.clone())
+            .unwrap_or_else(std::env::temp_dir);
+        writer.write(tabs::SpawnTabRequest { cwd });
     }
 }

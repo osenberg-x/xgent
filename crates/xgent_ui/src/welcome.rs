@@ -2,8 +2,11 @@
 //! （方案 §8.4）。快捷卡与 qa chips 共用 `QaChipMarker` 点击填入通路；
 //! 最近会话数据复用 `ListSessionsMessage`/`SessionListMessage` 流。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::LetterSpacing;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 use xgent_agent::{
     Conversation, ListSessionsMessage, RestoreSessionMessage, SessionListMessage, SessionSummary,
 };
@@ -169,6 +172,7 @@ fn spawn_welcome(
                     for (icon_name, tint_bg, tint_fg, title_key, desc_key, prompt_key) in cards {
                         row.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 flex_direction: FlexDirection::Column,
                                 align_items: AlignItems::Start,
@@ -300,6 +304,7 @@ fn rebuild_recent_sessions(
         commands.entity(container).with_children(|col| {
             col.spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
@@ -338,14 +343,12 @@ fn rebuild_recent_sessions(
 
 /// 点击最近会话 → 发恢复请求。
 fn handle_recent_click(
-    q: Query<(&Interaction, &RecentItemMarker), (Changed<Interaction>, With<Button>)>,
+    q: Query<&RecentItemMarker, (Added<Pressed>, With<Button>)>,
     mut restore: MessageWriter<RestoreSessionMessage>,
 ) {
-    for (interaction, item) in q.iter() {
-        if *interaction == Interaction::Pressed {
-            restore.write(RestoreSessionMessage {
-                session_id: item.session_id.clone(),
-            });
-        }
+    for item in q.iter() {
+        restore.write(RestoreSessionMessage {
+            session_id: item.session_id.clone(),
+        });
     }
 }

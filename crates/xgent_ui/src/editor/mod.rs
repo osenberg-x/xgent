@@ -21,7 +21,10 @@ pub mod io;
 pub mod state;
 pub mod tabs;
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::command::handle_editor_commands;
@@ -216,6 +219,7 @@ fn spawn_editor_view(
                 // ✕ 关闭分屏按钮（收起 SideView）
                 bar.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: px(28.0),
                         height: px(28.0),
@@ -368,17 +372,15 @@ pub fn switch_to_chat_view(mut view: ResMut<EditorView>) {
 
 /// 处理返回对话按钮点击：切回对话视图 + 收起右侧分屏 + 清空分屏内容。
 pub fn handle_back_button_click(
-    q_btn: Query<&Interaction, (With<EditorBackButtonMarker>, Changed<Interaction>)>,
+    q_btn: Query<(), (With<EditorBackButtonMarker>, Added<Pressed>)>,
     mut view: ResMut<EditorView>,
     mut content: ResMut<SideViewContent>,
     mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
 ) {
-    for interaction in q_btn.iter() {
-        if *interaction == Interaction::Pressed {
-            *view = EditorView::Chat;
-            *content = SideViewContent::None;
-            collapsed.0 = true;
-        }
+    for _ in q_btn.iter() {
+        *view = EditorView::Chat;
+        *content = SideViewContent::None;
+        collapsed.0 = true;
     }
 }
 /// 解决"打开第二个文件时旧内容仍显示"——多标签下所有 buffer 都挂在
@@ -479,6 +481,7 @@ pub fn rebuild_editor_tabs(
         commands.entity(bar).with_children(|bar| {
             bar.spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
@@ -513,6 +516,7 @@ pub fn rebuild_editor_tabs(
                 // 关闭×
                 tab.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: px(16.0),
                         height: px(16.0),
@@ -538,20 +542,18 @@ pub fn rebuild_editor_tabs(
 ///
 /// × 按钮实体只挂 `EditorTabCloseMarker`（`EditorTabMarker{buffer}` 在其父
 /// tab 节点上），经 `ChildOf` 回溯父实体取 buffer。× 是 `Button`
-/// （`FocusPolicy::Block`），点击时捕获 Interaction、父 tab 不会同时
-/// Pressed，两查询天然互斥。
+/// 点击 × 时事件由 ButtonPlugin 在最内层 Button 消费（propagate(false)），
+/// 父 tab 不会同时 Pressed，两查询天然互斥。
 pub fn handle_editor_tab_click(
-    q_tabs: Query<(&EditorTabMarker, &Interaction), Changed<Interaction>>,
-    q_close: Query<(&Interaction, &ChildOf), (With<EditorTabCloseMarker>, Changed<Interaction>)>,
+    q_tabs: Query<(&EditorTabMarker,), Added<Pressed>>,
+    q_close: Query<(&ChildOf,), (With<EditorTabCloseMarker>, Added<Pressed>)>,
     q_tab_marker: Query<&EditorTabMarker>,
     mut tabs: ResMut<EditorTabs>,
     mut close_writer: MessageWriter<CloseTabRequest>,
 ) {
     // 关闭× 优先
-    for (interaction, parent) in q_close.iter() {
-        if *interaction == Interaction::Pressed
-            && let Ok(marker) = q_tab_marker.get(parent.0)
-        {
+    for (parent,) in q_close.iter() {
+        if let Ok(marker) = q_tab_marker.get(parent.0) {
             close_writer.write(CloseTabRequest {
                 entity: marker.buffer,
                 force: false,
@@ -559,10 +561,8 @@ pub fn handle_editor_tab_click(
         }
     }
     // tab 项点击切换
-    for (marker, interaction) in q_tabs.iter() {
-        if *interaction == Interaction::Pressed {
-            tabs.open(marker.buffer);
-        }
+    for (marker,) in q_tabs.iter() {
+        tabs.open(marker.buffer);
     }
 }
 /// 同步 xui 的 EditorDirtyChanged 到 EditorBuffer 状态机。
@@ -682,6 +682,7 @@ fn spawn_page_tabs(
         let tab = commands
             .spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     height: Val::Percent(100.0),
                     padding: UiRect::horizontal(px(space::MD)),
@@ -706,6 +707,7 @@ fn spawn_page_tabs(
     let close = commands
         .spawn((
             Button,
+            Hovered::default(),
             Node {
                 width: px(28.0),
                 height: px(28.0),
@@ -732,14 +734,11 @@ fn spawn_page_tabs(
 
 /// 页签点击：切 `SideViewContent` 并展开面板。
 fn handle_page_tab_click(
-    q: Query<(&Interaction, &PageTabMarker), (Changed<Interaction>, With<Button>)>,
+    q: Query<&PageTabMarker, (Added<Pressed>, With<Button>)>,
     mut content: ResMut<SideViewContent>,
     mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
 ) {
-    for (interaction, tab) in q.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for tab in q.iter() {
         *content = match tab.page {
             SideViewPage::Preview => SideViewContent::Editor,
             SideViewPage::Diff => SideViewContent::Diff,

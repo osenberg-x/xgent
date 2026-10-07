@@ -3,7 +3,10 @@
 //!
 //! 会话状态文本已移除（顶栏 agent pill 承担，方案 §8.9）；状态点忙时脉冲。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
 use xgent_core::chat::AgentMessage;
 
@@ -150,6 +153,7 @@ fn spawn_status_bar(
         // 陪伴开关（本期唯一可点项）
         p.spawn((
             Button,
+            Hovered::default(),
             segment_node(),
             BorderColor::all(theme.line),
             CompanionToggleMarker,
@@ -278,13 +282,11 @@ fn update_companion_text(
 
 /// 点击陪伴段：切换开关（本期唯一可点项，方案 §8.9）。
 fn toggle_companion(
-    q: Query<&Interaction, (With<CompanionToggleMarker>, Changed<Interaction>)>,
+    q: Query<(), (With<CompanionToggleMarker>, Added<Pressed>)>,
     mut on: ResMut<CompanionOn>,
 ) {
-    for interaction in q.iter() {
-        if *interaction == Interaction::Pressed {
-            on.0 = !on.0;
-        }
+    for _ in q.iter() {
+        on.0 = !on.0;
     }
 }
 

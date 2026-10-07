@@ -11,7 +11,7 @@
 四大设计支柱：实用优先、数据驱动、可扩展、轻量多开。
 
 - 语言：Rust（edition 2024）
-- 引擎：Bevy 0.19.0，依赖通过 path 指向本地源码 `../bevy`（便于调试）
+- 引擎：Bevy 0.20.0-rc.2，依赖通过 path 指向本地源码 `../bevy`（便于调试）
 - 当前阶段：MVP（仅 2D GUI，3D/TUI/Web/宠物留待后续）
 
 **权威设计文档**（从零设计，不参考旧代码）：
@@ -68,7 +68,7 @@ cargo fmt                         # 格式化
 cargo clippy --workspace          # lint
 ```
 
-**注意**：构建依赖本地 `../bevy` 源码（0.19.0），确保该目录存在。编码时按需查阅 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。参考实现：zed 源码位于 `/Users/xdo/ws/zed`（gpui + editor 滚动抽象可借鉴，但底层 UI 库不同，仅作设计参考）。
+**注意**：构建依赖本地 `../bevy` 源码（0.20.0-rc.2），确保该目录存在。编码时按需查阅 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。参考实现：zed 源码位于 `/Users/xdo/ws/zed`（gpui + editor 滚动抽象可借鉴，但底层 UI 库不同，仅作设计参考）。
 
 ---
 

@@ -3,7 +3,10 @@
 //! 对齐 ui-prototype.html §4.3 modal 结构：head（确认执行 + ✕）/ body（工具名 + 路径 + diff 区增删色）
 //! / foot（拒绝 + 允许按钮）。有 diff（old/new 均有）时展示增删行，否则展示 summary 文本。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 use xgent_agent::{ConfirmDecisionMessage, ConfirmRequestMessage};
 use xgent_settings::Localizer;
 use xgent_tools::confirm::ConfirmDecision;
@@ -154,6 +157,7 @@ fn show_on_request(
                             });
                         head.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 width: px(24.0),
                                 height: px(24.0),
@@ -274,6 +278,7 @@ fn show_on_request(
                         // 拒绝 = ghost（透明底 + border）
                         foot.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect {
                                     left: px(space::LG),
@@ -298,6 +303,7 @@ fn show_on_request(
                         // 确认 = accent 底白字
                         foot.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect {
                                     left: px(space::LG),
@@ -333,8 +339,8 @@ pub struct ConfirmDenyMarker;
 /// 用户点决策按钮（或 head ✕）时发 ConfirmDecisionMessage 并关闭弹窗。
 fn hide_on_decision(
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
-    q_allow: Query<&Interaction, (With<ConfirmAllowMarker>, Changed<Interaction>)>,
-    q_deny: Query<&Interaction, (With<ConfirmDenyMarker>, Changed<Interaction>)>,
+    q_allow: Query<(), (With<ConfirmAllowMarker>, Added<Pressed>)>,
+    q_deny: Query<(), (With<ConfirmDenyMarker>, Added<Pressed>)>,
     mut commands: Commands,
     mut writer: MessageWriter<ConfirmDecisionMessage>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
@@ -347,15 +353,11 @@ fn hide_on_decision(
         writer.write(ConfirmDecisionMessage { decision });
         close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
     };
-    for i in q_allow.iter() {
-        if *i == Interaction::Pressed {
-            close(ConfirmDecision::Allow);
-        }
+    for _ in q_allow.iter() {
+        close(ConfirmDecision::Allow);
     }
-    for i in q_deny.iter() {
-        if *i == Interaction::Pressed {
-            close(ConfirmDecision::Deny);
-        }
+    for _ in q_deny.iter() {
+        close(ConfirmDecision::Deny);
     }
 }
 
@@ -397,12 +399,12 @@ fn close_dialog(
 fn handle_confirm_keyboard(
     mut reader: MessageReader<bevy::input::keyboard::KeyboardInput>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
-    focus: Res<bevy::input_focus::InputFocus>,
     q_editable: Query<(), With<bevy::text::EditableText>>,
     side_view: Res<crate::editor::SideViewContent>,
     mut commands: Commands,
     mut writer: MessageWriter<ConfirmDecisionMessage>,
-    mut focus_mut: ResMut<bevy::input_focus::InputFocus>,
+    // InputFocus 的唯一访问（读 get / 写 set 同参数；Res + ResMut 同资源是 B0002 冲突）
+    mut focus: ResMut<bevy::input_focus::InputFocus>,
     chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
 ) {
     let Ok(dialog) = q_dialog.single() else {
@@ -418,7 +420,7 @@ fn handle_confirm_keyboard(
                 writer.write(ConfirmDecisionMessage {
                     decision: ConfirmDecision::Deny,
                 });
-                close_dialog(&mut commands, dialog, &mut focus_mut, &chat_entities);
+                close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
                 return;
             }
             K::Enter => {
@@ -431,7 +433,7 @@ fn handle_confirm_keyboard(
                 writer.write(ConfirmDecisionMessage {
                     decision: ConfirmDecision::Allow,
                 });
-                close_dialog(&mut commands, dialog, &mut focus_mut, &chat_entities);
+                close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
                 return;
             }
             _ => {}

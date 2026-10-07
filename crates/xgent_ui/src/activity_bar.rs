@@ -5,7 +5,10 @@
 //! 陪伴按钮为全界面唯一暖色例外（ADR-0014 裁剪#3，宠物本体 P1）。
 //! 不放搜索/Git/插件入口（F-05/F-10 未实现，非本期目标）。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
 use crate::layout::{ActivityBarMarker, FileDrawerOpen, SideViewCollapsed};
@@ -81,6 +84,7 @@ fn rail_button(
 ) -> Entity {
     p.spawn((
         Button,
+        Hovered::default(),
         Node {
             width: px(40.0),
             height: px(40.0),
@@ -145,6 +149,7 @@ fn spawn_activity_bar(
         // 展开面板钮（面板折叠/响应式收起时显示，update_expand_visibility 控制）
         p.spawn((
             Button,
+            Hovered::default(),
             Node {
                 width: px(40.0),
                 height: px(40.0),
@@ -169,6 +174,7 @@ fn spawn_activity_bar(
         // 陪伴开关（全界面唯一暖色例外）+ 激活环（M7-T1：嵌套描边节点）
         p.spawn((
             Button,
+            Hovered::default(),
             Node {
                 width: px(40.0),
                 height: px(40.0),
@@ -243,9 +249,9 @@ fn companion_ring_system(
 
 /// 处理图标轨点击：切换面板/视图/抽屉。
 fn handle_rail_click(
-    q_items: Query<(&Interaction, &ActivityItemMarker), Changed<Interaction>>,
-    q_expand: Query<&Interaction, (With<ExpandPanelButtonMarker>, Changed<Interaction>)>,
-    q_companion: Query<&Interaction, (With<CompanionButtonMarker>, Changed<Interaction>)>,
+    q_items: Query<&ActivityItemMarker, Added<Pressed>>,
+    q_expand: Query<(), (With<ExpandPanelButtonMarker>, Added<Pressed>)>,
+    q_companion: Query<(), (With<CompanionButtonMarker>, Added<Pressed>)>,
     mut active: ResMut<ActiveActivity>,
     mut drawer_open: ResMut<FileDrawerOpen>,
     mut side_collapsed: ResMut<SideViewCollapsed>,
@@ -256,10 +262,7 @@ fn handle_rail_click(
     mut companion: ResMut<CompanionOn>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
-    for (interaction, item) in q_items.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for item in q_items.iter() {
         match item.kind {
             ActivityKind::Chat => {
                 // 对话为默认视图：关闭文件抽屉
@@ -303,16 +306,12 @@ fn handle_rail_click(
         }
     }
     // 展开面板钮：恢复折叠的上下文面板
-    for interaction in q_expand.iter() {
-        if *interaction == Interaction::Pressed {
-            side_collapsed.0 = false;
-        }
+    for _ in q_expand.iter() {
+        side_collapsed.0 = false;
     }
     // 陪伴开关
-    for interaction in q_companion.iter() {
-        if *interaction == Interaction::Pressed {
-            companion.0 = !companion.0;
-        }
+    for _ in q_companion.iter() {
+        companion.0 = !companion.0;
     }
 }
 

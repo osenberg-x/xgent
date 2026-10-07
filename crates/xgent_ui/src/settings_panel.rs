@@ -6,8 +6,11 @@
 //!
 //! 使用官方 `EditableText` 处理输入（光标/删除/IME 全由官方 text_input 系统）。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::{Button, TextInput};
 use xgent_settings::Localizer;
 
 use crate::fonts::ui_text;
@@ -274,6 +277,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                         for (kind, label) in kinds {
                             row.spawn((
                                 Button,
+                                Hovered::default(),
                                 Node {
                                     padding: UiRect::all(px(space::SM)),
                                     ..default()
@@ -331,6 +335,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                         row.spawn(text_input_node(theme, font, ModelInput));
                         row.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(px(space::SM)),
                                 ..default()
@@ -367,6 +372,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     .with_children(|btns| {
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect {
                                     left: px(space::LG),
@@ -389,6 +395,7 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                         ));
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(px(space::SM)),
                                 border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
@@ -432,6 +439,7 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
         crate::cursor::CursorStyle::Text,
         crate::cursor::CursorHit::default(),
         EditableText::default(),
+        TextInput,
     )
 }
 
@@ -442,16 +450,13 @@ fn px(v: f32) -> Val {
 
 /// 处理 kind 按钮点击：切换当前选中 kind，更新按钮高亮。
 fn handle_kind_button(
-    q_kind: Query<(&Interaction, Entity, &KindButton), Changed<Interaction>>,
+    q_kind: Query<&KindButton, Added<Pressed>>,
     mut selector: ResMut<KindSelector>,
     mut commands: Commands,
     q_all: Query<(Entity, &KindButton)>,
     theme: Res<Theme>,
 ) {
-    for (interaction, _entity, kb) in q_kind.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for kb in q_kind.iter() {
         selector.current = kb.kind;
         // 更新所有 kind 按钮的选中状态与背景色
         for (e, kb) in q_all.iter() {
@@ -469,8 +474,8 @@ fn handle_kind_button(
 
 /// 处理保存/关闭按钮点击。
 fn handle_save_button(
-    q_save: Query<&Interaction, (With<SettingsSaveButtonMarker>, Changed<Interaction>)>,
-    q_close: Query<&Interaction, (With<SettingsCloseButtonMarker>, Changed<Interaction>)>,
+    q_save: Query<(), (With<SettingsSaveButtonMarker>, Added<Pressed>)>,
+    q_close: Query<(), (With<SettingsCloseButtonMarker>, Added<Pressed>)>,
     q_id: Query<&EditableText, With<ProviderIdInput>>,
     q_base: Query<&EditableText, With<ApiBaseInput>>,
     q_key: Query<&EditableText, With<ApiKeyInput>>,
@@ -479,10 +484,7 @@ fn handle_save_button(
     mut state: ResMut<SettingsPanelState>,
     mut writer: MessageWriter<SaveProviderConfigMessage>,
 ) {
-    for interaction in q_save.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for _ in q_save.iter() {
         let provider_id = q_id
             .single()
             .map(|e| e.value().to_string())
@@ -512,16 +514,14 @@ fn handle_save_button(
         state.open = false;
     }
 
-    for interaction in q_close.iter() {
-        if *interaction == Interaction::Pressed {
-            state.open = false;
-        }
+    for _ in q_close.iter() {
+        state.open = false;
     }
 }
 
 /// 处理刷新模型按钮点击：发 FetchModelsMessage。
 fn handle_fetch_models(
-    q_fetch: Query<&Interaction, (With<FetchModelsButtonMarker>, Changed<Interaction>)>,
+    q_fetch: Query<(), (With<FetchModelsButtonMarker>, Added<Pressed>)>,
     q_id: Query<&EditableText, With<ProviderIdInput>>,
     q_base: Query<&EditableText, With<ApiBaseInput>>,
     q_key: Query<&EditableText, With<ApiKeyInput>>,
@@ -529,10 +529,7 @@ fn handle_fetch_models(
     mut fetch_writer: MessageWriter<FetchModelsMessage>,
     mut model_state: ResMut<ModelListState>,
 ) {
-    for interaction in q_fetch.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for _ in q_fetch.iter() {
         let provider_id = q_id
             .single()
             .map(|e| e.value().to_string())
@@ -602,6 +599,7 @@ fn handle_model_list_results(
                     for model_id in &ev.models {
                         c.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(px(space::XS)),
                                 border: UiRect::bottom(px(1.0)),
@@ -628,17 +626,14 @@ fn handle_model_list_results(
 
 /// 处理模型列表项点击：填充到 Model 输入框。
 fn handle_model_click(
-    q_items: Query<(&Interaction, &ModelItemMarker), Changed<Interaction>>,
+    q_items: Query<&ModelItemMarker, Added<Pressed>>,
     mut q_model: Query<&mut EditableText, With<ModelInput>>,
 ) {
     if let Ok(mut model_input) = q_model.single_mut() {
-        for (interaction, marker) in q_items.iter() {
-            if *interaction == Interaction::Pressed {
-                // 用 clear + Insert 语义：先 clear 再 Insert
-                model_input.clear();
-                model_input
-                    .queue_edit(bevy::text::TextEdit::Insert(marker.model_id.clone().into()));
-            }
+        for marker in q_items.iter() {
+            // 用 clear + Insert 语义：先 clear 再 Insert
+            model_input.clear();
+            model_input.queue_edit(bevy::text::TextEdit::Insert(marker.model_id.clone().into()));
         }
     }
 }

@@ -3,8 +3,11 @@
 //! 作为 overlay 弹窗（类似设置面板），从 sessions 目录读取 JSONL 摘要。
 //! 订阅 `SessionListMessage` 获取会话列表，发 `RestoreSessionMessage` 恢复。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::ui::{FocusPolicy, ScrollPosition};
+use bevy::ui::Pressed;
+use bevy::ui::ScrollPosition;
+use bevy::ui_widgets::Button;
 
 use xgent_agent::{
     ListSessionsMessage, RestoreSessionMessage, SessionListMessage, SessionRestoredMessage,
@@ -77,19 +80,16 @@ fn session_history_overlay_systems(
     loc: Res<Localizer>,
     cached: Res<CachedSessionList>,
     mut commands: Commands,
-    q_overlay: Query<(Option<&Interaction>, Entity), With<SessionHistoryOverlayMarker>>,
-    q_overlay_pressed: Query<
-        &Interaction,
-        (With<SessionHistoryOverlayMarker>, Changed<Interaction>),
-    >,
-    q_restore: Query<(&Interaction, &SessionRestoreButtonMarker), Changed<Interaction>>,
-    q_close: Query<&Interaction, (With<SessionHistoryCloseMarker>, Changed<Interaction>)>,
+    q_overlay: Query<(Option<&Hovered>, Entity), With<SessionHistoryOverlayMarker>>,
+    q_overlay_pressed: Query<(), (With<SessionHistoryOverlayMarker>, Added<Pressed>)>,
+    q_restore: Query<&SessionRestoreButtonMarker, Added<Pressed>>,
+    q_close: Query<(), (With<SessionHistoryCloseMarker>, Added<Pressed>)>,
     mut restore_writer: MessageWriter<RestoreSessionMessage>,
     mut history_state: ResMut<SessionHistoryState>,
     mut list_writer: MessageWriter<ListSessionsMessage>,
 ) {
-    // 存在性检查（R1 修复：不用 Changed<Interaction> 闸门——bevy_ui 仅在悬停/点击
-    // 变化帧写 Interaction，未动鼠标时 Changed 过滤为空会误判「不存在」每帧重复
+    // 存在性检查（R1 修复：不用 Changed 闸门做存在性判断——交互组件仅在悬停/点击
+    // 变化帧有变更，未动鼠标时 Changed 过滤为空会误判「不存在」每帧重复
     // spawn；关闭时同样误判跳过 despawn 留下全屏僵尸遮罩锁死 UI）
     let existing: Vec<Entity> = q_overlay.iter().map(|(_, e)| e).collect();
     let exists = !existing.is_empty();
@@ -107,28 +107,22 @@ fn session_history_overlay_systems(
         }
     }
 
-    // 遮罩点击关闭（点在面板外 = overlay 根节点收到 Pressed；仅变化帧检查）
-    for i in q_overlay_pressed.iter() {
-        if *i == Interaction::Pressed {
-            history_state.open = false;
-        }
+    // 遮罩点击关闭（点在面板外 = overlay 根节点收到按下；仅 Added 帧检查）
+    for _ in q_overlay_pressed.iter() {
+        history_state.open = false;
     }
 
     // 处理关闭按钮
-    for i in q_close.iter() {
-        if *i == Interaction::Pressed {
-            history_state.open = false;
-        }
+    for _ in q_close.iter() {
+        history_state.open = false;
     }
 
     // 处理恢复按钮点击
-    for (interaction, marker) in q_restore.iter() {
-        if *interaction == Interaction::Pressed {
-            restore_writer.write(RestoreSessionMessage {
-                session_id: marker.session_id.clone(),
-            });
-            history_state.open = false;
-        }
+    for marker in q_restore.iter() {
+        restore_writer.write(RestoreSessionMessage {
+            session_id: marker.session_id.clone(),
+        });
+        history_state.open = false;
     }
 }
 
@@ -152,6 +146,7 @@ fn spawn_overlay(
             BackgroundColor(theme.overlay),
             GlobalZIndex(DRAWER_Z),
             Button,
+            Hovered::default(),
             SessionHistoryOverlayMarker,
         ))
         .with_children(|overlay| {
@@ -168,9 +163,9 @@ fn spawn_overlay(
                     },
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.line),
-                    // R1 修复：Block 阻止 press 穿透面板（Pass）到达遮罩 Button，
-                    // 否则点面板非按钮区域会误触遮罩关闭抽屉
-                    FocusPolicy::Block,
+                    // 0.20 指针事件会冒泡到 Button 祖先：面板消费 PointerPress，
+                    // 点面板不会误触遮罩关闭（等价旧 FocusPolicy::Block）
+                    crate::kit::block_press_bubbling(),
                 ))
                 .with_children(|panel| {
                     // 标题栏
@@ -197,6 +192,7 @@ fn spawn_overlay(
                             ));
                             head.spawn((
                                 Button,
+                                Hovered::default(),
                                 Node {
                                     width: Val::Px(24.0),
                                     height: Val::Px(24.0),
@@ -315,6 +311,7 @@ fn spawn_session_item(
             // 右侧：恢复按钮
             row.spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     padding: UiRect::horizontal(Val::Px(space::SM)),
                     border: UiRect::all(Val::Px(1.0)),
@@ -534,7 +531,7 @@ mod tests {
         }
     }
 
-    /// 最小 App：R1-P0 回归——overlay 生命周期不依赖 Interaction 变化。
+    /// 最小 App：R1-P0 回归——overlay 生命周期不依赖交互状态变化。
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::app::ScheduleRunnerPlugin::default())
@@ -556,7 +553,7 @@ mod tests {
         q.iter(app.world()).count()
     }
 
-    /// R1-P0 回归：打开后不动鼠标（Interaction 不变化），overlay 不应重复 spawn；
+    /// R1-P0 回归：打开后不动鼠标（无交互状态变化），overlay 不应重复 spawn；
     /// 关闭后不应残留僵尸遮罩。
     #[test]
     fn overlay_lifecycle_without_interaction_changes() {
@@ -565,7 +562,7 @@ mod tests {
         app.update();
         assert_eq!(overlay_count(&mut app), 1, "打开后应有 1 个 overlay");
 
-        // 旧 bug：Changed<Interaction> 过滤使存在性检查误判「不存在」，
+        // 旧 bug：Changed 过滤使存在性检查误判「不存在」，
         // 每帧重复 spawn（跑 5 帧应恒为 1，旧实现会递增到 6）
         for _ in 0..5 {
             app.update();

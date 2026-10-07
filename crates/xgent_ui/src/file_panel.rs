@@ -7,8 +7,11 @@
 //! 文件系统变更时（daemon `FileChangedEvent`）自动重建文件树，保留已展开目录。
 
 use bevy::ecs::hierarchy::ChildOf;
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::ui::{FocusPolicy, ScrollPosition};
+use bevy::ui::Pressed;
+use bevy::ui::ScrollPosition;
+use bevy::ui_widgets::Button;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -123,6 +126,7 @@ fn spawn_file_panel(
             BackgroundColor(theme.overlay),
             GlobalZIndex(crate::session_history::DRAWER_Z),
             Button,
+            Hovered::default(),
             FileDrawerOverlayMarker,
         ));
         // 抽屉面板（左侧贴齐，surface 底 + 右边框；初始隐藏）
@@ -142,9 +146,9 @@ fn spawn_file_panel(
             BackgroundColor(theme.surface),
             BorderColor::all(theme.line),
             GlobalZIndex(crate::session_history::DRAWER_Z + 1),
-            // R1 修复：Block 阻止 press 穿透面板（Pass）到达遮罩 Button，
-            // 否则点面板非按钮区域会误触遮罩关闭抽屉
-            FocusPolicy::Block,
+            // 0.20 指针事件会冒泡到 Button 祖先：面板消费 PointerPress，
+            // 点面板不会误触遮罩关闭（等价旧 FocusPolicy::Block）
+            crate::kit::block_press_bubbling(),
             FilePanelMarker,
         ))
         .with_children(|p| {
@@ -211,13 +215,11 @@ fn handle_drawer_visibility(
 
 /// 遮罩点击关闭抽屉。
 fn handle_drawer_overlay_click(
-    q: Query<&Interaction, (With<FileDrawerOverlayMarker>, Changed<Interaction>)>,
+    q: Query<(), (With<FileDrawerOverlayMarker>, Added<Pressed>)>,
     mut open: ResMut<FileDrawerOpen>,
 ) {
-    for interaction in q.iter() {
-        if *interaction == Interaction::Pressed {
-            open.0 = false;
-        }
+    for _ in q.iter() {
+        open.0 = false;
     }
 }
 
@@ -308,6 +310,7 @@ fn spawn_entry(
                 // 目录行（Button + row: 箭头 + 图标 + 名称）
                 col.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: Val::Percent(100.0),
                         flex_direction: FlexDirection::Row,
@@ -373,6 +376,7 @@ fn spawn_entry(
     } else {
         let mut cmd = parent.spawn((
             Button,
+            Hovered::default(),
             Node {
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
@@ -490,17 +494,14 @@ fn mark_file_tree_dirty_on_fs_change(
 /// 选中态（`FileSelectedMarker`）由本系统维护；条目背景色由
 /// [`update_file_entry_style`] 统一绘制。
 fn handle_file_click(
-    q_files: Query<(Entity, &FileEntry, &Interaction), Changed<Interaction>>,
+    q_files: Query<(Entity, &FileEntry), Added<Pressed>>,
     q_selected: Query<Entity, With<FileSelectedMarker>>,
     mut selected_file: ResMut<SelectedFilePath>,
     mut drawer: ResMut<FileDrawerOpen>,
     mut open_writer: MessageWriter<crate::editor::tabs::OpenFileRequest>,
     mut commands: Commands,
 ) {
-    for (entity, file, interaction) in q_files.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for (entity, file) in q_files.iter() {
         // 选中态：清除旧选中，标记当前
         for old in q_selected.iter() {
             commands.entity(old).remove::<FileSelectedMarker>();
@@ -522,7 +523,7 @@ fn handle_file_click(
 /// ImageNode 不能旋转故用两枚图标），并 spawn/despawn 子项容器内容。
 fn handle_dir_click(
     mut commands: Commands,
-    mut q_dirs: Query<(&mut DirEntry, &Interaction, &ChildOf), Changed<Interaction>>,
+    mut q_dirs: Query<(&mut DirEntry, &ChildOf), Added<Pressed>>,
     q_children: Query<&Children>,
     q_dir_children: Query<Entity, With<DirChildrenMarker>>,
     q_dir_rows: Query<Entity, With<DirEntry>>,
@@ -532,10 +533,7 @@ fn handle_dir_click(
     icons: Res<crate::kit::IconAssets>,
     mut expanded: ResMut<ExpandedDirs>,
 ) {
-    for (mut dir, interaction, parent) in q_dirs.iter_mut() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for (mut dir, parent) in q_dirs.iter_mut() {
         // 拿外层 Column 的 children，找目录行 Button 与 DirChildrenMarker 子容器
         let Ok(col_children) = q_children.get(parent.0) else {
             continue;
@@ -608,15 +606,15 @@ fn handle_dir_click(
 /// 更新文件/目录条目背景色：选中态半透明 accent、悬停态更淡 accent、默认透明。
 ///
 /// 条目 Button 在 spawn 时挂 `BackgroundColor(Color::NONE)`，本系统据
-/// `FileSelectedMarker`（选中）与 `Interaction::Hovered`（悬停）改写背景色。
+/// `FileSelectedMarker`（选中）与 `Hovered`（悬停）改写背景色。
 ///
-/// 优化：仅处理 Interaction 变化或 SelectedMarker 变化的条目，避免每帧全量遍历。
+/// 优化：仅处理 Hovered 变化或 SelectedMarker 变化的条目，避免每帧全量遍历。
 fn update_file_entry_style(
     q: Query<
-        (Entity, Option<&FileSelectedMarker>, &Interaction),
+        (Entity, Option<&FileSelectedMarker>, &Hovered),
         (
             Or<(With<FileEntry>, With<DirEntry>)>,
-            Or<(Changed<Interaction>, Changed<FileSelectedMarker>)>,
+            Or<(Changed<Hovered>, Changed<FileSelectedMarker>)>,
         ),
     >,
     mut q_bg: Query<&mut BackgroundColor>,
@@ -628,7 +626,7 @@ fn update_file_entry_style(
     for (entity, selected, interaction) in q.iter() {
         let want = if selected.is_some() {
             sel_color
-        } else if *interaction == Interaction::Hovered {
+        } else if interaction.get() {
             hover_color
         } else {
             none_color

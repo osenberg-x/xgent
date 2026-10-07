@@ -232,7 +232,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - 调用方不需要结果，只要"通知发生了" → Message。
 - 多个系统都要读"当前状态" → Resource；状态变更要广播 → 改 Resource + 发一个通知 Message。
 
-> 注：Bevy 0.19 中 `Event` 与 `Message` 是**两个并存的 trait**，语义不同：
+> 注：Bevy 0.20 中 `Event` 与 `Message` 是**两个并存的 trait**，语义不同：
 > - `Message`（`#[derive(Message)]` + `add_message::<T>()` + `MessageReader`/`MessageWriter`）：缓冲队列，双缓冲（`Messages<M>`），配 `message_update_system` 每帧 `update` 切缓冲。读一次 per update 不丢，两次 update 后保证丢。每个 `MessageReader` 独立 cursor，多 reader 各读全量（广播语义）。
 > - `Event`（`#[derive(Event)]` + `Observer` + `On<E>` + `world.trigger(E)`）：即时观察者，trigger 即同步派发给所有 observer，无缓冲、无队列。
 >
@@ -250,12 +250,12 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - 接收方可能多个（UI 渲染 + 状态栏 + 持久化都要听 Done）。
 - 调用方不需要同步等结果（"发完即走"）。
 
-**Message vs Event 选择**（见上方注释的 Bevy 0.19 源码语义）：
+**Message vs Event 选择**（见上方注释的 Bevy 0.20 源码语义）：
 - **默认 Message**：跨帧、需缓冲、多消费者各读全量。本项目所有动作信号都是 Message。
 - **改用 Event 的判据**：信号严格单帧内被 observer 消费、且无需跨帧保留、希望 trigger 即同步派发。典型场景：provider 状态变更、配置热重载完成、预算告警——这些"发生即响应"的通知若用 Message 也能工作（本项目即如此），但 Event 的即时性更贴合语义。
 - **必须用 Message 的场景**：流式 delta（跨帧累积）、用户输入、abort/steering（不能丢、可能跨帧）——这些用 Event 会丢消息。
 
-**Message 用法要点**（Bevy 0.19）：
+**Message 用法要点**（Bevy 0.20）：
 - 派生 `#[derive(Message)]`，插件 `build` 里 `app.add_message::<T>()` 注册（自动配 `message_update_system`）。
 - 写：`MessageWriter<T>::write(payload)`；读：`MessageReader<T>::read()` 迭代（循环消费，单帧内可能多条）。
 - 跨帧保留：`Messages<M>` 双缓冲，读一次 per update 不丢，两次 update 后保证丢。`AbortMessage`、`SteeringMessage` 这类必须抵达的信号靠此保证（前提是消费系统至少每帧 read 一次）。
@@ -468,6 +468,15 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 ---
 
+### 5.12.4 Bevy 0.20 UI 交互模型（0.19→0.20 适配，详见 `doc/notes/bevy-0.20-migration.md`）
+
+- **可交互节点三件套**：`bevy::ui_widgets::Button`（行为控件）+ `Hovered::default()`（opt-in 悬停跟踪）+（业务 marker）。0.20 的 `bevy::ui::Button` 是弃用 type alias，**不能作值使用**；`bevy::ui::Interaction` 也已弃用，禁止再用。
+- **点击判定**：`Query<..., Added<Pressed>>`——`ui::Pressed` 由 `ButtonPlugin`（在 DefaultPlugins）监听指针事件（含子节点冒泡）自动插拔；按下帧即 `Added`，等价旧 `Changed<Interaction> + == Pressed` 的"按下即触发"边沿语义。事件 handler 内部 `propagate(false)`，嵌套按钮（tab 里的 ×）在最内层消费，父按钮不会误触发。
+- **悬停判定**：`Query<..., &Hovered>`（`.get()` 取 bool）或 `Has<Pressed>` 轮询。`Hovered` 由 picking 按 CSS `:hover` 后代语义维护——悬停按钮内文本/图标子节点时根节点也为 true（旧 `ui_focus_system` 靠 FocusPolicy 默认 Pass 穿透子节点实现同等效果；**`picking::hover::PickingInteraction` 无后代回溯，不能用于带子节点的交互根**，这是本次迁移踩过的坑）。
+- **穿透/阻断**：UI picking 后端忽略 `FocusPolicy`；无 `Pickable` 组件默认阻断下层（抽屉面板压遮罩防误触即依赖此默认），需要放行用 `bevy_picking::Pickable { should_block_lower: false, ..}`。
+- **文本输入**：可编辑实体 = `EditableText`（状态载体）+ `TextInput`（行为控件，`TextInputPlugin` 在 DefaultPlugins）成对挂载；编辑器（F-11）为虚拟化只读态，不挂 `EditableText`，文本在 `TextEditor.rope`。
+- **后续优化路线**（rem 全局缩放 / 多开焦点 / BSN 与 feathers 采纳评估）见 `doc/notes/bevy-0.20-migration.md` §4。
+
 ### 5.13 插件系统（WASM 组件模型）
 
 插件系统已落地：WASM Component + wasmtime 29，插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider。设计文档 `doc/design/plugin-system-design.md` v3 + 偏差修正（见 `local://plugin-system-impl-plan.md`）。
@@ -548,6 +557,14 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - **IPC 健壮性**：daemon 对无法解析的行回 `PARSE_ERROR/-32600` 错误响应（原静默丢弃，调用方永久挂死无痕迹）；UI `call()` 等响应限时 120s（> provider 最长请求超时）。
    - **杂项**：registry 新增 `unsubscribe_project`（fs.watch 回滚只删本项目，不 clear 全部订阅）；lifecycle 计时器落地前锁内复查 `client_count==0`（防活跃会话被 30s 退出计时杀掉）；anthropic message_delta 兜底 drain 按 index 排序（HashMap 迭代序随机）；fs_watcher 注册成功后复查订阅集（补偿与 unwatch_client 的并发窗口）；provider_client 消费 task 加 180s 空闲兜底 + 事件反序列化失败 warn（版本偏差丢 Done 时不再滞留）；UI 全局配置损坏时打 error 日志（原静默回退默认，与 daemon 拒启行为不一致）；`preferences.language` 的 config.changed 跨窗口同步到本窗口 Localizer。
 
+26. **Bevy 0.20.0-rc.2 适配（2026-10-05，经三轮自审修订）**——本地 `../bevy` 升 0.20.0-rc.2，破坏面 100% 集中在 UI 交互模型（其余 crate 零改动零警告，xui 隔离层设计得到验证）：
+   - `bevy::ui::Button`（0.20 变弃用 type alias，48 处编译错误）→ `bevy::ui_widgets::Button`（20 文件显式导入压过 prelude 弃用导出；附带 a11y `Role::Button`）。
+   - `bevy::ui::Interaction`（弃用，145 处警告）→ 官方 **`Hovered` + `Pressed`** 双组件：48 个 Button spawn 点补挂 `Hovered::default()`；点击查询改 `Added<Pressed>`（按下即触发，等价旧边沿语义）；悬停查询改 `&Hovered`/`Has<Pressed>` 轮询。`Pressed` 由 `ButtonPlugin` 经冒泡指针事件自动插拔（嵌套按钮在最内层 `propagate(false)` 消费，父按钮不误触发）。
+   - **踩坑记录**：初版曾迁到 `picking::hover::PickingInteraction`（API 形状与旧 Interaction 同构），但该组件只写 hover map 的**最顶层命中实体**、无后代回溯——xgent 按钮几乎都带文字/图标子节点，悬停子节点时根节点状态不更新（旧 `ui_focus_system` 靠 Node required 的 `FocusPolicy` 默认 **Pass** 穿透子节点）。官方 `Hovered` 按 CSS `:hover` 后代语义维护（命中实体+祖先集合），才是带子节点交互根的正确状态源。
+   - 删除 `FocusPolicy::Block`（0.20 UI picking 后端忽略 FocusPolicy，无 `Pickable` 默认阻断即等价）；3 个文本输入框（chat/palette/settings）`EditableText` 旁补挂 `TextInput`（0.20 起输入行为挂在 TextInputPlugin）；tests/file_preview 模拟点击同步换新模型。
+   - 策略与后续优化路线（rem 缩放、多开焦点、BSN/feathers 采纳评估）沉淀于 `doc/notes/bevy-0.20-migration.md`，交互模型速查见 §5.12.4。
+   - **功能性 review 补充（2026-10-07）**：① 发现 0.20 指针事件从非 Button 子实体**冒泡到 Button 祖先**（全局 observer 逐级运行）——抽屉面板点击会误触遮罩关闭，修复为 `kit.rs::block_press_bubbling()`（`ui_widgets::observe` 实体作用域 observer 消费 `PointerPress`，等价旧 FocusPolicy::Block；**裸 `Observer` 组件是全局观察者，严禁直接插**）；② resize 手柄拖拽启动加 `hovered` 门控（窄手柄移出后 `Pressed` 残留防御）；③ 冒烟测试抓出 `handle_confirm_keyboard` 的 `Res<InputFocus>` + `ResMut<InputFocus>` B0002 重复访问（既存缺陷，0.20 起启动即 panic），合并为单一 `ResMut`；④ 新增 `tests/interaction_model.rs` headless 交互契约测试（6 用例：后代悬停/按下冒泡/嵌套消费/面板压遮罩 ×2/同帧边界观测）——0.20 交互模型回归金丝雀。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 1. **阅读背景**：开始任务前读 `AGENTS.md`、`doc/design/`、`doc/plans/` 中相关 step 文件；编码时按需查 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。
@@ -578,4 +595,4 @@ cargo clippy --workspace           # lint
 ./build_plugins.sh release         # release profile（更小 wasm）
 cargo test -p xgent_plugin -p xgent_plugin_host  # 插件集成测试（需先 build_plugins.sh）
 
-构建依赖本地 `../bevy` 源码（0.19.0），确保该目录存在。
+构建依赖本地 `../bevy` 源码（0.20.0-rc.2），确保该目录存在。

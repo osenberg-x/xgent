@@ -16,8 +16,11 @@
 //! - 按钮/可点组件 → [`SystemCursorIcon::Pointer`]（手形）
 //! - 默认（无匹配）→ 系统默认箭头
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
 use bevy::ui::{RelativeCursorPosition, UiStack};
+use bevy::ui_widgets::Button;
 use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 
 /// 节点期望的鼠标指针样式（挂于 UI 节点，配 [`CursorHit`] 或自带 `RelativeCursorPosition`）。
@@ -37,7 +40,8 @@ pub enum CursorStyle {
 
 /// 按钮节点的交互/样式/可见性查询元组。
 type ButtonBits<'a> = (
-    &'a Interaction,
+    &'a Hovered,
+    Has<Pressed>,
     Option<&'a CursorStyle>,
     Option<&'a InheritedVisibility>,
 );
@@ -72,9 +76,9 @@ pub struct CursorHit {
 pub fn cursor_style_system(
     stack: Res<UiStack>,
     windows: Query<Entity, With<PrimaryWindow>>,
-    // Button 节点自带 RelativeCursorPosition 吗？不一定——交互判定只要求
-    // Interaction；为此对 Button 单独查询（bevy_ui 对所有含 RelativeCursorPosition
-    // 的节点写 cursor_over，Button 若无该组件则用 Interaction::Hovered 判定）
+    // Button 节点自带 RelativeCursorPosition 吗？不一定——为此对 Button 单独查询，
+    // 用 picking 的 Hovered（CSS :hover 后代语义，悬停按钮内文本/图标子节点也算）
+    // 与 ui::Pressed 判定
     styled: Query<(
         &RelativeCursorPosition,
         &CursorStyle,
@@ -97,8 +101,8 @@ pub fn cursor_style_system(
             }
             return None;
         }
-        if let Ok((interaction, style, vis)) = buttons.get(*e)
-            && *interaction != Interaction::None
+        if let Ok((hovered, pressed, style, vis)) = buttons.get(*e)
+            && (hovered.get() || pressed)
             && visible(vis)
         {
             return Some(style.copied().unwrap_or(CursorStyle::Pointer));
@@ -116,7 +120,8 @@ pub struct CursorStylePlugin;
 
 impl Plugin for CursorStylePlugin {
     fn build(&self, app: &mut App) {
-        // 须在 ui_focus_system 写完 RelativeCursorPosition/Interaction 之后跑
+        // RelativeCursorPosition 由 bevy_ui 焦点系统（Update）写、Hovered/Pressed 由
+        // picking + ButtonPlugin（PreUpdate）写，本系统在两者之后跑
         app.add_systems(
             Update,
             cursor_style_system.after(bevy::ui::UiSystems::Focus),

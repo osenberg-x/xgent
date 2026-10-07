@@ -12,7 +12,10 @@
 
 use std::path::PathBuf;
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::editor::SideViewContent;
 use crate::fonts::{UiFonts, mono_text};
@@ -205,6 +208,7 @@ pub fn rebuild_terminal_tabs(
         commands.entity(bar).with_children(|bar| {
             bar.spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     padding: UiRect::horizontal(px(space::SM)),
                     flex_direction: FlexDirection::Row,
@@ -238,6 +242,7 @@ pub fn rebuild_terminal_tabs(
                 ));
                 item.spawn((
                     Button,
+                    Hovered::default(),
                     Node {
                         width: px(16.0),
                         height: px(16.0),
@@ -263,25 +268,21 @@ pub fn rebuild_terminal_tabs(
 ///
 /// × 按钮实体只挂 `TerminalTabCloseMarker`（`TerminalTabMarker{tab}` 在其
 /// 父 tab 节点上），经 `ChildOf` 回溯父实体取 tab id。× 是 `Button`
-/// （`FocusPolicy::Block`），点击时捕获 Interaction、父 tab 不会同时
-/// Pressed，两查询天然互斥。
+/// 点击 × 时事件由 ButtonPlugin 在最内层 Button 消费（propagate(false)），
+/// 父 tab 不会同时 Pressed，两查询天然互斥。
 pub fn handle_terminal_tab_click(
-    q_tabs: Query<(&TerminalTabMarker, &Interaction), Changed<Interaction>>,
-    q_close: Query<(&Interaction, &ChildOf), (With<TerminalTabCloseMarker>, Changed<Interaction>)>,
+    q_tabs: Query<(&TerminalTabMarker,), Added<Pressed>>,
+    q_close: Query<(&ChildOf,), (With<TerminalTabCloseMarker>, Added<Pressed>)>,
     q_tab_marker: Query<&TerminalTabMarker>,
     mut writer: MessageWriter<SwitchTabRequest>,
     mut close_writer: MessageWriter<CloseTabRequest>,
 ) {
-    for (interaction, parent) in q_close.iter() {
-        if *interaction == Interaction::Pressed
-            && let Ok(marker) = q_tab_marker.get(parent.0)
-        {
+    for (parent,) in q_close.iter() {
+        if let Ok(marker) = q_tab_marker.get(parent.0) {
             close_writer.write(CloseTabRequest { tab: marker.tab });
         }
     }
-    for (marker, interaction) in q_tabs.iter() {
-        if *interaction == Interaction::Pressed {
-            writer.write(SwitchTabRequest { tab: marker.tab });
-        }
+    for (marker,) in q_tabs.iter() {
+        writer.write(SwitchTabRequest { tab: marker.tab });
     }
 }

@@ -14,7 +14,10 @@
 
 use std::path::PathBuf;
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::editor::buffer::{BufferState, EditorBuffer};
 use crate::editor::io::FileReadRequest;
@@ -187,6 +190,7 @@ fn spawn_conflict_dialog(
                     .with_children(|btns| {
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
                                 ..default()
@@ -203,6 +207,7 @@ fn spawn_conflict_dialog(
                         ));
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
                                 ..default()
@@ -219,6 +224,7 @@ fn spawn_conflict_dialog(
                         ));
                         btns.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 padding: UiRect::all(Val::Px(8.0)),
                                 ..default()
@@ -241,9 +247,9 @@ fn spawn_conflict_dialog(
 /// 处理冲突决策按钮点击。
 pub fn handle_conflict_decision(
     q_dialog: Query<(Entity, &ConflictDialogFor), With<ConflictDialogMarker>>,
-    q_discard: Query<&Interaction, (With<ConflictDiscardMarker>, Changed<Interaction>)>,
-    q_keep: Query<&Interaction, (With<ConflictKeepLocalMarker>, Changed<Interaction>)>,
-    q_diff: Query<&Interaction, (With<ConflictDiffMarker>, Changed<Interaction>)>,
+    q_discard: Query<(), (With<ConflictDiscardMarker>, Added<Pressed>)>,
+    q_keep: Query<(), (With<ConflictKeepLocalMarker>, Added<Pressed>)>,
+    q_diff: Query<(), (With<ConflictDiffMarker>, Added<Pressed>)>,
     mut q_buffers: Query<&mut EditorBuffer>,
     mut read_writer: MessageWriter<FileReadRequest>,
     mut commands: Commands,
@@ -255,19 +261,22 @@ pub fn handle_conflict_decision(
         .or_else(|| {
             q_discard
                 .iter()
-                .any(|i| *i == Interaction::Pressed)
+                .next()
+                .is_some()
                 .then_some(ConflictDecision::Discard)
         })
         .or_else(|| {
             q_keep
                 .iter()
-                .any(|i| *i == Interaction::Pressed)
+                .next()
+                .is_some()
                 .then_some(ConflictDecision::KeepLocal)
         })
         .or_else(|| {
             q_diff
                 .iter()
-                .any(|i| *i == Interaction::Pressed)
+                .next()
+                .is_some()
                 .then_some(ConflictDecision::Diff)
         });
     let Some(decision) = decision else {

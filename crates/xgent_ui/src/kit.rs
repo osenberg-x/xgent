@@ -6,8 +6,11 @@
 //! 禁止逐组件写专用 hover 系统（方案 §7.1）。
 
 use bevy::ecs::hierarchy::ChildSpawnerCommands;
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontWeight, LetterSpacing, LineHeight};
+use bevy::ui::Pressed;
+use bevy::ui_widgets::{Button, observe};
 use std::collections::HashMap;
 
 use crate::fonts::{UiFonts, mono_text, ui_text};
@@ -117,30 +120,59 @@ impl HoverTint {
     }
 }
 
-/// hover/按下三态换色（单系统遍历全部 `HoverTint` 节点）。
+/// hover/按下换色（单系统遍历全部 `HoverTint` 节点；无过滤全量轮询，
+/// 写入前比较避免无谓的组件变更——对齐官方 widgets 示例的每帧刷新模式）。
 fn hover_tint_system(
     theme: Res<Theme>,
     mut q: Query<
         (
-            &Interaction,
+            &Hovered,
+            Has<Pressed>,
             &HoverTint,
             &mut BackgroundColor,
             &mut BorderColor,
         ),
-        Changed<Interaction>,
+        With<HoverTint>,
     >,
 ) {
-    for (interaction, tint, mut bg, mut border) in q.iter_mut() {
-        let (bg_want, line_want) = match interaction {
-            Interaction::Hovered => (tint.hover_bg, tint.hover_border),
-            Interaction::Pressed => (theme.active, tint.hover_border),
-            Interaction::None => (tint.base_bg, tint.base_border),
+    for (hovered, pressed, tint, mut bg, mut border) in q.iter_mut() {
+        let (bg_want, line_want) = if pressed {
+            (theme.active, tint.hover_border)
+        } else if hovered.get() {
+            (tint.hover_bg, tint.hover_border)
+        } else {
+            (tint.base_bg, tint.base_border)
         };
         if bg.0 != bg_want {
             bg.0 = bg_want;
         }
-        border.set_all(line_want);
+        if (border.top != line_want)
+            || (border.right != line_want)
+            || (border.bottom != line_want)
+            || (border.left != line_want)
+        {
+            border.set_all(line_want);
+        }
     }
+}
+
+// ===== 面板按压防护 =====
+
+/// 「面板压遮罩」防护：0.20 的指针事件会从子实体向 Button 祖先冒泡
+/// （ButtonPlugin 全局 observer 逐级运行），遮罩 Button 上的普通面板被点击时
+/// 事件会冒泡到遮罩 → 误触发"点面板外关闭"。把本 bundle 挂到面板实体上，
+/// 在面板处消费 `PointerPress`，等价旧 `FocusPolicy::Block` 的阻断语义。
+///
+/// 实现注意：必须经 [`observe`] 助手挂**实体作用域** observer（其 bundle effect
+/// 调用 `entity.observe()`）；直接插裸 `Observer` 组件是全局观察者，会消费
+/// 全世界的 PointerPress。
+///
+/// 面板内的按钮不受影响：内层 Button 的事件由 ButtonPlugin 在自身消费
+/// （propagate(false)），不会到达面板这一层。
+pub fn block_press_bubbling() -> impl Bundle {
+    observe(|mut press: On<bevy::picking::events::PointerPress>| {
+        press.propagate(false);
+    })
 }
 
 // ===== tooltip =====
@@ -170,7 +202,7 @@ fn tooltip_system(
     mut q: Query<
         (
             Entity,
-            &Interaction,
+            &Hovered,
             &Tooltip,
             Option<&mut TooltipPending>,
             Option<&Children>,
@@ -179,69 +211,66 @@ fn tooltip_system(
     >,
     panels: Query<(), With<TooltipPanel>>,
 ) {
-    for (entity, interaction, tip, pending, children) in q.iter_mut() {
+    for (entity, hovered, tip, pending, children) in q.iter_mut() {
         let has_panel = children
             .map(|c| c.iter().any(|child| panels.contains(child)))
             .unwrap_or(false);
 
-        match interaction {
-            Interaction::Hovered => {
-                if has_panel {
-                    continue;
-                }
-                match pending {
-                    // 计时中
-                    Some(mut p) => {
-                        p.elapsed += time.delta_secs();
-                        if p.elapsed >= 0.5 {
-                            commands.entity(entity).remove::<TooltipPending>();
-                            let text = tip.text.clone();
-                            commands.entity(entity).with_children(|t| {
-                                t.spawn((
-                                    Node {
-                                        position_type: PositionType::Absolute,
-                                        left: Val::Percent(100.0),
-                                        top: Val::Px(2.0),
-                                        margin: UiRect::left(px(space::SM)),
-                                        padding: UiRect::all(px(space::XS)),
-                                        border_radius: BorderRadius::all(px(radius::SMALL)),
-                                        flex_shrink: 0.0,
-                                        ..default()
-                                    },
-                                    BackgroundColor(theme.tooltip_bg),
-                                    BorderColor::all(theme.border),
-                                    TooltipPanel,
-                                ))
-                                .with_children(|tip_node| {
-                                    tip_node.spawn(mono_text(
-                                        &fonts,
-                                        text,
-                                        type_scale::MICRO,
-                                        theme.tooltip_text,
-                                        type_scale::line_height::UI,
-                                    ));
-                                });
+        if hovered.get() {
+            if has_panel {
+                continue;
+            }
+            match pending {
+                // 计时中
+                Some(mut p) => {
+                    p.elapsed += time.delta_secs();
+                    if p.elapsed >= 0.5 {
+                        commands.entity(entity).remove::<TooltipPending>();
+                        let text = tip.text.clone();
+                        commands.entity(entity).with_children(|t| {
+                            t.spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Percent(100.0),
+                                    top: Val::Px(2.0),
+                                    margin: UiRect::left(px(space::SM)),
+                                    padding: UiRect::all(px(space::XS)),
+                                    border_radius: BorderRadius::all(px(radius::SMALL)),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                BackgroundColor(theme.tooltip_bg),
+                                BorderColor::all(theme.border),
+                                TooltipPanel,
+                            ))
+                            .with_children(|tip_node| {
+                                tip_node.spawn(mono_text(
+                                    &fonts,
+                                    text,
+                                    type_scale::MICRO,
+                                    theme.tooltip_text,
+                                    type_scale::line_height::UI,
+                                ));
                             });
-                        }
+                        });
                     }
-                    // 悬停开始：挂计时
-                    None => {
-                        commands
-                            .entity(entity)
-                            .insert(TooltipPending { elapsed: 0.0 });
-                    }
+                }
+                // 悬停开始：挂计时
+                None => {
+                    commands
+                        .entity(entity)
+                        .insert(TooltipPending { elapsed: 0.0 });
                 }
             }
+        } else {
             // 离开：清计时与面板
-            _ => {
-                if pending.is_some() {
-                    commands.entity(entity).remove::<TooltipPending>();
-                }
-                if let Some(children) = children {
-                    for child in children.iter() {
-                        if panels.contains(child) {
-                            commands.entity(child).despawn();
-                        }
+            if pending.is_some() {
+                commands.entity(entity).remove::<TooltipPending>();
+            }
+            if let Some(children) = children {
+                for child in children.iter() {
+                    if panels.contains(child) {
+                        commands.entity(child).despawn();
                     }
                 }
             }
@@ -270,6 +299,7 @@ impl UiKit<'_> {
         parent
             .spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
@@ -306,6 +336,7 @@ impl UiKit<'_> {
         parent
             .spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
@@ -341,6 +372,7 @@ impl UiKit<'_> {
         parent
             .spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     width: px(34.0),
                     height: px(34.0),

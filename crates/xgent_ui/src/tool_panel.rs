@@ -3,8 +3,11 @@
 //! v2 重构：从独立卡片改为"嵌入式时间线"节点，左侧带图标节点 +
 //! 连接线，体现 agent 执行流程序列。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
 use bevy::ui::ScrollPosition;
+use bevy::ui_widgets::Button;
 
 use xgent_agent::{ToolCallMessage, ToolResultMessage};
 use xgent_settings::Localizer;
@@ -128,6 +131,7 @@ fn spawn_tool_card(
                         // head：工具名 + 参数摘要 + 状态药丸
                         card.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 width: Val::Percent(100.0),
                                 flex_direction: FlexDirection::Row,
@@ -220,6 +224,7 @@ fn spawn_tool_card(
                         // fold 行
                         card.spawn((
                             Button,
+                            Hovered::default(),
                             Node {
                                 width: Val::Percent(100.0),
                                 padding: UiRect::all(px(space::XS)),
@@ -361,15 +366,12 @@ fn format_tool_summary(tool_id: &str, input: &serde_json::Value) -> String {
 }
 /// 处理工具卡片 head / fold 点击：toggle `expanded`。
 fn handle_tool_card_click(
-    q_head: Query<(&Interaction, &ChildOf), (With<ToolCardHeadMarker>, Changed<Interaction>)>,
-    q_fold: Query<(&Interaction, &ChildOf), (With<ToolFoldMarker>, Changed<Interaction>)>,
+    q_head: Query<(&ChildOf,), (With<ToolCardHeadMarker>, Added<Pressed>)>,
+    q_fold: Query<(&ChildOf,), (With<ToolFoldMarker>, Added<Pressed>)>,
     mut q_cards: Query<&mut ToolCardMarker>,
     q_children: Query<&Children>,
 ) {
-    for (interaction, parent) in q_head.iter().chain(q_fold.iter()) {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for (parent,) in q_head.iter().chain(q_fold.iter()) {
         if let Ok(card_children) = q_children.get(parent.0) {
             if let Ok(mut card) = q_cards.get_mut(parent.0) {
                 card.expanded = !card.expanded;

@@ -5,7 +5,10 @@
 //! 历史入口迁图标轨（M3-T5）；agent 状态 pill 取代状态栏会话状态文本。
 //! 按钮交互标记与既有系统（`handle_top_bar_buttons`）保持兼容。
 
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 use xgent_agent::ProviderInfo;
 use xgent_settings::Localizer;
 use xui::command_palette::CommandPaletteState;
@@ -168,6 +171,7 @@ fn spawn_top_bar(
         // ⑥ provider/model pill（点击开设置；chevron 指示下拉）
         p.spawn((
             Button,
+            Hovered::default(),
             Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -394,35 +398,27 @@ fn update_agent_pill(
 
 /// 处理顶栏按钮点击（历史钮已迁 rail，M3-T5）。
 fn handle_top_bar_buttons(
-    q_new: Query<&Interaction, (With<NewSessionButtonMarker>, Changed<Interaction>)>,
-    q_palette: Query<&Interaction, (With<PaletteButtonMarker>, Changed<Interaction>)>,
-    q_settings: Query<&Interaction, (With<SettingsButtonMarker>, Changed<Interaction>)>,
-    q_provider: Query<&Interaction, (With<ProviderButtonMarker>, Changed<Interaction>)>,
+    q_new: Query<(), (With<NewSessionButtonMarker>, Added<Pressed>)>,
+    q_palette: Query<(), (With<PaletteButtonMarker>, Added<Pressed>)>,
+    q_settings: Query<(), (With<SettingsButtonMarker>, Added<Pressed>)>,
+    q_provider: Query<(), (With<ProviderButtonMarker>, Added<Pressed>)>,
     mut palette: ResMut<CommandPaletteState>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
     mut new_session: MessageWriter<xgent_agent::NewSessionMessage>,
 ) {
-    for i in q_new.iter() {
-        if *i == Interaction::Pressed {
-            new_session.write(xgent_agent::NewSessionMessage);
-        }
+    for _ in q_new.iter() {
+        new_session.write(xgent_agent::NewSessionMessage);
     }
     // 命令面板按钮
-    for i in q_palette.iter() {
-        if *i == Interaction::Pressed {
-            palette.open();
-        }
+    for _ in q_palette.iter() {
+        palette.open();
     }
     // 设置按钮
-    for i in q_settings.iter() {
-        if *i == Interaction::Pressed {
-            settings_state.open = !settings_state.open;
-        }
+    for _ in q_settings.iter() {
+        settings_state.open = !settings_state.open;
     }
     // provider 标签点击 → 打开设置面板
-    for i in q_provider.iter() {
-        if *i == Interaction::Pressed {
-            settings_state.open = true;
-        }
+    for _ in q_provider.iter() {
+        settings_state.open = true;
     }
 }

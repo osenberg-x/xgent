@@ -7,9 +7,12 @@
 use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::input_focus::AutoFocus;
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::Pressed;
 use bevy::ui::ScrollPosition;
+use bevy::ui_widgets::{Button, TextInput};
 
 use xgent_agent::NewSessionMessage;
 use xgent_settings::Localizer;
@@ -168,6 +171,7 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                             allow_newlines: false,
                             ..default()
                         },
+                        TextInput,
                         ChatInput::single_line(),
                         AutoFocus,
                         PaletteInputMarker,
@@ -229,8 +233,8 @@ fn sync_input_to_query(
 
 /// 仅在 `filtered` 内容变化时重建命令项 entity；`selected` 变化只更新视觉。
 ///
-/// 关键：不能每帧无条件 despawn+重建，否则 `Interaction::Pressed` 来不及被
-/// `handle_palette_click` 观察到就被新 entity 覆盖（新 entity 的 Interaction 为 None）。
+/// 关键：不能每帧无条件 despawn+重建，否则 `Pressed` 来不及被
+/// `handle_palette_click` 观察到就被新 entity 覆盖（新 entity 无 `Pressed`）。
 /// 用 `Local` 缓存上次 filtered，内容相同时保持 entity 稳定。
 ///
 /// M6-T2 视觉：条目 = 图标块（`icon_bg` 底圆角 4）+ 命令名（SMALL/510）；
@@ -255,7 +259,7 @@ fn rebuild_list(
         return;
     };
 
-    // 仅当 filtered 内容变化时才重建 entity，保持 Interaction 组件稳定。
+    // 仅当 filtered 内容变化时才重建 entity，保持 Pressed 状态稳定。
     if *last_filtered != state.filtered {
         for entity in q_items_entity.iter() {
             commands.entity(entity).despawn();
@@ -267,8 +271,9 @@ fn rebuild_list(
                     continue;
                 };
                 p.spawn((
-                    // Button 自带 Interaction，使鼠标点击可被检测
+                    // Hovered：picking 按 CSS :hover 后代语义维护，使鼠标点击可被检测
                     Button,
+                    Hovered::default(),
                     Node {
                         width: Val::Percent(100.0),
                         flex_direction: FlexDirection::Row,
@@ -279,7 +284,6 @@ fn rebuild_list(
                         margin: UiRect::horizontal(px(space::XS)),
                         ..default()
                     },
-                    Interaction::default(),
                     BackgroundColor::default(),
                     PaletteItemMarker { index: idx },
                 ))
@@ -317,7 +321,7 @@ fn rebuild_list(
         });
     }
 
-    // 选中态视觉更新（不重建 entity，避免破坏 Interaction 状态）：
+    // 选中态视觉更新（不重建 entity，避免破坏 Pressed/Hovered 状态）：
     // 选中 = 中性 `hover` 底（非 accent）；未选中 = 透明
     let selected_idx = state
         .filtered
@@ -346,7 +350,7 @@ fn rebuild_list(
 ///
 /// 与键盘 Enter 走同一条 `trigger_selected` 路径，保持行为一致。
 fn handle_palette_click(
-    q_items: Query<(&Interaction, &PaletteItemMarker), Changed<Interaction>>,
+    q_items: Query<&PaletteItemMarker, Added<Pressed>>,
     mut state: ResMut<CommandPaletteState>,
     registry: Res<CommandRegistry>,
     mut writer: MessageWriter<PaletteTriggered>,
@@ -354,10 +358,7 @@ fn handle_palette_click(
     if !state.open {
         return;
     }
-    for (interaction, marker) in q_items.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    for marker in q_items.iter() {
         // 把命令在 registry 中的索引转成 filtered 列表里的位置
         if let Some(pos) = state.filtered.iter().position(|&i| i == marker.index) {
             state.selected = pos;

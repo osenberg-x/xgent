@@ -9,11 +9,14 @@
 //! [`AccumulatedMouseMotion`] 增量更新宽度，钳制经纯函数 [`clamp_side_view`]
 //! （配单测）。启动/缩窗时统一钳制防溢出（方案 §8.8）；窗口 <1100px 自动收起面板。
 //!
-//! 不引入 `bevy_picking`（默认未启用，会拉重依赖）；改用手柄 `Interaction::Pressed`
-//! 触发拖拽 + `ButtonInput<MouseButton>` 维持 + 释放清除的状态机。
+//! 拖拽手柄 = `ui_widgets::Button` + `Hovered`：`Pressed`（ButtonPlugin 经冒泡事件
+//! 维护）触发拖拽，配合 `ButtonInput<MouseButton>` 维持 + 释放清除的状态机。
 use bevy::input::ButtonInput;
 use bevy::input::mouse::{AccumulatedMouseMotion, MouseButton};
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 
 use crate::layout::{MainAreaMarker, SideViewCollapsed};
 use crate::theme::size;
@@ -103,6 +106,7 @@ pub fn handle_bundle(edge: ResizeEdge) -> impl Bundle {
         BackgroundColor(Color::NONE),
         BorderColor::all(Color::NONE),
         Button,
+        Hovered::default(),
         ResizeEdgeMarker(edge),
         // 拖拽手柄 → 左右箭头指针
         crate::cursor::CursorStyle::EwResize,
@@ -132,15 +136,18 @@ fn handle_resize_drag(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     main_q: Query<&ComputedNode, With<MainAreaMarker>>,
-    handles: Query<(&ResizeEdgeMarker, &Interaction)>,
+    handles: Query<(&ResizeEdgeMarker, &Hovered, Has<Pressed>)>,
     side_collapsed: Res<SideViewCollapsed>,
     mut q_handle_style: Query<(&ResizeEdgeMarker, &mut BackgroundColor, &mut BorderColor)>,
     theme: Res<crate::theme::Theme>,
 ) {
-    // 1. 启动：任一手柄被按下（鼠标在按下瞬间位于手柄上）
+    // 1. 启动：任一手柄被按下且正被悬停（鼠标在按下瞬间位于手柄上）。
+    // hovered 门控防御 Pressed 残留：手柄极窄，按下后移出手柄再释放时
+    // ButtonPlugin 的 Pressed 不会被移除（release 目标非手柄、位移小无
+    // drag_end），残留会让下一次任意位置按下从错误边缘开始拖拽。
     if active.0.is_none() {
-        for (marker, interaction) in handles.iter() {
-            if *interaction == Interaction::Pressed && mouse.pressed(MouseButton::Left) {
+        for (marker, hovered, pressed) in handles.iter() {
+            if pressed && hovered.get() && mouse.pressed(MouseButton::Left) {
                 active.0 = Some(marker.0);
                 break;
             }
@@ -150,9 +157,7 @@ fn handle_resize_drag(
     // 2. 手柄视觉反馈：hover/拖拽 → accent_glow 底 + 交互色竖线
     let active_edge = active.0;
     for (marker, mut bg, mut border) in q_handle_style.iter_mut() {
-        let hovered = handles
-            .iter()
-            .any(|(m, i)| m.0 == marker.0 && *i == Interaction::Hovered);
+        let hovered = handles.iter().any(|(m, h, _)| m.0 == marker.0 && h.get());
         let highlighted = active_edge == Some(marker.0) || hovered;
         let target = if highlighted {
             theme.accent_glow
@@ -203,12 +208,12 @@ fn handle_resize_drag(
 /// 双击右手柄：复位上下文面板为默认宽度（300ms 内两次按下，方案 §8.8）。
 fn handle_double_click_reset(
     mut widths: ResMut<PanelWidths>,
-    handles: Query<(&ResizeEdgeMarker, &Interaction), Changed<Interaction>>,
+    handles: Query<&ResizeEdgeMarker, Added<Pressed>>,
     time: Res<Time>,
     mut last: Local<Option<f64>>,
 ) {
-    for (marker, interaction) in handles.iter() {
-        if marker.0 != ResizeEdge::Right || *interaction != Interaction::Pressed {
+    for marker in handles.iter() {
+        if marker.0 != ResizeEdge::Right {
             continue;
         }
         let now = time.elapsed_secs_f64();

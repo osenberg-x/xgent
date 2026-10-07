@@ -6,7 +6,10 @@
 //! chips 挂 `ContextChipMarker`，tab 列表变化时按签名比对整批重建（标签/添加钮保留）。
 
 use crate::fonts::ui_text;
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::Pressed;
+use bevy::ui_widgets::Button;
 use xgent_settings::Localizer;
 
 use crate::editor::buffer::EditorBuffer;
@@ -89,6 +92,7 @@ fn spawn_context_scope(
             ));
             row.spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
@@ -164,6 +168,7 @@ fn rebuild_context_chips(
         commands.entity(row).with_children(|row| {
             row.spawn((
                 Button,
+                Hovered::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
@@ -195,12 +200,10 @@ fn rebuild_context_chips(
 
 /// 「添加上下文」点击 → 打开文件抽屉（M5-T6 抽屉化）。
 fn handle_add_click(
-    q: Query<&Interaction, (With<ContextAddMarker>, Changed<Interaction>)>,
+    q: Query<(), (With<ContextAddMarker>, Added<Pressed>)>,
     mut drawer: ResMut<crate::layout::FileDrawerOpen>,
 ) {
-    for interaction in q.iter() {
-        if *interaction == Interaction::Pressed {
-            drawer.0 = true;
-        }
+    for _ in q.iter() {
+        drawer.0 = true;
     }
 }
