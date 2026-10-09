@@ -1,0 +1,588 @@
+schema: comet.native.v4
+name: close-agent-gaps
+language: en
+phase: archive
+status: done
+state_version: 15
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: d4a8c993434d77a7f1f62e1dc7cf874f3be4cf3ad0ed416fa9ec4d4d8cf1a48f
+spec_changes:
+  - capability: agent-safety-gaps
+    operation: create
+    source: specs/agent-safety-gaps/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 3
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 1
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: Every entry in the R1 and R2 tiers of `doc/notes/agent-gap-review.md`
+      is either implemented in this change or recorded as deferred with a named
+      reason, and the classification covers all 14 entries."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。报告本身未被修改（git status 显示 doc/notes/agent-gap-review.md
+        仍是未跟踪的原始审查产物，本次未编辑其内容）。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: The agent loop stops after a bounded number of tool-call iterations
+      or when a cumulative token ceiling is reached, and it reports which bound
+      it hit instead of silently stopping."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。两处测试分别把闸压到 3 轮 / 150 token 并断言命中的界与终止语义（Idle 而非 Error）。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: The retry configuration defaults to a finite retry count, 429 and 5xx
+      responses are retried, and a provider-supplied `Retry-After` overrides the
+      computed backoff delay."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。第一轮判 failed（Retry-After 在 IPC 边界被丢弃）。第二轮复核确认五段链路已打通；其提出的『流内构造点仍为
+        None』经复核不构成缺陷——Retry-After 是响应头，2xx 响应头发出后即固定，流内不存在可读的头，429
+        按定义落在建流路径，而建流路径正是已打通的那条；流内传输链本身是通的（ChatEvent::Error.retry_after_secs 有
+        serde 默认值与全链路反序列化，真有值可直达重试层）。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: Aborting a response issues a cancel through the daemon to the
+      provider, the spawned stream task terminates, and no further tokens are
+      produced for the abandoned stream."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。前两轮均判 failed 的核心项：第一轮 drop 接收端不终止上游 body；第二轮确认修复但指出我的测试无判别力。本轮补齐
+        anthropic 首事件前守卫并重写为有判别力的测试（已用移除守卫的反证实验验证）。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: `read_file` accepts `offset` and `limit`, truncates output that
+      exceeds its cap with an explicit marker, and never splits a UTF-8
+      character."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。截断与切片都不切碎 UTF-8 字符；offset 越界返回空、limit 越界钳制，均不报错（模型常按估算行号请求）。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: A new `edit_file` tool applies a line-range replacement to an
+      existing file, writes atomically, leaves a backup of the original, and
+      reports a clear error when the specified lines do not match the expected
+      content."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。写入路径与 write_file 共用 atomic::atomic_write（同目录 rename，原子）；写前备份为
+        <name>.xgent-bak。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "A7: A dangerous command in `run_command` yields a stricter approval
+      outcome than an ordinary command, and plugin `run_command` rejects an
+      argument outside the manifest's allowed set."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。危险命令检测此前命中与未命中都返回 Exec，severity 相等使升级分支不可达；Dangerous tier
+        使其真正生效（有针对性单测证明普通命令仍放行）。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "A8: Plugin tools supply a real `preview_diff` and a real `summarize`
+      through the WIT bridge, and the tool update callback delivers streaming
+      tool output to the UI as `Arc` instead of a borrowed boxed closure."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。summarize 由同步改 async 是必要的：WIT 方法为 async，同步签名无法 await WASM 调用。这是
+        trait 破坏性变更，已全量改完 9 处实现并通过编译与测试。
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "A9: An API key stored in the OS keychain is used in preference to the
+      TOML value, a missing or unreadable keychain falls back to TOML, and the
+      TOML value is preserved rather than deleted."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。TOML 值永不被删除是硬约束（凭据存储不可用时必须仍有回退），已写入文档注释。Windows 分支显式返回不支持并回退
+        TOML，非静默失败。
+      truncated: false
+  - id: A10
+    source: brief.md
+    text: 'A10: `ResponseApiProvider` and `CustomApiProvider` produce real streamed
+      responses through the existing `LlmProvider` trait instead of returning a
+      placeholder error, and neither contains a "尚未实现" path.'
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。Custom 复用已验证的兼容适配器而非复制 HTTP 逻辑，避免超时/错误/协议两份实现漂移；代价是它只能覆盖 OpenAI
+        兼容形态的自定义接口（这是 F-07 原文对第三方的定义）。
+      truncated: false
+  - id: A11
+    source: brief.md
+    text: "A11: `context_strategy` selects the built-in provider at startup, and a
+      strategy without an implementation surfaces a configuration error rather
+      than falling back to another strategy."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。静默回退会让误配置的项目看起来完全正常，故选择启动失败并给出可操作提示。
+      truncated: false
+  - id: A12
+    source: brief.md
+    text: "A12: `requirements.md` F-04 no longer claims read-only operations are
+      auto-approved, and the correction is limited to claims contradicted by the
+      shipped code."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。按已交付的更严格行为收敛文档，代码未改。
+      truncated: false
+  - id: A13
+    source: brief.md
+    text: "A13: Each of the seven deferral groups (R2-2, the R3 tier, the R4 tier)
+      records what it defers and why, so no entry in the gap report has an
+      unstated disposition."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。每条延后都指向具体的阻塞决策编号，而非笼统的「后续再做」。
+      truncated: false
+  - id: A14
+    source: brief.md
+    text: "A14: `cargo check --workspace` and `cargo test --workspace` both pass."
+    result: passed
+    reason:
+      text: 第三轮独立验证通过。本变更触及 44 个文件、约 2907 行新增。
+      truncated: false
+builder_handoff:
+  candidate_id: e37f6738-7feb-4909-889c-7ff0342130c1
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:ca2986c4-0852-4a4e-8a96-49867b3d51d0
+  iteration: 3
+  summary:
+    text: 实现 agent-gap-review 的 R1（10 项）与 R2（3 项可做项）。经两轮独立验证：第一轮 12/14（A3/A4
+      失败），修复后第二轮 14/14 通过，并根据第二轮反馈把 A4 的测试重写为有判别力的版本（移除守卫即失败，已反证验证）。46 文件 /
+      +3233/-324。0 error / 0 clippy warning（含 --all-targets）/ 537 tests passed /
+      0 failed。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - doc/notes/agent-gap-disposition.md:13-30 — R1/R2 逐条落点表（14
+          行，每行含缺口编号与代码位置）
+        - doc/notes/agent-gap-disposition.md:36-44 — 三组延后项（R2-2 / R3 / R4）各记理由
+        - doc/notes/agent-gap-disposition.md:54-60 — 本次发现的既有问题单列
+        - 覆盖性核对：报告 R1-1..R1-10 与 R2-1..R2-4 共 14 条，13 条实现、R2-3 为文档订正，均在表内
+      note: 报告本身未被修改（git status 显示 doc/notes/agent-gap-review.md
+        仍是未跟踪的原始审查产物，本次未编辑其内容）。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_agent/src/bridge.rs:178-194 — LoopBounds 结构与 loop_limits
+          缺省（20 轮 / 200k token）
+        - crates/xgent_agent/src/bridge.rs:~983 — 每轮工具执行后 tool_rounds += 1
+          并检查上限，命中发 Bounded{IterationLimit}
+        - crates/xgent_agent/src/bridge.rs:~652 — 每轮 stream 结束即累加 tokens_used
+          并检查上限，命中发 Bounded{TokenLimit}
+        - crates/xgent_agent/src/events.rs:125-129 — BoundedMessage 定义（含面向用户的
+          detail 文本）
+        - 测试
+          crates/xgent_agent/src/bridge_tests.rs:tool_loop_stops_at_iteration_ceiling
+          — 断言恰好一次 Bounded、reason 为 IterationLimit、detail 含上限 '3'、对话回到 Idle
+        - 测试 tool_loop_stops_at_token_ceiling — 断言 reason 为 TokenLimit 且 detail
+          含 token 上限 150
+        - 【本轮修复】crates/xgent_ui/src/chat_panel.rs:show_bounded_notice —
+          BoundedMessage 补 UI 消费者，detail 固化为 assistant 气泡（首轮发现无消费者，用户看不到命中的界）
+      note: 两处测试分别把闸压到 3 轮 / 150 token 并断言命中的界与终止语义（Idle 而非 Error）。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_agent/src/bridge.rs — RetryConfig::DEFAULT_MAX_RETRIES=5
+          与 effective_max_retries() 把 None 钳为有限缺省
+        - crates/xgent_core/src/chat.rs:ErrorKind 新增 RateLimited /
+          ServerError；crates/xgent_provider/src/provider.rs:to_error_kind 把
+          429→RateLimited、500..=599→ServerError
+        - crates/xgent_provider/src/provider.rs:parse_retry_after（4 个单测）+
+          ProviderError::Api.retry_after_secs 字段
+        - 【本轮修复】crates/xgent_daemon/src/provider_pool.rs — 新增
+          ProviderCallError{kind,message,retry_after_secs}；ProviderPool::chat 的
+          map_err 上抛 e.retry_after_secs()
+        - 【本轮修复】crates/xgent_daemon/src/session.rs:provider_chat — error.data
+          编码为 {kind, retry_after_secs} 对象（此前只编码裸 kind，Retry-After 在此丢失）
+        - 【本轮修复】crates/xgent_app/src/provider_client.rs — 从 error.data 对象还原
+          (kind, retry_after_secs)，并兼容旧版裸 kind 字符串形态
+        - 【本轮修复】测试
+          xgent_daemon::session::tests::provider_chat_error_carries_kind_and_retry_after
+          / _without_retry_after_is_null
+        - 【本轮修复】测试
+          xgent_app::provider_client::tests::rpc_error_data_object_yields_kind_and_retry_after
+          / _bare_kind_still_parses
+        - crates/xgent_agent/src/bridge.rs:delay_for_with_retry_after —
+          Retry-After 覆盖计算退避且受 max_delay_ms 约束
+        - 测试 bridge_tests::none_max_retries_is_clamped_to_finite_default /
+          rate_limit_and_server_error_are_retryable /
+          retry_after_overrides_computed_backoff /
+          http_status_maps_to_error_kind
+      note: 第一轮判 failed（Retry-After 在 IPC 边界被丢弃）。第二轮复核确认五段链路已打通；其提出的『流内构造点仍为
+        None』经复核不构成缺陷——Retry-After 是响应头，2xx 响应头发出后即固定，流内不存在可读的头，429
+        按定义落在建流路径，而建流路径正是已打通的那条；流内传输链本身是通的（ChatEvent::Error.retry_after_secs 有
+        serde 默认值与全链路反序列化，真有值可直达重试层）。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_core/src/methods.rs —
+          PROVIDER_CANCEL；crates/xgent_daemon/src/provider_pool.rs —
+          active_streams 登记表 + cancel()；推送 task 三条出口（cancel/发送失败/自然结束）统一
+          remove，无泄漏
+        - crates/xgent_daemon/src/session.rs:provider_cancel handler（未知流返回
+          cancelled:false，幂等）+ 2 个单测
+        - crates/xgent_app/src/provider_client.rs:ProviderClient::cancel 实现
+        - crates/xgent_agent/src/bridge.rs — stream_llm_response 的 cancel_token
+          分支、Steering 分支、Abort 命令分支三处都调 provider.cancel
+        - 【关键修复】openai_compat.rs / response_api.rs / anthropic.rs — 流循环在 Start
+          前与每轮 s.next() 之前检查 tx.is_closed()，为真即 return；s 被 drop 使 reqwest 关闭
+          body 与连接
+        - 【判别力已实测】测试 dropped_receiver_never_pulls_upstream /
+          receiver_dropped_midstream_stops_pulling
+          使用可观测拉取计数（Arc<AtomicUsize>）的上游。实测：临时移除守卫后两用例分别报「实际拉了 1000 帧」「丢弃时 7 →
+          等待后 9735」并 FAILED，还原守卫后 passed
+        - 测试 xgent_daemon::session::tests::provider_cancel_removes_active_stream
+          / provider_cancel_unknown_stream_is_noop
+        - 测试 xgent_agent::bridge_tests::abort_cancels_upstream_stream
+      note: 前两轮均判 failed 的核心项：第一轮 drop 接收端不终止上游 body；第二轮确认修复但指出我的测试无判别力。本轮补齐 anthropic
+        首事件前守卫并重写为有判别力的测试（已用移除守卫的反证实验验证）。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_tools/src/builtins/read_file.rs — schema 新增
+          offset/limit；slice_lines 处理边界（10 个单测）；输出经 crate::truncate_output
+        - crates/xgent_tools/src/lib.rs — MAX_TOOL_OUTPUT_BYTES 与
+          truncate_output（按字符边界，双重判据防 CJK 下溢）
+        - 测试
+          executor.rs:read_file_honors_offset_and_limit、read_file_truncates_oversized_output
+        - read_file 单测覆盖：区间内、仅 offset、仅 limit、无参、offset 越界返回空、limit
+          越界钳制、负值报错、非整数报错、CJK 整行
+      note: 截断与切片都不切碎 UTF-8 字符；offset 越界返回空、limit 越界钳制，均不报错（模型常按估算行号请求）。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_tools/src/builtins/edit_file.rs — apply_edit 行范围替换（13
+          个单测：单行/范围/删除/多行/尾换行/越界钳制/负值/反序/old_content 匹配与不匹配/尾随空格容忍/缺参）
+        - crates/xgent_tools/src/atomic.rs — atomic_write（临时文件+fsync+同目录
+          rename）与 backup_existing
+        - 测试 executor.rs:edit_file_registered_by_default_and_edits — 经
+          ToolExecutor 走确认流程后校验文件内容与备份内容
+        - 测试 executor.rs:edit_file_rejects_content_mismatch — 校验失败时文件未被修改
+        - 【本轮修复】edit_file 补 MAX_WRITE_BYTES 校验 + truncate_output 上界单测
+      note: 写入路径与 write_file 共用 atomic::atomic_write（同目录 rename，原子）；写前备份为
+        <name>.xgent-bak。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_tools/src/tool.rs — 新增 ToolTier::Dangerous，severity 4（高于
+          Exec 3），使 resolve_policy 动态升级分支可达
+        - crates/xgent_tools/src/builtins/run_command.rs — DANGER_PATTERNS 从 3
+          项扩到 18 项；is_dangerous 大小写不敏感；命中返回 Dangerous
+        - 测试 run_command::approval_for_dangerous_command_returns_dangerous（8
+          条危险命令含大写与 fork 炸弹）
+        - 测试 security::dangerous_input_forces_confirmation_even_when_approved —
+          DangerAwareTool 按输入敏感：危险命令在 approved 配置下仍需确认，普通命令自动放行
+        - crates/xgent_plugin/src/host_state.rs::check_args —
+          DENY_ARG_PREFIXES（--upload-pack/--receive-pack/--exec/--ext-diff/--textconv/--output/--config）、SHELL_METACHARS、git
+          -c 注入、清单 command-args 子命令白名单（8 个单测）
+        - crates/xgent_plugin/src/manifest.rs — PermissionsManifest 新增
+          command_args（rename=command-args）+ 解析断言
+        - crates/xgent_plugin_git/plugin.toml — 显式声明 command-args = git 子命令
+      note: 危险命令检测此前命中与未命中都返回 Exec，severity 相等使升级分支不可达；Dangerous tier
+        使其真正生效（有针对性单测证明普通命令仍放行）。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_tools/src/tool.rs — ToolUpdateCallback 改为 Arc
+          共享闭包；Tool::execute 与 ToolExecutor::execute 均收 Option<Arc<...>>
+        - crates/xgent_tools/src/executor.rs — Approved / AllowAll / Allow /
+          AllowAll 四条执行路径都传真实 on_update
+        - crates/xgent_agent/src/bridge.rs — 构造 Arc 回调把中间结果转为
+          AgentEvent::ToolProgress
+        - crates/xgent_agent/src/events.rs —
+          ToolProgressMessage；crates/xgent_ui/src/tool_panel.rs —
+          update_tool_progress 增量刷新
+        - 测试 executor.rs:forwards_update_callback_to_tool — 断言工具的中间结果到达回调（修复前恒传
+          None）
+        - crates/xgent_plugin_api/wit/plugin.wit — 新增 tool.preview-diff
+          导出；crates/xgent_plugin_api/src/lib.rs — 宿主 Guest 实现 + 默认 preview_diff
+        - crates/xgent_plugin/src/wasm_host.rs —
+          call_tool_preview_diff；Tool::summarize 改 async 后经既有
+          call_tool_summarize 桥接
+        - crates/xgent_plugin_host/src/tool.rs — preview_diff 与 summarize 经 WIT
+          实现；on_update 桥接到 push-update（修复前恒 None）
+        - build_plugins.sh ROOT 解析修正 + 重跑后 xgent_plugin_host 集成测试 3/3 通过（新 WIT
+          导出要求插件重编译）
+      note: summarize 由同步改 async 是必要的：WIT 方法为 async，同步签名无法 await WASM 调用。这是 trait
+        破坏性变更，已全量改完 9 处实现并通过编译与测试。
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_settings_core/src/keychain.rs — macOS security / Linux
+          secret-tool 读写删；read_api_key 返回 None 表示取不到
+        - resolve_api_key(provider_id, toml_value) — 凭据存储优先，回退
+          TOML；persist_api_key 空值不写
+        - delete_api_key 仅显式调用；读取路径与解析路径都不删除 TOML 值（代码结构保证）
+        - crates/xgent_provider/src/lib.rs:build_provider — 全部 provider 经
+          resolve_api_key 取 key（Daemon 与 UI 两侧都走此函数）
+        - 5 个单测：account 按 provider 区分、resolve 回退、persist 拒绝空值、read 未知条目返回
+          None、delete 未知条目不报错
+      note: TOML 值永不被删除是硬约束（凭据存储不可用时必须仍有回退），已写入文档注释。Windows 分支显式返回不支持并回退 TOML，非静默失败。
+    - id: A10
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_provider/src/response_api.rs 全文件重写 — build_input_items 把
+          messages 转为 Responses API 的 input
+          项（system/user/assistant/function_call/function_call_output
+          五种）；run_responses_stream 把 response.* 事件翻译为统一
+          ChatEvent（TextStart/TextDelta/TextEnd/ToolCallStart/ToolCallDelta/ToolCallEnd/Done/Error）
+        - 8 个单测：input 项映射 4 项、usage 字段名映射、流式事件翻译、function_call 翻译、error
+          帧终止、incomplete→Length
+        - crates/xgent_provider/src/custom.rs 全文件重写 — CustomApiProvider 复用
+          OpenAiCompatProvider（用户 base URL + extra_headers + 模型 id），缺 base_base
+          显式 Config 错误
+        - 3 个单测：缺 base 报 Config 错误不可达端点得到真实传输层错误（非占位）、extra_headers 携带且非法头名被丢弃
+        - crates/xgent_settings_core/src/global.rs — ProviderConfig 新增
+          extra_headers；crates/xgent_provider/src/openai_compat.rs —
+          with_extra_headers + apply_extra_headers 接入 models/chat 两条请求
+        - 全仓检索「尚未实现」：两文件均无该字符串
+      note: Custom 复用已验证的兼容适配器而非复制 HTTP 逻辑，避免超时/错误/协议两份实现漂移；代价是它只能覆盖 OpenAI
+        兼容形态的自定义接口（这是 F-07 原文对第三方的定义）。
+    - id: A11
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/lib.rs — build_context_provider 返回
+          BuiltContextProvider::{Ready, Unsupported}；RepoMap/Vector/Hybrid 返回
+          Unsupported
+        - crates/xgent_app/src/main.rs — 按 project_config.context_strategy 构造内置
+          provider；Unsupported 时 error 日志 + exit(2)，不回退
+        - 测试 unimplemented_strategies_report_unsupported — 3 个无实现策略全部返回
+          Unsupported 且回报原策略；ondemand_is_ready
+        - 原硬编码 OnDemandContextProvider 已移除（main.rs 不再 import 该类型）
+      note: 静默回退会让误配置的项目看起来完全正常，故选择启动失败并给出可操作提示。
+    - id: A12
+      status: implemented-with-evidence
+      evidence:
+        - doc/design/requirements.md:74 — F-04
+          措辞改为「工具调用需用户确认后执行。默认所有层级（含只读）均需确认，可按工具 id 在配置中提升为自动执行或降为拒绝。见 AGENTS.md
+          §5.4」
+        - git diff --stat HEAD -- doc/ 显示只有 requirements.md 一行改动（+1/-1），F-04
+          行前后内容未动
+        - 对照 crates/xgent_tools/src/security.rs:58 的实际行为（三 tier 全
+          NeedsConfirmation）
+      note: 按已交付的更严格行为收敛文档，代码未改。
+    - id: A13
+      status: implemented-with-evidence
+      evidence:
+        - doc/notes/agent-gap-disposition.md:36-44 — 三组延放：R2-2（需先定会话格式语义）、R3（21
+          条各自成特性，向量/LSP 另阻塞于选型与 D-06）、R4（混合了可做但需多天 / 阻塞于未决设计
+          D-07/OQ-05/D-P2·3·4·6 / 被 AGENTS.md §6.5 禁止的 3D·TUI·Web）
+        - doc/notes/agent-gap-disposition.md:46-52 — 遗留说明三条（无占位 provider、Windows
+          无凭据集成、Retry-After 仅支持 delta-seconds）
+        - doc/notes/agent-gap-disposition.md:54-60 — 本次发现的既有问题（fs-read
+          kebab-case 未映射、build_plugins.sh ROOT、paths.rs 测试锁）
+        - 【本轮修复】doc/notes/agent-gap-disposition.md 第五节 — 记录首轮验证发现并修复的 5 项
+      note: 每条延后都指向具体的阻塞决策编号，而非笼统的「后续再做」。
+    - id: A14
+      status: implemented-with-evidence
+      evidence:
+        - cargo check --workspace → 0 error
+        - cargo test --workspace → 0 failed（全量，含 3 个 plugin_host 集成测试需重编译 wasm
+          插件）
+        - cargo clippy --workspace → 0 warning
+        - cargo fmt --all 已执行
+        - 连续 4 次全量测试运行均为 0 failed（曾出现两个 flaky：paths.rs 测试未加 ENV_LOCK、abort 测试与
+          select 分支竞态，均已定位并修复而非重跑掩盖）
+      note: 本变更触及 44 个文件、约 2907 行新增。
+  checks:
+    - name:
+        text: cargo check --workspace
+        truncated: false
+      result: passed
+      note:
+        text: 0 error
+        truncated: false
+    - name:
+        text: cargo test --workspace
+        truncated: false
+      result: passed
+      note:
+        text: 0 failed；连续 4 次运行稳定
+        truncated: false
+    - name:
+        text: cargo clippy --workspace
+        truncated: false
+      result: passed
+      note:
+        text: 0 warning（含 needless_borrow / unused_cast / dead_code 逐项清理）
+        truncated: false
+    - name:
+        text: cargo fmt --all
+        truncated: false
+      result: passed
+      note:
+        text: 已格式化
+        truncated: false
+    - name:
+        text: ./build_plugins.sh
+        truncated: false
+      result: passed
+      note:
+        text: 修正 ROOT 后成功重建 wasm 插件并打包（WIT 新增导出要求插件重编译）
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: R3/R4 共 31 条未实现，理由与逐条分类记在 doc/notes/agent-gap-disposition.md；本次只交付 Shape
+        确认的 R1+R2 范围
+      truncated: false
+    - text: OS keychain 的真实读写路径无自动化测试覆盖（需真实 macOS Keyring / Linux libsecret
+        环境）。单测只覆盖函数存在性、空值处理、未知条目幂等、resolve 优先级；分支逻辑经代码审查，未经端到端验证
+      truncated: false
+    - text: Retry-After 仅支持 delta-seconds；HTTP-date 需日期解析依赖，本次未引入，解析失败退回计算退避
+      truncated: false
+    - text: manifest 的 fs-read/fs-write/network 字段 kebab-case 未映射（既有问题，本次未改——改动会变更既有
+        fs 权限的实际生效范围）。command-args 之外插件 fs 权限的实际生效范围与文档不符
+      truncated: false
+    - text: 插件 args 白名单只约束首个非 flag 参数（子命令），flag 依赖通用危险黑名单——语法上无法区分 flag 与其值
+      truncated: false
+    - text: CustomApiProvider 只能覆盖 OpenAI 兼容形态的自定义接口（复用兼容适配器），不支持自定义 body
+        模板；requirements.md 原文只要求「支持自定义 API」，未要求 body 模板
+      truncated: false
+    - text: token 闸只统计 provider 回报的 usage；provider 不回报时 tokens_used 恒为 0，累计 token
+        上限不触发，仅剩轮次闸兜底
+      truncated: false
+    - text: read_file 先读全文件再切片：offset/limit 只减少回灌 LLM 的内容量，不减少磁盘/内存读取量
+      truncated: false
+    - text: 本次为当前目录（main）直接开发，非隔离分支；工作区仍有与本变更无关的未提交内容（.gitignore 的 Comet
+        块、若干工具配置目录、docs/openspec/）
+      truncated: false
+    - text: 对外破坏性变更（已在 brief 与本清单声明，仓内调用点全部更新且编译测试通过）：ErrorKind 新增
+        RateLimited/ServerError、ProviderError::Api 新增
+        retry_after_secs、ToolExecutor::execute 新增 on_update 形参、Tool::execute 的
+        on_update 由 Option<&> 改 Option<Arc<>>、Tool::summarize 改
+        async、xgent_context::build_context_provider 返回类型改为
+        BuiltContextProvider、PluginConfig/WIT 新增 command-args 与
+        tool.preview-diff
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-08T23:50:52.965Z
+blockers: []
+verification:
+  candidate_id: e37f6738-7feb-4909-889c-7ff0342130c1
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:ce84187c-f0df-4273-bece-95608ce9b467
+  iteration: 3
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks: []
+  summary:
+    text: 第三轮验证 14/14 通过。关键：A4 测试判别力经独立反证实验确认——把工作区复制到 /tmp、仅在副本中移除两个 tx.is_closed()
+      守卫，两个用例分别以『实际拉了 1000 帧』与『丢弃时 7 → 等待后 9735』FAILED，还原后 46 passed；diff -q
+      确认项目文件字节未变。cargo check/test/clippy --all-targets 退出码 0，537 tests passed /
+      0 failed / 0 clippy warning。已在工作区外完成实验并保持严格只读。
+    truncated: false
+  risks:
+    - text: response_api 在 Start 前缺 is_closed 守卫（已在本轮补齐，与另两个 provider 对齐）
+      truncated: false
+    - text: 台账标题『14/14』与表内 13 行不符（已订正为 13 条 + R2-2 延后）
+      truncated: false
+    - text: A4 中途丢弃测试依赖墙钟等待，重载机器上最脆弱（但对照实验显示修复前后相差约三个数量级：0 vs 9735 帧）
+      truncated: false
+    - text: Windows keychain 未实现，回退 TOML（D-C2 已记录）
+      truncated: false
+    - text: manifest fs-read kebab-case 未映射的既有问题仍在（§四已记录，本次有意不动）
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-09T00:16:57.796Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A3
+      - A4
+    summary:
+      text: 首轮只读验证：cargo check/test 全绿；14 项中 12 项通过，A3（Retry-After 跨 IPC 断链）与 A4（drop
+        接收端不终止上游 body）失败——两者均为真实链路断裂。
+      truncated: false
+    completed_at: 2026-10-08T17:53:57.457Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 第二轮验证 14/14 通过；cargo check/test/clippy 退出码 0，537 tests passed / 0
+        failed。同时指出 A4 测试无判别力与 anthropic 守卫缺失，已在本轮修复。
+      truncated: false
+    completed_at: 2026-10-08T23:50:41.418Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 第二轮验证指出 A4 测试无判别力与 anthropic 首事件前缺守卫：已重写 A4
+        测试为可观测拉取计数并用移除守卫的反证实验确认会失败（1000 帧 / 7→9735），已补齐 anthropic 守卫，清理过期注释与全部
+        clippy 警告。回到 Build 重新提交并再跑一轮验证。
+      truncated: false
+    completed_at: 2026-10-08T23:50:47.742Z
+  - goal_cycle: 1
+    iteration: 3
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 第三轮验证 14/14 通过。关键：A4 测试判别力经独立反证实验确认——把工作区复制到 /tmp、仅在副本中移除两个 tx.is_closed()
+        守卫，两个用例分别以『实际拉了 1000 帧』与『丢弃时 7 → 等待后 9735』FAILED，还原后 46 passed；diff -q
+        确认项目文件字节未变。cargo check/test/clippy --all-targets 退出码 0，537 tests passed
+        / 0 failed / 0 clippy warning。已在工作区外完成实验并保持严格只读。
+      truncated: false
+    completed_at: 2026-10-09T00:16:57.796Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-08T14:28:44.554Z
