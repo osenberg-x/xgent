@@ -15,6 +15,18 @@ use xgent_provider::{LlmProvider, build_provider};
 
 use crate::config_store::ConfigCoordinator;
 
+/// 建流失败的错误：携带跨进程重建重试行为所需的全部信息。
+///
+/// 三个字段都必须过 IPC——只传 message 会让 UI 误判 kind 而触发无意义重试；
+/// 只传 kind 会丢掉 `Retry-After`，使限流退避失效。
+#[derive(Debug, Clone)]
+pub struct ProviderCallError {
+    pub kind: xgent_core::chat::ErrorKind,
+    pub message: String,
+    /// 服务端 `Retry-After`（秒）
+    pub retry_after_secs: Option<u64>,
+}
+
 /// Provider 连接池。
 pub struct ProviderPool {
     /// provider id → 实例（按配置中的 providers map key 标识）
@@ -23,6 +35,15 @@ pub struct ProviderPool {
     config: Arc<RwLock<ConfigCoordinator>>,
     /// daemon 自身的 StreamId 生成计数器
     stream_counter: std::sync::atomic::AtomicU64,
+    /// 活跃流：stream_id → 该流的取消令牌。
+    ///
+    /// 用户 abort 时经 `provider.cancel` 查到令牌并 cancel，推送 task 在
+    /// `cancelled()` 分支退出并 drop 接收端，上游 HTTP 请求随之取消——
+    /// 否则被放弃的流会继续被消费到自然结束，token 照常计费（R1-2）。
+    ///
+    /// 用 `Arc<RwLock<..>>`：推送 task 需持有它，以便退出时移除自己的条目，
+    /// 否则每次流结束都泄漏一条登记。
+    active_streams: Arc<RwLock<HashMap<StreamId, tokio_util::sync::CancellationToken>>>,
 }
 
 impl ProviderPool {
@@ -32,6 +53,7 @@ impl ProviderPool {
             providers: RwLock::new(HashMap::new()),
             config,
             stream_counter: std::sync::atomic::AtomicU64::new(1),
+            active_streams: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -88,28 +110,87 @@ impl ProviderPool {
         req: ChatRequest,
         _client: ClientId,
         sender: tokio::sync::mpsc::Sender<Notification>,
-    ) -> Result<StreamId, (xgent_core::chat::ErrorKind, String)> {
+    ) -> Result<StreamId, ProviderCallError> {
         let provider_id = req.provider.clone();
-        let provider = self.get(&provider_id).await.map_err(|msg| {
-            // get 返回 String 错误（provider 不存在/配置缺失）→ NotConfigured
-            (xgent_core::chat::ErrorKind::NotConfigured, msg)
-        })?;
+        let provider = self
+            .get(&provider_id)
+            .await
+            .map_err(|msg| ProviderCallError {
+                kind: xgent_core::chat::ErrorKind::NotConfigured,
+                message: msg,
+                retry_after_secs: None,
+            })?;
         let stream_id = self.next_stream_id();
-        let (_, mut stream) = provider.chat(req).await.map_err(|e| {
-            let kind = e.to_error_kind();
-            (kind, e.to_string())
+        let (_, mut stream) = provider.chat(req).await.map_err(|e| ProviderCallError {
+            kind: e.to_error_kind(),
+            message: e.to_string(),
+            // Retry-After 必须跨 IPC 抵达重试层，否则限流下永远按客户端
+            // 退避重试——只会更快撞上限（R1-7 / A3）。
+            retry_after_secs: e.retry_after_secs(),
         })?;
         let sid = stream_id;
+        // 登记取消令牌，使 `provider.cancel` 能停掉本流（R1-2）
+        let cancel = tokio_util::sync::CancellationToken::new();
+        self.active_streams
+            .write()
+            .await
+            .insert(sid, cancel.clone());
+        // task 持有登记表，退出时移除自己的条目（否则每次流结束泄漏一条）
+        let streams = self.active_streams.clone();
         tokio::spawn(async move {
-            while let Some(ev) = stream.recv().await {
-                let notif = chat_event_to_notification(sid, ev);
-                if sender.send(notif).await.is_err() {
-                    // 客户端已断开，停止推送
-                    break;
+            loop {
+                tokio::select! {
+                    // 用户 abort：立即停止消费并退出 task，上游请求随之取消
+                    _ = cancel.cancelled() => {
+                        tracing::info!(stream_id = sid.0, "流被客户端取消");
+                        break;
+                    }
+                    ev = stream.recv() => match ev {
+                        Some(ev) => {
+                            let notif = chat_event_to_notification(sid, ev);
+                            if sender.send(notif).await.is_err() {
+                                // 客户端已断开，停止推送
+                                break;
+                            }
+                        }
+                        None => break,
+                    },
                 }
             }
+            // 流结束（正常/取消/断开）：移除登记
+            streams.write().await.remove(&sid);
         });
         Ok(stream_id)
+    }
+
+    /// 取消指定流（用户 abort）。
+    ///
+    /// 流不存在或已结束视为成功——取消是幂等的，重复取消不应报错。
+    pub async fn cancel(&self, stream_id: StreamId) -> bool {
+        match self.active_streams.write().await.remove(&stream_id) {
+            Some(token) => {
+                token.cancel();
+                tracing::info!(stream_id = stream_id.0, "已取消流");
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 当前活跃流数量（测试与诊断用）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub async fn active_stream_count(&self) -> usize {
+        self.active_streams.read().await.len()
+    }
+
+    /// 登记一条活跃流（仅测试用）。
+    #[cfg(test)]
+    pub async fn register_stream_for_test(
+        &self,
+        stream_id: StreamId,
+        token: tokio_util::sync::CancellationToken,
+    ) {
+        self.active_streams.write().await.insert(stream_id, token);
     }
 }
 

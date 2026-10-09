@@ -189,6 +189,9 @@ mod tests {
 
     #[test]
     fn global_config_file_is_config_toml() {
+        // 持 ENV_LOCK：本测试读 agent_dir()，而其他测试会在同一进程内
+        // 改 XGENT_AGENT_DIR 环境变量——不串行化时读到临时目录而误判失败。
+        let _guard = ENV_LOCK.lock();
         let f = global_config_file();
         assert!(f.ends_with("config.toml"));
         assert!(f.starts_with(agent_dir()));
@@ -196,6 +199,7 @@ mod tests {
 
     #[test]
     fn sessions_dir_under_agent_dir() {
+        let _guard = ENV_LOCK.lock();
         let p = sessions_dir();
         assert!(p.ends_with("sessions"));
         assert!(p.starts_with(agent_dir()));

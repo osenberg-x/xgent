@@ -125,9 +125,13 @@ impl Plugin for ChatPanelPlugin {
             )
             .add_systems(
                 Update,
-                show_retry_status
-                    .after(xgent_agent::agent_loop::agent_poll_system)
-                    .after(finalize_on_done),
+                (
+                    show_retry_status
+                        .after(xgent_agent::agent_loop::agent_poll_system)
+                        .after(finalize_on_done),
+                    show_bounded_notice,
+                )
+                    .chain(),
             );
     }
 }
@@ -635,6 +639,8 @@ fn on_error(
             xgent_core::chat::ErrorKind::AuthFailed => crate::i18n::tr(&loc, "error-auth-failed"),
             xgent_core::chat::ErrorKind::Network => crate::i18n::tr(&loc, "error-network"),
             xgent_core::chat::ErrorKind::StreamParse => crate::i18n::tr(&loc, "error-stream-parse"),
+            xgent_core::chat::ErrorKind::RateLimited => crate::i18n::tr(&loc, "error-rate-limited"),
+            xgent_core::chat::ErrorKind::ServerError => crate::i18n::tr(&loc, "error-server"),
             xgent_core::chat::ErrorKind::ProviderError => crate::i18n::tr(&loc, "error-provider"),
         };
         let retry_hint = crate::i18n::tr(&loc, "error-retry-hint");
@@ -644,6 +650,23 @@ fn on_error(
         ));
     }
 }
+/// 有界执行终止提示：命中迭代/ token 上限时在对话流里告知用户。
+///
+/// 这不是错误（对话已正常结束），但用户必须知道本轮为何停下——否则
+/// 表现为"agent 突然不说话了"（A2 要求报告命中的界）。
+fn show_bounded_notice(
+    mut reader: MessageReader<xgent_agent::BoundedMessage>,
+    mut conv: ResMut<Conversation>,
+) {
+    for ev in reader.read() {
+        // 作为一条 assistant 气泡固化到对话流：说明是 agent 侧的，
+        // 不是用户输入，也不是错误（对话已正常结束）。
+        conv.current_assistant_text = ev.detail.clone();
+        conv.finalize_assistant(None, None);
+        conv.status = ConversationStatus::Idle;
+    }
+}
+
 /// 重试时在当前助手消息节点显示「重试中(第 N 次)」与上次失败原因。
 fn show_retry_status(
     mut reader: MessageReader<RetryMessage>,

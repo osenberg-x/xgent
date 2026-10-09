@@ -70,6 +70,8 @@ error-not-configured = ⚠ [Not configured]
 error-auth-failed = ⚠ [Auth failed]
 error-network = ⚠ [Network]
 error-stream-parse = ⚠ [Parse]
+error-rate-limited = ⚠ [Rate limited]
+error-server = ⚠ [Server error]
 error-provider = ⚠
 error-retry-hint = Type again to continue
 

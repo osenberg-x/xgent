@@ -25,6 +25,8 @@ pub fn agent_poll_system(
         MessageWriter<CompactedMessage>,
     )>,
     mut session_cleared: MessageWriter<SessionClearedMessage>,
+    mut tool_progress: MessageWriter<ToolProgressMessage>,
+    mut bounded_msg: MessageWriter<BoundedMessage>,
     mut session_list: MessageWriter<SessionListMessage>,
     mut session_restored: MessageWriter<SessionRestoredMessage>,
     // ParamSet 合并所有 MessageReader，突破 SystemParam 数量上限
@@ -168,17 +170,27 @@ pub fn agent_poll_system(
     }
 
     // 3b. drain editor 命令 channel：EditorTool → EditorCommandRequestMessage
+    // 非阻塞：抢不到锁就跳过本帧，命令留在 channel 里下帧再取（R1-10）。
     if let Some(editor_rx) = editor_cmd_rx {
-        let mut rx = editor_rx.rx.blocking_lock();
-        while let Ok(req) = rx.try_recv() {
-            editor_cmd.write(EditorCommandRequestMessage(req));
+        match editor_rx.rx.try_lock() {
+            Ok(mut rx) => {
+                while let Ok(req) = rx.try_recv() {
+                    editor_cmd.write(EditorCommandRequestMessage(req));
+                }
+            }
+            Err(_) => {
+                bevy::log::debug!("editor 命令 channel 正被异步 task 持有，跳过本帧 drain");
+            }
         }
     }
 
     // 4. 非阻塞轮询事件 channel
-    let mut event_rx = bridge.event_rx.blocking_lock();
-    // 限制每帧处理数量，避免单帧过长
+    // 同上：tokio Mutex 用 try_lock 而非 blocking_lock，避免主线程被异步 task 阻塞。
     let mut processed = 0;
+    let Ok(mut event_rx) = bridge.event_rx.try_lock() else {
+        bevy::log::debug!("agent 事件 channel 正被异步 task 持有，跳过本帧轮询");
+        return;
+    };
     while processed < 64 {
         match event_rx.try_recv() {
             Ok(ev) => {
@@ -186,6 +198,8 @@ pub fn agent_poll_system(
                 handle_agent_event(
                     ev,
                     &mut conv,
+                    &mut tool_progress,
+                    &mut bounded_msg,
                     &mut writers,
                     &mut session_cleared,
                     &mut session_restored,
@@ -209,6 +223,8 @@ pub fn agent_poll_system(
 fn handle_agent_event(
     ev: AgentEvent,
     conv: &mut Conversation,
+    tool_progress: &mut MessageWriter<ToolProgressMessage>,
+    bounded_msg: &mut MessageWriter<BoundedMessage>,
     writers: &mut ParamSet<(
         MessageWriter<DeltaMessage>,
         MessageWriter<ToolCallMessage>,
@@ -261,6 +277,26 @@ fn handle_agent_event(
                 is_error,
                 denied,
             });
+        }
+        AgentEvent::ToolProgress {
+            call_id,
+            tool_id,
+            output,
+        } => {
+            // 中间进度：不写 conv.messages（LLM 只需要最终结果），
+            // 只发 ECS Message 让 UI 实时呈现。ToolResult 才是终态。
+            bevy::log::debug!("tool progress: {tool_id} {call_id}");
+            tool_progress.write(ToolProgressMessage {
+                tool_call_id: call_id,
+                tool_id,
+                output,
+            });
+        }
+        AgentEvent::Bounded { reason, detail } => {
+            // 有界执行终止：正常结束（对话已一致），仅提示命中的界。
+            // 不写 conv.messages——这不是错误，也不是对话内容。
+            bevy::log::warn!("agent loop 有界终止: {detail}");
+            bounded_msg.write(BoundedMessage { reason, detail });
         }
         AgentEvent::ConfirmRequest(req) => {
             conv.status = ConversationStatus::Confirming;
@@ -326,7 +362,7 @@ fn handle_agent_event(
                 last_error,
             });
         }
-        AgentEvent::Error { kind, message } => {
+        AgentEvent::Error { kind, message, .. } => {
             // 错误不进 conv.messages（不发给 LLM），但持久化为独立 entry 供审计
             conv.persist_error(kind, &message);
             conv.status = ConversationStatus::Error;

@@ -153,6 +153,10 @@ pub enum ErrorKind {
     Network,
     /// SSE/JSON 解析失败，可重试
     StreamParse,
+    /// 服务端限流（HTTP 429），可重试；应尊重 `Retry-After`
+    RateLimited,
+    /// 服务端错误（HTTP 5xx），可重试
+    ServerError,
     /// provider 返回非鉴权类错误，含原始 message 供排查
     ProviderError,
 }
@@ -214,6 +218,10 @@ pub enum ChatEvent {
     Error {
         kind: ErrorKind,
         message: String,
+        /// 服务端 `Retry-After`（秒）：限流时透传给 agent 重试层，优先于
+        /// 客户端计算的退避。缺省 None。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_after_secs: Option<u64>,
     },
 }
 
@@ -427,11 +435,12 @@ mod tests {
         let e = ChatEvent::Error {
             kind: ErrorKind::Network,
             message: "boom".into(),
+            retry_after_secs: None,
         };
         let j = serde_json::to_string(&e).unwrap();
         let e2: ChatEvent = serde_json::from_str(&j).unwrap();
         assert!(
-            matches!(e2, ChatEvent::Error { kind: ErrorKind::Network, message } if message == "boom")
+            matches!(e2, ChatEvent::Error { kind: ErrorKind::Network, message, .. } if message == "boom")
         );
     }
 

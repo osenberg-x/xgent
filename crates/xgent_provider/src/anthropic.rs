@@ -243,8 +243,10 @@ impl LlmProvider for AnthropicProvider {
             .await?;
         let status = resp.status();
         if !status.is_success() {
+            let retry_after_secs = crate::provider::parse_retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
             return Err(ProviderError::Api {
+                retry_after_secs,
                 status: status.as_u16(),
                 body,
             });
@@ -298,8 +300,10 @@ impl LlmProvider for AnthropicProvider {
         })??;
         let status = resp.status();
         if !status.is_success() {
+            let retry_after_secs = crate::provider::parse_retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
             return Err(ProviderError::Api {
+                retry_after_secs,
                 status: status.as_u16(),
                 body,
             });
@@ -376,6 +380,12 @@ async fn run_anthropic_stream_with_timeout<S>(
     let mut tool_accum: std::collections::HashMap<u32, ToolUseAccum> =
         std::collections::HashMap::new();
 
+    // 接收端已丢弃时不得拉取上游（含首事件）——与 openai_compat / response_api
+    // 的守卫位置对齐，否则 abort 后仍会多读一帧（R1-2 / A4）。
+    if tx.is_closed() {
+        return;
+    }
+
     // 流开始：先发 Start（model 可能从 message_start 更新）
     let _ = tx.send(ChatEvent::Start { model }).await;
 
@@ -391,6 +401,8 @@ async fn run_anthropic_stream_with_timeout<S>(
                 .send(ChatEvent::Error {
                     kind: ErrorKind::Network,
                     message: "stream first event timeout".into(),
+
+                    retry_after_secs: None,
                 })
                 .await;
             return;
@@ -410,6 +422,11 @@ async fn run_anthropic_stream_with_timeout<S>(
     }
 
     loop {
+        // 接收端已丢弃（agent abort / daemon 取消流）时停止拉取上游 body——
+        // 否则被放弃的流继续生成并计费，正是 R1-2 要消除的失效模式（R1-4）。
+        if tx.is_closed() {
+            return;
+        }
         match timeout(idle_timeout, s.next()).await {
             Ok(Some(item)) => {
                 if !handle_anthropic_item(
@@ -430,6 +447,8 @@ async fn run_anthropic_stream_with_timeout<S>(
                     .send(ChatEvent::Error {
                         kind: ErrorKind::Network,
                         message: "stream idle timeout".into(),
+
+                        retry_after_secs: None,
                     })
                     .await;
                 return;
@@ -456,6 +475,8 @@ async fn handle_anthropic_item(
                     .send(ChatEvent::Error {
                         kind: e.to_error_kind(),
                         message: e.to_string(),
+
+                        retry_after_secs: None,
                     })
                     .await;
                 return false;
@@ -467,6 +488,8 @@ async fn handle_anthropic_item(
                 .send(ChatEvent::Error {
                     kind: e.to_error_kind(),
                     message: e.to_string(),
+
+                    retry_after_secs: None,
                 })
                 .await;
             false

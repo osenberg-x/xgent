@@ -328,6 +328,33 @@ impl WasmPlugin {
         .await
     }
 
+    /// 调用插件 `tool.preview-diff`（async WIT 调用，无 cancel 需求）。
+    pub async fn call_tool_preview_diff(
+        &self,
+        short_id: &str,
+        input_json: &str,
+    ) -> Result<String, WasmCallError> {
+        let short_id = short_id.to_string();
+        let input = input_json.to_string();
+        self.dispatch(CancellationToken::new(), move |_cancel, resp_tx| {
+            let short_id = short_id.clone();
+            let input = input.clone();
+            Box::new(move |ext: &mut Plugin, store: &mut Store<HostState>| {
+                let short_id = short_id.clone();
+                let input = input.clone();
+                Box::pin(async move {
+                    let result = ext
+                        .xgent_plugin_tool()
+                        .call_preview_diff(store, &short_id, &input)
+                        .await;
+                    let mapped = map_trap(result);
+                    let _ = resp_tx.send(mapped);
+                })
+            })
+        })
+        .await
+    }
+
     /// 调用插件 `command.run`。
     pub async fn call_command_run(
         &self,

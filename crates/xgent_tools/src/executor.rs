@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::confirm::{ConfirmDecision, ConfirmRequest};
 use crate::security::resolve_policy;
-use crate::tool::{SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult};
+use crate::tool::{SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult, ToolUpdateCallback};
 
 /// 确认回调 trait：传入确认请求，返回一个可 await 的决策接收端。
 ///
@@ -94,6 +94,9 @@ impl ToolExecutor {
     /// `ToolError::Aborted` 透传给调用方（agent loop 走 abort 路径）。
     /// 工具返回 `Ok(ToolResult{is_error:true})` 时 executor 仍返回 `Ok`
     /// （非异常失败，错误文本回灌 LLM）。
+    ///
+    /// `on_update` 为流式更新回调：转发给工具，长时工具（`run_command` 的
+    /// stdout 增量、插件工具的 `push-update`）经它把中间结果回灌调用方。
     pub async fn execute(
         &self,
         tool_id: &str,
@@ -101,6 +104,7 @@ impl ToolExecutor {
         ctx: &ToolCtx,
         signal: CancellationToken,
         confirm: &dyn ConfirmCallback,
+        on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError> {
         let tool = match self.tools.read().get(tool_id).cloned() {
             Some(t) => t,
@@ -127,11 +131,11 @@ impl ToolExecutor {
                 denied: true,
                 side_effect: None,
             }),
-            SecurityPolicy::Approved => tool.execute(input, ctx, signal, None).await,
+            SecurityPolicy::Approved => tool.execute(input, ctx, signal, on_update).await,
             SecurityPolicy::NeedsConfirmation => {
                 // 会话级 AllowAll 命中则跳过确认
                 if self.allowed_all.lock().await.contains(tool_id) {
-                    return tool.execute(input, ctx, signal, None).await;
+                    return tool.execute(input, ctx, signal, on_update).await;
                 }
                 let (old_content, new_content) = match tool.preview_diff(&input, ctx).await {
                     Some((old, new)) => (Some(old), Some(new)),
@@ -140,7 +144,7 @@ impl ToolExecutor {
                 let req = ConfirmRequest {
                     tool_id: tool_id.to_string(),
                     input: input.clone(),
-                    summary: tool.summarize(&input),
+                    summary: tool.summarize(&input).await,
                     old_content,
                     new_content,
                 };
@@ -163,10 +167,10 @@ impl ToolExecutor {
                     }
                 };
                 match decision {
-                    ConfirmDecision::Allow => tool.execute(input, ctx, signal, None).await,
+                    ConfirmDecision::Allow => tool.execute(input, ctx, signal, on_update).await,
                     ConfirmDecision::AllowAll => {
                         self.allowed_all.lock().await.insert(tool_id.to_string());
-                        tool.execute(input, ctx, signal, None).await
+                        tool.execute(input, ctx, signal, on_update).await
                     }
                     ConfirmDecision::Deny => Ok(ToolResult {
                         output: "用户拒绝".into(),
@@ -245,6 +249,7 @@ mod tests {
                 &ctx(dir.path(), Default::default()),
                 CancellationToken::new(),
                 &AutoAllow,
+                None,
             )
             .await
             .unwrap();
@@ -266,6 +271,7 @@ mod tests {
                 &ctx(dir.path(), policy(&[], &["read_file"])),
                 CancellationToken::new(),
                 &AutoAllow,
+                None,
             )
             .await
             .unwrap();
@@ -287,6 +293,7 @@ mod tests {
                 &ctx(dir.path(), policy(&["read_file"], &[])),
                 CancellationToken::new(),
                 &AutoDeny,
+                None,
             )
             .await
             .unwrap();
@@ -308,6 +315,7 @@ mod tests {
                 &ctx(dir.path(), Default::default()),
                 CancellationToken::new(),
                 &AutoAllow,
+                None,
             )
             .await
             .unwrap();
@@ -329,6 +337,7 @@ mod tests {
                 &ctx(dir.path(), Default::default()),
                 CancellationToken::new(),
                 &AutoDeny,
+                None,
             )
             .await
             .unwrap();
@@ -360,6 +369,7 @@ mod tests {
             &ctx(dir.path(), Default::default()),
             CancellationToken::new(),
             &AllowAll,
+            None,
         )
         .await
         .unwrap();
@@ -371,6 +381,7 @@ mod tests {
                 &ctx(dir.path(), Default::default()),
                 CancellationToken::new(),
                 &AutoDeny,
+                None,
             )
             .await
             .unwrap();
@@ -389,6 +400,7 @@ mod tests {
                 &ctx(dir.path(), policy(&["write_file"], &[])),
                 CancellationToken::new(),
                 &AutoDeny,
+                None,
             )
             .await
             .unwrap();
@@ -432,7 +444,7 @@ mod tests {
         fn concurrency(&self) -> Concurrency {
             Concurrency::Shared
         }
-        fn summarize(&self, _input: &Value) -> String {
+        async fn summarize(&self, _input: &Value) -> String {
             "sleep".into()
         }
         async fn execute(
@@ -440,7 +452,7 @@ mod tests {
             _input: Value,
             _ctx: &ToolCtx,
             signal: CancellationToken,
-            _on_update: Option<&ToolUpdateCallback>,
+            _on_update: Option<Arc<ToolUpdateCallback>>,
         ) -> Result<ToolResult, ToolError> {
             tokio::select! {
                 _ = signal.cancelled() => Err(ToolError::Aborted),
@@ -471,11 +483,201 @@ mod tests {
                 &ctx(dir.path(), Default::default()),
                 token,
                 &AutoAllow,
+                None,
             )
             .await;
         match r {
             Err(ToolError::Aborted) => {} // 期望
             other => panic!("期望 ToolError::Aborted，得到 {other:?}"),
         }
+    }
+
+    /// 发出流式更新的 mock 工具：执行期间调用一次 `on_update`。
+    struct StreamingTool;
+
+    #[async_trait::async_trait]
+    impl Tool for StreamingTool {
+        fn id(&self) -> &str {
+            "streaming"
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: "streaming".into(),
+                description: "mock".into(),
+                input_schema: json!({"type": "object"}),
+            }
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::Exec
+        }
+        fn concurrency(&self) -> Concurrency {
+            Concurrency::Exclusive
+        }
+        async fn summarize(&self, _input: &Value) -> String {
+            "streaming".into()
+        }
+        async fn execute(
+            &self,
+            _input: Value,
+            _ctx: &ToolCtx,
+            _signal: CancellationToken,
+            on_update: Option<Arc<ToolUpdateCallback>>,
+        ) -> Result<ToolResult, ToolError> {
+            if let Some(cb) = on_update {
+                cb(ToolResult {
+                    output: "中间结果".into(),
+                    is_error: false,
+                    denied: false,
+                    side_effect: None,
+                });
+            }
+            Ok(ToolResult {
+                output: "最终结果".into(),
+                is_error: false,
+                denied: false,
+                side_effect: None,
+            })
+        }
+    }
+
+    /// executor 必须把 `on_update` 真实转发给工具（R1-9）——
+    /// 修复前三条执行路径恒传 `None`，流式进度完全断链。
+    #[tokio::test]
+    async fn forwards_update_callback_to_tool() {
+        let exec = ToolExecutor::new(vec![Arc::new(StreamingTool)]);
+        let dir = tempfile::tempdir().unwrap();
+        let updates = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = updates.clone();
+        let cb: Arc<ToolUpdateCallback> =
+            Arc::new(move |r: ToolResult| sink.lock().unwrap().push(r.output));
+
+        let r = exec
+            .execute(
+                "streaming",
+                json!({}),
+                &ctx(dir.path(), policy(&["streaming"], &[])),
+                CancellationToken::new(),
+                &AutoDeny,
+                Some(cb),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(r.output, "最终结果");
+        assert_eq!(
+            updates.lock().unwrap().as_slice(),
+            ["中间结果".to_string()],
+            "工具的流式中间结果应到达回调"
+        );
+    }
+
+    /// edit_file 走确认流程时会先取 preview_diff，diff 应基于替换结果而非原文。
+    #[tokio::test]
+    async fn edit_file_registered_by_default_and_edits() {
+        let exec = ToolExecutor::with_defaults();
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("a.txt"), "1\n2\n3\n")
+            .await
+            .unwrap();
+        let r = exec
+            .execute(
+                "edit_file",
+                json!({"path": "a.txt", "start_line": 1, "new_content": "TWO"}),
+                &ctx(dir.path(), policy(&["edit_file"], &[])),
+                CancellationToken::new(),
+                &AutoDeny,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!r.is_error, "edit_file 应成功: {}", r.output);
+        let content = tokio::fs::read_to_string(dir.path().join("a.txt"))
+            .await
+            .unwrap();
+        assert_eq!(content, "1\nTWO\n3\n");
+        // 原文件备份应存在且保留原内容
+        let bak = crate::atomic::backup_path_for(&dir.path().join("a.txt"));
+        let bak_content = tokio::fs::read_to_string(&bak).await.unwrap();
+        assert_eq!(bak_content, "1\n2\n3\n", "备份应保留原内容");
+    }
+
+    /// edit_file 的 old_content 不匹配时不得写入。
+    #[tokio::test]
+    async fn edit_file_rejects_content_mismatch() {
+        let exec = ToolExecutor::with_defaults();
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("a.txt");
+        tokio::fs::write(&f, "1\n2\n3\n").await.unwrap();
+        let r = exec
+            .execute(
+                "edit_file",
+                json!({
+                    "path": "a.txt", "start_line": 1,
+                    "new_content": "TWO", "old_content": "NOT_THERE"
+                }),
+                &ctx(dir.path(), policy(&["edit_file"], &[])),
+                CancellationToken::new(),
+                &AutoDeny,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(r.is_error, "内容不匹配应报错");
+        assert!(
+            tokio::fs::read_to_string(&f).await.unwrap() == "1\n2\n3\n",
+            "报错时不得修改文件"
+        );
+    }
+
+    /// read_file 经 executor 传递 offset/limit（R1-3）。
+    #[tokio::test]
+    async fn read_file_honors_offset_and_limit() {
+        let exec = ToolExecutor::with_defaults();
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("a.txt"), "l0\nl1\nl2\nl3\n")
+            .await
+            .unwrap();
+        let r = exec
+            .execute(
+                "read_file",
+                json!({"path": "a.txt", "offset": 1, "limit": 2}),
+                &ctx(dir.path(), policy(&["read_file"], &[])),
+                CancellationToken::new(),
+                &AutoDeny,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!r.is_error);
+        assert_eq!(r.output, "l1\nl2");
+    }
+
+    /// read_file 超大文件输出被截断且带标记（R1-3）。
+    #[tokio::test]
+    async fn read_file_truncates_oversized_output() {
+        let exec = ToolExecutor::with_defaults();
+        let dir = tempfile::tempdir().unwrap();
+        let big = "x".repeat(crate::MAX_TOOL_OUTPUT_BYTES * 2);
+        tokio::fs::write(dir.path().join("big.txt"), &big)
+            .await
+            .unwrap();
+        let r = exec
+            .execute(
+                "read_file",
+                json!({"path": "big.txt"}),
+                &ctx(dir.path(), policy(&["read_file"], &[])),
+                CancellationToken::new(),
+                &AutoDeny,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!r.is_error);
+        assert!(
+            r.output.len() < big.len(),
+            "输出应被截断（原 {} 字节）",
+            big.len()
+        );
+        assert!(r.output.contains("已截断"), "应含截断标记");
     }
 }

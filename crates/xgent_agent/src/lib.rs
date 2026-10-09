@@ -21,8 +21,8 @@ mod bridge_tests;
 
 pub use agent_loop::agent_poll_system;
 pub use bridge::{
-    AgentBridge, AgentBridgeConfig, AgentCommand, AgentEvent, ChannelEditorCommandSink,
-    EditorCommandRx, ProviderClient,
+    AgentBridge, AgentBridgeConfig, AgentCommand, AgentEvent, BoundedReason,
+    ChannelEditorCommandSink, EditorCommandRx, ProviderClient, loop_limits,
 };
 pub use compaction::{
     CompactionError, CompactionProvider, CompactionResult, CompactionSettings, LlmCompactor,
@@ -52,6 +52,8 @@ impl Plugin for XgentAgentPlugin {
             .add_message::<DeltaMessage>()
             .add_message::<ToolCallMessage>()
             .add_message::<ToolResultMessage>()
+            .add_message::<ToolProgressMessage>()
+            .add_message::<BoundedMessage>()
             .add_message::<ConfirmRequestMessage>()
             .add_message::<ConfirmDecisionMessage>()
             .add_message::<DoneMessage>()

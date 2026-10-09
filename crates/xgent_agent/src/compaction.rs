@@ -222,7 +222,7 @@ impl LlmCompactor {
             .provider
             .chat(req)
             .await
-            .map_err(|(kind, message)| CompactionError::Provider { kind, message })?;
+            .map_err(|(kind, message, _)| CompactionError::Provider { kind, message })?;
 
         let mut summary = String::new();
         loop {
@@ -231,7 +231,7 @@ impl LlmCompactor {
                     match ev {
                         Some(ChatEvent::TextDelta { text }) => summary.push_str(&text),
                         Some(ChatEvent::Done { .. }) => break,
-                        Some(ChatEvent::Error { kind, message }) => {
+                        Some(ChatEvent::Error { kind, message, .. }) => {
                             return Err(CompactionError::Provider { kind, message });
                         }
                         Some(_) => {}

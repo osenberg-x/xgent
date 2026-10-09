@@ -56,8 +56,15 @@ pub enum ProviderError {
     #[error("network: {0}")]
     Network(String),
     /// API 返回非成功状态码
+    ///
+    /// `retry_after_secs` 承载 `Retry-After` 头（秒），服务端要求等待更久
+    /// 时应优先于客户端计算出的退避时长（限流场景下重试太快只会加剧拥塞）。
     #[error("api: status {status}, body: {body}")]
-    Api { status: u16, body: String },
+    Api {
+        status: u16,
+        body: String,
+        retry_after_secs: Option<u64>,
+    },
     /// SSE 流解析错误
     #[error("stream parse: {0}")]
     Stream(String),
@@ -71,17 +78,28 @@ impl ProviderError {
     ///
     /// UI 不感知 HTTP 状态码：401/403 → AuthFailed，其余 Api → ProviderError。
     pub fn to_error_kind(&self) -> xgent_core::chat::ErrorKind {
+        use xgent_core::chat::ErrorKind;
         match self {
-            ProviderError::Network(_) => xgent_core::chat::ErrorKind::Network,
-            ProviderError::Stream(_) => xgent_core::chat::ErrorKind::StreamParse,
-            ProviderError::Config(_) => xgent_core::chat::ErrorKind::NotConfigured,
-            ProviderError::Api { status, .. } => {
-                if *status == 401 || *status == 403 {
-                    xgent_core::chat::ErrorKind::AuthFailed
-                } else {
-                    xgent_core::chat::ErrorKind::ProviderError
-                }
-            }
+            ProviderError::Network(_) => ErrorKind::Network,
+            ProviderError::Stream(_) => ErrorKind::StreamParse,
+            ProviderError::Config(_) => ErrorKind::NotConfigured,
+            ProviderError::Api { status, .. } => match *status {
+                401 | 403 => ErrorKind::AuthFailed,
+                429 => ErrorKind::RateLimited,
+                // 5xx：服务端暂时故障，重试有意义（429 单独归类以读取 Retry-After）
+                500..=599 => ErrorKind::ServerError,
+                _ => ErrorKind::ProviderError,
+            },
+        }
+    }
+
+    /// 服务端要求的重试等待秒数（来自 `Retry-After` 头）。
+    pub fn retry_after_secs(&self) -> Option<u64> {
+        match self {
+            ProviderError::Api {
+                retry_after_secs, ..
+            } => *retry_after_secs,
+            _ => None,
         }
     }
 }
@@ -95,5 +113,51 @@ impl From<reqwest::Error> for ProviderError {
 impl From<serde_json::Error> for ProviderError {
     fn from(e: serde_json::Error) -> Self {
         ProviderError::Stream(format!("json: {e}"))
+    }
+}
+
+/// 解析响应头里的 `Retry-After`（秒数形态）。
+///
+/// 只支持 delta-seconds 形态（`Retry-After: 120`）。HTTP-date 形态
+/// （`Retry-After: Wed, 21 Oct 2026 07:28:00 GMT`）需要日期解析依赖，
+/// 项目暂不引入；解析失败返回 `None`，退回客户端计算的退避时长。
+pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    let raw = headers.get("retry-after")?.to_str().ok()?;
+    raw.trim().parse::<u64>().ok()
+}
+
+#[cfg(test)]
+mod retry_after_tests {
+    use super::parse_retry_after;
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn delta_seconds_parsed() {
+        let mut h = HeaderMap::new();
+        h.insert("retry-after", HeaderValue::from_static("120"));
+        assert_eq!(parse_retry_after(&h), Some(120));
+    }
+
+    #[test]
+    fn missing_header_is_none() {
+        assert_eq!(parse_retry_after(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn http_date_form_is_none() {
+        // 日期形态不解析（无日期依赖），退回计算退避
+        let mut h = HeaderMap::new();
+        h.insert(
+            "retry-after",
+            HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"),
+        );
+        assert_eq!(parse_retry_after(&h), None);
+    }
+
+    #[test]
+    fn garbage_is_none() {
+        let mut h = HeaderMap::new();
+        h.insert("retry-after", HeaderValue::from_static("soon"));
+        assert_eq!(parse_retry_after(&h), None);
     }
 }

@@ -53,3 +53,7 @@ fs-read = ["**"]
 fs-write = []
 network = []
 command = ["git"]
+# 允许的 git 子命令（首个非 flag 参数）。缺此声明时宿主只施加通用危险
+# 参数拦截，不限制子命令——故显式声明插件实际用到的子命令，收紧 argv 面。
+[permissions.command-args]
+git = ["diff", "log", "status", "show", "add", "commit"]

@@ -9,7 +9,7 @@ use bevy::ui::Pressed;
 use bevy::ui::ScrollPosition;
 use bevy::ui_widgets::Button;
 
-use xgent_agent::{ToolCallMessage, ToolResultMessage};
+use xgent_agent::{ToolCallMessage, ToolProgressMessage, ToolResultMessage};
 use xgent_settings::Localizer;
 
 use crate::chat_panel::MessageListMarker;
@@ -57,6 +57,7 @@ impl Plugin for ToolPanelPlugin {
             Update,
             (
                 spawn_tool_card,
+                update_tool_progress,
                 update_tool_result,
                 handle_tool_card_click,
                 apply_tool_card_visibility,
@@ -244,6 +245,27 @@ fn spawn_tool_card(
                     });
                 });
         });
+    }
+}
+
+/// 订阅 ToolProgressMessage：长时工具执行中实时刷新结果区文本。
+///
+/// 与 `ToolResultMessage` 同一 `tool_call_id`，可发多次；最终结果到达前
+/// 用户能看到增量输出（如 `run_command` 的 stdout），不必干等（R1-9）。
+fn update_tool_progress(
+    mut reader: MessageReader<ToolProgressMessage>,
+    q_cards: Query<&ToolCardMarker>,
+    mut q_result: Query<&mut Text, With<ToolResultTextMarker>>,
+) {
+    for ev in reader.read() {
+        // 仅当该 call 的卡片已存在时更新（卡片由 ToolCallMessage 创建）
+        if !q_cards.iter().any(|c| c.tool_call_id == ev.tool_call_id) {
+            continue;
+        }
+        for mut text in q_result.iter_mut() {
+            text.0 = ev.output.clone();
+            text.0.push_str("\n…");
+        }
     }
 }
 

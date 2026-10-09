@@ -6,7 +6,9 @@
 use async_trait::async_trait;
 use futures::Stream;
 use reqwest::Client;
+use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -44,6 +46,11 @@ pub struct OpenAiCompatProvider {
     /// 不设在 Client 整体上——那会杀死长流式响应；流式 body 由
     /// first/idle 超时兜底（见 run_stream）。
     request_timeout: Duration,
+    /// 额外请求头（`CustomApiProvider` 用：部分第三方接口需自定义鉴权头）。
+    ///
+    /// 非法头名/值在构造时丢弃（reqwest::header 只接受合法 ASCII），
+    /// 不因一个畸形头让整个 provider 构造失败。
+    extra_headers: HeaderMap,
 }
 
 impl OpenAiCompatProvider {
@@ -67,7 +74,46 @@ impl OpenAiCompatProvider {
             api_key,
             client,
             request_timeout: Duration::from_secs(timeout_secs),
+            extra_headers: HeaderMap::new(),
         }
+    }
+
+    /// 指定额外请求头构造（`CustomApiProvider` 经此透传用户自定义头）。
+    pub fn with_extra_headers(
+        id: String,
+        api_base: String,
+        api_key: String,
+        timeout_secs: u64,
+        extra_headers: &HashMap<String, String>,
+    ) -> Self {
+        let mut me = Self::with_timeout(id, api_base, api_key, timeout_secs);
+        for (k, v) in extra_headers {
+            match (
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                reqwest::header::HeaderValue::from_str(v),
+            ) {
+                (Ok(name), Ok(val)) => {
+                    me.extra_headers.insert(name, val);
+                }
+                _ => {
+                    eprintln!("[provider] 非法自定义请求头名或值，已忽略: {k}");
+                }
+            }
+        }
+        me
+    }
+
+    /// api_base 是否为空（自定义 API 必须显式给出 base URL）。
+    pub fn api_base_is_empty(&self) -> bool {
+        self.api_base.trim().is_empty()
+    }
+
+    /// 给请求构造器套上额外头。
+    fn apply_extra_headers(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.extra_headers.is_empty() {
+            return rb;
+        }
+        rb.headers(self.extra_headers.clone())
     }
 
     /// 用已有 Client 构造（便于测试与连接复用）。
@@ -78,6 +124,7 @@ impl OpenAiCompatProvider {
             api_key,
             client,
             request_timeout: Duration::from_secs(60),
+            extra_headers: HeaderMap::new(),
         }
     }
 
@@ -220,16 +267,20 @@ impl LlmProvider for OpenAiCompatProvider {
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
         let resp = self
-            .client
-            .get(self.models_url())
-            .bearer_auth(&self.api_key)
+            .apply_extra_headers(
+                self.client
+                    .get(self.models_url())
+                    .bearer_auth(&self.api_key),
+            )
             .timeout(self.request_timeout)
             .send()
             .await?;
         let status = resp.status();
         if !status.is_success() {
+            let retry_after_secs = crate::provider::parse_retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
             return Err(ProviderError::Api {
+                retry_after_secs,
                 status: status.as_u16(),
                 body,
             });
@@ -261,9 +312,7 @@ impl LlmProvider for OpenAiCompatProvider {
         // first/idle 超时要等流建立后才生效。timeout 只覆盖 send() 本身，
         // 响应头返回后 body 流式不受影响。
         let resp = timeout(self.request_timeout, async {
-            self.client
-                .post(self.chat_url())
-                .bearer_auth(&self.api_key)
+            self.apply_extra_headers(self.client.post(self.chat_url()).bearer_auth(&self.api_key))
                 .json(&body)
                 .send()
                 .await
@@ -277,8 +326,10 @@ impl LlmProvider for OpenAiCompatProvider {
         })??;
         let status = resp.status();
         if !status.is_success() {
+            let retry_after_secs = crate::provider::parse_retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
             return Err(ProviderError::Api {
+                retry_after_secs,
                 status: status.as_u16(),
                 body,
             });
@@ -348,6 +399,14 @@ async fn run_stream_with_timeout<S>(
     let mut s = Box::pin(stream);
     let mut st = StreamState::default();
 
+    // 接收端已关闭（agent abort → daemon 取消流 → drop 本 receiver）时，
+    // **必须终止对上游 body 的拉取**：继续读会把模型生成出来的 token 白白
+    // 消耗掉——这正是 R1-2 要消除的失效模式。break 后 `s` 被 drop，
+    // reqwest 的 body 流随之关闭，HTTP 连接断开。
+    if tx.is_closed() {
+        return;
+    }
+
     // 流开始
     let _ = tx.send(ChatEvent::Start { model }).await;
 
@@ -364,6 +423,8 @@ async fn run_stream_with_timeout<S>(
                 .send(ChatEvent::Error {
                     kind: ErrorKind::Network,
                     message: "stream first event timeout".into(),
+
+                    retry_after_secs: None,
                 })
                 .await;
             return;
@@ -377,6 +438,10 @@ async fn run_stream_with_timeout<S>(
 
     // 后续事件用 idle_timeout 逐个等待
     loop {
+        // 每轮先看接收端是否已被丢弃（见上方说明）：是则停止拉取上游。
+        if tx.is_closed() {
+            return;
+        }
         match timeout(idle_timeout, s.next()).await {
             Ok(Some(item)) => {
                 if !handle_item(item, &tx, &mut st).await {
@@ -390,6 +455,8 @@ async fn run_stream_with_timeout<S>(
                     .send(ChatEvent::Error {
                         kind: ErrorKind::Network,
                         message: "stream idle timeout".into(),
+
+                        retry_after_secs: None,
                     })
                     .await;
                 return;
@@ -464,6 +531,8 @@ async fn handle_item(
                     .send(ChatEvent::Error {
                         kind: xgent_core::chat::ErrorKind::ProviderError,
                         message: msg,
+
+                        retry_after_secs: None,
                     })
                     .await;
                 return false;
@@ -473,6 +542,8 @@ async fn handle_item(
                     .send(ChatEvent::Error {
                         kind: e.to_error_kind(),
                         message: e.to_string(),
+
+                        retry_after_secs: None,
                     })
                     .await;
                 return false;
@@ -484,6 +555,8 @@ async fn handle_item(
                 .send(ChatEvent::Error {
                     kind: e.to_error_kind(),
                     message: e.to_string(),
+
+                    retry_after_secs: None,
                 })
                 .await;
             false
@@ -1004,7 +1077,7 @@ mod tests {
         // 第二条应为 Error{Network, "stream first event timeout"}
         let ev1 = recv(&mut rx).await;
         match ev1 {
-            ChatEvent::Error { kind, message } => {
+            ChatEvent::Error { kind, message, .. } => {
                 assert_eq!(
                     kind,
                     xgent_core::chat::ErrorKind::Network,
@@ -1067,7 +1140,7 @@ mod tests {
         // 之后应因 idle 超时发 Error{Network, "stream idle timeout"}
         let ev3 = recv(&mut rx).await;
         match ev3 {
-            ChatEvent::Error { kind, message } => {
+            ChatEvent::Error { kind, message, .. } => {
                 assert_eq!(
                     kind,
                     xgent_core::chat::ErrorKind::Network,
@@ -1138,5 +1211,97 @@ mod tests {
             "第 5 个应为 Done{{Stop}}"
         );
         assert_eq!(seq.len(), 5, "正常流应恰好 5 个事件, 实际 {}", seq.len());
+    }
+}
+
+#[cfg(test)]
+mod receiver_drop_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::mpsc;
+
+    /// 构造一个"无限"上游：每次被拉取就把 `pulled` 自增。
+    ///
+    /// 关键是让"是否还在拉取上游"成为**外部可观测量**——早期版本用
+    /// `stream::iter` 预生成内存帧，接收端 drop 后 `send` 立即返回 Err，
+    /// 不加守卫也会瞬间跑完，测试对修复完全不敏感（判别力为零）。
+    fn counting_upstream(
+        pulled: Arc<AtomicUsize>,
+        frames: usize,
+    ) -> impl Stream<Item = Result<Value, ProviderError>> {
+        futures::stream::unfold(0usize, move |n| {
+            let pulled = pulled.clone();
+            async move {
+                if n >= frames {
+                    return None;
+                }
+                pulled.fetch_add(1, Ordering::SeqCst);
+                let val = json!({"choices": [{"delta": {"content": "x"}, "index": 0}]});
+                Some((Ok(val), n + 1))
+            }
+        })
+    }
+
+    /// 接收端**预先**被丢弃：上游一帧都不应被拉取。
+    ///
+    /// 无守卫时计数会等于总帧数；修复后为 0。
+    #[tokio::test]
+    async fn dropped_receiver_never_pulls_upstream() {
+        let (tx, rx) = mpsc::channel::<ChatEvent>(1);
+        drop(rx);
+
+        let pulled = Arc::new(AtomicUsize::new(0));
+        let s = counting_upstream(pulled.clone(), 1000);
+
+        run_stream_with_timeout(
+            s,
+            "m".into(),
+            tx,
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(
+            pulled.load(Ordering::SeqCst),
+            0,
+            "接收端已丢弃时不应拉取上游任何一帧（实际拉了 {} 帧）",
+            pulled.load(Ordering::SeqCst)
+        );
+    }
+
+    /// 接收端在流**中途**被丢弃：拉取计数必须停止增长。
+    #[tokio::test]
+    async fn receiver_dropped_midstream_stops_pulling() {
+        let (tx, rx) = mpsc::channel::<ChatEvent>(8);
+        let pulled = Arc::new(AtomicUsize::new(0));
+        let s = counting_upstream(pulled.clone(), 1_000_000);
+
+        let task = tokio::spawn(run_stream_with_timeout(
+            s,
+            "m".into(),
+            tx,
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        ));
+
+        // 让它跑一会儿，接收若干帧
+        for _ in 0..5 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        drop(rx);
+        let at_drop = pulled.load(Ordering::SeqCst);
+        assert!(at_drop > 0, "丢弃前应已拉取若干帧");
+
+        // 给足时间让（无守卫的）实现继续跑完剩余帧
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let after_wait = pulled.load(Ordering::SeqCst);
+
+        assert!(
+            after_wait <= at_drop + 8,
+            "接收端丢弃后拉取计数应停止（丢弃时 {at_drop} → 等待后 {after_wait}）"
+        );
+        let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
     }
 }

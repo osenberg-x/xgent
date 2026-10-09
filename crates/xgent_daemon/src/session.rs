@@ -177,6 +177,7 @@ async fn dispatch_request(
         methods::FS_NOTIFY => fs_notify(req, shared, client_id).await,
         methods::PROVIDER_LIST_MODELS => provider_list_models(req, shared).await,
         methods::PROVIDER_CHAT => provider_chat(req, shared, client_id).await,
+        methods::PROVIDER_CANCEL => provider_cancel(req, shared).await,
         _ => Response::err(
             req.id,
             RpcError::new(
@@ -438,24 +439,137 @@ async fn provider_chat(
     };
     match shared.pool.chat(chat_req, client_id, sender).await {
         Ok(stream_id) => Response::ok(req.id, serde_json::json!({"stream_id": stream_id.0})),
-        Err((kind, message)) => {
-            // 把 ErrorKind 编码进 data 字段，供 UI 侧恢复（修复之前只传 message
-            // 导致 UI 误判为 Network 触发无意义重试的 bug）
+        Err(e) => {
+            // 把 ErrorKind 与 Retry-After 一起编码进 data，供 UI 侧恢复：
+            // 只传 message 会让 UI 误判为 Network 触发无意义重试；
+            // 只传 kind 会丢掉 Retry-After，使限流退避失效（R1-7 / A3）。
             Response::err(
                 req.id,
                 RpcError::new(
                     xgent_core::proto::INTERNAL_ERROR,
-                    message,
-                    Some(serde_json::to_value(kind).unwrap_or(serde_json::Value::Null)),
+                    e.message,
+                    Some(serde_json::json!({
+                        "kind": e.kind,
+                        "retry_after_secs": e.retry_after_secs,
+                    })),
                 ),
             )
         }
     }
 }
 
+/// provider.cancel：取消指定流。
+///
+/// 取消是幂等的：流不存在（已结束或已被取消）也返回成功——用户重复按
+/// 中断、或流恰好自然结束时，都不该看到错误。
+async fn provider_cancel(req: Request, shared: &Shared) -> Response {
+    let sid = match req.params.get("stream_id").and_then(|v| v.as_u64()) {
+        Some(v) => xgent_core::ids::StreamId(v),
+        None => {
+            return Response::err(
+                req.id,
+                RpcError::new(
+                    xgent_core::proto::INVALID_PARAMS,
+                    "缺少参数 stream_id".to_string(),
+                    None,
+                ),
+            );
+        }
+    };
+    let was_active = shared.pool.cancel(sid).await;
+    Response::ok(req.id, serde_json::json!({"cancelled": was_active}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// provider.cancel：取消活跃流后该流不再登记。
+    #[tokio::test]
+    async fn provider_cancel_removes_active_stream() {
+        let cfg = crate::config_store::ConfigCoordinator::with_config(Default::default());
+        let pool = std::sync::Arc::new(crate::provider_pool::ProviderPool::new(
+            std::sync::Arc::new(tokio::sync::RwLock::new(cfg)),
+        ));
+        // 直接往登记表塞一个活跃流，验证 cancel 路径
+        let sid = xgent_core::ids::StreamId(9999);
+        let token = tokio_util::sync::CancellationToken::new();
+        pool.register_stream_for_test(sid, token.clone()).await;
+        assert_eq!(pool.active_stream_count().await, 1);
+        assert!(pool.cancel(sid).await, "取消活跃流应返回 true");
+        assert!(token.is_cancelled(), "取消令牌应被 cancel");
+        assert_eq!(pool.active_stream_count().await, 0);
+    }
+
+    /// 取消不存在的流是幂等的（返回 false，不报错）。
+    #[tokio::test]
+    async fn provider_cancel_unknown_stream_is_noop() {
+        let cfg = crate::config_store::ConfigCoordinator::with_config(Default::default());
+        let pool = crate::provider_pool::ProviderPool::new(std::sync::Arc::new(
+            tokio::sync::RwLock::new(cfg),
+        ));
+        assert!(
+            !pool.cancel(xgent_core::ids::StreamId(4242)).await,
+            "取消未知流应返回 false"
+        );
+    }
+
+    /// A3/R1-7：建流失败的错误必须把 ErrorKind 与 Retry-After **一起**
+    /// 编进 IPC error.data——只传其一都会让限流退避在跨进程后失效。
+    #[test]
+    fn provider_chat_error_carries_kind_and_retry_after() {
+        use crate::provider_pool::ProviderCallError;
+        use xgent_core::chat::ErrorKind;
+
+        let e = ProviderCallError {
+            kind: ErrorKind::RateLimited,
+            message: "429 rate limited".into(),
+            retry_after_secs: Some(7),
+        };
+        let r = Response::err(
+            1,
+            RpcError::new(
+                xgent_core::proto::INTERNAL_ERROR,
+                e.message,
+                Some(serde_json::json!({
+                    "kind": e.kind,
+                    "retry_after_secs": e.retry_after_secs,
+                })),
+            ),
+        );
+        let data = r.error.expect("应有 error");
+        assert_eq!(data.data.as_ref().unwrap()["retry_after_secs"], 7);
+        // kind 序列化后应能被 UI 侧反序列化回同一枚举
+        let raw = data.data.as_ref().unwrap()["kind"].clone();
+        let back: ErrorKind = serde_json::from_value(raw).expect("kind 应可反序列化");
+        assert_eq!(back, ErrorKind::RateLimited);
+    }
+
+    #[test]
+    fn provider_chat_error_without_retry_after_is_null() {
+        use crate::provider_pool::ProviderCallError;
+        use xgent_core::chat::ErrorKind;
+        let e = ProviderCallError {
+            kind: ErrorKind::AuthFailed,
+            message: "401".into(),
+            retry_after_secs: None,
+        };
+        let r = Response::err(
+            1,
+            RpcError::new(
+                xgent_core::proto::INTERNAL_ERROR,
+                e.message,
+                Some(serde_json::json!({
+                    "kind": e.kind,
+                    "retry_after_secs": e.retry_after_secs,
+                })),
+            ),
+        );
+        assert!(
+            r.error.unwrap().data.as_ref().unwrap()["retry_after_secs"].is_null(),
+            "无 Retry-After 时应编码为 null 而非缺字段（UI 侧按 as_u64() 取值）"
+        );
+    }
 
     #[test]
     fn outgoing_response_to_json_line() {

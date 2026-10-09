@@ -30,9 +30,17 @@ impl ProviderClient for IpcProviderClient {
     async fn chat(
         &self,
         req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
-        let params = serde_json::to_value(&req)
-            .map_err(|e| (xgent_core::chat::ErrorKind::ProviderError, e.to_string()))?;
+    ) -> Result<
+        (StreamId, mpsc::Receiver<ChatEvent>),
+        (xgent_core::chat::ErrorKind, String, Option<u64>),
+    > {
+        let params = serde_json::to_value(&req).map_err(|e| {
+            (
+                xgent_core::chat::ErrorKind::ProviderError,
+                e.to_string(),
+                None,
+            )
+        })?;
         // 先订阅通知，再发起 chat 请求——避免 daemon 推送 task 在
         // call_ok 返回前已发通知、subscribe 后到的竞态导致首批事件丢失
         // （修复 broadcast 无历史缓存致 subscribe 前通知丢失的 bug）。
@@ -41,16 +49,28 @@ impl ProviderClient for IpcProviderClient {
             .ipc
             .call(xgent_core::methods::PROVIDER_CHAT, params)
             .await
-            .map_err(|e| (xgent_core::chat::ErrorKind::Network, e.to_string()))?;
+            .map_err(|e| (xgent_core::chat::ErrorKind::Network, e.to_string(), None))?;
         let result = match resp.error {
             Some(err) => {
-                // 从 RPC error.data 恢复 ErrorKind（修复之前 call_ok 扁平化
-                // 为 anyhow String、UI 误判 Network 触发无意义重试的 bug）。
-                let kind = err
-                    .data
-                    .and_then(|d| serde_json::from_value::<xgent_core::chat::ErrorKind>(d).ok())
-                    .unwrap_or(xgent_core::chat::ErrorKind::ProviderError);
-                return Err((kind, err.message));
+                // 从 RPC error.data 恢复 ErrorKind 与 Retry-After（修复之前
+                // call_ok 扁平化为 anyhow String、UI 误判 Network 触发无意义重试）。
+                //
+                // 兼容两种 data 形态：新版是 `{kind, retry_after_secs}` 对象，
+                // 旧版 daemon 只发裸 kind 字符串。
+                let (kind, retry_after_secs) = match err.data.as_ref() {
+                    Some(v) if v.is_object() => (
+                        serde_json::from_value::<xgent_core::chat::ErrorKind>(v["kind"].clone())
+                            .unwrap_or(xgent_core::chat::ErrorKind::ProviderError),
+                        v["retry_after_secs"].as_u64(),
+                    ),
+                    Some(v) => (
+                        serde_json::from_value::<xgent_core::chat::ErrorKind>(v.clone())
+                            .unwrap_or(xgent_core::chat::ErrorKind::ProviderError),
+                        None,
+                    ),
+                    None => (xgent_core::chat::ErrorKind::ProviderError, None),
+                };
+                return Err((kind, err.message, retry_after_secs));
             }
             None => resp.result.unwrap_or(serde_json::Value::Null),
         };
@@ -58,6 +78,7 @@ impl ProviderClient for IpcProviderClient {
             (
                 xgent_core::chat::ErrorKind::StreamParse,
                 "响应缺少 stream_id".to_string(),
+                None,
             )
         })?;
         let stream_id = StreamId(stream_id);
@@ -128,5 +149,66 @@ impl ProviderClient for IpcProviderClient {
         });
 
         Ok((stream_id, chat_rx))
+    }
+
+    /// 经 `provider.cancel` 把取消送到 daemon。
+    ///
+    /// daemon 侧据 stream_id 查到该流的取消令牌并 cancel，推送 task 退出并
+    /// drop provider 接收端，上游 HTTP 请求随之取消——用户按中断后不再产生
+    /// token。取消幂等：流已结束也不报错（R1-2）。
+    async fn cancel(&self, stream_id: StreamId) {
+        let params = serde_json::json!({ "stream_id": stream_id.0 });
+        if let Err(e) = self
+            .ipc
+            .call_ok(xgent_core::methods::PROVIDER_CANCEL, params)
+            .await
+        {
+            tracing::warn!(stream_id = stream_id.0, "取消流失败: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use xgent_core::chat::ErrorKind;
+    use xgent_core::proto::RpcError;
+
+    fn err_with_data(data: serde_json::Value) -> xgent_core::proto::Response {
+        xgent_core::proto::Response::err(
+            1,
+            RpcError::new(xgent_core::proto::INTERNAL_ERROR, "boom", Some(data)),
+        )
+    }
+
+    /// A3/R1-7：daemon 把 `{kind, retry_after_secs}` 编进 error.data，
+    /// UI 侧必须能把两者都还原出来——否则 Retry-After 在 IPC 边界被丢弃。
+    #[test]
+    fn rpc_error_data_object_yields_kind_and_retry_after() {
+        let r = err_with_data(serde_json::json!({
+            "kind": "rateLimited",
+            "retry_after_secs": 7,
+        }));
+        let d = r.error.unwrap().data.unwrap();
+        let kind: ErrorKind = serde_json::from_value(d["kind"].clone()).unwrap();
+        assert_eq!(kind, ErrorKind::RateLimited);
+        assert_eq!(d["retry_after_secs"].as_u64(), Some(7));
+    }
+
+    /// 兼容旧版 daemon：只发裸 kind 字符串。
+    #[test]
+    fn rpc_error_data_bare_kind_still_parses() {
+        let r = err_with_data(serde_json::json!("rateLimited"));
+        let d = r.error.unwrap().data.unwrap();
+        let kind: ErrorKind = serde_json::from_value(d).unwrap();
+        assert_eq!(kind, ErrorKind::RateLimited);
+    }
+
+    #[test]
+    fn rpc_error_data_null_yields_provider_error() {
+        let r = xgent_core::proto::Response::err(
+            1,
+            RpcError::new(xgent_core::proto::INTERNAL_ERROR, "boom", None),
+        );
+        assert!(r.error.unwrap().data.is_none());
     }
 }

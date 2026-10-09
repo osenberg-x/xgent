@@ -105,6 +105,29 @@ pub struct ToolResultMessage {
     pub denied: bool,
 }
 
+/// 工具执行中的中间进度（agent → UI）。
+///
+/// 与 [`ToolResultMessage`] 同一 `tool_call_id`，但可发多次：
+/// 长时工具经 `ToolUpdateCallback` 推送中间文本，UI 实时呈现而不必等结束。
+#[derive(Clone, Debug, Message)]
+pub struct ToolProgressMessage {
+    /// 对应 ToolCallMessage.tool_call_id
+    pub tool_call_id: String,
+    pub tool_id: String,
+    /// 中间结果文本
+    pub output: String,
+}
+
+/// 有界执行终止（agent → UI）。
+///
+/// 循环因命中迭代/ token 上限而正常停止时发出，UI 提示命中的界。
+/// 这不是错误：对话状态一致，用户发下一条消息即可继续。
+#[derive(Clone, Debug, Message)]
+pub struct BoundedMessage {
+    pub reason: crate::bridge::BoundedReason,
+    pub detail: String,
+}
+
 /// 需要用户确认（agent → UI，触发弹窗）。
 #[derive(Message)]
 pub struct ConfirmRequestMessage(pub ConfirmRequest);

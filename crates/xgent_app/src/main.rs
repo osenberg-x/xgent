@@ -15,7 +15,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use clap::Parser;
 use xgent_agent::bridge::{AgentBridge, AgentBridgeConfig};
-use xgent_context::{ContextHub, OnDemandContextProvider};
+use xgent_context::ContextHub;
 use xgent_plugin::{PluginHost, PluginHostProxy, WasmHost};
 use xgent_plugin_host::{PluginEventRx, PluginHostResource, register_proxy_impls};
 use xgent_settings_core::paths::{daemon_socket_path, plugins_dir};
@@ -100,13 +100,28 @@ fn main() {
     let editor_sink = Arc::new(xgent_agent::ChannelEditorCommandSink::new(editor_cmd_tx));
     let editor_tool = xgent_tools::EditorTool::new(editor_sink);
     executor.register(Arc::new(editor_tool));
-    // ContextHub 包装内置 OnDemandContextProvider + 动态插件 provider。
+    // ContextHub 包装内置 provider + 动态插件 provider。
     // 作为 Arc<dyn ContextProvider> 注入 bridge（agent 无感于内置 vs 插件）。
+    //
+    // 内置 provider 按项目配置的 context_strategy 选择（R2-4）。无实现的
+    // 策略显式报错而非静默回退：静默回退会让误配置的项目看起来完全正常。
+    let project_config_for_ctx = ProjectConfigStore::load(&project_root).unwrap_or_default();
+    let builtin_ctx: Arc<dyn xgent_context::ContextProvider> =
+        match xgent_context::build_context_provider(
+            project_config_for_ctx.context_strategy,
+            project_root.clone(),
+        ) {
+            xgent_context::BuiltContextProvider::Ready(p) => Arc::from(p),
+            xgent_context::BuiltContextProvider::Unsupported(s) => {
+                tracing::error!(
+                    strategy = ?s,
+                    "context_strategy 尚无实现，已中止启动（不静默回退到其他策略）。                     可用策略：on_demand"
+                );
+                std::process::exit(2);
+            }
+        };
     let context_hub = Arc::new(ContextHub::default());
-    context_hub.set_builtin(vec![
-        Arc::new(OnDemandContextProvider::new(project_root.clone()))
-            as Arc<dyn xgent_context::ContextProvider>,
-    ]);
+    context_hub.set_builtin(vec![builtin_ctx]);
     let context = context_hub.clone() as Arc<dyn xgent_context::ContextProvider>;
     // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model 与重试配置）
     let global_config = GlobalConfigStore::load().unwrap_or_default();
@@ -156,6 +171,9 @@ fn main() {
         compaction: Some(compactor),
         context_window: 128_000,
         compaction_settings: xgent_agent::CompactionSettings::default(),
+        // 有界执行：防止 LLM 反复请求同一 tool_call 导致无限执行与无限计费（R1-1）
+        max_tool_rounds: Some(xgent_agent::loop_limits::MAX_TOOL_ROUNDS),
+        max_tokens_per_turn: Some(xgent_agent::loop_limits::MAX_TOKENS_PER_TURN),
     });
 
     // 通知订阅端（fs/config 桥接用）

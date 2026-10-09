@@ -62,6 +62,10 @@ interface tool {
     // 插件未实现时宿主回退到默认摘要。
     summarize: func(tool-id: string, input: string) -> string;
 
+    // 为确认弹窗提供 diff 数据（§5.3）。返回 JSON 字符串 {"old": "...", "new": "..."}；
+    // 插件返回空串表示无 diff（如只读工具），宿主退化为纯文本 summary。
+    preview-diff: func(tool-id: string, input: string) -> string;
+
     variant tool-error {
         failed(string),
         aborted,

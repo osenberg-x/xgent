@@ -22,24 +22,34 @@ use xgent_settings_core::{ProviderConfig, ProviderKind};
 ///
 /// `id` 为 providers map 的 key（如 `"openai"`、`"deepseek"`），作为 provider 标识。
 /// 据 [`ProviderKind`] 选择适配器；Ollama 兼容模式复用 `OpenAiCompatProvider`。
+///
+/// API Key 经 [`xgent_settings_core::keychain::resolve_api_key`] 解析：OS 凭据
+/// 存储优先，缺失时回退 `cfg.api_key`（TOML）。TOML 值永不被清除。
 pub fn build_provider(id: &str, cfg: &ProviderConfig) -> Box<dyn LlmProvider> {
+    let api_key = xgent_settings_core::keychain::resolve_api_key(id, &cfg.api_key);
     match cfg.kind {
         ProviderKind::OpenAiCompat | ProviderKind::Ollama => {
             Box::new(OpenAiCompatProvider::with_timeout(
                 id.to_string(),
                 cfg.api_base.clone(),
-                cfg.api_key.clone(),
+                api_key,
                 cfg.timeout_secs,
             ))
         }
-        ProviderKind::ResponseApi => Box::new(ResponseApiProvider::new(id.to_string())),
+        ProviderKind::ResponseApi => Box::new(ResponseApiProvider::with_config(
+            id.to_string(),
+            cfg,
+            api_key,
+        )),
         ProviderKind::Anthropic => Box::new(AnthropicProvider::with_timeout(
             id.to_string(),
             cfg.api_base.clone(),
-            cfg.api_key.clone(),
+            api_key,
             cfg.timeout_secs,
         )),
-        ProviderKind::Custom => Box::new(CustomApiProvider::new(id.to_string())),
+        ProviderKind::Custom => {
+            Box::new(CustomApiProvider::with_config(id.to_string(), cfg, api_key))
+        }
     }
 }
 

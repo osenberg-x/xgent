@@ -71,6 +71,8 @@ error-not-configured = ⚠ [未配置]
 error-auth-failed = ⚠ [鉴权失败]
 error-network = ⚠ [网络]
 error-stream-parse = ⚠ [解析]
+error-rate-limited = ⚠ [限流]
+error-server = ⚠ [服务端错误]
 error-provider = ⚠
 error-retry-hint = 重新输入可继续对话
 

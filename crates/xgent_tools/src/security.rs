@@ -12,15 +12,15 @@ use xgent_settings_core::project::ToolPolicyConfig;
 ///
 /// 决议顺序：
 /// 1. `policy.denied` 命中 → [`SecurityPolicy::Denied`]
-/// 2. `policy.approved` 命中 → [`SecurityPolicy::Approved`]
-/// 3. `tool.approval_for(input)` 动态 tier（保留供未来更严格判定）
-/// 4. 按 tier 推导默认：
+/// 2. `policy.approved` 命中 → 但动态 tier 更危险时仍退回需确认
+/// 3. `tool.approval_for(input)` 动态 tier
+/// 4. 按 tier 推导默认策略：
 ///    - [`ToolTier::UiOnly`] → [`SecurityPolicy::Approved`]（仅 UI 状态变更，无副作用）
-///    - `Read`/`Write`/`Exec` → [`SecurityPolicy::NeedsConfirmation`]（MVP 默认全需确认）
+///    - `Read`/`Write`/`Exec`/`Dangerous` → [`SecurityPolicy::NeedsConfirmation`]
 ///
 /// `tool` 参数用于调用 `approval_for`；`tier` 为工具静态分层（由调用方
-/// 传入 `tool.tier()`），保留为显式参数便于未来在 yolo 模式下按 tier
-/// 自动批准 Read 工具。
+/// 传入 `tool.tier()`），两者经 `severity()` 比较：动态 tier 更高即视为
+/// "更危险"，配置 approved 也退回需确认（`run_command` 命中危险模式即此路径）。
 pub fn resolve_policy(
     tool_id: &str,
     tier: ToolTier,
@@ -55,7 +55,9 @@ pub fn resolve_policy(
     };
     match final_tier {
         ToolTier::UiOnly => SecurityPolicy::Approved,
-        ToolTier::Read | ToolTier::Write | ToolTier::Exec => SecurityPolicy::NeedsConfirmation,
+        ToolTier::Read | ToolTier::Write | ToolTier::Exec | ToolTier::Dangerous => {
+            SecurityPolicy::NeedsConfirmation
+        }
     }
 }
 
@@ -65,6 +67,7 @@ mod tests {
     use crate::tool::{Concurrency, ToolCtx, ToolError, ToolResult};
     use async_trait::async_trait;
     use serde_json::json;
+    use std::sync::Arc;
     use xgent_core::chat::ToolSchema;
 
     /// 测试用工具：tier 可配置，approval_for 可 override。
@@ -95,7 +98,7 @@ mod tests {
         fn concurrency(&self) -> Concurrency {
             Concurrency::Shared
         }
-        fn summarize(&self, _input: &Value) -> String {
+        async fn summarize(&self, _input: &Value) -> String {
             "mock".into()
         }
         async fn execute(
@@ -103,7 +106,7 @@ mod tests {
             _input: Value,
             _ctx: &ToolCtx,
             _signal: tokio_util::sync::CancellationToken,
-            _on_update: Option<&crate::tool::ToolUpdateCallback>,
+            _on_update: Option<Arc<crate::tool::ToolUpdateCallback>>,
         ) -> Result<ToolResult, ToolError> {
             Ok(ToolResult {
                 output: "ok".into(),
@@ -213,7 +216,7 @@ mod tests {
             let tool_id = match tier {
                 ToolTier::Read => "read_file",
                 ToolTier::Write => "write_file",
-                ToolTier::Exec => "run_command",
+                ToolTier::Exec | ToolTier::Dangerous => "run_command",
                 ToolTier::UiOnly => "editor",
             };
             let tool = MockTool {
@@ -243,6 +246,118 @@ mod tests {
                 "tier {tier:?} 默认应为 NeedsConfirmation"
             );
         }
+    }
+
+    /// 按输入动态判定的 mock：命令含 "rm -rf" 时返回 `Dangerous`，
+    /// 否则返回静态 tier。复刻 `RunCommand::approval_for` 的输入敏感性。
+    struct DangerAwareTool {
+        id: &'static str,
+        tier: ToolTier,
+    }
+
+    #[async_trait]
+    impl Tool for DangerAwareTool {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: self.id.into(),
+                description: "mock".into(),
+                input_schema: json!({"type": "object"}),
+            }
+        }
+        fn tier(&self) -> ToolTier {
+            self.tier
+        }
+        fn approval_for(&self, input: &Value) -> ToolTier {
+            if input["command"]
+                .as_str()
+                .is_some_and(|c| c.contains("rm -rf"))
+            {
+                ToolTier::Dangerous
+            } else {
+                self.tier
+            }
+        }
+        fn concurrency(&self) -> Concurrency {
+            Concurrency::Shared
+        }
+        async fn summarize(&self, _input: &Value) -> String {
+            "mock".into()
+        }
+        async fn execute(
+            &self,
+            _input: Value,
+            _ctx: &ToolCtx,
+            _signal: tokio_util::sync::CancellationToken,
+            _on_update: Option<Arc<crate::tool::ToolUpdateCallback>>,
+        ) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                output: "ok".into(),
+                is_error: false,
+                denied: false,
+                side_effect: None,
+            })
+        }
+    }
+
+    /// `Dangerous` tier（工具对特定输入判定高危）**配置 approved 也退回需确认**——
+    /// 动态升级分支必须真的生效，否则危险命令检测形同虚设（R1-5）。
+    ///
+    /// 修复前 `run_command` 命中与未命中都返回 `Exec`，`severity()` 相等使
+    /// 升级分支不可达。
+    #[test]
+    fn dangerous_input_forces_confirmation_even_when_approved() {
+        let tool = DangerAwareTool {
+            id: "run_command",
+            tier: ToolTier::Exec,
+        };
+        let p_approved = policy(&["run_command"], &[]);
+        // 危险命令：配置 approved 仍需确认
+        assert_eq!(
+            resolve_policy(
+                "run_command",
+                ToolTier::Exec,
+                &json!({"command": "rm -rf /"}),
+                &tool,
+                &p_approved
+            ),
+            SecurityPolicy::NeedsConfirmation,
+            "配置 approved 时危险命令仍需确认"
+        );
+        // 普通命令：同样配置下自动放行（证明升级分支只对危险输入生效）
+        assert_eq!(
+            resolve_policy(
+                "run_command",
+                ToolTier::Exec,
+                &json!({"command": "cargo check"}),
+                &tool,
+                &p_approved
+            ),
+            SecurityPolicy::Approved,
+            "普通命令在 approved 配置下自动放行"
+        );
+    }
+
+    /// `Dangerous` 作为静态 tier（工具整体高危）默认需确认。
+    #[test]
+    fn dangerous_static_tier_needs_confirmation() {
+        let tool = MockTool {
+            id: "x",
+            tier: ToolTier::Dangerous,
+            approval: None,
+        };
+        assert_eq!(
+            resolve_policy(
+                "x",
+                ToolTier::Dangerous,
+                &json!({}),
+                &tool,
+                &ToolPolicyConfig::default()
+            ),
+            SecurityPolicy::NeedsConfirmation
+        );
     }
 
     /// UiOnly tier 默认为 Approved（不走 NeedsConfirmation），

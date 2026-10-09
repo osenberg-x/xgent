@@ -61,6 +61,12 @@ pub struct ProviderConfig {
     /// API Key（MVP 明文存 TOML，未来考虑 keychain，见 D-02）
     #[serde(default)]
     pub api_key: String,
+    /// 额外请求头（`CustomApiProvider` 用：`key` → `value`）。
+    ///
+    /// 部分第三方接口需要自定义鉴权头（如 `api-key`、`x-api-token`），
+    /// 标准 `Authorization: Bearer` 覆盖不到。
+    #[serde(default)]
+    pub extra_headers: HashMap<String, String>,
     /// 模型覆盖（通用名 → 实际模型 id）
     #[serde(default)]
     pub model_overrides: HashMap<String, String>,
@@ -97,6 +103,7 @@ impl Default for ProviderConfig {
             kind: ProviderKind::OpenAiCompat,
             api_base: String::new(),
             api_key: String::new(),
+            extra_headers: HashMap::new(),
             model_overrides: HashMap::new(),
             timeout_secs: default_timeout_secs(),
             max_retries: default_max_retries(),

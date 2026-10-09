@@ -10,7 +10,8 @@ set -euo pipefail
 
 PROFILE="${1:-debug}"
 TARGET="wasm32-wasip2"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 脚本位于仓库根，ROOT 即仓库根（原为 dirname/.. 会解析到仓库的父目录）
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 build_one() {
     local crate="$1"      # crate 名（crates/<crate>）

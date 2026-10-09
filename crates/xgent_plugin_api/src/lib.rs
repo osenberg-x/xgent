@@ -103,6 +103,15 @@ pub trait Extension: Send + Sync {
         Err("context retrieve not implemented".into())
     }
 
+    /// 为确认弹窗提供 diff（§5.3）。
+    ///
+    /// 默认返回空串（无 diff）；写类插件 override 返回
+    /// `{"old": "...", "new": "..."}` 的 JSON。
+    fn preview_diff(&mut self, tool_id: &str, input: &str) -> String {
+        let _ = (tool_id, input);
+        String::new()
+    }
+
     /// 通知文件变更（默认空实现，插件可 override 增量更新）。
     fn on_file_changed(&mut self, provider_id: &str, path: Option<&str>) {
         let _ = (provider_id, path);
@@ -169,6 +178,10 @@ impl ToolGuest for Component {
 
     fn summarize(tool_id: String, input: String) -> String {
         with_extension(|e| e.summarize(&tool_id, &input))
+    }
+
+    fn preview_diff(tool_id: String, input: String) -> String {
+        with_extension(|e| e.preview_diff(&tool_id, &input))
     }
 }
 

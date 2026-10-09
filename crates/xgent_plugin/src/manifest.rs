@@ -73,8 +73,17 @@ pub struct PermissionsManifest {
     pub fs_write: Vec<String>,
     #[serde(default)]
     pub network: Vec<String>,
+    /// 允许执行的程序名（精确匹配，含可执行文件名本身）。
     #[serde(default)]
     pub command: Vec<String>,
+    /// 按程序限定允许的参数：`program -> [允许的子命令/flag]`。
+    ///
+    /// §9.2 的 argv 注入面：只校验 program 名时，插件拿到 `git` 即可用
+    /// `--upload-pack=<任意命令>` 执行任意程序。白名单把"能跑这个程序"
+    /// 细化为"只能跑这些子命令"。程序不在此表中时，宿主只施加
+    /// `deny_arg` 的通用危险参数拦截，不做细粒度限制。
+    #[serde(default, rename = "command-args")]
+    pub command_args: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// 工具清单条目。
@@ -204,12 +213,25 @@ id = "git_history"
 [permissions]
 fs-read = ["**"]
 command = ["git"]
+command-args = { git = ["diff", "log", "status", "show", "add", "commit"] }
 "#;
         let m = PluginManifest::from_toml(toml).expect("解析成功");
         assert_eq!(m.id, "git");
         assert_eq!(m.tools.len(), 1);
         assert_eq!(m.tools[0].id, "git_diff");
         assert_eq!(m.permissions.command, vec!["git".to_string()]);
+        // command-args 解析为按程序的白名单
+        assert_eq!(
+            m.permissions.command_args.get("git"),
+            Some(&vec![
+                "diff".to_string(),
+                "log".to_string(),
+                "status".to_string(),
+                "show".to_string(),
+                "add".to_string(),
+                "commit".to_string()
+            ])
+        );
     }
 
     #[test]

@@ -44,7 +44,10 @@ impl ProviderClient for MockProvider {
     async fn chat(
         &self,
         _req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+    ) -> Result<
+        (StreamId, mpsc::Receiver<ChatEvent>),
+        (xgent_core::chat::ErrorKind, String, Option<u64>),
+    > {
         let (tx, rx) = mpsc::channel(8);
         let n = self
             .call_count
@@ -150,6 +153,8 @@ fn test_app_with_retry_provider(
         compaction: None,
         context_window: 128_000,
         compaction_settings: crate::compaction::CompactionSettings::default(),
+        max_tool_rounds: Some(crate::bridge::loop_limits::MAX_TOOL_ROUNDS),
+        max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -216,7 +221,7 @@ impl Tool for EchoTool {
     fn concurrency(&self) -> Concurrency {
         Concurrency::Shared
     }
-    fn summarize(&self, _input: &Value) -> String {
+    async fn summarize(&self, _input: &Value) -> String {
         "echo".into()
     }
     async fn execute(
@@ -224,7 +229,7 @@ impl Tool for EchoTool {
         input: Value,
         _ctx: &ToolCtx,
         _signal: tokio_util::sync::CancellationToken,
-        _on_update: Option<&ToolUpdateCallback>,
+        _on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError> {
         Ok(ToolResult {
             output: input.to_string(),
@@ -285,6 +290,7 @@ fn error_message_propagates() {
     let mut app = test_app(vec![ChatEvent::Error {
         kind: xgent_core::chat::ErrorKind::ProviderError,
         message: "boom".into(),
+        retry_after_secs: None,
     }]);
     app.world_mut().write_message(UserInputMessage {
         text: "hi".into(),
@@ -481,7 +487,10 @@ impl ProviderClient for RetryMockProvider {
     async fn chat(
         &self,
         _req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+    ) -> Result<
+        (StreamId, mpsc::Receiver<ChatEvent>),
+        (xgent_core::chat::ErrorKind, String, Option<u64>),
+    > {
         let (tx, rx) = mpsc::channel(8);
         let n = self
             .call_count
@@ -551,6 +560,7 @@ fn retryable_error_retries_then_succeeds() {
         vec![ChatEvent::Error {
             kind: xgent_core::chat::ErrorKind::Network,
             message: "conn reset".into(),
+            retry_after_secs: None,
         }],
         vec![
             ChatEvent::TextDelta {
@@ -611,6 +621,7 @@ fn non_retryable_error_fails_immediately() {
     let provider = Arc::new(RetryMockProvider::new(vec![vec![ChatEvent::Error {
         kind: xgent_core::chat::ErrorKind::AuthFailed,
         message: "bad key".into(),
+        retry_after_secs: None,
     }]]));
     let (mut app, _root) = test_app_with_retry_provider(
         provider as Arc<dyn crate::bridge::ProviderClient>,
@@ -642,6 +653,7 @@ fn infinite_retry_can_be_aborted() {
     let provider = Arc::new(RetryMockProvider::new(vec![vec![ChatEvent::Error {
         kind: xgent_core::chat::ErrorKind::Network,
         message: "always fail".into(),
+        retry_after_secs: None,
     }]]));
     let (mut app, _root) = test_app_with_retry_provider(
         provider as Arc<dyn crate::bridge::ProviderClient>,
@@ -741,6 +753,8 @@ fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) ->
         // 极小窗口 + 默认 80% 阈值 → 8 token 即触发
         context_window: 10,
         compaction_settings: crate::compaction::CompactionSettings::default(),
+        max_tool_rounds: Some(crate::bridge::loop_limits::MAX_TOOL_ROUNDS),
+        max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -822,7 +836,10 @@ impl ProviderClient for StreamingSteerMockProvider {
     async fn chat(
         &self,
         _req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)> {
+    ) -> Result<
+        (StreamId, mpsc::Receiver<ChatEvent>),
+        (xgent_core::chat::ErrorKind, String, Option<u64>),
+    > {
         let (tx, rx) = mpsc::channel(8);
         let steer_seen = self.steer_seen.clone();
         std::thread::spawn(move || {
@@ -927,8 +944,10 @@ fn compaction_preserves_system_prompt_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self
@@ -1155,8 +1174,10 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             // 首次：文本 + tool_call；后续：无 tool_call 正常停止
@@ -1292,8 +1313,10 @@ fn abort_then_new_conversation_still_streams() {
         async fn chat(
             &self,
             _req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             let (tx, rx) = mpsc::channel(8);
             let n = self
                 .call_count
@@ -1516,8 +1539,10 @@ fn multi_tool_calls_single_assistant_message() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self.captured.lock().len() - 1;
@@ -1779,8 +1804,10 @@ fn steering_interrupt_preserves_assistant_text_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let steer_seen = self.steer_seen.clone();
@@ -1901,8 +1928,10 @@ fn retry_preserves_partial_assistant_text_in_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self.captured.lock().len() - 1;
@@ -2068,8 +2097,10 @@ fn normal_completion_backfills_assistant_text_to_req() {
         async fn chat(
             &self,
             req: ChatRequest,
-        ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>
-        {
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
             self.captured.lock().push(req.clone());
             let (tx, rx) = mpsc::channel(8);
             let n = self.captured.lock().len() - 1;
@@ -2159,4 +2190,363 @@ fn normal_completion_backfills_assistant_text_to_req() {
         "FollowUp 后的 req 应含上一轮 assistant 文本（修复前 req 侧丢失，LLM 看不到自己刚说的话）reqs={}",
         reqs.len()
     );
+}
+
+/// 永远返回 tool_call 的 mock provider（模拟 LLM 陷入工具调用死循环）。
+struct PerpetualToolProvider {
+    call_count: std::sync::atomic::AtomicU32,
+}
+
+#[async_trait]
+impl ProviderClient for PerpetualToolProvider {
+    async fn chat(
+        &self,
+        _req: ChatRequest,
+    ) -> Result<
+        (StreamId, mpsc::Receiver<ChatEvent>),
+        (xgent_core::chat::ErrorKind, String, Option<u64>),
+    > {
+        let (tx, rx) = mpsc::channel(8);
+        // 每次都要求执行同一个只读工具 → 无界循环（R1-1）
+        let _ = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let evs = vec![
+                    ChatEvent::ToolCallStart {
+                        index: 0,
+                        id: "call_x".into(),
+                        name: "read_file".into(),
+                    },
+                    ChatEvent::ToolCallEnd {
+                        index: 0,
+                        args: serde_json::json!({"path": "nope.txt"}),
+                    },
+                    ChatEvent::Done {
+                        reason: xgent_core::chat::StopReason::ToolUse,
+                        usage: TokenUsage::default(),
+                    },
+                ];
+                for ev in evs {
+                    if tx.send(ev).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        });
+        Ok((StreamId(1), rx))
+    }
+}
+
+/// 有界执行（R1-1）：LLM 反复请求同一 tool_call 时，循环必须在
+/// `max_tool_rounds` 处停止并发出 `Bounded` 事件，而不是无限执行工具。
+#[test]
+fn tool_loop_stops_at_iteration_ceiling() {
+    let (mut app, _root) = test_app_with_retry_provider(
+        Arc::new(PerpetualToolProvider {
+            call_count: std::sync::atomic::AtomicU32::new(0),
+        }),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig {
+            approved: vec!["read_file".into()],
+            denied: Vec::new(),
+        },
+        crate::bridge::RetryConfig::default(),
+    );
+    // 把上限压到 3 轮，便于断言
+    app.world_mut()
+        .resource_mut::<AgentBridge>()
+        .set_max_tool_rounds(Some(3));
+
+    // 在发消息之前挂收集系统
+    let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<BoundedMessage>::new()));
+    let sink = collected.clone();
+    app.add_systems(
+        bevy::app::Update,
+        move |mut r: bevy::prelude::MessageReader<BoundedMessage>| {
+            sink.lock().unwrap().extend(r.read().cloned());
+        },
+    );
+
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..300 {
+        app.update();
+    }
+
+    let got = collected.lock().unwrap().clone();
+    assert_eq!(
+        got.len(),
+        1,
+        "命中迭代上限时应恰好发一次 Bounded 事件（实际 {}）",
+        got.len()
+    );
+    assert_eq!(got[0].reason, crate::bridge::BoundedReason::IterationLimit);
+    assert!(
+        got[0].detail.contains('3'),
+        "提示应含具体上限：{}",
+        got[0].detail
+    );
+    // 达到上限后对话回到 Idle（正常终止，不是错误）
+    let conv = app.world().resource::<crate::conversation::Conversation>();
+    assert_eq!(conv.status, ConversationStatus::Idle);
+}
+
+/// 累计 token 闸：usage 累加超过 `max_tokens_per_turn` 时停止。
+#[test]
+fn tool_loop_stops_at_token_ceiling() {
+    struct HeavyUsageProvider;
+    #[async_trait]
+    impl ProviderClient for HeavyUsageProvider {
+        async fn chat(
+            &self,
+            _req: ChatRequest,
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
+            let (tx, rx) = mpsc::channel(8);
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async move {
+                    let evs = vec![
+                        ChatEvent::ToolCallStart {
+                            index: 0,
+                            id: "call_y".into(),
+                            name: "read_file".into(),
+                        },
+                        ChatEvent::ToolCallEnd {
+                            index: 0,
+                            args: serde_json::json!({"path": "nope.txt"}),
+                        },
+                        ChatEvent::Done {
+                            reason: xgent_core::chat::StopReason::ToolUse,
+                            // 每轮 100 token
+                            usage: TokenUsage {
+                                prompt: 60,
+                                completion: 40,
+                            },
+                        },
+                    ];
+                    for ev in evs {
+                        if tx.send(ev).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            });
+            Ok((StreamId(1), rx))
+        }
+    }
+
+    let (mut app, _root) = test_app_with_retry_provider(
+        Arc::new(HeavyUsageProvider),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig {
+            approved: vec!["read_file".into()],
+            denied: Vec::new(),
+        },
+        crate::bridge::RetryConfig::default(),
+    );
+    // 迭代上限放到很大，确保是 token 闸先命中
+    {
+        let bridge = app.world_mut().resource_mut::<AgentBridge>();
+        bridge.set_max_tool_rounds(Some(1000));
+        bridge.set_max_tokens_per_turn(Some(150));
+    }
+    let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<BoundedMessage>::new()));
+    let sink = collected.clone();
+    app.add_systems(
+        bevy::app::Update,
+        move |mut r: bevy::prelude::MessageReader<BoundedMessage>| {
+            sink.lock().unwrap().extend(r.read().cloned());
+        },
+    );
+
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..300 {
+        app.update();
+    }
+    let got = collected.lock().unwrap().clone();
+    assert_eq!(got.len(), 1, "命中 token 上限应发一次 Bounded 事件");
+    assert_eq!(got[0].reason, crate::bridge::BoundedReason::TokenLimit);
+    assert!(
+        got[0].detail.contains("150"),
+        "提示应含 token 上限：{}",
+        got[0].detail
+    );
+}
+
+/// abort 时经 ProviderClient::cancel 取消上游流（R1-2）。
+#[test]
+fn abort_cancels_upstream_stream() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct CancelRecordingProvider {
+        cancelled: Arc<AtomicBool>,
+        chat_started: Arc<AtomicBool>,
+    }
+    #[async_trait]
+    impl ProviderClient for CancelRecordingProvider {
+        async fn chat(
+            &self,
+            _req: ChatRequest,
+        ) -> Result<
+            (StreamId, mpsc::Receiver<ChatEvent>),
+            (xgent_core::chat::ErrorKind, String, Option<u64>),
+        > {
+            self.chat_started.store(true, Ordering::SeqCst);
+            let (tx, rx) = mpsc::channel(8);
+            // 永不主动结束（tx 由这条线程永久持有）：只有 cancel 能终止本流，
+            // 故测试不依赖任何超时——负载高时也不会竞态失败。
+            std::thread::spawn(move || {
+                // 永久持有 tx：只有 cancel 能终止本流，测试不依赖任何超时。
+                // tx 由这条线程持有到测试进程结束，故无需显式 drop。
+                let _keep_open = tx;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3600));
+                }
+            });
+            Ok((StreamId(42), rx))
+        }
+        async fn cancel(&self, stream_id: StreamId) {
+            assert_eq!(stream_id.0, 42, "取消的应是本流的 stream_id");
+            self.cancelled.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let chat_started = Arc::new(AtomicBool::new(false));
+    let (mut app, _root) = test_app_with_retry_provider(
+        Arc::new(CancelRecordingProvider {
+            cancelled: cancelled.clone(),
+            chat_started: chat_started.clone(),
+        }),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig::default(),
+        crate::bridge::RetryConfig::default(),
+    );
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    // 等异步 task 真正建流（current_cancel 已设置）再中断，否则 abort 无对象
+    for _ in 0..2000 {
+        app.update();
+        if chat_started.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(chat_started.load(Ordering::SeqCst), "provider 应已建流");
+    app.world_mut().write_message(AbortMessage);
+    app.update();
+    for _ in 0..2000 {
+        app.update();
+        if cancelled.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(
+        cancelled.load(Ordering::SeqCst),
+        "abort 应经 ProviderClient::cancel 取消上游流"
+    );
+}
+
+/// R1-7：`max_retries == None` 不得导致无界重试。
+#[test]
+fn none_max_retries_is_clamped_to_finite_default() {
+    let cfg = crate::bridge::RetryConfig {
+        max_retries: None,
+        ..Default::default()
+    };
+    assert_eq!(
+        cfg.effective_max_retries(),
+        crate::bridge::RetryConfig::DEFAULT_MAX_RETRIES
+    );
+    // 有界：第 N 次之后不再重试
+    let n = cfg.effective_max_retries();
+    assert!(!cfg.can_retry(n + 1), "超出上限后不应继续重试");
+    assert!(cfg.can_retry(1));
+}
+
+/// R1-7：429 / 5xx 归为可重试。
+#[test]
+fn rate_limit_and_server_error_are_retryable() {
+    use crate::bridge::RetryConfig;
+    use xgent_core::chat::ErrorKind;
+    assert!(RetryConfig::is_retryable(ErrorKind::RateLimited));
+    assert!(RetryConfig::is_retryable(ErrorKind::ServerError));
+    assert!(RetryConfig::is_retryable(ErrorKind::Network));
+    assert!(RetryConfig::is_retryable(ErrorKind::StreamParse));
+    // 不可重试的仍不可重试
+    assert!(!RetryConfig::is_retryable(ErrorKind::AuthFailed));
+    assert!(!RetryConfig::is_retryable(ErrorKind::NotConfigured));
+}
+
+/// R1-7：服务端 `Retry-After` 覆盖客户端计算的退避。
+#[test]
+fn retry_after_overrides_computed_backoff() {
+    let cfg = crate::bridge::RetryConfig {
+        mode: xgent_settings_core::global::RetryMode::Fixed,
+        initial_delay_ms: 500,
+        max_delay_ms: 30_000,
+        ..Default::default()
+    };
+    // 无 Retry-After → 用计算值
+    assert_eq!(
+        cfg.delay_for_with_retry_after(1, None),
+        std::time::Duration::from_millis(500)
+    );
+    // 有 Retry-After → 采用它
+    assert_eq!(
+        cfg.delay_for_with_retry_after(1, Some(7)),
+        std::time::Duration::from_millis(7000)
+    );
+    // 离谱的 Retry-After 仍受 max_delay_ms 约束
+    assert_eq!(
+        cfg.delay_for_with_retry_after(1, Some(9999)),
+        std::time::Duration::from_millis(30_000)
+    );
+}
+
+/// R1-7：429 的 ErrorKind 映射。
+#[test]
+fn http_status_maps_to_error_kind() {
+    use xgent_core::chat::ErrorKind;
+    use xgent_provider::ProviderError;
+    let ra = Some(3);
+    let e429 = ProviderError::Api {
+        status: 429,
+        body: String::new(),
+        retry_after_secs: ra,
+    };
+    assert_eq!(e429.to_error_kind(), ErrorKind::RateLimited);
+    assert_eq!(e429.retry_after_secs(), Some(3));
+    let e500 = ProviderError::Api {
+        status: 503,
+        body: String::new(),
+        retry_after_secs: None,
+    };
+    assert_eq!(e500.to_error_kind(), ErrorKind::ServerError);
+    let e401 = ProviderError::Api {
+        status: 401,
+        body: String::new(),
+        retry_after_secs: None,
+    };
+    assert_eq!(e401.to_error_kind(), ErrorKind::AuthFailed);
+    let e400 = ProviderError::Api {
+        status: 400,
+        body: String::new(),
+        retry_after_secs: None,
+    };
+    assert_eq!(e400.to_error_kind(), ErrorKind::ProviderError);
 }

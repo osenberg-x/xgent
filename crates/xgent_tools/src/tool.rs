@@ -10,6 +10,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
 use xgent_core::chat::ToolSchema;
 use xgent_settings_core::project::ToolPolicyConfig;
@@ -89,10 +90,16 @@ pub enum ToolTier {
     /// `resolve_policy` 对 `UiOnly` 默认返回 [`SecurityPolicy::Approved`]，
     /// 不走 `NeedsConfirmation`。详见 `doc/design/editor-design.md` 6.4 节。
     UiOnly,
+    /// 强制确认（危险输入）：工具对特定输入判定为高危时经 `approval_for` 返回。
+    ///
+    /// 危险度高于 `Exec`，因此 [`crate::security::resolve_policy`] 的
+    /// "动态升级" 分支会把配置为 approved 的工具退回 `NeedsConfirmation`——
+    /// 这正是 `run_command` 命中危险模式时的行为（配置 approved 也不放行）。
+    Dangerous,
 }
 
 impl ToolTier {
-    /// 危险度序（数值越大越危险）：UiOnly < Read < Write < Exec。
+    /// 危险度序（数值越大越危险）：UiOnly < Read < Write < Exec < Dangerous。
     ///
     /// 供 `resolve_policy` 判断动态 `approval_for` 是否比静态 tier 升级
     /// （枚举声明顺序与危险度无关，不能用派生 Ord）。
@@ -102,6 +109,7 @@ impl ToolTier {
             ToolTier::Read => 1,
             ToolTier::Write => 2,
             ToolTier::Exec => 3,
+            ToolTier::Dangerous => 4,
         }
     }
 }
@@ -127,8 +135,12 @@ pub enum ToolError {
 /// 工具流式更新回调。
 ///
 /// 长时工具（如 run_command 的 stdout 增量）通过此回调推送中间 `ToolResult`
-/// 给调用方。MVP 阶段 executor 传 `None`。
-pub type ToolUpdateCallback = Box<dyn Fn(ToolResult) + Send + Sync>;
+/// 给调用方。
+///
+/// 用 `Arc` 而非 `Box`：回调需与 `execute` 的借用生命周期解耦，才能跨
+/// await 存活并被多个下游（UI 事件转发、插件 host 的 `push-update` 桥接）
+/// 共享。`Box<dyn Fn>` 非 `'static` 且不可克隆，无法满足该要求。
+pub type ToolUpdateCallback = dyn Fn(ToolResult) + Send + Sync;
 
 /// 工具安全策略级别（运行时决议结果）。
 ///
@@ -174,7 +186,9 @@ pub trait Tool: Send + Sync {
     }
 
     /// 对输入生成人类可读摘要，用于确认弹窗展示。
-    fn summarize(&self, input: &Value) -> String;
+    ///
+    /// async：插件工具经 WIT `tool.summarize` 调 WASM，必须 await。
+    async fn summarize(&self, input: &Value) -> String;
 
     /// 为确认弹窗提供 diff 数据（旧/新内容），默认返回 None。
     ///
@@ -188,7 +202,7 @@ pub trait Tool: Send + Sync {
     /// 异步执行工具。
     ///
     /// - `signal`：中断信号，cancel 后工具应尽快返回 `ToolError::Aborted`。
-    /// - `on_update`：流式更新回调（MVP 传 `None`）。
+    /// - `on_update`：流式更新回调，`None` 表示调用方不需要中间结果。
     /// - 逻辑失败返回 `Ok(ToolResult { is_error: true, .. })`；
     ///   中断/超时等异常返回 `Err(ToolError::...)`。
     async fn execute(
@@ -196,6 +210,6 @@ pub trait Tool: Send + Sync {
         input: Value,
         ctx: &ToolCtx,
         signal: tokio_util::sync::CancellationToken,
-        on_update: Option<&ToolUpdateCallback>,
+        on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError>;
 }

@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use xgent_core::chat::ToolSchema;
 
@@ -42,7 +43,7 @@ impl Tool for WriteFile {
         Concurrency::Exclusive
     }
 
-    fn summarize(&self, input: &Value) -> String {
+    async fn summarize(&self, input: &Value) -> String {
         let path = input["path"].as_str().unwrap_or("?");
         format!("写入文件 {path}")
     }
@@ -62,7 +63,7 @@ impl Tool for WriteFile {
         input: Value,
         ctx: &ToolCtx,
         _signal: CancellationToken,
-        _on_update: Option<&ToolUpdateCallback>,
+        _on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError> {
         let Some(path) = input["path"].as_str() else {
             return Ok(ToolResult {
@@ -80,6 +81,19 @@ impl Tool for WriteFile {
                 side_effect: None,
             });
         };
+        // 大小上限：防单次写入撑爆磁盘与下游上下文
+        if content.len() > crate::atomic::MAX_WRITE_BYTES {
+            return Ok(ToolResult {
+                output: format!(
+                    "内容过大（{} 字节，上限 {} 字节），请分段写入",
+                    content.len(),
+                    crate::atomic::MAX_WRITE_BYTES
+                ),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            });
+        }
         let full = match resolve_in_project(&ctx.project_root, path) {
             Ok(p) => p,
             Err(e) => {
@@ -102,18 +116,21 @@ impl Tool for WriteFile {
                 side_effect: None,
             });
         }
+        // 备份原文件（若存在），供回滚路径使用
+        match crate::atomic::backup_existing(&full).await {
+            Ok(_) => {}
+            Err(e) => {
+                return Ok(ToolResult {
+                    output: format!("备份原文件失败 {}: {e}", full.display()),
+                    is_error: true,
+                    denied: false,
+                    side_effect: None,
+                });
+            }
+        }
         // 原子写：先写同目录临时文件再 rename。直接覆盖在进程崩溃/磁盘满时
         // 会把目标文件截断损坏且原内容不可恢复；同目录 rename 原子。
-        let tmp = full.with_extension("xgent-tmp");
-        if let Err(e) = tokio::fs::write(&tmp, &content).await {
-            return Ok(ToolResult {
-                output: format!("写入失败 {}: {e}", full.display()),
-                is_error: true,
-                denied: false,
-                side_effect: None,
-            });
-        }
-        match tokio::fs::rename(&tmp, &full).await {
+        match crate::atomic::atomic_write(&full, content).await {
             Ok(()) => {
                 let written = full.clone();
                 Ok(ToolResult {
@@ -123,15 +140,12 @@ impl Tool for WriteFile {
                     side_effect: Some(SideEffect::FileWritten(written)),
                 })
             }
-            Err(e) => {
-                let _ = tokio::fs::remove_file(&tmp).await; // 清理临时文件
-                Ok(ToolResult {
-                    output: format!("写入失败 {}: {e}", full.display()),
-                    is_error: true,
-                    denied: false,
-                    side_effect: None,
-                })
-            }
+            Err(e) => Ok(ToolResult {
+                output: format!("写入失败 {}: {e}", full.display()),
+                is_error: true,
+                denied: false,
+                side_effect: None,
+            }),
         }
     }
 }

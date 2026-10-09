@@ -4,10 +4,12 @@
 //! daemon 与 provider 可使用配置类型而不被 Bevy 拖重。
 
 pub mod global;
+pub mod keychain;
 pub mod paths;
 pub mod project;
 pub mod store;
 
 pub use global::{GlobalConfig, PluginConfig, Preferences, ProviderConfig, ProviderKind};
+pub use keychain::resolve_api_key;
 pub use project::{ContextStrategy, ProjectConfig, ToolPolicyConfig};
 pub use store::{GlobalConfigStore, ProjectConfigStore};

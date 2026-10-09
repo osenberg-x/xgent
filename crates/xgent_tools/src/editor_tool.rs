@@ -215,7 +215,7 @@ impl Tool for EditorTool {
         Concurrency::Shared
     }
 
-    fn summarize(&self, input: &Value) -> String {
+    async fn summarize(&self, input: &Value) -> String {
         match Self::parse_input(input) {
             Ok((_, s)) => s,
             Err(e) => format!("editor: {e}"),
@@ -227,7 +227,7 @@ impl Tool for EditorTool {
         input: Value,
         _ctx: &ToolCtx,
         _signal: CancellationToken,
-        _on_update: Option<&ToolUpdateCallback>,
+        _on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError> {
         let (req, summary) = match Self::parse_input(&input) {
             Ok(v) => v,

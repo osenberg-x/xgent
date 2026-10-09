@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::Path;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use xgent_core::chat::ToolSchema;
 
@@ -50,7 +51,7 @@ impl Tool for SearchFiles {
         Concurrency::Shared
     }
 
-    fn summarize(&self, input: &Value) -> String {
+    async fn summarize(&self, input: &Value) -> String {
         let pattern = input["pattern"].as_str().unwrap_or("?");
         match input["path"].as_str() {
             Some(p) => format!("在 {p} 搜索 “{pattern}”"),
@@ -63,7 +64,7 @@ impl Tool for SearchFiles {
         input: Value,
         ctx: &ToolCtx,
         signal: CancellationToken,
-        _on_update: Option<&ToolUpdateCallback>,
+        _on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError> {
         let Some(pattern) = input["pattern"].as_str() else {
             return Ok(ToolResult {
@@ -319,9 +320,11 @@ mod tests {
         assert!(!ignores("src"));
     }
 
-    #[test]
-    fn summarize_with_path() {
-        let s = SearchFiles.summarize(&json!({"pattern": "foo", "path": "src"}));
+    #[tokio::test]
+    async fn summarize_with_path() {
+        let s = SearchFiles
+            .summarize(&json!({"pattern": "foo", "path": "src"}))
+            .await;
         assert!(s.contains("src"));
         assert!(s.contains("foo"));
     }

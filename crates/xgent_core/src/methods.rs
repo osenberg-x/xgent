@@ -4,6 +4,12 @@
 
 /// 发起 provider 流式对话，返回 `StreamId`，后续通过通知推送事件。
 pub const PROVIDER_CHAT: &str = "provider.chat";
+/// 取消指定 provider 流（用户 abort）。
+///
+/// daemon 侧据此终止该流的推送 task 并 drop provider 接收端，上游 HTTP
+/// 请求随之取消——否则被放弃的流会继续消费到自然结束并继续计费。
+/// 取消已结束的流视为成功（幂等）。
+pub const PROVIDER_CANCEL: &str = "provider.cancel";
 /// 列出 provider 可用模型。
 pub const PROVIDER_LIST_MODELS: &str = "provider.listModels";
 /// 读取配置项。
@@ -25,6 +31,7 @@ mod tests {
     fn method_names_are_unique() {
         let all = [
             PROVIDER_CHAT,
+            PROVIDER_CANCEL,
             PROVIDER_LIST_MODELS,
             CONFIG_READ,
             CONFIG_WRITE,

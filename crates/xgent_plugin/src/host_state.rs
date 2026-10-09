@@ -124,6 +124,17 @@ impl crate::wasm_host::xgent::plugin::host::Host for HostState {
         {
             return Ok(Err(CommandError::PermissionDenied));
         }
+        // args 校验：只放行 program 名不够——`git --upload-pack=<任意命令>`
+        // 即为 argv 注入面（plugin-system-design §9.2）。程序有
+        // `command-args` 白名单时逐项核对；无白名单时只拦截通用危险参数。
+        if let Err(reason) = check_args(&self.manifest.permissions, &cmd.program, &cmd.args) {
+            tracing::warn!(
+                plugin = %self.manifest.id,
+                program = %cmd.program,
+                "run_command args 权限校验失败: {reason}"
+            );
+            return Ok(Err(CommandError::PermissionDenied));
+        }
         let cwd = match cmd.cwd.as_deref() {
             Some(p) => {
                 match self.resolve_and_check(p, &self.manifest.permissions.fs_read, "cwd(fs-read)")
@@ -360,5 +371,171 @@ mod tests {
         assert!(glob_match("", ""));
         assert!(!glob_match("", "x"));
         assert!(!glob_match("x", ""));
+    }
+}
+
+/// 通用危险参数：即便程序名在白名单内，这些参数也应被拒绝。
+///
+/// 覆盖三类向量：
+/// - **代码执行**：`--upload-pack` / `--receive-pack` / `--exec` 让 git 把参数
+///   当命令执行；`-c` 可改 git config 指向 pager/hook 执行任意程序。
+/// - **代码装载**：`--ext-diff` / `--textconv` 让 git 加载并执行外部程序。
+/// - **越界写**：`--output` / `-o` 可把内容写到项目外路径。
+const DENY_ARG_PREFIXES: &[&str] = &[
+    "--upload-pack",
+    "--receive-pack",
+    "--exec",
+    "--ext-diff",
+    "--textconv",
+    "--output",
+    "--exec-path",
+    "--config",
+];
+
+/// shell 元字符：程序是直接 exec（不经 shell），出现这些通常意味着插件在
+/// 试图拼接 shell 命令——一律拒绝，避免日后有人改成 shell 执行时静默失守。
+const SHELL_METACHARS: &[char] = &[';', '|', '&', '`', '>', '<', '\n', '$'];
+
+/// 校验 `run_command` 的 args 是否被清单允许。
+///
+/// 规则：
+/// 1. 任一参数命中 [`DENY_ARG_PREFIXES`] → 拒绝；
+/// 2. 任一参数含 [`SHELL_METACHARS`] → 拒绝；
+/// 3. 该 program 在 `command_args` 中有白名单 → 每个参数须命中白名单
+///    （允许 `--flag` 形式的前缀匹配）；不在白名单的参数直接拒绝。
+///
+/// ③是主要防线：它把"能跑这个程序"细化为"只能跑这些子命令"。
+///
+/// 白名单只约束**第一个非 flag 参数（即子命令）**：`git status --short` 中的
+/// `status` 需在白名单内，其余参数只受 ①② 约束。
+///
+/// 只卡第一个位置参数是刻意的：语法上无法区分 flag 与它的值
+/// （`commit -m msg` 的 `msg` 是位置形态但语义是 `-m` 的值），
+/// 逐个 flag 列白名单既不现实也不安全（各子命令 flag 过多且随版本变化），
+/// 而危险 flag 已被 ① 全量覆盖。
+pub fn check_args(
+    perms: &crate::manifest::PermissionsManifest,
+    program: &str,
+    args: &[String],
+) -> Result<(), String> {
+    for a in args {
+        if DENY_ARG_PREFIXES.iter().any(|p| a.starts_with(p)) {
+            return Err(format!("危险参数: {a}"));
+        }
+        if a.contains(SHELL_METACHARS) {
+            return Err(format!("参数含 shell 元字符: {a}"));
+        }
+        // git 的 -c 可注入任意 config（core.pager=... 即命令执行）
+        if program == "git" && (a == "-c" || a.starts_with("-c") && a.len() > 2) {
+            return Err(format!("git -c 配置注入: {a}"));
+        }
+    }
+    if let Some(allowed) = perms.command_args.get(program) {
+        // 只约束子命令（第一个非 flag 参数），其余参数受 ①② 约束
+        if let Some(sub) = args.iter().find(|a| !a.starts_with('-'))
+            && !allowed.iter().any(|w| w == sub)
+        {
+            return Err(format!(
+                "子命令 {sub} 不在 {program} 的 command-args 白名单内"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod args_check_tests {
+    use super::check_args;
+    use crate::manifest::PermissionsManifest;
+    use std::collections::HashMap;
+
+    fn perms(program: &str, args: Option<Vec<&str>>) -> PermissionsManifest {
+        let mut p = PermissionsManifest {
+            command: vec![program.to_string()],
+            ..Default::default()
+        };
+        if let Some(a) = args {
+            p.command_args.insert(
+                program.to_string(),
+                a.into_iter().map(String::from).collect(),
+            );
+        }
+        p
+    }
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn 无白名单时普通参数放行() {
+        let p = perms("git", None);
+        assert!(check_args(&p, "git", &s(&["status", "--short"])).is_ok());
+    }
+
+    #[test]
+    fn upload_pack_被拒() {
+        let p = perms("git", None);
+        let e = check_args(&p, "git", &s(&["--upload-pack=touch /tmp/pwned", "clone"]));
+        assert!(e.is_err(), "upload-pack 是代码执行向量，应拒绝");
+    }
+
+    #[test]
+    fn ext_diff_被拒() {
+        let p = perms("git", None);
+        assert!(check_args(&p, "git", &s(&["--ext-diff", "diff"])).is_err());
+    }
+
+    #[test]
+    fn git_c_配置注入被拒() {
+        let p = perms("git", None);
+        assert!(check_args(&p, "git", &s(&["-c", "core.pager=id"])).is_err());
+        assert!(
+            check_args(&p, "git", &s(&["-ccore.pager=id", "log"])).is_err(),
+            "-c 前缀粘连写法也应拒绝"
+        );
+    }
+
+    #[test]
+    fn shell_元字符被拒() {
+        let p = perms("git", None);
+        assert!(check_args(&p, "git", &s(&["log; rm -rf /"])).is_err());
+        assert!(check_args(&p, "git", &s(&["log", "&& curl x"])).is_err());
+        assert!(check_args(&p, "git", &s(&["$(id)"])).is_err());
+    }
+
+    #[test]
+    fn 白名单内子命令放行_其flag亦放行() {
+        let p = perms("git", Some(vec!["status", "diff", "log", "add", "commit"]));
+        assert!(check_args(&p, "git", &s(&["status", "--short"])).is_ok());
+        assert!(check_args(&p, "git", &s(&["commit", "-m", "msg"])).is_ok());
+    }
+
+    #[test]
+    fn 白名单只约束子命令_不给白名单的flag仍可过() {
+        // flag 与 flag 值不逐个列白名单（语法上无法区分），危险 flag 由 ① 全量覆盖
+        let p = perms("git", Some(vec!["status", "diff"]));
+        assert!(check_args(&p, "git", &s(&["diff", "--stat", "--name-only"])).is_ok());
+        assert!(check_args(&p, "git", &s(&["--ext-diff", "diff"])).is_err());
+    }
+
+    #[test]
+    fn 白名单外子命令被拒() {
+        let p = perms("git", Some(vec!["status", "diff"]));
+        let e = check_args(&p, "git", &s(&["push", "origin", "main"]));
+        assert!(e.is_err(), "未声明的子命令应拒绝");
+    }
+
+    #[test]
+    fn 白名单存在时_danger_前缀仍优先() {
+        let mut map = HashMap::new();
+        map.insert("git".to_string(), vec!["--upload-pack".to_string()]);
+        let p = PermissionsManifest {
+            command: vec!["git".into()],
+            command_args: map,
+            ..Default::default()
+        };
+        // 即便清单白名单里写了它，通用危险表也优先
+        assert!(check_args(&p, "git", &s(&["--upload-pack=id", "clone"])).is_err());
     }
 }

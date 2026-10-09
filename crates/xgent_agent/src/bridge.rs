@@ -27,7 +27,17 @@ pub trait ProviderClient: Send + Sync {
     async fn chat(
         &self,
         req: ChatRequest,
-    ) -> Result<(StreamId, mpsc::Receiver<ChatEvent>), (xgent_core::chat::ErrorKind, String)>;
+    ) -> Result<
+        (StreamId, mpsc::Receiver<ChatEvent>),
+        (xgent_core::chat::ErrorKind, String, Option<u64>),
+    >;
+
+    /// 取消指定流（默认空实现：本地 provider 由调用方 drop 接收端即可终止）。
+    ///
+    /// 经 daemon 的 provider 实现必须真正把取消送到上游请求——否则用户
+    /// 按下中断后，daemon 侧仍把 LLM 流消费到自然结束，token 照常计费（R1-2）。
+    /// 取消应幂等：流不存在或已结束也视为成功。
+    async fn cancel(&self, _stream_id: StreamId) {}
 }
 
 /// 重试配置：从 [`ProviderConfig`](xgent_settings_core::global::ProviderConfig) 派生，
@@ -77,17 +87,44 @@ impl From<&xgent_settings_core::global::ProviderConfig> for RetryConfig {
 impl RetryConfig {
     /// 判断错误是否可重试。
     ///
-    /// 仅 `Network`（连接/超时）与 `StreamParse`（SSE/JSON 解析）可重试；
-    /// `NotConfigured`/`AuthFailed`/`ProviderError` 立即失败（重试无意义）。
+    /// 可重试：连接/超时（`Network`）、SSE/JSON 解析（`StreamParse`）、
+    /// 服务端限流（`RateLimited`）、服务端错误（`ServerError`）。
+    /// 立即失败：`NotConfigured`/`AuthFailed`/`ProviderError`（重试无意义）。
+    ///
+    /// 限流与服务端错误纳入可重试是 R1-7 的修复：此前 429/5xx 落到
+    /// `ProviderError` 直接失败，限流下用户只能手动重发。
     pub fn is_retryable(kind: xgent_core::chat::ErrorKind) -> bool {
         use xgent_core::chat::ErrorKind;
-        matches!(kind, ErrorKind::Network | ErrorKind::StreamParse)
+        matches!(
+            kind,
+            ErrorKind::Network
+                | ErrorKind::StreamParse
+                | ErrorKind::RateLimited
+                | ErrorKind::ServerError
+        )
     }
 
     /// 计算第 `attempt` 次重试（1-based）前的等待时长。
     ///
     /// 固定模式：恒为 `initial_delay_ms`。
     /// 指数模式：`min(initial * factor^(attempt-1), max_delay)`。
+    ///
+    /// `retry_after_secs` 为服务端 `Retry-After` 时**优先**采用它——
+    /// 限流场景下按客户端退避重试只会更快撞上限、加剧拥塞（R1-7）。
+    /// 该值仍受 `max_delay_ms` 约束，防止服务端给出离谱的长等待。
+    pub fn delay_for_with_retry_after(
+        &self,
+        attempt: u32,
+        retry_after_secs: Option<u64>,
+    ) -> std::time::Duration {
+        if let Some(secs) = retry_after_secs {
+            let ms = secs.saturating_mul(1000).min(self.max_delay_ms);
+            return std::time::Duration::from_millis(ms);
+        }
+        self.delay_for(attempt)
+    }
+
+    /// 计算第 `attempt` 次重试（1-based）前的等待时长（不含服务端覆盖）。
     pub fn delay_for(&self, attempt: u32) -> std::time::Duration {
         let ms = match self.mode {
             xgent_settings_core::global::RetryMode::Fixed => self.initial_delay_ms,
@@ -109,14 +146,23 @@ impl RetryConfig {
 
     /// 是否还有重试机会。
     ///
-    /// `max_retries == None` → 永远返回 true（无限重试）。
+    /// `max_retries == None` 时退到有限缺省值 [`Self::bounded_max_retries`]——
+    /// 无界重试会让网络长期故障时 agent 任务永久占用并持续计费（R1-7）。
     /// `max_retries == Some(n)` → 当 `attempt < n` 时可继续。
     pub fn can_retry(&self, attempt: u32) -> bool {
-        match self.max_retries {
-            None => true,
-            Some(n) => attempt < n,
-        }
+        attempt < self.effective_max_retries()
     }
+
+    /// 实际生效的重试上限（永远有限）。
+    ///
+    /// `max_retries == None` 退到 [`Self::DEFAULT_MAX_RETRIES`]：无界重试会让
+    /// 网络长期故障时 agent 任务永久占用、连接与配额持续消耗（R1-7）。
+    pub fn effective_max_retries(&self) -> u32 {
+        self.max_retries.unwrap_or(Self::DEFAULT_MAX_RETRIES)
+    }
+
+    /// 有限重试缺省次数（保守：正常请求远少于该值）。
+    pub const DEFAULT_MAX_RETRIES: u32 = 5;
 }
 
 /// 共享确认状态：异步任务等待的 oneshot 由 ECS 回填决策。
@@ -163,6 +209,29 @@ pub struct AgentBridge {
     /// 运行期工具集合不变；ECS 侧构造 ChatRequest 时注入为 `tools` 字段，
     /// 修复工具 schema 从未注入导致 LLM 无法发起工具调用的 bug）。
     pub tool_schemas: Arc<Vec<xgent_core::chat::ToolSchema>>,
+    /// 有界执行的运行时可调上限（与 task 共享，测试与运行时调整用）。
+    ///
+    /// `None` = 不限。用 `parking_lot::RwLock` 而非裸字段，使 ECS 与异步
+    /// task 都能读写而不必重建 bridge。
+    pub loop_bounds: Arc<parking_lot::RwLock<LoopBounds>>,
+}
+
+/// agent loop 的有界执行上限。
+#[derive(Debug, Clone, Copy)]
+pub struct LoopBounds {
+    /// 单轮工具调用轮次上限
+    pub max_tool_rounds: Option<u32>,
+    /// 单轮累计 token 上限
+    pub max_tokens_per_turn: Option<u64>,
+}
+
+impl Default for LoopBounds {
+    fn default() -> Self {
+        Self {
+            max_tool_rounds: Some(loop_limits::MAX_TOOL_ROUNDS),
+            max_tokens_per_turn: Some(loop_limits::MAX_TOKENS_PER_TURN),
+        }
+    }
 }
 
 /// 命令（ECS → 异步任务）。
@@ -181,6 +250,15 @@ pub enum AgentCommand {
     Steering { text: String },
     /// Follow-up：agent 停止后注入后续消息继续对话
     FollowUp { text: String },
+}
+
+/// 有界执行的终止原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundedReason {
+    /// 达到单轮工具调用轮次上限
+    IterationLimit,
+    /// 达到单轮累计 token 上限
+    TokenLimit,
 }
 
 /// 异步任务 → ECS 的事件。
@@ -207,6 +285,26 @@ pub enum AgentEvent {
         denied: bool,
         side_effect: Option<SideEffect>,
     },
+    /// 工具执行中的中间结果（流式进度）。
+    ///
+    /// 长时工具（`run_command` 的 stdout 增量、插件工具的 `push-update`）
+    /// 经 `ToolUpdateCallback` 推送中间文本，UI 据此实时呈现进度而不必
+    /// 等工具结束。与最终 [`AgentEvent::ToolResult`] 是同一 `call_id` 的
+    /// 两个阶段：ToolProgress 可多次，ToolResult 恰好一次且为终态。
+    ToolProgress {
+        call_id: String,
+        tool_id: String,
+        output: String,
+    },
+    /// 有界执行终止（agent → UI）。
+    ///
+    /// 循环因命中上限而**正常停止**（非错误、非中断）：对话状态保持一致，
+    /// 用户发下一条消息即可继续。UI 据此提示命中的界，让用户知道本轮为何停下。
+    Bounded {
+        reason: BoundedReason,
+        /// 面向用户的中文说明，含具体上限与已用量
+        detail: String,
+    },
     /// 需要用户确认
     ConfirmRequest(ConfirmRequest),
     /// 对话完成（assistant turn 结束）。
@@ -229,6 +327,8 @@ pub enum AgentEvent {
     Error {
         kind: xgent_core::chat::ErrorKind,
         message: String,
+        /// 服务端 `Retry-After`（秒），透传给 UI 供展示"X 秒后自动重试"
+        retry_after_secs: Option<u64>,
     },
     /// 即将重试。
     ///
@@ -280,6 +380,24 @@ pub struct AgentBridgeConfig {
     pub context_window: u32,
     /// Compaction 配置（阈值/reserve）。
     pub compaction_settings: crate::compaction::CompactionSettings,
+    /// 单轮工具调用轮次上限（`None` = 不限，慎用）。
+    ///
+    /// LLM 若反复返回同一 tool_call（命令失败后重试同一条），无此闸会
+    /// 无限执行工具并无限计费（R1-1）。
+    pub max_tool_rounds: Option<u32>,
+    /// 单轮累计 token 上限（`None` = 不限，慎用）。
+    pub max_tokens_per_turn: Option<u64>,
+}
+
+/// agent loop 的默认有界值。
+///
+/// 刻意保守：正常一轮对话的工具调用远少于 20 次，累计 token 远少于
+/// 100k；这两个上限只用于拦住失控循环，正常使用不会触达。
+pub mod loop_limits {
+    /// 单轮工具调用轮次上限
+    pub const MAX_TOOL_ROUNDS: u32 = 20;
+    /// 单轮累计 token 上限
+    pub const MAX_TOKENS_PER_TURN: u64 = 200_000;
 }
 
 impl std::fmt::Debug for AgentBridgeConfig {
@@ -309,11 +427,25 @@ impl AgentBridge {
         // ECS Abort handler 直接 cancel（绕过 steering_rx 即时中断）。
         let current_cancel: Arc<parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>> =
             Arc::new(parking_lot::Mutex::new(None));
+        // 有界执行上限：cfg 的初始值写入共享结构，ECS 与 task 共用
+        let loop_bounds = Arc::new(parking_lot::RwLock::new(LoopBounds {
+            max_tool_rounds: cfg.max_tool_rounds,
+            max_tokens_per_turn: cfg.max_tokens_per_turn,
+        }));
 
         let shared_for_task = shared_confirm.clone();
         let cancel_for_task = current_cancel.clone();
+        let bounds_for_task = loop_bounds.clone();
         runtime.spawn(async move {
-            agent_loop_task(cfg, cmd_rx, event_tx, shared_for_task, cancel_for_task).await;
+            agent_loop_task(
+                cfg,
+                cmd_rx,
+                event_tx,
+                shared_for_task,
+                cancel_for_task,
+                bounds_for_task,
+            )
+            .await;
         });
 
         Self {
@@ -325,12 +457,23 @@ impl AgentBridge {
             retry_config,
             current_cancel,
             tool_schemas,
+            loop_bounds,
         }
     }
 
     /// 运行时刷新重试配置（下次 `StartLoop` 生效）。
     pub fn update_retry_config(&self, cfg: RetryConfig) {
         *self.retry_config.write() = cfg;
+    }
+
+    /// 调整单轮工具调用轮次上限（`None` = 不限）。
+    pub fn set_max_tool_rounds(&self, v: Option<u32>) {
+        self.loop_bounds.write().max_tool_rounds = v;
+    }
+
+    /// 调整单轮累计 token 上限（`None` = 不限）。
+    pub fn set_max_tokens_per_turn(&self, v: Option<u64>) {
+        self.loop_bounds.write().max_tokens_per_turn = v;
     }
 }
 
@@ -343,6 +486,7 @@ async fn agent_loop_task(
     event_tx: mpsc::Sender<AgentEvent>,
     shared_confirm: SharedConfirm,
     current_cancel: Arc<parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>>,
+    loop_bounds: Arc<parking_lot::RwLock<LoopBounds>>,
 ) {
     let tool_ctx = ToolCtx {
         project_root: cfg.project_root.clone(),
@@ -411,6 +555,7 @@ async fn agent_loop_task(
                         cfg.compaction.as_ref(),
                         cfg.context_window,
                         &cfg.compaction_settings,
+                        &loop_bounds,
                     )
                     .await;
                     // 对话结束：清除 current_cancel，ECS Abort 不再误触发
@@ -482,15 +627,23 @@ async fn run_agent_loop(
     compaction: Option<&Arc<dyn crate::compaction::CompactionProvider>>,
     context_window: u32,
     compaction_settings: &crate::compaction::CompactionSettings,
+    loop_bounds: &Arc<parking_lot::RwLock<LoopBounds>>,
 ) -> Option<(ChatRequest, Vec<xgent_core::EditorQuery>)> {
     use xgent_core::chat::{ContentBlock, Role};
     // 对话级快照：本对话期间配置固定，运行时刷新下次对话生效
     let retry_cfg = retry_config.read().clone();
+    // 有界上限在每次 StartLoop 时读一次快照（parking_lot guard 不跨 await）
+    let bounds = *loop_bounds.read();
+    let max_tool_rounds = bounds.max_tool_rounds;
+    let max_tokens_per_turn = bounds.max_tokens_per_turn;
     loop {
         let mut has_tool_calls = true;
         // 本轮最后一次 stream 的 usage 与 model，供 Done 事件携带
         let mut last_usage: Option<xgent_core::chat::TokenUsage> = None;
         let mut last_model: Option<String> = None;
+        // 有界执行：tool-call 轮次计数与累计 token 计数（R1-1）
+        let mut tool_rounds: u32 = 0;
+        let mut tokens_used: u64 = 0;
 
         // 内层循环：tool-call + steering
         while has_tool_calls {
@@ -532,11 +685,43 @@ async fn run_agent_loop(
             .await
             {
                 Ok(o) => o,
-                Err((kind, message)) => {
-                    let _ = event_tx.send(AgentEvent::Error { kind, message }).await;
+                Err((kind, message, retry_after_secs)) => {
+                    let _ = event_tx
+                        .send(AgentEvent::Error {
+                            kind,
+                            message,
+                            retry_after_secs,
+                        })
+                        .await;
                     return None;
                 }
             };
+            // 累计 token：每轮 stream 一结束即累加（含带 tool_calls 的轮次），
+            // 否则只在末轮累加，token 闸形同虚设（R1-1）
+            if let Some(u) = outcome.usage.as_ref() {
+                tokens_used += (u.prompt as u64) + (u.completion as u64);
+            }
+            // 累计 token 超限：结束本轮并报告命中的界（与轮次闸同层，
+            // 每轮检查一次——不能只在末轮检查）
+            if let Some(limit) = max_tokens_per_turn
+                && tokens_used >= limit
+            {
+                let _ = event_tx
+                    .send(AgentEvent::Done {
+                        usage: outcome.usage.clone(),
+                        model: Some(req.model.clone()),
+                    })
+                    .await;
+                let _ = event_tx
+                    .send(AgentEvent::Bounded {
+                        reason: BoundedReason::TokenLimit,
+                        detail: format!(
+                            "达到单轮 token 上限（{limit}，已用 {tokens_used}），已停止本轮执行"
+                        ),
+                    })
+                    .await;
+                return None;
+            }
 
             // 流式期间被 steering 中断：发 SteeringInterrupted 让 ECS 固化半截文本，
             // 然后把被中断的 assistant 文本 + steering 文本注入 req.messages，
@@ -682,8 +867,36 @@ async fn run_agent_loop(
                         event_tx: event_tx.clone(),
                         shared: shared_confirm.clone(),
                     };
+                    // 流式更新回调：长时工具（run_command 的 stdout 增量、
+                    // 插件工具的 push-update）经此把中间结果回灌 UI。
+                    let update_tx = event_tx.clone();
+                    let update_call_id = call_id.clone();
+                    let update_tool_id = name.clone();
+                    let update_cb: Arc<xgent_tools::ToolUpdateCallback> =
+                        Arc::new(move |partial| {
+                            let tx = update_tx.clone();
+                            let cid = update_call_id.clone();
+                            let tid = update_tool_id.clone();
+                            let out = partial.output.clone();
+                            tokio::spawn(async move {
+                                let _ = tx
+                                    .send(AgentEvent::ToolProgress {
+                                        call_id: cid,
+                                        tool_id: tid,
+                                        output: out,
+                                    })
+                                    .await;
+                            });
+                        });
                     let result = executor
-                        .execute(name, args.clone(), ctx, cancel_token.clone(), &cb)
+                        .execute(
+                            name,
+                            args.clone(),
+                            ctx,
+                            cancel_token.clone(),
+                            &cb,
+                            Some(update_cb),
+                        )
                         .await;
                     match result {
                         Ok(r) => {
@@ -813,6 +1026,27 @@ async fn run_agent_loop(
                     return None;
                 }
                 has_tool_calls = true;
+            }
+
+            // 每完成一轮工具调用即计数并检查上限：LLM 反复返回同一 tool_call
+            // （如命令失败后重试同一条）时，无此闸会无限执行并无限计费（R1-1）。
+            tool_rounds += 1;
+            if let Some(limit) = max_tool_rounds
+                && tool_rounds >= limit
+            {
+                let _ = event_tx
+                    .send(AgentEvent::Done {
+                        usage: last_usage,
+                        model: last_model,
+                    })
+                    .await;
+                let _ = event_tx
+                    .send(AgentEvent::Bounded {
+                        reason: BoundedReason::IterationLimit,
+                        detail: format!("达到单轮工具调用上限（{limit} 次），已停止本轮执行"),
+                    })
+                    .await;
+                return None;
             }
         }
 
@@ -1007,8 +1241,12 @@ async fn maybe_compact(
 /// 带自动重试的流式调用。
 ///
 /// 包装 [`stream_llm_response`]：失败时按 [`RetryConfig`] 重试。
-/// 仅 [`ErrorKind::Network`] 与 [`ErrorKind::StreamParse`] 可重试，
-/// 其余错误立即返回。重试前发 [`AgentEvent::RetryAttempt`]，UI 据此清空半截文本。
+/// 可重试错误见 [`RetryConfig::is_retryable`]：网络、流解析、限流、服务端错误；
+/// 其余立即返回。重试前发 [`AgentEvent::RetryAttempt`]，UI 据此清空半截文本。
+///
+/// 重试次数**永远有限**（`None` 退到缺省值，见
+/// [`RetryConfig::effective_max_retries`]）。限流时优先采用服务端
+/// `Retry-After` 而非客户端计算的退避（R1-7）。
 ///
 /// 重试等待期间监听 `cancel_token`，用户 abort 立即中断重试循环。
 async fn stream_with_retry(
@@ -1018,24 +1256,25 @@ async fn stream_with_retry(
     cancel_token: &tokio_util::sync::CancellationToken,
     retry_config: &RetryConfig,
     steering_rx: &mut mpsc::Receiver<AgentCommand>,
-) -> Result<StreamOutcome, (xgent_core::chat::ErrorKind, String)> {
+) -> Result<StreamOutcome, (xgent_core::chat::ErrorKind, String, Option<u64>)> {
     use xgent_core::chat::{ContentBlock, Role};
     let mut attempt: u32 = 0;
     loop {
         match stream_llm_response(provider, req, event_tx, cancel_token, steering_rx).await {
             Ok(o) => return Ok(o),
-            Err((kind, message, partial_text)) => {
+            Err((kind, message, partial_text, retry_after_secs)) => {
                 // 不可重试错误立即失败
                 if !RetryConfig::is_retryable(kind) {
-                    return Err((kind, message));
+                    return Err((kind, message, retry_after_secs));
                 }
                 // 可重试：检查是否还有重试机会
                 // attempt 是已失败次数；下一次重试序号 = attempt + 1
                 if !retry_config.can_retry(attempt + 1) {
-                    return Err((kind, message));
+                    return Err((kind, message, retry_after_secs));
                 }
                 attempt += 1;
-                let infinite = retry_config.max_retries.is_none();
+                // 重试永远有限（None 退到缺省），infinite 仅用于 UI 提示
+                let infinite = false;
                 // 通知 UI 即将重试（清空半截文本 + 展示进度）
                 let _ = event_tx
                     .send(AgentEvent::RetryAttempt {
@@ -1056,8 +1295,9 @@ async fn stream_with_retry(
                         content: vec![ContentBlock::Text { text: text.clone() }],
                     });
                 }
-                // 等待退避时长，期间可被 abort 中断
-                let delay = retry_config.delay_for(attempt);
+                // 等待退避时长，期间可被 abort 中断。
+                // 限流时优先采用服务端 Retry-After（R1-7）。
+                let delay = retry_config.delay_for_with_retry_after(attempt, retry_after_secs);
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {}
                     _ = cancel_token.cancelled() => {
@@ -1095,11 +1335,25 @@ async fn stream_llm_response(
     event_tx: &mpsc::Sender<AgentEvent>,
     cancel_token: &tokio_util::sync::CancellationToken,
     steering_rx: &mut mpsc::Receiver<AgentCommand>,
-) -> Result<StreamOutcome, (xgent_core::chat::ErrorKind, String, Option<String>)> {
-    let (_sid, mut stream) = match provider.chat(req.clone()).await {
-        Ok(s) => s,
-        Err((kind, msg)) => return Err((kind, msg, None)),
+) -> Result<
+    StreamOutcome,
+    (
+        xgent_core::chat::ErrorKind,
+        String,
+        Option<String>,
+        Option<u64>,
+    ),
+> {
+    // 建流失败也可能带 Retry-After（如请求即被 429 限流），一并透传（R1-7）
+    let (sid, mut stream) = match provider.chat(req.clone()).await {
+        Ok((sid, rx)) => (sid, rx),
+        Err((kind, msg, ra)) => return Err((kind, msg, None, ra)),
     };
+    // abort 时把取消送到上游：顶层 select 在 cancel_token 触发时经 provider
+    // 取消该流。经 daemon 的实现会真正取消 HTTP 请求，被放弃的流不再继续
+    // 消费与计费（R1-2）。用 select 而非常驻 watcher task，避免每次流结束
+    // 都泄漏一个等待 cancel 的 task。
+    let sid_for_cancel = sid;
 
     // 累积 ToolCallStart 的 id/name（按 index），ToolCallEnd 时配对
     let mut pending_tool_calls: std::collections::HashMap<u32, (String, String)> =
@@ -1136,8 +1390,12 @@ async fn stream_llm_response(
                             partial_text: Some(partial_text.clone()),
                         });
                     }
-                    Some(ChatEvent::Error { kind, message }) => {
-                        return Err((kind, message, Some(partial_text.clone())));
+                    Some(ChatEvent::Error {
+                        kind,
+                        message,
+                        retry_after_secs: ra,
+                    }) => {
+                        return Err((kind, message, Some(partial_text.clone()), ra));
                     }
                     Some(_) => {} // 忽略其他细粒度事件
                     None => {
@@ -1150,12 +1408,16 @@ async fn stream_llm_response(
                             xgent_core::chat::ErrorKind::StreamParse,
                             "stream ended without Done event".into(),
                             Some(partial_text.clone()),
+                            None,
                         ));
                     }
                 }
             }
             _ = cancel_token.cancelled() => {
-                // abort：发 Done 后返回空（停止循环）
+                // abort：先把取消送到上游，再发 Done 后返回（停止循环）。
+                // 经 daemon 的 provider 会真正取消 HTTP 请求——否则 daemon 侧
+                // 推送 task 继续把流消费到自然结束，被放弃的请求照常产生 token（R1-2）。
+                provider.cancel(sid_for_cancel).await;
                 let _ = event_tx
                     .send(AgentEvent::Done {
                         usage: None,
@@ -1174,7 +1436,9 @@ async fn stream_llm_response(
                 // 流式期间 steering：即时中断当前流
                 match cmd {
                     Some(AgentCommand::Steering { text }) => {
-                        // 不发 Done（对话继续，只是中断当前流）
+                        // 不发 Done（对话继续，只是中断当前流）。
+                        // steering 同样中止当前 LLM 请求，故也要取消上游（R1-2）。
+                        provider.cancel(sid_for_cancel).await;
                         return Ok(StreamOutcome {
                             tool_calls: collected,
                             usage: None,
@@ -1185,6 +1449,10 @@ async fn stream_llm_response(
                     }
                     Some(AgentCommand::Abort) => {
                         cancel_token.cancel();
+                        // 本分支与 `cancel_token.cancelled()` 分支竞争同一中断信号，
+                        // 谁先被 select 选中是不确定的——两条路径都必须取消上游，
+                        // 否则 Abort 命令路径下流仍被消费到自然结束（R1-2）。
+                        provider.cancel(sid_for_cancel).await;
                         let _ = event_tx
                             .send(AgentEvent::Done {
                                 usage: None,
@@ -1252,6 +1520,10 @@ impl xgent_tools::EditorCommandSink for ChannelEditorCommandSink {
 /// 持有 editor 命令 channel 的接收端，由 agent_poll_system 每帧 drain。
 #[derive(Resource)]
 pub struct EditorCommandRx {
-    /// tokio mpsc 接收端（blocking_lock + try_recv 非阻塞 drain）。
+    /// tokio mpsc 接收端。
+    ///
+    /// ECS 系统线程**不得** `blocking_lock()`：tokio Mutex 被异步 task 持有时
+    /// 会整帧阻塞主线程（Bevy 渲染与输入全部卡死）。改为 `try_lock()`——
+    /// 抢不到就跳过本帧，事件留在 channel 里下帧再取，不丢数据。
     pub rx: Mutex<mpsc::Receiver<xgent_tools::EditorCommandRequest>>,
 }

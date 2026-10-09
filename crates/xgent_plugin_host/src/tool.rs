@@ -99,39 +99,65 @@ impl Tool for PluginTool {
     /// 必须显式实现——trait 默认恒 Shared，与 §5.3 承诺不符。
     fn concurrency(&self) -> Concurrency {
         match self.tier {
-            ToolTier::Read => Concurrency::Shared,
-            ToolTier::Write | ToolTier::Exec => Concurrency::Exclusive,
-            ToolTier::UiOnly => Concurrency::Shared, // 不会命中（tier 无 UiOnly）
+            ToolTier::Read | ToolTier::UiOnly => Concurrency::Shared,
+            ToolTier::Write | ToolTier::Exec | ToolTier::Dangerous => Concurrency::Exclusive,
         }
     }
 
-    /// 生成工具输入的人类可读摘要（§5.3）。
+    /// 生成工具输入的人类可读摘要（§5.3）：经 WIT `tool.summarize` 调插件。
     ///
-    /// 设计 §5.3 要求经 WIT `tool.summarize` 调用插件，但 WIT 方法是 async，
-    /// 而 `Tool::summarize` 是同步 trait 方法（被 `ToolExecutor::execute` 在
-    /// 确认流程中同步调用）。MVP 保留本地默认摘要；WIT `tool.summarize` 接口
-    /// 已声明（供未来 summarize 改 async 后接通）。
-    fn summarize(&self, input: &Value) -> String {
-        format!("{}({})", self.short_id, input)
+    /// `Tool::summarize` 已改为 async（见 `xgent_tools::tool::Tool`），故此处
+    /// 可以 await WASM 调用——修复前因签名是同步而无法接 WIT，确认弹窗只能
+    /// 展示 `tool_id(input)` 的本地兜底文本。
+    async fn summarize(&self, input: &Value) -> String {
+        let input_json = serde_json::to_string(input).unwrap_or_default();
+        match self
+            .plugin
+            .call_tool_summarize(&self.short_id, &input_json)
+            .await
+        {
+            Ok(s) if !s.trim().is_empty() => s,
+            Ok(_) | Err(_) => format!("{}({})", self.short_id, input),
+        }
     }
 
-    /// approval_for / preview_diff：MVP 裁决（设计 §5.3 289 行）暂不接 WIT，
-    /// 回退 trait 默认（approval_for = tier()，preview_diff = None）。
-    /// 确认弹窗对插件工具退化为纯文本 summary（与内建只读工具一致）。
+    /// `preview_diff` 经 WIT `tool.preview-diff` 调插件，拿到真实 diff。
+    ///
+    /// 修复前恒返回 `None`，确认弹窗对插件工具退化为纯文本 summary。
+    async fn preview_diff(&self, input: &Value, _ctx: &ToolCtx) -> Option<(String, String)> {
+        let input_json = serde_json::to_string(input).ok()?;
+        let raw = self
+            .plugin
+            .call_tool_preview_diff(&self.short_id, &input_json)
+            .await
+            .ok()?;
+        let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let old = v["old"].as_str()?.to_string();
+        let new = v["new"].as_str()?.to_string();
+        Some((old, new))
+    }
     async fn execute(
         &self,
         input: Value,
         _ctx: &ToolCtx,
         signal: CancellationToken,
-        on_update: Option<&ToolUpdateCallback>,
+        on_update: Option<Arc<ToolUpdateCallback>>,
     ) -> Result<ToolResult, ToolError> {
         let input_json = serde_json::to_string(&input).unwrap_or_default();
-        // on_update 桥接受限：ToolUpdateCallback 是 Box<dyn Fn>（非 'static），
-        // call_tool_execute 要求 Arc<dyn Fn + 'static>，且 ToolExecutor MVP
-        // 总传 None（executor.rs:126/155）。push-update 基础设施（WIT/HostState/
-        // call_tool_execute 参数）已就绪，待 ToolUpdateCallback 改 Arc 后接通。
-        let _ = on_update;
-        let update_cb: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>> = None;
+        // on_update 桥接：`ToolUpdateCallback` 已改为 `Arc`，与 WASM host 需要的
+        // `Arc<dyn Fn(String) + Send + Sync>` 同形，故此处真正接通插件的
+        // `push-update`（修复前恒传 None，流式中间结果被丢弃）。
+        let update_cb: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>> =
+            on_update.map(|cb| -> std::sync::Arc<dyn Fn(String) + Send + Sync> {
+                std::sync::Arc::new(move |s: String| {
+                    cb(ToolResult {
+                        output: s,
+                        is_error: false,
+                        denied: false,
+                        side_effect: None,
+                    })
+                })
+            });
         match self
             .plugin
             .call_tool_execute(&self.short_id, &input_json, signal, update_cb)
