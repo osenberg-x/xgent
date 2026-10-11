@@ -1,6 +1,6 @@
-# Bevy 0.20 适配与优化策略（0.19 → 0.20.0-rc.2）
+# Bevy 0.20 适配与优化策略（0.19 → 0.20.0-rc.2 → 0.20.0 正式版）
 
-> 状态：适配已落地（本文 §3），优化路线见 §4。
+> 状态：适配已落地（本文 §3），优化路线见 §4。**0.20.0 正式版已于 2026-10-11 切换完成，零代码适配**（见 §4.5 与文末实测数据）。
 > 参考：bevy 0.20.0-rc.2 源码 `_release-content/migration-guides/`（74 篇）。
 
 ---
@@ -124,7 +124,7 @@
 
 ### 4.5 风险与跟进
 
-- 本地依赖是 **0.20.0-rc.2**：正式版发布前仍可能有 API 微调（尤其 BSN/feathers），升级正式版时重跑一轮 `cargo check` 即可，预计破坏面远小于本轮。
+- ~~本地依赖是 **0.20.0-rc.2**：正式版发布前仍可能有 API 微调（尤其 BSN/feathers），升级正式版时重跑一轮 `cargo check` 即可，预计破坏面远小于本轮。~~ **已验证（2026-10-11）**：`../bevy` 检出上游 `v0.20.0` tag 后 `cargo check --workspace --all-targets` 0 error / 0 warning，未做任何代码改动。正式版实际阻塞点只有一个——bevy `rust-version = 1.97.1` 对 rustc 版本的硬门槛。
 - 观察上游：`Interaction`/`Button` 弃用别名计划在 0.20 发布后移除；`FilteredResources` 弃用（xgent 未用）；`UiPickingSettings` 可调 picking 行为（如 `pickable_events`）。
 - bevy_dev_tools 依赖（xgent_ui dev）中 `RenderDebugOverlay` 有变更，本轮已兼容，后续 dev-tools 变更关注 release notes。
 
@@ -136,3 +136,4 @@
 - 迁移后：`cargo check`/`test`/`clippy --workspace --all-targets` 全绿。
 - 自审修订：初版 `PickingInteraction` 方案经三轮自审发现「最顶层命中、无后代回溯」回归（§3.1 候选 2），改定为官方 `Hovered`+`Pressed`；文档层级（dev-tutorial §5.12.4）与若干过时注释一并修正。
 - 变更量：xgent_ui 20 源文件 + 1 测试文件 + workspace 配置 + 3 处文档。
+- **0.20.0 正式版（2026-10-11 切换）**：rc.2→0.20.0 共 13 个 commit，改动集中在 bevy_image/bevy_scene(BSN 宏)/bevy_shader(WESL 0.6)/bevy_ecs 内部，xgent 相关 API 面只有一处 `pub(crate) enum DeprecatedInteraction` → `pub`；Cargo.toml 变更仅版本号与 `rust-version`（1.96.0→1.97.1）。`cargo check --workspace --all-targets` 用时 13m39s（rustc 1.99.0 冷重建整个依赖图），结果 0 error / 0 warning，代码变更量 0 行。

@@ -567,6 +567,14 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - 策略与后续优化路线（rem 缩放、多开焦点、BSN/feathers 采纳评估）沉淀于 `doc/notes/bevy-0.20-migration.md`，交互模型速查见 §5.12.4。
    - **功能性 review 补充（2026-10-07）**：① 发现 0.20 指针事件从非 Button 子实体**冒泡到 Button 祖先**（全局 observer 逐级运行）——抽屉面板点击会误触遮罩关闭，修复为 `kit.rs::block_press_bubbling()`（`ui_widgets::observe` 实体作用域 observer 消费 `PointerPress`，等价旧 FocusPolicy::Block；**裸 `Observer` 组件是全局观察者，严禁直接插**）；② resize 手柄拖拽启动加 `hovered` 门控（窄手柄移出后 `Pressed` 残留防御）；③ 冒烟测试抓出 `handle_confirm_keyboard` 的 `Res<InputFocus>` + `ResMut<InputFocus>` B0002 重复访问（既存缺陷，0.20 起启动即 panic），合并为单一 `ResMut`；④ 新增 `tests/interaction_model.rs` headless 交互契约测试（6 用例：后代悬停/按下冒泡/嵌套消费/面板压遮罩 ×2/同帧边界观测）——0.20 交互模型回归金丝雀。
 
+27. **Bevy 0.20.0 正式版切换（2026-10-11）**——`../bevy` 从 rc.2 检出切到上游 `v0.20.0` tag（`b3bdd75be Release 0.20.0`），path 依赖形态与 9 个 feature 名（keyboard/system_font_discovery/system_clipboard/track_location/ui/bevy_ui_widgets/default_font/bevy_dev_tools/serialize）全部沿用不变：
+   - **零代码适配**：rc.2→0.20.0 仅 13 个 commit，UI 侧唯一改动是弃用别名 `Interaction` 由 `pub(crate)` 转 `pub`；xgent 不碰 `replace_related`/bevy_image saver/BSN 宏/自定义 shader，`cargo check --workspace --all-targets` 直接 0 error 0 warning。命中 `doc/notes/bevy-0.20-migration.md` §4.5 的预判（正式版破坏面远小于 rc 轮）。
+   - **唯一阻塞是工具链**：bevy 0.20.0 `rust-version = 1.97.1`，rustc 1.97.0 会被 cargo 以 `rustc X is not supported by the following packages` 拒编（依赖图解析阶段就失败，不是编译错误）。本机已升到 stable 1.99.0。
+   - **邻仓库操作注意**：`../bevy` 是共享工作区，本次发现其中残留一个未完成的 interactive rebase（19 个 0.19.0 release 提交变基到某 Solari 提交）。动它之前先 `git status` + 读 `.git/rebase-merge/{orig-head,onto}` 判断有无独有工作，再 `rebase --abort`（可经 reflog 找回）→ `fetch upstream --tags` → `checkout --detach v0.20.0`。
+   - **验证结果（rustc 1.99.0）**：`cargo check --workspace --all-targets` 0 error 0 warning；`cargo test --workspace` 46 个测试二进制 **537 passed / 0 failed / 1 ignored**；`cargo clippy --workspace --all-targets` 通过，残留 **8 处同类警告**——`#[must_use]` 无 message 且返回类型本身已是 must_use（xgent_agent `bridge.rs`/`compaction.rs`、xgent_context `provider.rs`、xgent_provider `provider.rs`、xgent_terminal `backend.rs`、xgent_tools `executor.rs`/`mcp.rs`/`tool.rs`），属 clippy 1.99 新增 lint 面、与 bevy 0.20 无关，本轮未处理。
+   - **新发现的操作陷阱**：`cargo fmt --all` 会连带格式化 path 依赖 `../bevy` 的源码（实测报出 `bevy_pbr/src/render/mesh.rs` 2 处 diff），不带 `--check` 直接跑会改写那个上游检出；`cargo fmt` 与 `cargo fmt -p <crate>` 实测 0 diff。以后统一用 `cargo fmt -p <crate>`（已写进 `AGENTS.md` 第 3 节）。
+   - **冷重建成本**：换 rustc 版本会让整个依赖图缓存失效——本轮 `cargo check` 13m39s、`cargo test`（含真码生成与链接）约 70 分钟。评估升级代价时按这个量级算。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 1. **阅读背景**：开始任务前读 `AGENTS.md`、`doc/design/`、`doc/plans/` 中相关 step 文件；编码时按需查 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。
@@ -597,4 +605,4 @@ cargo clippy --workspace           # lint
 ./build_plugins.sh release         # release profile（更小 wasm）
 cargo test -p xgent_plugin -p xgent_plugin_host  # 插件集成测试（需先 build_plugins.sh）
 
-构建依赖本地 `../bevy` 源码（0.20.0-rc.2），确保该目录存在。
+构建依赖本地 `../bevy` 源码（检出上游 `v0.20.0` tag，detached HEAD），确保该目录存在且指向正式版；工具链需满足 bevy MSRV（rustc ≥ 1.97.1），否则 cargo 在依赖解析阶段即拒绝编译。

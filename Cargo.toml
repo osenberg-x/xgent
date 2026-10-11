@@ -3,7 +3,8 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.dependencies]
-# Bevy 0.20.0-rc.2 — path 依赖指向本地源码，便于调试与排查 breaking change
+# Bevy 0.20.0 正式版 — path 依赖指向本地源码（../bevy 跟踪上游 release tag），便于调试与排查 breaking change
+# 注意：bevy 0.20.0 的 rust-version = 1.97.1，工具链低于此版本时 cargo 直接拒编
 bevy = { path = "../bevy", features = ["keyboard", "system_font_discovery", "system_clipboard", "track_location"] }
 # 文本布局（启用复杂脚本支持，修复 CJK 分词模型缺失导致的 ICU4X 日志刷屏）
 parley = { version = "0.11", default-features = false, features = ["std", "complex-scripts"] }
