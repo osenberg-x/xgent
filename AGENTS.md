@@ -11,7 +11,8 @@
 四大设计支柱：实用优先、数据驱动、可扩展、轻量多开。
 
 - 语言：Rust（edition 2024）
-- 引擎：Bevy 0.20.0-rc.2，依赖通过 path 指向本地源码 `../bevy`（便于调试）
+- 引擎：Bevy 0.20.0（正式版），依赖通过 path 指向本地源码 `../bevy`（检出上游 `v0.20.0` tag，便于调试）
+- Rust 工具链：bevy 0.20.0 要求 `rust-version >= 1.97.1`
 - 当前阶段：MVP（仅 2D GUI，3D/TUI/Web/宠物留待后续）
 
 **权威设计文档**（从零设计，不参考旧代码）：
@@ -64,11 +65,13 @@ cargo run -p xgent_daemon         # 单独运行守护进程
 cargo test                        # 全量测试
 cargo test -p <crate>            # 单 crate 测试
 cargo tree -p <crate>             # 依赖树（验证 crate 独立性，如 xui 不含 xgent_*）
-cargo fmt                         # 格式化
+cargo fmt -p <crate>              # 格式化（勿用 cargo fmt --all，见下方注意）
 cargo clippy --workspace          # lint
 ```
 
-**注意**：构建依赖本地 `../bevy` 源码（0.20.0-rc.2），确保该目录存在。编码时按需查阅 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。参考实现：zed 源码位于 `/Users/xdo/ws/zed`（gpui + editor 滚动抽象可借鉴，但底层 UI 库不同，仅作设计参考）。
+**注意**：构建依赖本地 `../bevy` 源码（检出上游 `v0.20.0` tag，detached HEAD），确保该目录存在且指向正式版；工具链需满足 bevy 的 MSRV（rustc ≥ 1.97.1），否则 cargo 会以 "rustc X is not supported by the following packages" 直接拒绝编译。编码时按需查阅 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。参考实现：zed 源码位于 `/Users/xdo/ws/zed`（gpui + editor 滚动抽象可借鉴，但底层 UI 库不同，仅作设计参考）。
+
+**格式化警告**：`cargo fmt --all` 会连带处理 path 依赖 `../bevy` 的源码（实测报出 `bevy_pbr/src/render/mesh.rs` 2 处 diff），直接跑会改写那个上游检出；`cargo fmt`（根 virtual workspace）与 `cargo fmt -p <crate>` 不受影响（实测 0 diff）。格式化只用 `cargo fmt -p <crate>`。
 
 ---
 
@@ -209,3 +212,23 @@ xgent_app → 组装所有 UI 侧 crate
 - D-07 宠物等级度量（P1）
 
 需求层开放问题（详见 `doc/design/requirements.md` 第 9 节）：OQ-05 宠物对话陪伴形式、OQ-07 会话持久化、OQ-10 成本统计细节。OQ↔D 映射见架构 13.1 节。
+
+<comet-ambient-resume>
+<!-- Managed by Comet. Edits inside this block may be replaced by comet init/update. -->
+<!-- Contract: comet.resume_probe.v2 -->
+
+## Comet Ambient Resume
+
+In this repository, before starting work that may need code changes or investigation, pass the current user request to the read-only probe when a Comet workflow may already be active: `comet resume-probe . --stdin --json`.
+
+- If the user explicitly invokes any Comet Skill through the host (for example, `@comet`, `/comet`, `@comet-native`, or `/comet-hotfix`), that explicit invocation takes precedence over this resume protocol; do not run the resume probe, and enter the invoked Skill directly.
+- If the user explicitly invokes a non-Comet skill or slash command through the host, the task intent is already explicit in that invocation: do not run the resume probe, and execute the invoked skill directly.
+- If you are already inside a Comet flow (including while waiting for the user to answer a question you asked in that flow), do not run the resume probe; treat replies such as option picks as continuation of the current change and proceed directly with the chosen option.
+- Trust only the returned `workflow`, `skill`, and `entrySource`; project configuration or the no-config compatibility fallback alone selects them. Do not scan or switch to the other workflow.
+- If the probe returns `auto_resume`, briefly state the selected active change and enter the permanent entry in `nextCommand`. Do not treat a state command as the resume entry or advance it blindly.
+- If the probe returns `ask_user`, ask one short question and wait.
+- If the current request did not explicitly invoke a Comet Skill and the probe returns `out_of_scope` or `none`, do not enter the Comet workflow.
+- An `out_of_scope` or `none` result only means do not enter the Comet workflow for this new request; it never pauses or exits a Comet flow that is already in progress.
+- If configuration or state is invalid and `nextCommand` is absent, stop and report the reason; do not guess another workflow.
+- Never attach unrelated work merely because an active change exists. The Native entry inspects uncommitted work; the probe does not attribute it automatically.
+</comet-ambient-resume>

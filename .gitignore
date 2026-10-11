@@ -6,3 +6,8 @@
 
 # 插件构建产物（由 build_plugins.sh 生成，不入库）
 crates/xgent_app/assets/plugins/*/extension.wasm
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<
