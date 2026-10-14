@@ -20,7 +20,7 @@
 | F-02 | 流式输出 | ✅ | `xgent_provider/src/openai_compat.rs`（SSE → ChatEvent 细粒度事件）→ `xgent_ui/src/chat_panel.rs` | `plans/step5`、ADR-0006 |
 | F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md` |
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
-| F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`（445 行实现）；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md` |
+| F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；**中文问句按相邻二字组合切词、rg 走 `--fixed-strings` 字面量、`@file:` 线索直接读文件、目录遍历经 spawn_blocking、Hub 合并后复核预算**（2026-10-14，约束见 §5.10）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/context-retrieval/spec.md` |
 | F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only + `list_sessions` + `restore_session`）+ `conversation.rs`（`restore` 方法）+ `xgent_ui/src/session_history.rs`（历史面板 UI）+ `events.rs`（`ListSessionsMessage`/`SessionListMessage`/`RestoreSessionMessage`/`SessionRestoredMessage`）；**新建、列出、恢复** 均完整可用 | `plans/step9`、ADR-0008 |
 | F-07 | Provider 切换 | ✅ | `xgent_provider/src/openai_compat.rs`（完整实现）+ `anthropic.rs`（完整实现：Anthropic Messages API 流式 + 工具调用）；`response_api.rs`/`custom.rs` 仅 trait 占位；`xgent_ui/src/settings_panel.rs`（含**模型列表拉取**：`FetchModelsMessage`/`ModelListResultMessage` + ↻ 按钮触发 IPC `provider.listModels`，点击模型项填充输入框）| `plans/step5` |
 | F-08 | 命令面板 | ✅ | `xui/src/command_palette.rs`（通用组件）+ `xgent_ui/src/command_palette.rs`（业务命令注册） | `plans/step10`/`step11`、`design/ui-design.md` §8 |
@@ -84,7 +84,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`（`chat` 返回 `(ErrorKind, String)`，ErrorKind 经 `ProviderError::to_error_kind` 映射，透传给 UI 避免误判 Network 重试）、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
 | `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待）、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError` |
-| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，impl ContextProvider）、`XgentContextPlugin` |
+| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
 | `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）、`handle_palette_triggers` 路由 `plugin.` 前缀到 `PluginCommandTriggered` |
@@ -434,6 +434,15 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 - MVP 用方案 A（OnDemand：目录树 + ripgrep + 按需读文件）。
 - 编辑器上线只触发到 C（向量 RAG）；D（LSP/AST）延后到 LSP 真正接入；E（混合检索）跟随 D。
 - 新增检索实现时实现 `ContextProvider` trait，`build_context_provider` 据配置切换，调用方无感。
+
+**方案 A 的检索约束**（2026-10-14 落地，见 `docs/comet/specs/context-retrieval/spec.md`）：
+
+- **中文分词**：`extract_keywords` 把 CJK 连续串切成**相邻二字组合（bigram）**，单字丢弃。整句作为一个关键词时任何源码都不会包含它，中文提问必然零命中；二字片段正是子串匹配与 rg 字面量能命中的单位。英文按字符数（非字节）≥3 过滤，另有一小张中英虚词表（`CN_FUNC_CHARS` / `EN_STOPWORDS`）作精度过滤。关键词上限 `MAX_KEYWORDS = 16`——bigram 会成倍放大数量，8 会截掉中文问句后半段。
+- **rg 用字面量**：`rg_args` 产出 `--fixed-strings` + 每个关键词一个 `-e`，不拼 `a|b` 正则。关键词是用户输入的文本：拼正则时 `.` 变通配、`(`/`+` 让模式非法，rg 失败会触发全量遍历回退。
+- **`@file:` 线索**：bridge 把编辑器 `@` 引用作为 hint 传入（形如 `@file:src/main.rs`）。这类 hint 由 `file_refs` 解析后**直接读该文件**，不再当检索词（旧实现拿整串当关键词，任何文件内容都不含 `@file:...`，引用文件等于没引用）。
+- **遍历不进 async 线程**：`collect_tree_lines` / `collect_matching_files` 是非 async 纯同步函数，全部 `std::fs` 调用只存在于它们内部，由 `tree_summary` / `fallback_search` 经 `tokio::task::spawn_blocking` 调用（NF-03）。
+- **relevance 说真话**：chunk 的 `relevance` 由 `relevance_for` 生成，标明来源角色（当前打开文件 / `@file` 引用 / 关键词检索命中）并列出**内容里实际命中**的关键词，不再是固定文案。
+- **Hub 合并后复核预算**：`clamp_to_budget` 按 provider 顺序贪心保留装得进的 chunk，装不下的**整块丢弃**（hub 不截断别的 provider 交来的文件片段），`total_tokens` 由保留 chunk 重算；`tree_summary` 不占 chunk 预算。
 
 ### 5.11 上下文面板与文件抽屉（v7，ADR-0014）
 

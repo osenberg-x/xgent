@@ -60,16 +60,19 @@ pub trait ContextProvider: Send + Sync {
 /// MVP 用字符数 / 4 上取整的粗估，足以做预算控制。
 pub fn estimate_tokens(s: &str) -> u32 {
     // 中文字符按 1 token，其余按 4 字符 1 token
-    let cjk: usize = s
-        .chars()
-        .filter(|c| {
-            (*c >= '\u{4E00}' && *c <= '\u{9FFF}')
-                || (*c >= '\u{3040}' && *c <= '\u{30FF}')
-                || (*c >= '\u{AC00}' && *c <= '\u{D7AF}')
-        })
-        .count();
+    let cjk: usize = s.chars().filter(|c| is_cjk_char(*c)).count();
     let other = s.chars().count() - cjk;
     ((cjk + other / 4) as u32).max(1)
+}
+
+/// 是否 CJK 字符（汉字 / 假名 / 谚文）。
+///
+/// 分词与 token 估算共用这一判据，避免两处字符范围随时间漂移
+/// （估算按 1 字符 1 token 计，分词按 CJK 词串切 bigram）。
+pub fn is_cjk_char(c: char) -> bool {
+    ('\u{4E00}'..='\u{9FFF}').contains(&c)
+        || ('\u{3040}'..='\u{30FF}').contains(&c)
+        || ('\u{AC00}'..='\u{D7AF}').contains(&c)
 }
 
 #[cfg(test)]

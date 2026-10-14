@@ -76,3 +76,63 @@
 | 台账写「模式表扩到 18 项」，实际 16 项 | 数字订正 |
 | `plugin_host/tool.rs` 残留一段已过期的「待 ToolUpdateCallback 改 Arc 后接通」注释，紧挨着已生效的新代码 | 旧注释删除 |
 | A4 的测试对修复不敏感（见上） | 重写为可观测拉取计数并实测判别力 |
+
+---
+
+## 六、close-context-gaps（2026-10-14）：R3 检索组
+
+承接 §二 中延后的 R3 条目，本轮关闭 `xgent_context` 里互相咬合的三条：R3-1（中文检索完全失效 + relevance 假文案）、R3-8（线程内阻塞 IO 违反 NF-03）、R3-9（Hub 合并后不复核预算）。正式 Spec 见 `docs/comet/specs/context-retrieval/spec.md`。
+
+| 缺口 | 落点 | 说明 |
+|:---|:---|:---|
+| R3-1 中文分词 | `on_demand.rs`：`split_runs` / `cjk_bigrams` / `extract_keywords` | CJK 连续串切成**相邻二字组合**；单字 run 自然产出 0 个词片；整句再也不会成为一个关键词（旧行为下中文提问必然零命中）。长度判据由 `w.len() >= 3`（字节）改为 `chars().count() >= 3`；新增中英虚词表 `CN_FUNC_CHARS` / `EN_STOPWORDS` 作精度过滤；上限 `MAX_KEYWORDS` 8→16，因为 bigram 会成倍放大数量，8 个会截掉中文问句后半段 |
+| R3-1 relevance 假文案 | `on_demand.rs::relevance_for` | chunk 的 `relevance` 改为「来源角色 + 内容里实际命中的关键词」，替代恒定文案「匹配用户问题或当前文件」；搜索命中但片段被裁到看不见关键词时，如实写「未包含任何关键词」 |
+| R3-1 家族 `@file:` | `on_demand.rs::file_refs` | 编辑器 `@` 引用经 bridge 以 `@file:<path>` hint 传入，旧实现把**整串当检索词**（任何文件内容都不含 `@file:...`，等于引用无效）。现解析出路径直接读该文件，且不再进入关键词 |
+| R3-1 家族 rg | `on_demand.rs::rg_args` | 由 `keywords.join("\|")` 拼正则改为 `--fixed-strings` + 每个关键词一个 `-e`。关键词是用户输入的文本：`.` 会变通配，`(`/`+` 之类让模式非法从而 rg 失败并触发全量遍历回退 |
+| R3-8 | `on_demand.rs::collect_tree_lines` / `collect_matching_files` + `spawn_blocking` | 遍历与降级搜索的 `std::fs` 调用全部收进非 async 函数，async 侧只经 `tokio::task::spawn_blocking` 调用。返回内容不变（同样的树文本、相对路径、忽略表、深度与条目上限、大小写敏感语义） |
+| R3-9 | `hub.rs::clamp_to_budget` | 合并后按 `query.max_tokens` 复核：按 provider 顺序贪心保留装得进的 chunk，装不下的**整块丢弃**（Hub 不截断别的 provider 交来的文件片段），`total_tokens` 由保留 chunk 重算；`tree_summary` 不占 chunk 预算 |
+
+仍留在台账 §二 的 R3 行内、本轮未做：R3-2（B/C/D/E 空壳 provider，阻塞于嵌入模型与向量库选型 + D-06 二次重定）、R3-3（`search_files` 正则/glob，属 `xgent_tools`）、R3-17（硬编码参数转配置）。
+
+### 判别力反证（11 个变异体）
+
+沿用 §五 的方法：逐个把修复改回缺陷形态，确认对应用例**确实失败**；全部还原后基线转绿。
+
+| 变异 | 失败用例 |
+|:---|:---|
+| M1 关闭 CJK bigram（整段当一个关键词） | `extract_keywords_splits_cjk_into_bigrams`、`_caps_at_sixteen_in_order`、`_drops_single_cjk_char`、`_measures_chars_not_bytes`、`retrieve_finds_file_from_chinese_question` |
+| M2 长度判据改回按字节 | `extract_keywords_measures_chars_not_bytes` |
+| M3 rg 改回拼接 `a\|b` 正则 | `rg_args_matches_each_keyword_literally` |
+| M4 `@file:` 线索不再排除 | `extract_keywords_excludes_file_ref_hint` |
+| M5 relevance 回到固定文案 | `relevance_lists_only_keywords_present_in_content` |
+| M6 Hub 不再复核预算 | `over_budget_merge_keeps_prefix_and_recomputes_total`、`zero_budget_keeps_nothing`、`clamp_drops_chunks_larger_than_budget` |
+| M7 只关闭标点切分（空白仍断开） | **无一失败——测试失去判别力**，暴露盲区 |
+| M8 分隔符被跳过而非作为边界（粘回一整段） | `no_bigram_spans_a_separator`、`extract_keywords_filters_short`、`_caps_at_sixteen_in_order`、`_drops_function_words` |
+| M9 `tree_summary` 不走 spawn_blocking | `traversal_helpers_are_awaited_via_spawn_blocking` |
+| M10 `async fn` 体内直接 `std::fs::read_dir` | `std_fs_calls_never_appear_in_async_fns` |
+| M11 降级搜索不走 spawn_blocking | `traversal_helpers_are_awaited_via_spawn_blocking` |
+
+M7 是本轮真正学到的东西，但**结论与我先前的记述不同**——独立验证把它证伪了一半：
+
+- 先用为「盲区」的说法是错的。我用一个独立小程序对两种切分做产出对比（`上下文 检索` / `上下文,检索` / `上下文。检索` / `hello world`）：M7 与现行实现**输出完全一致**。CJK 的边界由「CJK / 非 CJK 类别切换」保证，外层分隔符断开对中文不起作用，所以这条变异对中文路径本就是**行为等价变异**，没有任何输入行为测试能区分它，也不该指望区分。
+- 两者唯一的真实差异在**含下划线的标识符**：现行实现把 `find_me_x` 切成 `find`（`_` 属 ASCII 标点，先断开），M7 保留整串 `find_me_x`。现行行为与变更前一致（旧实现同样按 ASCII 标点断开），故不是回归。若要锁死这条选择，加一条 `extract_keywords("find_me_x")` 的断言即可——属测试补强，不改行为，本轮未做。
+- 真正抓回「分隔符粘连」这类回归的是 **M8**（分隔符被 `continue` 跳过而非当作边界），它使 `no_bigram_spans_a_separator`、`extract_keywords_filters_short`、`_caps_at_sixteen_in_order`、`_drops_function_words` 四个用例失败。
+
+另两处独立验证纠正：
+
+| 纠正 | 事实 |
+|:---|:---|
+| 「本机 PATH 无真实 ripgrep，rg 分支未端到端执行」**是错的** | `sh -c 'command -v rg'` 解析到 `~/.qoder-cn/plugins/cache/.../bin/rg`（ripgrep 15.0.0）。`which rg` 只显示 shell alias，容易误判为「不在 PATH」。验证者用真实 rg 跑了构造出的 argv：`--fixed-strings` + 逐词 `-e` 只命中 `lit.rs`，而旧的 `a+b\|ContextHub` 拼接正则还会误命中 `other.rs`，`(` 这类词旧路径下 rg 退出码 2 并触发全量回退。A1/A4 因此比自报的更强 |
+| `doc/dev-tutorial.md` 引用的 Spec 路径在归档前是悬空链接 | 归档发布后才生效，属正常时序，不是缺陷 |
+
+后续待办（本轮范围外，记此以免遗忘）：
+
+- `@file:<path>` 解析未限制在项目根内（绝对路径与 `..` 可越界读取）。`read_file_chunk` 对 `current_file` 早已如此，本轮把同一逻辑延伸到 hints，未新增约束也未收紧。收紧会改变已确认行为，需另立变更。
+- 降级遍历大小写敏感、rg 路径 `-i` 不敏感（既有分歧，统一它会改变返回文件集合）。
+- `cargo test --workspace` 仍未跑（全量测试二进制链接在本机 20 分钟以上），覆盖面依赖 `cargo check --workspace --all-targets` + 本 crate 全量测试。
+
+`NF-03 不进异步线程` 这条约束无法用行为测试判别（两种写法返回结果一致），故改为**源码级断言**：`std_fs_calls_never_appear_in_async_fns` 逐行核对每个 `std::fs::` 调用点所属函数头不是 `async fn`；`traversal_helpers_are_awaited_via_spawn_blocking` 断言两个遍历函数在 `spawn_blocking` 闭包内被调用。代价是对源码排版敏感（调用写成跨多行的闭包体即失效），M9/M11 已确认二者有判别力。
+
+### 工具陷阱（复现过一次，值得记住）
+
+`cargo fmt` 与反证脚本并发跑会互相踩：脚本用 `.bak` 回写源码时 `shutil.move` 保留了旧 mtime，cargo 判定产物仍新于源码，**直接复用了变异体的缓存二进制**，于是「还原后基线」报出一个并不存在的失败。反证脚本必须在回写后 `touch` 源文件；且格式化要在变异批次之外单独跑。
