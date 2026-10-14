@@ -106,7 +106,7 @@
 | M4 `@file:` 线索不再排除 | `extract_keywords_excludes_file_ref_hint` |
 | M5 relevance 回到固定文案 | `relevance_lists_only_keywords_present_in_content` |
 | M6 Hub 不再复核预算 | `over_budget_merge_keeps_prefix_and_recomputes_total`、`zero_budget_keeps_nothing`、`clamp_drops_chunks_larger_than_budget` |
-| M7 只关闭标点切分（空白仍断开） | **无一失败——测试失去判别力**，暴露盲区 |
+| M7 只关闭外层标点断开（仅按 CJK 类别切分） | 无一失败——经实测判定为**行为等价变异**（见下），不是盲区 |
 | M8 分隔符被跳过而非作为边界（粘回一整段） | `no_bigram_spans_a_separator`、`extract_keywords_filters_short`、`_caps_at_sixteen_in_order`、`_drops_function_words` |
 | M9 `tree_summary` 不走 spawn_blocking | `traversal_helpers_are_awaited_via_spawn_blocking` |
 | M10 `async fn` 体内直接 `std::fs::read_dir` | `std_fs_calls_never_appear_in_async_fns` |
