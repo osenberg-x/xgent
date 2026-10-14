@@ -35,25 +35,34 @@ pub struct ToolExecutor {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
     /// 会话级 AllowAll 集合：用户选过 AllowAll 的工具不再确认
     allowed_all: tokio::sync::Mutex<HashSet<String>>,
+    /// 等待用户确认的秒数（项目配置 `[tools] confirm_timeout_secs`，R3-17）。
+    confirm_timeout_secs: u64,
 }
 
 impl ToolExecutor {
-    /// 构造并注册内置工具。
+    /// 构造并注册内置工具（内置缺省参数）。
     pub fn with_defaults() -> Self {
-        let tools: Vec<Arc<dyn Tool>> = crate::default_tools();
+        Self::with_params(&crate::ToolParams::default())
+    }
+
+    /// 用给定运行参数构造并注册内置工具（`xgent_app` 由项目配置派生）。
+    pub fn with_params(params: &crate::ToolParams) -> Self {
+        let tools: Vec<Arc<dyn Tool>> = crate::default_tools(params);
         let map = tools.into_iter().map(|t| (t.id().to_string(), t)).collect();
         Self {
             tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
+            confirm_timeout_secs: params.confirm_timeout_secs,
         }
     }
 
-    /// 用指定工具集合构造（测试用）。
+    /// 用指定工具集合构造（测试用），确认超时取内置缺省。
     pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
         let map = tools.into_iter().map(|t| (t.id().to_string(), t)).collect();
         Self {
             tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
+            confirm_timeout_secs: crate::ToolParams::default().confirm_timeout_secs,
         }
     }
 
@@ -149,22 +158,29 @@ impl ToolExecutor {
                     new_content,
                 };
                 // 发起确认请求 + 等待用户决策，全程监听 cancel_token。
-                // 修复之前 timeout(confirm.confirm) 不监听 cancel，Abort 在
-                // confirm.confirm 卡住（event_tx 满）时需等满 300s 才生效。
+                //
+                // 超时须覆盖**两段**：取回 receiver 与等 `rx.await` 拿到决策。
+                // 生产实现 `BridgeConfirm::confirm` 立即返回 receiver（用户的
+                // 点击发生在之后），只包前一段等于超时永不触发——确认请求会一直
+                // 挂着，除 Abort 外没有出口（2026-10-14 由 `[tools]
+                // confirm_timeout_secs` 的行为测试暴露，见台账 §七）。
+                // `biased` 让取消优先判定，Abort 不被超时抢跑。
                 let decision = tokio::select! {
-                    r = tokio::time::timeout(
-                        std::time::Duration::from_secs(300),
-                        confirm.confirm(req),
-                    ) => match r {
-                        Ok(rx) => match rx.await {
-                            Ok(d) => d,
-                            Err(_) => return Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
-                        },
-                        Err(_) => return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None }),
-                    },
+                    biased;
                     _ = signal.cancelled() => {
                         return Err(ToolError::Aborted);
                     }
+                    r = tokio::time::timeout(
+                        std::time::Duration::from_secs(self.confirm_timeout_secs),
+                        async {
+                            let rx = confirm.confirm(req).await;
+                            rx.await
+                        },
+                    ) => match r {
+                        Ok(Ok(d)) => d,
+                        Ok(Err(_)) => return Ok(ToolResult { output: "确认被取消".into(), is_error: true, denied: false, side_effect: None }),
+                        Err(_) => return Ok(ToolResult { output: "确认请求超时".into(), is_error: true, denied: false, side_effect: None }),
+                    },
                 };
                 match decision {
                     ConfirmDecision::Allow => tool.execute(input, ctx, signal, on_update).await,
@@ -224,6 +240,23 @@ mod tests {
         }
     }
 
+    /// 永不回应的 mock 回调：留住发送端，使接收端既不完成也不失败，
+    /// 从而只能由确认超时结束等待（测 A8 的超时支路）。
+    struct NeverAnswers(std::sync::Mutex<Vec<oneshot::Sender<ConfirmDecision>>>);
+    impl NeverAnswers {
+        fn new() -> Self {
+            Self(std::sync::Mutex::new(Vec::new()))
+        }
+    }
+    #[async_trait::async_trait]
+    impl ConfirmCallback for NeverAnswers {
+        async fn confirm(&self, _req: ConfirmRequest) -> oneshot::Receiver<ConfirmDecision> {
+            let (tx, rx) = oneshot::channel();
+            self.0.lock().expect("锁").push(tx);
+            rx
+        }
+    }
+
     fn ctx(root: &std::path::Path, policy: ToolPolicyConfig) -> ToolCtx {
         ToolCtx {
             project_root: root.to_path_buf(),
@@ -236,6 +269,77 @@ mod tests {
             approved: approved.iter().map(|s| s.to_string()).collect(),
             denied: denied.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    /// A8：确认等待上限取自 `[tools] confirm_timeout_secs`。
+    ///
+    /// 1 秒上限 + 永不回应的回调 → 应很快报「确认请求超时」，而不是内置的
+    /// 5 分钟。改回硬编码 300s 时本测试会挂到 tokio 的 30s 测试超时。
+    #[tokio::test]
+    async fn configured_confirm_timeout_expires() {
+        use std::time::Instant;
+        let params = crate::ToolParams {
+            confirm_timeout_secs: 1,
+            ..Default::default()
+        };
+        let exec = ToolExecutor::with_params(&params);
+        let dir = tempfile::tempdir().unwrap();
+        let hold = NeverAnswers::new();
+        let started = Instant::now();
+        let r = exec
+            .execute(
+                "read_file",
+                serde_json::json!({"path": "x.txt"}),
+                &ctx(dir.path(), Default::default()),
+                CancellationToken::new(),
+                &hold,
+                None,
+            )
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        assert!(r.is_error, "超时应是错误: {}", r.output);
+        assert!(
+            r.output.contains("确认请求超时"),
+            "应走超时支路而非取消支路: {}",
+            r.output
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "配置 1s 生效则不应等满内置 300s: {elapsed:?}"
+        );
+    }
+
+    /// A8：等待期间 Abort 仍然优先于超时（保住 R1-2 修好的取消语义）。
+    #[tokio::test]
+    async fn abort_beats_confirm_timeout() {
+        let params = crate::ToolParams {
+            confirm_timeout_secs: 30,
+            ..Default::default()
+        };
+        let exec = ToolExecutor::with_params(&params);
+        let dir = tempfile::tempdir().unwrap();
+        let hold = NeverAnswers::new();
+        let signal = CancellationToken::new();
+        let cancel = signal.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            cancel.cancel();
+        });
+        let r = exec
+            .execute(
+                "read_file",
+                serde_json::json!({"path": "x.txt"}),
+                &ctx(dir.path(), Default::default()),
+                signal,
+                &hold,
+                None,
+            )
+            .await;
+        assert!(
+            matches!(r, Err(ToolError::Aborted)),
+            "Abort 应即刻中断等待: {r:?}"
+        );
     }
 
     #[tokio::test]

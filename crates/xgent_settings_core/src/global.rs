@@ -95,6 +95,95 @@ pub struct ProviderConfig {
     /// 每次重试间隔 = min(initial * backoff_factor^(n-1), max_delay)。
     #[serde(default = "default_retry_backoff_factor")]
     pub retry_backoff_factor: f64,
+    /// 上下文窗口 token 数，compaction 触发依据。
+    ///
+    /// `0` 表示未设置（用 [`defaults::CONTEXT_WINDOW`]）。此前该值硬编码在
+    /// `xgent_app`，小窗口模型永不触发压缩、大窗口模型被过早压缩（R3-17）。
+    #[serde(default)]
+    pub context_window: u32,
+    /// 按模型 id 覆盖上下文窗口（模型 id → token 数）。
+    ///
+    /// 一个 provider 端点常挂多个窗口不同的模型。取值次序见
+    /// [`ProviderConfig::resolve_context_window`]。
+    #[serde(default)]
+    pub model_context_windows: HashMap<String, u32>,
+    /// 显式输出上限 token 数。
+    ///
+    /// 仅当前真正发送输出上限的适配器（Anthropic Messages 的 `max_tokens`）
+    /// 读取它；`0` 表示未设置（用 [`defaults::MAX_OUTPUT_TOKENS`]）。
+    /// OpenAI 兼容与 Response API 不发送该字段，本设置对它们无效。
+    #[serde(default)]
+    pub max_output_tokens: u32,
+    /// 等待首个 SSE 事件的秒数（`0` = 用 [`defaults::FIRST_EVENT_TIMEOUT_SECS`]）。
+    #[serde(default)]
+    pub first_event_timeout_secs: u64,
+}
+
+/// 内置缺省值——即本次转配置前各 crate 里的硬编码常量。
+///
+/// 配置值为 `0` 时回落到这些数，使「不写配置」与「改变前的行为」完全等价。
+pub mod defaults {
+    /// 上下文窗口（token）。
+    pub const CONTEXT_WINDOW: u32 = 128_000;
+    /// 单次响应输出上限（token）。
+    pub const MAX_OUTPUT_TOKENS: u32 = 8_192;
+    /// 等待首个 SSE 事件（秒）。
+    pub const FIRST_EVENT_TIMEOUT_SECS: u64 = 30;
+}
+
+/// `0` 哨兵下的实际取值：未设置即回落内置缺省。
+fn or_default_u32(value: u32, fallback: u32) -> u32 {
+    if value == 0 { fallback } else { value }
+}
+
+impl ProviderConfig {
+    /// 解析给定模型的上下文窗口。
+    ///
+    /// 次序：`model_context_windows[model]`（非 0）> `context_window`（非 0）
+    /// > [`defaults::CONTEXT_WINDOW`]。返回窗口与「是否用了内置回落」，
+    /// 调用方据此在启动时打一条告警。
+    pub fn resolve_context_window(&self, model: &str) -> (u32, bool) {
+        if let Some(v) = self.model_context_windows.get(model).copied()
+            && v != 0
+        {
+            return (v, false);
+        }
+        if self.context_window != 0 {
+            return (self.context_window, false);
+        }
+        (defaults::CONTEXT_WINDOW, true)
+    }
+
+    /// 生效的输出上限 token 数。
+    pub fn effective_max_output_tokens(&self) -> u32 {
+        or_default_u32(self.max_output_tokens, defaults::MAX_OUTPUT_TOKENS)
+    }
+
+    /// 生效的首事件等待秒数。
+    pub fn effective_first_event_timeout_secs(&self) -> u64 {
+        if self.first_event_timeout_secs == 0 {
+            defaults::FIRST_EVENT_TIMEOUT_SECS
+        } else {
+            self.first_event_timeout_secs
+        }
+    }
+}
+
+impl GlobalConfig {
+    /// 解析指定 provider + 模型的上下文窗口。
+    ///
+    /// 次序：该模型的 `model_context_windows` 条目 > provider 级
+    /// `context_window` > [`defaults::CONTEXT_WINDOW`]。返回
+    /// `(窗口, 是否走了内置回落)`，调用方据此打启动告警（R3-17）。
+    ///
+    /// provider 未出现在配置里（命令行 `--provider` 指了个没配过的 id、
+    /// 或全局配置为空）同样报回落，而不是静默当作已配置。
+    pub fn resolve_context_window(&self, provider_id: &str, model: &str) -> (u32, bool) {
+        match self.providers.get(provider_id) {
+            Some(cfg) => cfg.resolve_context_window(model),
+            None => (defaults::CONTEXT_WINDOW, true),
+        }
+    }
 }
 
 impl Default for ProviderConfig {
@@ -111,6 +200,10 @@ impl Default for ProviderConfig {
             retry_initial_delay_ms: default_retry_initial_delay_ms(),
             retry_max_delay_ms: default_retry_max_delay_ms(),
             retry_backoff_factor: default_retry_backoff_factor(),
+            context_window: 0,
+            model_context_windows: HashMap::new(),
+            max_output_tokens: 0,
+            first_event_timeout_secs: 0,
         }
     }
 }
@@ -294,5 +387,132 @@ mod tests {
         assert_eq!(p.kind, ProviderKind::OpenAiCompat);
         assert_eq!(p.api_key, "sk-xxx");
         assert_eq!(p.timeout_secs, 60);
+    }
+
+    /// R3-17 不变量：新键缺省即「未设置」，生效值等于本次转配置前的硬编码常量。
+    #[test]
+    fn new_provider_keys_default_to_previous_constants() {
+        let p = ProviderConfig::default();
+        assert_eq!(p.context_window, 0);
+        assert!(p.model_context_windows.is_empty());
+        assert_eq!(p.max_output_tokens, 0);
+        assert_eq!(p.first_event_timeout_secs, 0);
+        assert_eq!(p.resolve_context_window("gpt-4").0, 128_000);
+        assert!(
+            p.resolve_context_window("gpt-4").1,
+            "未配置时应标记用了内置回落"
+        );
+        assert_eq!(p.effective_max_output_tokens(), 8_192);
+        assert_eq!(p.effective_first_event_timeout_secs(), 30);
+    }
+
+    /// 同一判据从 TOML 文本出发：老配置文件的键不受影响，新键取内置缺省。
+    #[test]
+    fn toml_without_new_keys_resolves_to_builtin_defaults() {
+        let toml_src = r#"
+[providers.openai]
+kind = "open_ai_compat"
+api_base = "https://api.openai.com/v1"
+api_key = "sk-x"
+"#;
+        let cfg: GlobalConfig = toml::from_str(toml_src).unwrap();
+        let p = cfg.providers.get("openai").unwrap();
+        assert_eq!(p.timeout_secs, 60);
+        assert_eq!(p.context_window, 0);
+        assert_eq!(p.resolve_context_window("gpt-4o"), (128_000, true));
+        assert_eq!(p.effective_max_output_tokens(), 8_192);
+        assert_eq!(p.effective_first_event_timeout_secs(), 30);
+    }
+
+    #[test]
+    fn context_window_precedence_is_model_then_provider_then_fallback() {
+        let mut p = ProviderConfig {
+            context_window: 32_768,
+            ..Default::default()
+        };
+        // provider 级生效，非回落
+        assert_eq!(p.resolve_context_window("gpt-4o"), (32_768, false));
+        // 模型级覆盖 provider 级
+        p.model_context_windows.insert("gpt-4o".into(), 128_000);
+        assert_eq!(p.resolve_context_window("gpt-4o"), (128_000, false));
+        // 未列出的模型仍用 provider 级
+        assert_eq!(p.resolve_context_window("claude"), (32_768, false));
+        // 模型级写 0 视为未设置，不成为回落
+        p.model_context_windows.insert("zero".into(), 0);
+        assert_eq!(p.resolve_context_window("zero"), (32_768, false));
+        // 两处都不设 → 内置回落并标记
+        let bare = ProviderConfig::default();
+        assert_eq!(bare.resolve_context_window("any"), (128_000, true));
+    }
+
+    #[test]
+    fn explicit_zero_means_unset_for_provider_limits() {
+        let p: ProviderConfig = serde_json::from_str(
+            r#"{"kind":"anthropic","max_output_tokens":0,"first_event_timeout_secs":0}"#,
+        )
+        .unwrap();
+        assert_eq!(p.effective_max_output_tokens(), 8_192);
+        assert_eq!(p.effective_first_event_timeout_secs(), 30);
+        // 非零值直接生效
+        let p: ProviderConfig = serde_json::from_str(
+            r#"{"kind":"anthropic","max_output_tokens":4096,"first_event_timeout_secs":1}"#,
+        )
+        .unwrap();
+        assert_eq!(p.effective_max_output_tokens(), 4_096);
+        assert_eq!(p.effective_first_event_timeout_secs(), 1);
+    }
+
+    #[test]
+    fn provider_new_keys_roundtrip_and_keep_zero() {
+        let p = ProviderConfig {
+            kind: ProviderKind::Anthropic,
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let p2: ProviderConfig = serde_json::from_str(&s).unwrap();
+        assert_eq!(p2.context_window, 0);
+        assert_eq!(p2.max_output_tokens, 0);
+        assert_eq!(p2.first_event_timeout_secs, 0);
+        assert!(p2.model_context_windows.is_empty());
+        // 显式 map 往返
+        let mut m = HashMap::new();
+        m.insert("gpt-4o".to_string(), 128_000u32);
+        let p = ProviderConfig {
+            model_context_windows: m,
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let p2: ProviderConfig = serde_json::from_str(&s).unwrap();
+        assert_eq!(p2.resolve_context_window("gpt-4o").0, 128_000);
+    }
+
+    /// A6：全局层的窗口解析覆盖「provider 根本没配」这一路。
+    #[test]
+    fn global_resolve_context_window_handles_missing_provider() {
+        let g = GlobalConfig::default();
+        assert_eq!(
+            g.resolve_context_window("openai", "gpt-4o"),
+            (128_000, true),
+            "未配置的 provider 应报内置回落，而不是静默当作已配置"
+        );
+
+        let mut providers = std::collections::HashMap::new();
+        providers.insert(
+            "openai".to_string(),
+            ProviderConfig {
+                context_window: 32_768,
+                ..Default::default()
+            },
+        );
+        let g = GlobalConfig {
+            providers,
+            ..Default::default()
+        };
+        assert_eq!(
+            g.resolve_context_window("openai", "gpt-4o"),
+            (32_768, false)
+        );
+        // 另一个没配过的 id 仍走回落，不受已配置项影响
+        assert_eq!(g.resolve_context_window("other", "m"), (128_000, true));
     }
 }

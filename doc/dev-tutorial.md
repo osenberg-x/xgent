@@ -18,7 +18,7 @@
 |:---|:---|:---|:---|:---|
 | F-01 | 多轮对话 | ✅ | `xgent_agent/src/bridge.rs`（双层 `run_agent_loop`：外层 follow-up、内层 tool-call+steering；`stream_with_retry` 自动重试可重试错误；流式期 steering 即时中断 race abort、停止边界重新轮询防丢失）+ `compaction.rs`（token 估算 + should_compact 触发 + find_cut_point 切点 + LlmCompactor 摘要） | `plans/step9`、`plans/optimization-from-omp.md` O4/O9 |
 | F-02 | 流式输出 | ✅ | `xgent_provider/src/openai_compat.rs`（SSE → ChatEvent 细粒度事件）→ `xgent_ui/src/chat_panel.rs` | `plans/step5`、ADR-0006 |
-| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md` |
+| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id）；**`search_files` 支持 `regex`（默认关，字面量子串）/`case_insensitive`/`glob`/`file_type`，坏参数在遍历前报 `is_error` 而不是伪装成「未找到匹配」**（2026-10-14，见 §5.14） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/code-search/spec.md` |
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
 | F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；**中文问句按相邻二字组合切词、rg 走 `--fixed-strings` 字面量、`@file:` 线索直接读文件、目录遍历经 spawn_blocking、Hub 合并后复核预算**（2026-10-14，约束见 §5.10）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/context-retrieval/spec.md` |
 | F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only + `list_sessions` + `restore_session`）+ `conversation.rs`（`restore` 方法）+ `xgent_ui/src/session_history.rs`（历史面板 UI）+ `events.rs`（`ListSessionsMessage`/`SessionListMessage`/`RestoreSessionMessage`/`SessionRestoredMessage`）；**新建、列出、恢复** 均完整可用 | `plans/step9`、ADR-0008 |
@@ -78,14 +78,14 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 |:---|:---|
 | `xgent_core` | `ChatEvent`(12 变体)、`StopReason`、`AgentMessage`/`ContentBlock`/`convert_to_llm`、`ErrorKind`、`SessionEntry`、`EditorState` trait、`FileChanged`、JSON-RPC `Request/Response/Notification`、`methods`/`notifications` 常量 |
 | `xui_i18n` | `StringSource` trait |
-| `xgent_settings_core` | `GlobalConfig`/`ProviderConfig`(含 `max_retries: Option<u32>`/`retry_mode`/`retry_initial_delay_ms`/`retry_max_delay_ms`/`retry_backoff_factor`)/`ProviderKind`/`RetryMode`(Fixed/Exponential)/`ProjectConfig`/`ContextStrategy`(OnDemand/RepoMap/Vector/Hybrid)/`ToolPolicyConfig`、`GlobalConfigStore`/`ProjectConfigStore`、`paths` |
+| `xgent_settings_core` | `GlobalConfig`/`ProviderConfig`(含 `max_retries: Option<u32>`/`retry_mode`/`retry_initial_delay_ms`/`retry_max_delay_ms`/`retry_backoff_factor`，R3-17 新增 `context_window`/`model_context_windows`/`max_output_tokens`/`first_event_timeout_secs` + `resolve_context_window`/`effective_*` 访问器)/`ProviderKind`/`RetryMode`(Fixed/Exponential)/`ProjectConfig`(新增 `AgentConfig`/`ToolConfig`/`ContextLimits` 三节，均带 `effective_*()`)/`ContextStrategy`(OnDemand/RepoMap/Vector/Hybrid)/`ToolPolicyConfig`、`global::defaults`/`project::defaults`（转配置前那批常量的唯一来源）、`GlobalConfigStore`/`ProjectConfigStore`、`paths` |
 | `xgent_settings` | `Localizer`（impl StringSource）、`GlobalConfigRes`/`ProjectConfigRes`、`XgentSettingsPlugin` |
-| `xgent_provider` | `LlmProvider` trait、`OpenAiCompatProvider`（完整）、`ResponseApiProvider`/`AnthropicProvider`/`CustomApiProvider`（占位）、`build_provider(id, cfg)`、`ChatStream` |
+| `xgent_provider` | `LlmProvider` trait、`OpenAiCompatProvider`（完整）、`ResponseApiProvider`/`AnthropicProvider`/`CustomApiProvider`（占位）、`build_provider(id, cfg)`、`ChatStream`；R3-17 后适配器经 `with_first_event_timeout_secs` / `with_max_output_tokens` 承接 `ProviderConfig`（`build_provider` 与 `CustomApiProvider::with_config` 负责取值），缺省仍等于原 `FIRST_EVENT_TIMEOUT_SECS`/`8192` 常量 |
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`（`chat` 返回 `(ErrorKind, String)`，ErrorKind 经 `ProviderError::to_error_kind` 映射，透传给 UI 避免误判 Network 重试）、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
-| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待）、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具、`EditorTool`（UiOnly）、`McpTransport`（占位） |
+| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自 `with_params(&ToolParams)`）、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError` |
-| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
-| `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
+| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入，缺省等于原常量）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
+| `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`/`retrieval_max_tokens`/`max_events_per_frame`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
 | `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）、`handle_palette_triggers` 路由 `plugin.` 前缀到 `PluginCommandTriggered` |
 | `xgent_plugin_api` | 插件作者面向的 API：`Extension` trait（new/register_tools/register_commands/register_context_providers/execute/run_command/retrieve/on_file_changed）、`register_plugin!` 宏（生成 `init-extension` 导出）、WIT 绑定（`wit/plugin.wit`：host/tool/command/context-provider 四 interface + world plugin）、`host` 模块（read_file/write_file/log/get_config/run_command/http_get import）。编译为 `wasm32-wasip2`。 |
@@ -93,7 +93,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_plugin_host` | ECS 桥接 + 适配器：`PluginTool`（→ Tool trait，完整 id `plugin.<id>.<short>`，schema.name 一致性硬约束）、`PluginCommand`（→ CommandRegistry + PluginCommandRegistry）、`PluginContextProvider`（→ ContextHub）、`PluginHostPlugin`（Bevy Plugin，注册 Message + `plugin_poll_system`）、`plugin_poll_system`（drain PluginEvent + 执行 PluginOp + 处理 PluginCommandTriggered）、`register_proxy_impls`（创建 channel + 三 proxy impl）。 |
 | `xgent_plugin_hello` | 测试插件：hello 工具（read tier），验证最小链路。cdylib → wasm32-wasip2。 |
 | `xgent_plugin_git` | Git 集成参考插件：git_diff/git_log/git_status 工具 + diff/log/status 命令，经 `host::run_command("git", ...)` 执行。cdylib → wasm32-wasip2，打包到 `xgent_app/assets/plugins/git/`。 |
-| `xgent_app` | `Args`（命令行）、组装 `XuiPlugin` + `XgentSettingsPlugin` + `XgentAgentPlugin` + `XgentContextPlugin` + `PluginHostPlugin` + `XgentUiPlugin` + `ConfigBridgePlugin` + `FsEventBridgePlugin`、`connect_or_spawn_daemon`、`IpcProviderClient`、`ToolExecutorResource`（Arc 共享 ToolExecutor）、`PluginHostResource`/`PluginEventRx`、启动时 `load_builtin_plugins` spawn 到 tokio runtime。 |
+| `xgent_app` | `Args`（命令行）、组装 `XuiPlugin` + `XgentSettingsPlugin` + `XgentAgentPlugin` + `XgentContextPlugin` + `PluginHostPlugin` + `XgentUiPlugin` + `ConfigBridgePlugin` + `FsEventBridgePlugin`、`connect_or_spawn_daemon`、`IpcProviderClient`、`ToolExecutorResource`（Arc 共享 ToolExecutor）、`PluginHostResource`/`PluginEventRx`、启动时 `load_builtin_plugins` spawn 到 tokio runtime；**配置注入点**：`resolve_context_window`（窗口三级次序 + 回落 warn）+ 由 `ProjectConfig` 派生 `ToolParams`/`RetrievalLimits`/`[agent]` 两项（见 §4.5.1）。 |
 
 ---
 
@@ -198,9 +198,45 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
   - `auth.json` / `models.json`：预留
   - 路径函数：`paths::agent_dir()` / `global_config_file()` / `sessions_dir()` / `session_file_path(id)` / `sessions_db_path()`
   - 用 `dirs::home_dir()` 而非 `dirs::config_dir()`，跨平台一致、用户易找（macOS 不埋在 `~/Library/Application Support`）。
-- **项目级目录** `<project_root>/.xgent/`：项目特定配置（`config.toml` 含 provider 覆盖、tool 策略）。
+- **项目级目录** `<project_root>/.xgent/`：项目特定配置（`config.toml` 含 provider 覆盖、tool 策略、`[agent]`/`[tools]`/`[context]` 运行限额，见 §4.5.1）。
   - 路径函数：`paths::project_config_dir(root)` / `project_config_file(root)`。
 - **daemon socket**：默认平台缓存目录（`dirs::cache_dir()/xgent/daemon.sock`）；设置 `XGENT_AGENT_DIR` 时改用其下 `daemon.sock`（开发隔离）。
+
+### 4.5.1 运行参数配置（R3-17，2026-10-14）
+
+台账 R3-17 点名的 13 个限额（落成 14 个配置键，其中上下文窗口另有按模型的映射表）原本是编译期常量，用户无法调整；现在全部可配，且**缺省值逐项等于它替换掉的常量**——不写配置的工程行为与改动前逐字等价（由 `xgent_settings_core` 的 serde 测试锁死）。
+
+约定：数值键 **`0` = 未设置，回落内置缺省**；因此"完全不限"不可表达（这些闸的存在意义就是止住失控成本与卡帧）。取值一律经 `effective_*()` 访问器读取，`0` 的解析只发生在这一处。
+
+全局 `~/.xgent/agent/config.toml` 的 `[providers.<id>]`（端点属性，daemon 与 UI 共用同一 `build_provider`）：
+
+| 键 | 缺省 | 作用点 |
+|:---|:---|:---|
+| `context_window` | `128_000` | compaction 触发量尺（`xgent_app::resolve_context_window`） |
+| `model_context_windows` | 无条目 | 按模型 id 覆盖上面的值 |
+| `max_output_tokens` | `8192` | Anthropic Messages 请求体 `max_tokens`（OpenAI 兼容/Response API 不发送该字段，此键对它们无效） |
+| `first_event_timeout_secs` | `30` | openai_compat / anthropic 等首个 SSE 事件的上限 |
+
+窗口取值次序：`model_context_windows[当前模型]` > `context_window` > `128_000`，**走内置回落时启动打一条 warn**（窗口猜错的表现是「小模型永不压缩」或「大模型过早压缩」，不告警就无从归因）。不在启动时调 `list_models` 探测——那会把一次网络往返与其失败模式塞进启动路径。
+
+项目级 `<project>/.xgent/config.toml`（按仓库的工作条件，与既有 `tool_policy`/`context_strategy` 同层）：
+
+| 键 | 缺省 | 作用点 |
+|:---|:---|:---|
+| `[agent] retrieval_max_tokens` | `8_000` | bridge 每轮构造 `ContextQuery.max_tokens` |
+| `[agent] max_events_per_frame` | `64` | `agent_poll_system` 单帧 drain 事件数（到界即停，剩余留在 channel，**不丢事件**） |
+| `[tools] confirm_timeout_secs` | `300` | `ToolExecutor` 等待确认决策的时长 |
+| `[tools] command_timeout_secs` | `60` | `run_command` 执行上限，超时杀整个进程组 |
+| `[tools] command_max_output_bytes` | `65_536` | `run_command` 捕获输出上限（仍受共享天花板 `MAX_TOOL_OUTPUT_BYTES` 再约束） |
+| `[context] tree_max_depth` | `4` | 目录树摘要深度 |
+| `[context] tree_max_entries` | `200` | 目录树条目数（超限以 `...` 收尾） |
+| `[context] rg_timeout_secs` | `10` | rg 调用超时，超时降级内置遍历 |
+| `[context] max_search_files` | `20` | 检索读取的文件数 |
+| `[context] max_keywords` | `16` | 关键词上限（CJK bigram 会成倍放大，8 会截掉中文问句后半段） |
+
+**接线方式**（新增参数时照此路径，不要引全局单例）：`xgent_app` 读配置 → `AgentBridgeConfig{retrieval_max_tokens, max_events_per_frame, context_window}` / `xgent_tools::ToolParams::from_tool_config` / `xgent_context::RetrievalLimits::from_context_limits` → 构造函数注入。工具与检索 crate **不直接依赖配置节类型**，转换在 app 完成，`Tool`/`ContextProvider` 契约因此与配置层解耦。
+
+注意 `xgent_agent` 的每帧上限是 `AgentBridge` 上的普通字段（bridge 本就是循环配置的载体，没有为单个整数新增 Resource）。
 
 **迁移注意**：会话历史从项目级 `<project>/.xgent/sessions/` 迁到全局 `~/.xgent/agent/sessions/`，`session_file_path(id)` 去除 `project_root` 参数。旧项目级会话文件不自动迁移（MVP 会话为临时性，跨项目共享更符合 D-04 演进）。
 
@@ -583,6 +619,16 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - **验证结果（rustc 1.99.0）**：`cargo check --workspace --all-targets` 0 error 0 warning；`cargo test --workspace` 46 个测试二进制 **537 passed / 0 failed / 1 ignored**；`cargo clippy --workspace --all-targets` 通过，残留 **8 处同类警告**——`#[must_use]` 无 message 且返回类型本身已是 must_use（xgent_agent `bridge.rs`/`compaction.rs`、xgent_context `provider.rs`、xgent_provider `provider.rs`、xgent_terminal `backend.rs`、xgent_tools `executor.rs`/`mcp.rs`/`tool.rs`），属 clippy 1.99 新增 lint 面、与 bevy 0.20 无关，本轮未处理。
    - **新发现的操作陷阱**：`cargo fmt --all` 会连带格式化 path 依赖 `../bevy` 的源码（实测报出 `bevy_pbr/src/render/mesh.rs` 2 处 diff），不带 `--check` 直接跑会改写那个上游检出；`cargo fmt` 与 `cargo fmt -p <crate>` 实测 0 diff。以后统一用 `cargo fmt -p <crate>`（已写进 `AGENTS.md` 第 3 节）。
    - **冷重建成本**：换 rustc 版本会让整个依赖图缓存失效——本轮 `cargo check` 13m39s、`cargo test`（含真码生成与链接）约 70 分钟。评估升级代价时按这个量级算。
+
+28. **搜索能力与运行参数（2026-10-14，缺口 R3-3 / R3-17）**：
+   - **坏参数是错误，不是零结果**（`xgent_tools::search_files`）。改前只支持子串，模型写 `"(foo"` 之类的模式会拿到「未找到匹配」，于是断定代码不存在并给出错答。现在 `regex` / `glob` / `file_type` 三者任一非法，都在**遍历开始之前**返回 `is_error` 且错因点名是哪个参数、为什么非法。判据写进工具描述里，因为选参数的是模型。
+   - `regex` 是**逐行**匹配、默认关闭（`regex: false` 保持字面量子串，既有调用与测试行为不变）。用 `regex` crate（1.13.0 已在 `Cargo.lock` 里，作直接依赖不增加编译量）而非自写引擎；lookaround/反向引用不属于该引擎语言，报同一类非法错。
+   - `glob` 自建翻译（`*` 不跨 `/`、`**` 跨、`?` 单字符、`{a,b}` 分支，其余字面量转义），**不含 `/` 的模式只匹配文件名**——`"*.rs"` 在任意深度命中，这是 ripgrep 的 `--glob` 约定，也是用户写下它时的预期。不引 `globset`。
+   - `file_type` 用 ripgrep `--type` 的名称词表（`rust`/`python`/`cpp`…，一个名称覆盖多个扩展名）。未知名称报错并列出支持集合；合法名称但工程内无该类型文件是**正常空结果**，不是错误。
+   - 被筛掉的文件不读、也不占用 `MAX_RESULTS`；忽略目录、单文件 1MB 跳过、深度上限、取消边界全部不变。
+   - **台账点名的 13 个运行限额全部转配置**（14 个键）：见 §4.5.1。核心不变量是「缺省值逐项等于它替换掉的常量」，因此不写配置的工程行为等价——这条由 serde 测试当作数据断言，而不是靠人读 `default` 函数。
+   - 加新参数请沿 `xgent_app → ToolParams / RetrievalLimits / AgentBridgeConfig → 构造函数注入` 这条路；工具与检索 crate **不 import 配置节类型**，`Tool` / `ContextProvider` 契约与配置层保持解耦（`ToolExecutor::with_defaults()` 仍可用，它取 `ToolParams::default()`）。
+   - **本轮查实的一处台账低估**：R3-21 记「编辑器查找替换仅字面匹配」，实际 `xui::FindState` 在 `xgent_ui` 里**零消费者**——查找替换不是「只支持字面量」，而是产品里根本不可达。下一条变更应按"接 UI + 正则"估工作量，别按"加个开关"估。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

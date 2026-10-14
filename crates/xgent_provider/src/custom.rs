@@ -47,7 +47,8 @@ impl CustomApiProvider {
                 api_key,
                 cfg.timeout_secs,
                 &cfg.extra_headers,
-            ),
+            )
+            .with_first_event_timeout_secs(cfg.effective_first_event_timeout_secs()),
             id,
         }
     }

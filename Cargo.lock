@@ -9370,6 +9370,7 @@ dependencies = [
  "bevy",
  "libc",
  "parking_lot",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

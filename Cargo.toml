@@ -21,6 +21,8 @@ async-trait = "0.1.89"
 eventsource-stream = "0.2.3"
 # 错误处理
 thiserror = "2.0.18"
+# 正则匹配（search_files 的 regex 模式；1.13.0 已在 Cargo.lock 中，无新增编译成本）
+regex = "1.13"
 # futures core（流式处理）
 futures = "0.3.32"
 futures-core = "0.3.32"

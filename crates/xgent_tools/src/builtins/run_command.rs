@@ -17,22 +17,14 @@ use crate::tool::{
 /// 运行子进程命令。
 ///
 /// 工作目录固定为 `project_root`，捕获合并的 stdout/stderr。
-/// 超时由内部限制（60s），避免卡死 agent loop。
-pub struct RunCommand;
-
-/// 默认命令超时（秒）。
-const TIMEOUT_SECS: u64 = 60;
-
-/// 工具输出上限（字节）：见 [`crate::MAX_TOOL_OUTPUT_BYTES`]。
-///
-/// 无上限时命令输出（递归 cat、日志 dump）原样回灌 LLM 上下文，
-/// 单次即可撑爆窗口并触发连锁压缩。
-/// 工具输出上限（字节）：见 [`crate::MAX_TOOL_OUTPUT_BYTES`]。
-///
-/// 无上限时命令输出（递归 cat、日志 dump）原样回灌 LLM 上下文，
-/// 单次即可撑爆窗口并触发连锁压缩。
-#[allow(dead_code)]
-const MAX_OUTPUT_BYTES: usize = crate::MAX_TOOL_OUTPUT_BYTES;
+/// 超时与输出上限取自 [`crate::ToolParams`]（项目配置 `[tools]`，R3-17），
+/// 缺省即本次转配置前的硬编码常量，避免卡死 agent loop 与无界输出。
+pub struct RunCommand {
+    /// 最长执行秒数
+    timeout_secs: u64,
+    /// 捕获输出上限（字节）
+    max_output_bytes: usize,
+}
 
 /// 危险命令模式（小写匹配）：命中则 [`RunCommand::approval_for`] 返回
 /// `approval_required`（独立于 tier 的强制确认标记），使
@@ -65,13 +57,8 @@ const DANGER_PATTERNS: &[&str] = &[
     ":/bin/bash",
 ];
 
-/// 把命令输出截断到 `MAX_OUTPUT_BYTES` 内：见 [`crate::truncate_output`]。
-///
-/// 抽出为 crate 级共享函数，使命令输出与文件读取用同一套截断语义
-/// （同上限、同头尾保留、同截断标记），避免两处实现漂移。
-fn truncate_output(s: &str) -> String {
-    crate::truncate_output(s)
-}
+/// 把命令输出截断到实例配置的上限内：见
+/// [`crate::truncate_output_to`]（与文件读取共用同一套头尾保留语义）。
 
 /// 命令是否命中危险模式（大小写不敏感）。
 ///
@@ -81,6 +68,27 @@ fn truncate_output(s: &str) -> String {
 fn is_dangerous(cmd: &str) -> bool {
     let lower = cmd.to_lowercase();
     DANGER_PATTERNS.iter().any(|p| lower.contains(p))
+}
+
+impl RunCommand {
+    /// 用内置缺省参数构造（等价于改动前的硬编码行为）。
+    pub fn new() -> Self {
+        Self::with_params(&crate::ToolParams::default())
+    }
+
+    /// 用给定运行参数构造（来自项目配置 `[tools]`）。
+    pub fn with_params(params: &crate::ToolParams) -> Self {
+        Self {
+            timeout_secs: params.command_timeout_secs,
+            max_output_bytes: params.command_max_output_bytes,
+        }
+    }
+}
+
+impl Default for RunCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
@@ -211,13 +219,13 @@ impl Tool for RunCommand {
                 }
                 return Err(ToolError::Aborted);
             }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(TIMEOUT_SECS)) => {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(self.timeout_secs)) => {
                 // 超时：杀整个进程组
                 if let Some(c) = child_opt.as_mut() {
                     kill_child(c);
                     let _ = c.wait().await;
                 }
-                return Err(ToolError::Timeout(TIMEOUT_SECS));
+                return Err(ToolError::Timeout(self.timeout_secs));
             }
             s = async { child_opt.as_mut().unwrap().wait().await } => match s {
                 Ok(st) => st,
@@ -245,13 +253,13 @@ impl Tool for RunCommand {
         let stdout = String::from_utf8_lossy(&stdout_data).to_string();
         let stderr = String::from_utf8_lossy(&stderr_data).to_string();
         let is_error = !status.success();
-        let mut text = truncate_output(&stdout);
+        let mut text = crate::truncate_output_to(&stdout, self.max_output_bytes);
         if !stderr.is_empty() {
             if !text.is_empty() {
                 text.push('\n');
             }
             text.push_str("[stderr]\n");
-            text.push_str(&truncate_output(&stderr));
+            text.push_str(&crate::truncate_output_to(&stderr, self.max_output_bytes));
         }
         text.push_str(&format!("\n[exit: {}]", status));
         Ok(ToolResult {
@@ -292,7 +300,7 @@ mod tests {
             project_root: dir.path().to_path_buf(),
             tool_policy: Default::default(),
         };
-        let r = RunCommand
+        let r = RunCommand::new()
             .execute(
                 json!({"command": "echo hello"}),
                 &ctx,
@@ -313,7 +321,7 @@ mod tests {
             project_root: dir.path().to_path_buf(),
             tool_policy: Default::default(),
         };
-        let r = RunCommand
+        let r = RunCommand::new()
             .execute(
                 json!({"command": "exit 7"}),
                 &ctx,
@@ -334,7 +342,7 @@ mod tests {
             project_root: root.clone(),
             tool_policy: Default::default(),
         };
-        let r = RunCommand
+        let r = RunCommand::new()
             .execute(
                 json!({"command": "pwd > out.txt"}),
                 &ctx,
@@ -366,7 +374,7 @@ mod tests {
         // 生成 1MB 输出，远超管道缓冲
         let r = tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            RunCommand.execute(
+            RunCommand::new().execute(
                 json!({"command": "head -c 1048576 /dev/zero | tr '\\0' 'a'"}),
                 &ctx,
                 CancellationToken::new(),
@@ -385,7 +393,9 @@ mod tests {
 
     #[tokio::test]
     async fn summarize_includes_command() {
-        let s = RunCommand.summarize(&json!({"command": "ls -la"})).await;
+        let s = RunCommand::new()
+            .summarize(&json!({"command": "ls -la"}))
+            .await;
         assert!(s.contains("ls -la"));
     }
 
@@ -404,7 +414,7 @@ mod tests {
             "SUDO RM -RF /", // 大小写不敏感
         ] {
             assert_eq!(
-                RunCommand.approval_for(&json!({"command": cmd})),
+                RunCommand::new().approval_for(&json!({"command": cmd})),
                 ToolTier::Dangerous,
                 "命令应判为危险: {cmd}"
             );
@@ -416,10 +426,102 @@ mod tests {
         // 普通命令返回静态 tier（Exec），不升级
         for cmd in ["ls -la", "cargo check", "git status"] {
             assert_eq!(
-                RunCommand.approval_for(&json!({"command": cmd})),
+                RunCommand::new().approval_for(&json!({"command": cmd})),
                 ToolTier::Exec,
                 "普通命令不应升级: {cmd}"
             );
         }
+    }
+
+    /// A8：命令超时上限取自参数。1 秒上限应杀掉 `sleep 3`，
+    /// 且报错里的秒数是配置值而非内置 60。
+    #[tokio::test]
+    async fn configured_command_timeout_kills_slow_command() {
+        use std::time::Instant;
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: Default::default(),
+        };
+        let params = crate::ToolParams {
+            command_timeout_secs: 1,
+            ..Default::default()
+        };
+        let started = Instant::now();
+        let r = RunCommand::with_params(&params)
+            .execute(
+                json!({"command": "sleep 3"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await;
+        let elapsed = started.elapsed();
+        assert!(
+            matches!(r, Err(ToolError::Timeout(1))),
+            "应按配置 1s 超时并回报该值: {r:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "不应等满命令自身时长: {elapsed:?}"
+        );
+    }
+
+    /// A8：捕获输出上限取自参数（配到 1KB 时 4KB 输出必须被截断）。
+    #[tokio::test]
+    async fn configured_output_cap_truncates_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: Default::default(),
+        };
+        let params = crate::ToolParams {
+            command_max_output_bytes: 1024,
+            ..Default::default()
+        };
+        // ~4KB 输出
+        let r = RunCommand::with_params(&params)
+            .execute(
+                json!({"command": "seq 1 900"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            r.output.contains("中间部分已截断"),
+            "超过配置上限应截断: len={}",
+            r.output.len()
+        );
+        assert!(
+            r.output.len() < 4_096,
+            "输出应被收到配置上限附近，实际 {}",
+            r.output.len()
+        );
+
+        // 同一命令在缺省参数下不截断（64KB 上限）
+        let full = RunCommand::new()
+            .execute(
+                json!({"command": "seq 1 900"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            !full.output.contains("中间部分已截断"),
+            "缺省上限不应截断 4KB 输出"
+        );
+    }
+
+    /// 参数缺省即改动前的硬编码值（A8「absent → 60/65536」）。
+    #[test]
+    fn default_params_equal_previous_constants() {
+        let p = crate::ToolParams::default();
+        assert_eq!(p.command_timeout_secs, 60);
+        assert_eq!(p.command_max_output_bytes, 65_536);
+        assert_eq!(p.confirm_timeout_secs, 300);
     }
 }

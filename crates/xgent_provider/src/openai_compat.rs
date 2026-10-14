@@ -19,11 +19,14 @@ use xgent_core::ids::StreamId;
 use crate::provider::{ChatStream, LlmProvider, ModelInfo, ProviderError};
 use crate::sse::parse_response_stream;
 
-/// 等待首个 SSE 事件的最大秒数。
+/// 等待首个 SSE 事件的最大秒数（内置缺省）。
 ///
 /// send() 返回后，若首事件迟迟不到，通常意味着服务端已接收请求但卡在排队/推理，
 /// 超过此阈值视为网络异常，触发 `ChatEvent::Error{kind: Network}`。
-const FIRST_EVENT_TIMEOUT_SECS: u64 = 30;
+/// 实际取值由配置 `[providers.<id>] first_event_timeout_secs` 决定（R3-17），
+/// 缺省值与配置层共享同一定义。
+const FIRST_EVENT_TIMEOUT_SECS: u64 =
+    xgent_settings_core::global::defaults::FIRST_EVENT_TIMEOUT_SECS;
 
 /// 流式消费中相邻两个事件之间的最大空闲秒数。
 ///
@@ -51,6 +54,11 @@ pub struct OpenAiCompatProvider {
     /// 非法头名/值在构造时丢弃（reqwest::header 只接受合法 ASCII），
     /// 不因一个畸形头让整个 provider 构造失败。
     extra_headers: HeaderMap,
+    /// 等待首个 SSE 事件的上限。
+    ///
+    /// 由配置 `[providers.<id>] first_event_timeout_secs` 决定，缺省
+    /// [`FIRST_EVENT_TIMEOUT_SECS`]（R3-17）。
+    first_event_timeout: Duration,
 }
 
 impl OpenAiCompatProvider {
@@ -75,7 +83,16 @@ impl OpenAiCompatProvider {
             client,
             request_timeout: Duration::from_secs(timeout_secs),
             extra_headers: HeaderMap::new(),
+            first_event_timeout: Duration::from_secs(FIRST_EVENT_TIMEOUT_SECS),
         }
+    }
+
+    /// 设置等待首个 SSE 事件的上限秒数（配置驱动，`0` 由调用方先解析为缺省值）。
+    pub fn with_first_event_timeout_secs(mut self, secs: u64) -> Self {
+        if secs > 0 {
+            self.first_event_timeout = Duration::from_secs(secs);
+        }
+        self
     }
 
     /// 指定额外请求头构造（`CustomApiProvider` 经此透传用户自定义头）。
@@ -125,6 +142,7 @@ impl OpenAiCompatProvider {
             client,
             request_timeout: Duration::from_secs(60),
             extra_headers: HeaderMap::new(),
+            first_event_timeout: Duration::from_secs(FIRST_EVENT_TIMEOUT_SECS),
         }
     }
 
@@ -342,8 +360,16 @@ impl LlmProvider for OpenAiCompatProvider {
         let (tx, rx) = mpsc::channel::<ChatEvent>(64);
 
         let model = req.model.clone();
+        let first_event_timeout = self.first_event_timeout;
         tokio::spawn(async move {
-            run_stream(stream, model, tx).await;
+            run_stream_with_timeout(
+                stream,
+                model,
+                tx,
+                first_event_timeout,
+                Duration::from_secs(IDLE_TIMEOUT_SECS),
+            )
+            .await;
         });
 
         Ok((stream_id, rx))
@@ -357,34 +383,20 @@ impl LlmProvider for OpenAiCompatProvider {
 
 /// 消费 SSE JSON Value 流，转换为细粒度 [`ChatEvent`] 并发送到 `tx`。
 ///
-/// 由 [`OpenAiCompatProvider::chat`] 在 spawn 的任务中调用。独立为函数便于
-/// 用 mock SSE 流做超时单测（见 `tests::run_stream_*_timeout`）。
+/// 由 [`OpenAiCompatProvider::chat`] 在 spawn 的任务中调用，首事件等待取自
+/// provider 配置。独立为函数便于用 mock SSE 流做超时单测
+/// （见 `tests::run_stream_*_timeout`）。
 ///
 /// 超时保护（O8）：
-/// - 首事件超时：`Start` 发出后，首个事件等待不超过
-///   [`FIRST_EVENT_TIMEOUT_SECS`]，超时发 `Error{kind: Network}` 并终止。
-/// - idle 超时：首事件后，相邻两事件之间等待不超过
-///   [`IDLE_TIMEOUT_SECS`]，超时发 `Error{kind: Network}` 并终止。
+/// - 首事件超时：`Start` 发出后，首个事件等待不超过 `first_timeout`，
+///   超时发 `Error{kind: Network}` 并终止。
+/// - idle 超时：首事件后，相邻两事件之间等待不超过 `idle_timeout`，
+///   超时发 `Error{kind: Network}` 并终止。
 ///
 /// `S` 取 `Stream<Item = Result<Value, ProviderError>>`，兼容真实 SSE 与 mock 流。
-async fn run_stream<S>(stream: S, model: String, tx: mpsc::Sender<ChatEvent>)
-where
-    S: Stream<Item = Result<Value, ProviderError>> + Send + 'static,
-{
-    run_stream_with_timeout(
-        stream,
-        model,
-        tx,
-        Duration::from_secs(FIRST_EVENT_TIMEOUT_SECS),
-        Duration::from_secs(IDLE_TIMEOUT_SECS),
-    )
-    .await;
-}
-
-/// [`run_stream`] 的可配置超时版本，供单测注入短超时，避免等待 30s/60s。
 ///
-/// 语义与 [`run_stream`] 一致：`first_timeout` 限定首事件等待，`idle_timeout`
-/// 限定后续相邻事件等待。两者超时均发 `Error{kind: Network}` 并终止流。
+/// `first_timeout` 限定首事件等待，`idle_timeout` 限定后续相邻事件等待；
+/// 两者超时均发 `Error{kind: Network}` 并终止流。
 async fn run_stream_with_timeout<S>(
     stream: S,
     model: String,
@@ -1303,5 +1315,59 @@ mod receiver_drop_tests {
             "接收端丢弃后拉取计数应停止（丢弃时 {at_drop} → 等待后 {after_wait}）"
         );
         let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+    }
+
+    /// A9：配置的首事件等待真的进入流消费本身，而不只是存进结构体。
+    ///
+    /// 端点回完 SSE 头后不再产生任何事件。若 `chat()` 仍用编译期 30s 常量，
+    /// 本测试要等满 30s 才拿到 `Network` 错误；配置成 1s 后应在数秒内拿到，
+    /// 且不是立刻拿到（证明确实等过）。
+    #[tokio::test]
+    async fn configured_first_event_timeout_reaches_the_wait() {
+        use std::time::Instant;
+        use xgent_core::chat::{ChatEvent, ErrorKind};
+
+        let addr = crate::test_support::bind_stalling_sse_endpoint().await;
+        let cfg = xgent_settings_core::ProviderConfig {
+            kind: xgent_settings_core::ProviderKind::OpenAiCompat,
+            api_base: format!("{}/v1", crate::test_support::origin(addr)),
+            api_key: "k".into(),
+            first_event_timeout_secs: 1,
+            ..Default::default()
+        };
+        let provider = crate::build_provider("stall", &cfg);
+        let req = ChatRequest {
+            provider: "stall".into(),
+            model: "m".into(),
+            messages: vec![],
+            tools: None,
+        };
+        let (_stream_id, mut rx) = provider.chat(req).await.expect("指向本机端点的建流应成功");
+
+        let started = Instant::now();
+        let mut kind = None;
+        // 上限 10s：远小于 30s 缺省，因此「没读配置」必然在此超时前失败
+        while kind.is_none() && started.elapsed() < Duration::from_secs(10) {
+            match tokio::time::timeout(Duration::from_secs(9), rx.recv()).await {
+                Ok(Some(ChatEvent::Error { kind: k, .. })) => kind = Some(k),
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        let elapsed = started.elapsed();
+        assert_eq!(
+            kind,
+            Some(ErrorKind::Network),
+            "首事件超时应报 Network，实测 {elapsed:?}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(900),
+            "应真的等待过配置值，而非立即失败：{elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "配置 1s 生效则不应等到内置 30s 缺省：{elapsed:?}"
+        );
     }
 }

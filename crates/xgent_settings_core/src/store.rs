@@ -194,6 +194,7 @@ mod tests {
                 approved: vec!["read_file".into()],
                 denied: vec![],
             },
+            ..Default::default()
         };
 
         ProjectConfigStore::save_to(&cfg, &path).unwrap();

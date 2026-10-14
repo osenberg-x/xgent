@@ -91,9 +91,13 @@ fn main() {
     // 构造 agent bridge 依赖
     let provider =
         Arc::new(IpcProviderClient::new(ipc.clone())) as Arc<dyn xgent_agent::ProviderClient>;
+    // 项目配置（工具策略、工具/检索/agent 限额、context_strategy 都取自这里）
+    let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
     // ToolExecutor 作为 Resource（与 AgentBridge 共享同一 Arc）。
     // 插件系统经 ToolExecutorResource 注册工具到同一实例。
-    let executor = Arc::new(ToolExecutor::with_defaults());
+    // 确认超时与命令上限取自 `[tools]`（R3-17）。
+    let tool_params = xgent_tools::ToolParams::from_tool_config(&project_config.tools);
+    let executor = Arc::new(ToolExecutor::with_params(&tool_params));
     // Editor 命令 channel：agent EditorTool → ECS（经 agent_poll_system 桥接）
     let (editor_cmd_tx, editor_cmd_rx) =
         tokio::sync::mpsc::channel::<xgent_tools::EditorCommandRequest>(32);
@@ -105,11 +109,11 @@ fn main() {
     //
     // 内置 provider 按项目配置的 context_strategy 选择（R2-4）。无实现的
     // 策略显式报错而非静默回退：静默回退会让误配置的项目看起来完全正常。
-    let project_config_for_ctx = ProjectConfigStore::load(&project_root).unwrap_or_default();
     let builtin_ctx: Arc<dyn xgent_context::ContextProvider> =
         match xgent_context::build_context_provider(
-            project_config_for_ctx.context_strategy,
+            project_config.context_strategy,
             project_root.clone(),
+            xgent_context::RetrievalLimits::from_context_limits(&project_config.context),
         ) {
             xgent_context::BuiltContextProvider::Ready(p) => Arc::from(p),
             xgent_context::BuiltContextProvider::Unsupported(s) => {
@@ -125,8 +129,6 @@ fn main() {
     let context = context_hub.clone() as Arc<dyn xgent_context::ContextProvider>;
     // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model 与重试配置）
     let global_config = GlobalConfigStore::load().unwrap_or_default();
-    // 加载项目配置（bridge 需 tool_policy）
-    let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
 
     // 派生重试配置：命令行 provider > 项目配置 > 全局配置的 default provider
     let provider_id_for_retry = args
@@ -157,10 +159,11 @@ fn main() {
     });
     let (provider_id, model) = derive_provider_model(provider_id, model);
     // Compaction provider：复用 agent 的 ProviderClient，与对话同 provider/model。
-    // context_window 用默认 128k（后续可从 ModelInfo 派生，见 D-04）。
     let compactor: Arc<dyn xgent_agent::CompactionProvider> = Arc::new(
         xgent_agent::LlmCompactor::new(provider.clone(), provider_id.clone(), model.clone()),
     );
+    // 上下文窗口：provider 的按模型覆盖 > provider 级值 > 内置缺省（含告警）。
+    let context_window = resolve_context_window(&global_config, &provider_id, &model);
     let bridge = AgentBridge::new(AgentBridgeConfig {
         provider,
         executor: executor.clone(),
@@ -169,11 +172,14 @@ fn main() {
         tool_policy: project_config.tool_policy.clone(),
         retry_config: Arc::new(parking_lot::RwLock::new(retry_config)),
         compaction: Some(compactor),
-        context_window: 128_000,
+        context_window,
         compaction_settings: xgent_agent::CompactionSettings::default(),
         // 有界执行：防止 LLM 反复请求同一 tool_call 导致无限执行与无限计费（R1-1）
         max_tool_rounds: Some(xgent_agent::loop_limits::MAX_TOOL_ROUNDS),
         max_tokens_per_turn: Some(xgent_agent::loop_limits::MAX_TOKENS_PER_TURN),
+        // 检索预算与每帧事件上限来自 `[agent]`（R3-17）
+        retrieval_max_tokens: project_config.agent.effective_retrieval_max_tokens(),
+        max_events_per_frame: project_config.agent.effective_max_events_per_frame(),
     });
 
     // 通知订阅端（fs/config 桥接用）
@@ -313,6 +319,31 @@ fn main() {
 /// UI 侧据此判断未配置状态并提示用户设置 provider。
 fn derive_provider_model(provider_id: Option<String>, model: Option<String>) -> (String, String) {
     (provider_id.unwrap_or_default(), model.unwrap_or_default())
+}
+
+/// 解析当前 provider/model 的上下文窗口（R3-17）。
+///
+/// 次序：`[providers.<id>.model_context_windows]` 里该模型的条目 >
+/// `[providers.<id>] context_window` > 内置缺省 `128_000`。
+///
+/// 走内置缺省时必须打一条告警：窗口是 compaction 的唯一量尺，猜错的后果是
+/// 「小窗口模型永不压缩」或「大窗口模型被过早压缩」，而两者在 UI 上都看不出原因。
+/// 不在此调 `list_models` 探测——那会把一次网络往返与它的失败模式塞进启动路径。
+fn resolve_context_window(
+    global: &xgent_settings_core::GlobalConfig,
+    provider_id: &str,
+    model: &str,
+) -> u32 {
+    let (window, used_fallback) = global.resolve_context_window(provider_id, model);
+    if used_fallback {
+        tracing::warn!(
+            provider = provider_id,
+            model,
+            window,
+            "未配置 context_window / model_context_windows，compaction 按内置缺省窗口计算；小窗口模型可能永不压缩、大窗口模型可能过早压缩"
+        );
+    }
+    window
 }
 
 // ===== 临时诊断探测（用后即删）=====

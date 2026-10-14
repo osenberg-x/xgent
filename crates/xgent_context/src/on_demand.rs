@@ -19,16 +19,13 @@ use crate::provider::{
     ContextChunk, ContextProvider, ContextQuery, ContextResult, estimate_tokens, is_cjk_char,
 };
 
-/// 目录树最大深度。
-const TREE_MAX_DEPTH: u32 = 4;
-/// 目录树最大条目数。
-const TREE_MAX_ENTRIES: usize = 200;
-/// ripgrep 超时（秒）。
-const RG_TIMEOUT_SECS: u64 = 10;
-/// 搜索返回的最大文件数。
-const MAX_SEARCH_FILES: usize = 20;
-/// 关键词上限。CJK 分词会成倍放大关键词数，8 个会截掉中文问句的后半段。
-const MAX_KEYWORDS: usize = 16;
+/// 遍历/搜索/关键词的限额不再是本文件的常量，而是 [`RetrievalLimits`]
+/// 的字段（项目配置 `[context]`，R3-17）。其缺省值与内置缺省同源，
+/// 定义在 `xgent_settings_core::project::defaults`。
+
+/// 降级遍历访问的节点数上限：纯止损闸，不属于「按工程调优」的参数，
+/// 因此保留为常量。
+const VISITED_NODE_LIMIT: usize = 2000;
 /// `@file:` 线索前缀（编辑器 `@` 引用把文件路径带进 hints）。
 const FILE_REF_PREFIX: &str = "@file:";
 /// 常见英文虚词：几乎不会作为标识符出现，作检索词只引入噪声。
@@ -59,19 +56,81 @@ enum ChunkRole {
     SearchHit,
 }
 
+/// 检索遍历限额（项目配置 `[context]`，R3-17）。
+///
+/// 缺省即本次转配置前 `on_demand.rs` 顶部的五个常量，因此「不写配置」与
+/// 「改前行为」逐字等价。放在实例上而非静态常量，是为了让 provider 的每次
+/// 遍历都按调用方给定的预算收敛，而不用改一处影响全部工程。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetrievalLimits {
+    /// 目录树最大深度
+    pub tree_max_depth: u32,
+    /// 目录树最大条目数
+    pub tree_max_entries: usize,
+    /// ripgrep 超时秒数
+    pub rg_timeout_secs: u64,
+    /// 搜索返回的最大文件数
+    pub max_search_files: usize,
+    /// 关键词上限
+    pub max_keywords: usize,
+}
+
+impl Default for RetrievalLimits {
+    fn default() -> Self {
+        use xgent_settings_core::project::defaults as d;
+        Self {
+            tree_max_depth: d::TREE_MAX_DEPTH,
+            tree_max_entries: d::TREE_MAX_ENTRIES,
+            rg_timeout_secs: d::RG_TIMEOUT_SECS,
+            max_search_files: d::MAX_SEARCH_FILES,
+            max_keywords: d::MAX_KEYWORDS,
+        }
+    }
+}
+
+impl RetrievalLimits {
+    /// 由项目配置的 `[context]` 节派生（`0` 已解析为内置缺省）。
+    pub fn from_context_limits(cfg: &xgent_settings_core::ContextLimits) -> Self {
+        Self {
+            tree_max_depth: cfg.effective_tree_max_depth(),
+            tree_max_entries: cfg.effective_tree_max_entries(),
+            rg_timeout_secs: cfg.effective_rg_timeout_secs(),
+            max_search_files: cfg.effective_max_search_files(),
+            max_keywords: cfg.effective_max_keywords(),
+        }
+    }
+}
+
 /// 方案 A 上下文提供者。
 pub struct OnDemandContextProvider {
     project_root: PathBuf,
+    limits: RetrievalLimits,
 }
 
 impl OnDemandContextProvider {
     pub fn new(project_root: PathBuf) -> Self {
-        Self { project_root }
+        Self {
+            project_root,
+            limits: RetrievalLimits::default(),
+        }
+    }
+
+    /// 用给定限额构造（`xgent_app` 由项目配置 `[context]` 派生）。
+    pub fn with_limits(project_root: PathBuf, limits: RetrievalLimits) -> Self {
+        Self {
+            project_root,
+            limits,
+        }
     }
 
     /// 项目根。
     pub fn project_root(&self) -> &Path {
         &self.project_root
+    }
+
+    /// 当前生效的限额。
+    pub fn limits(&self) -> &RetrievalLimits {
+        &self.limits
     }
 }
 
@@ -118,7 +177,7 @@ impl ContextProvider for OnDemandContextProvider {
         }
 
         // 4. 关键词搜索
-        let keywords = extract_keywords(&query.user_message, &query.hints);
+        let keywords = extract_keywords(&query.user_message, &query.hints, &self.limits);
         if !keywords.is_empty() && total_tokens < max {
             let files = self.search(&keywords).await;
             for f in files {
@@ -148,7 +207,8 @@ impl OnDemandContextProvider {
     /// 生成目录树摘要（跳过 .git/target 等）。遍历在 blocking pool 上执行。
     async fn tree_summary(&self) -> Option<String> {
         let root = self.project_root.clone();
-        let lines = tokio::task::spawn_blocking(move || collect_tree_lines(&root))
+        let limits = self.limits;
+        let lines = tokio::task::spawn_blocking(move || collect_tree_lines(&root, &limits))
             .await
             .unwrap_or_default();
         if lines.is_empty() {
@@ -177,7 +237,7 @@ impl OnDemandContextProvider {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
         let output = tokio::time::timeout(
-            std::time::Duration::from_secs(RG_TIMEOUT_SECS),
+            std::time::Duration::from_secs(self.limits.rg_timeout_secs),
             cmd.output(),
         )
         .await
@@ -199,7 +259,7 @@ impl OnDemandContextProvider {
                     .ok()
                     .map(|p| p.to_path_buf())
             })
-            .take(MAX_SEARCH_FILES)
+            .take(self.limits.max_search_files)
             .collect();
         Some(files)
     }
@@ -209,7 +269,8 @@ impl OnDemandContextProvider {
     async fn fallback_search(&self, keywords: &[String]) -> Vec<PathBuf> {
         let root = self.project_root.clone();
         let keywords = keywords.to_vec();
-        tokio::task::spawn_blocking(move || collect_matching_files(&root, &keywords))
+        let limits = self.limits;
+        tokio::task::spawn_blocking(move || collect_matching_files(&root, &keywords, &limits))
             .await
             .unwrap_or_default()
     }
@@ -284,7 +345,10 @@ fn file_refs(hints: &[String]) -> Vec<String> {
 ///
 /// 中文按相邻二字组合（bigram）产出：单字太泛（会命中大半棵源码树），整句太长
 /// （任何源码都不会包含整句），二字片段正是子串与 rg 字面量能命中的单位。
-fn extract_keywords(user_message: &str, hints: &[String]) -> Vec<String> {
+///
+/// 关键词上限取自 `limits`：CJK 分词会成倍放大数量，缺省 16 个，
+/// 8 个会截掉中文问句的后半段。
+fn extract_keywords(user_message: &str, hints: &[String], limits: &RetrievalLimits) -> Vec<String> {
     let mut kws: Vec<String> = Vec::new();
 
     // hints 优先，但 `@file:` 线索交由文件解析，不进检索词
@@ -314,7 +378,7 @@ fn extract_keywords(user_message: &str, hints: &[String]) -> Vec<String> {
         }
     }
 
-    kws.truncate(MAX_KEYWORDS);
+    kws.truncate(limits.max_keywords);
     kws
 }
 
@@ -410,25 +474,35 @@ fn ignores(name: &str) -> bool {
 
 /// 递归生成目录树文本。纯同步函数：全部 `std::fs` 调用都留在 async 之外，
 /// 由 [`OnDemandContextProvider::tree_summary`] 经 `spawn_blocking` 调用。
-fn collect_tree_lines(root: &Path) -> Vec<String> {
+fn collect_tree_lines(root: &Path, limits: &RetrievalLimits) -> Vec<String> {
     let mut lines = Vec::new();
     let mut count = 0usize;
-    walk_tree(root, 0, &mut lines, &mut count);
+    walk_tree(root, 0, limits, &mut lines, &mut count);
     lines
 }
 
 /// 降级搜索：递归遍历 + 字面量子串匹配。纯同步函数，同上。
-fn collect_matching_files(root: &Path, keywords: &[String]) -> Vec<PathBuf> {
+fn collect_matching_files(
+    root: &Path,
+    keywords: &[String],
+    limits: &RetrievalLimits,
+) -> Vec<PathBuf> {
     let mut results = Vec::new();
     let mut visited = 0usize;
-    walk_search(root, root, keywords, 0, &mut results, &mut visited);
+    walk_search(root, root, keywords, 0, limits, &mut results, &mut visited);
     results
 }
 
 /// 目录树递归实现。`dir` 一路向下走，项目根不需要参与（无相对路径计算），
 /// 因此不作为参数透传。
-fn walk_tree(dir: &Path, depth: u32, lines: &mut Vec<String>, count: &mut usize) {
-    if depth > TREE_MAX_DEPTH || *count >= TREE_MAX_ENTRIES {
+fn walk_tree(
+    dir: &Path,
+    depth: u32,
+    limits: &RetrievalLimits,
+    lines: &mut Vec<String>,
+    count: &mut usize,
+) {
+    if depth > limits.tree_max_depth || *count >= limits.tree_max_entries {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else {
@@ -437,7 +511,7 @@ fn walk_tree(dir: &Path, depth: u32, lines: &mut Vec<String>, count: &mut usize)
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
-        if *count >= TREE_MAX_ENTRIES {
+        if *count >= limits.tree_max_entries {
             lines.push("...".into());
             return;
         }
@@ -454,7 +528,7 @@ fn walk_tree(dir: &Path, depth: u32, lines: &mut Vec<String>, count: &mut usize)
             }
             lines.push(format!("{}{name_str}/", indent_str(depth)));
             *count += 1;
-            walk_tree(&path, depth + 1, lines, count);
+            walk_tree(&path, depth + 1, limits, lines, count);
         } else if ft.is_file() {
             lines.push(format!("{}{name_str}", indent_str(depth)));
             *count += 1;
@@ -471,17 +545,21 @@ fn walk_search(
     dir: &Path,
     keywords: &[String],
     depth: u32,
+    limits: &RetrievalLimits,
     results: &mut Vec<PathBuf>,
     visited: &mut usize,
 ) {
-    if depth > TREE_MAX_DEPTH || results.len() >= MAX_SEARCH_FILES || *visited > 2000 {
+    if depth > limits.tree_max_depth
+        || results.len() >= limits.max_search_files
+        || *visited > VISITED_NODE_LIMIT
+    {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in rd.flatten() {
-        if results.len() >= MAX_SEARCH_FILES {
+        if results.len() >= limits.max_search_files {
             return;
         }
         *visited += 1;
@@ -495,7 +573,7 @@ fn walk_search(
             if ignores(&name.to_string_lossy()) {
                 continue;
             }
-            walk_search(root, &path, keywords, depth + 1, results, visited);
+            walk_search(root, &path, keywords, depth + 1, limits, results, visited);
         } else if ft.is_file()
             && let Ok(content) = std::fs::read_to_string(&path)
             && keywords.iter().any(|k| content.contains(k.as_str()))
@@ -513,12 +591,21 @@ mod tests {
     use super::*;
     use crate::provider::ContextQuery;
 
+    /// 测试用缺省限额：与内置缺省一致，因此这些用例断言的是改动前的行为。
+    const TEST_LIMITS: RetrievalLimits = RetrievalLimits {
+        tree_max_depth: 4,
+        tree_max_entries: 200,
+        rg_timeout_secs: 10,
+        max_search_files: 20,
+        max_keywords: 16,
+    };
+
     fn provider(root: &Path) -> OnDemandContextProvider {
         OnDemandContextProvider::new(root.to_path_buf())
     }
 
     fn kw(msg: &str) -> Vec<String> {
-        extract_keywords(msg, &[])
+        extract_keywords(msg, &[], &TEST_LIMITS)
     }
 
     #[tokio::test]
@@ -551,7 +638,7 @@ mod tests {
         std::fs::write(root.join("src/main.rs"), "fn main(){}").unwrap();
         std::fs::create_dir_all(root.join("node_modules")).unwrap();
         std::fs::write(root.join("node_modules/junk.rs"), "x").unwrap();
-        let lines = collect_tree_lines(root);
+        let lines = collect_tree_lines(root, &TEST_LIMITS);
         let text = lines.join("\n");
         assert!(text.contains("main.rs"), "目录树应含 src/main.rs：{text}");
         assert!(!text.contains("junk.rs"), "应忽略 node_modules：{text}");
@@ -565,7 +652,7 @@ mod tests {
         std::fs::create_dir_all(root.join("crates/demo")).unwrap();
         std::fs::write(root.join("crates/demo/lib.rs"), "fn findme() {}").unwrap();
         std::fs::write(root.join("crates/demo/other.rs"), "nothing").unwrap();
-        let hits = collect_matching_files(root, &["findme".to_string()]);
+        let hits = collect_matching_files(root, &["findme".to_string()], &TEST_LIMITS);
         assert_eq!(hits, vec![PathBuf::from("crates/demo/lib.rs")]);
     }
 
@@ -671,7 +758,7 @@ mod tests {
 
     #[test]
     fn extract_keywords_filters_short() {
-        let kws = extract_keywords("fn the hello world abc", &[]);
+        let kws = extract_keywords("fn the hello world abc", &[], &TEST_LIMITS);
         // "the" 是虚词、"fn" 不足 3 字符，"hello"/"world"/"abc" 保留
         assert!(kws.contains(&"hello".to_string()));
         assert!(kws.contains(&"world".to_string()));
@@ -680,7 +767,7 @@ mod tests {
 
     #[test]
     fn extract_keywords_includes_hints() {
-        let kws = extract_keywords("msg", &["hint1".into()]);
+        let kws = extract_keywords("msg", &["hint1".into()], &TEST_LIMITS);
         assert!(kws.contains(&"hint1".to_string()));
     }
 
@@ -814,7 +901,7 @@ mod tests {
         // 9 个汉字 → 8 个 bigram，再加 ASCII 词，总数超过 16
         let msg = "一二三四五六七八九 alpha beta gamma delta epsilon zeta eta theta iota kappa";
         let kws = kw(msg);
-        assert_eq!(kws.len(), MAX_KEYWORDS);
+        assert_eq!(kws.len(), TEST_LIMITS.max_keywords);
         assert_eq!(kws[0], "一二");
         assert_eq!(kws[1], "二三");
         assert_eq!(kws[7], "八九");
@@ -827,7 +914,11 @@ mod tests {
     /// A3：`@file:` 线索不作为检索词。
     #[test]
     fn extract_keywords_excludes_file_ref_hint() {
-        let kws = extract_keywords("", &["@file:src/main.rs".into(), "ContextHub".into()]);
+        let kws = extract_keywords(
+            "",
+            &["@file:src/main.rs".into(), "ContextHub".into()],
+            &TEST_LIMITS,
+        );
         assert!(kws.contains(&"ContextHub".to_string()));
         assert!(
             !kws.iter().any(|k| k.contains(FILE_REF_PREFIX)),
@@ -937,7 +1028,7 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("lit.rs"), "let x = a+b;").unwrap();
         std::fs::write(root.join("other.rs"), "let x = ab;").unwrap();
-        let hits = collect_matching_files(root, &["a+b".to_string()]);
+        let hits = collect_matching_files(root, &["a+b".to_string()], &TEST_LIMITS);
         assert_eq!(hits, vec![PathBuf::from("lit.rs")]);
     }
 
@@ -1018,5 +1109,140 @@ mod tests {
         let r = p.retrieve(&q).await;
         assert!(r.tree_summary.is_some(), "目录树仍应返回");
         assert!(r.chunks.is_empty(), "无关键词时不应有检索片段");
+    }
+
+    /// A10：`tree_max_depth` 确实收窄目录树（缺省 4 时更深的文件应出现）。
+    #[tokio::test]
+    async fn configured_tree_depth_limit_shortens_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        tokio::fs::create_dir_all(root.join("src/sub"))
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("src/top.rs"), "").await.unwrap();
+        tokio::fs::write(root.join("src/sub/deep.rs"), "")
+            .await
+            .unwrap();
+
+        let shallow = OnDemandContextProvider::with_limits(
+            root.to_path_buf(),
+            RetrievalLimits {
+                tree_max_depth: 1,
+                ..TEST_LIMITS
+            },
+        );
+        let summary = shallow.tree_summary().await.unwrap_or_default();
+        assert!(
+            summary.contains("top.rs"),
+            "深度 1 仍应列出 src/top.rs: {summary}"
+        );
+        assert!(
+            !summary.contains("deep.rs"),
+            "深度 1 不应列出 src/sub/deep.rs: {summary}"
+        );
+
+        let full = provider(root);
+        let summary = full.tree_summary().await.unwrap_or_default();
+        assert!(
+            summary.contains("deep.rs"),
+            "缺省深度 4 应列出更深的文件: {summary}"
+        );
+    }
+
+    /// A10：`tree_max_entries` 收窄时目录树以省略号收尾。
+    #[tokio::test]
+    async fn configured_tree_entry_limit_stops_early() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for i in 0..20 {
+            tokio::fs::write(root.join(format!("f{i}.txt")), "")
+                .await
+                .unwrap();
+        }
+        let p = OnDemandContextProvider::with_limits(
+            root.to_path_buf(),
+            RetrievalLimits {
+                tree_max_entries: 5,
+                ..TEST_LIMITS
+            },
+        );
+        let summary = p.tree_summary().await.unwrap_or_default();
+        assert!(
+            summary.contains("..."),
+            "条目上限命中应有省略标记: {summary}"
+        );
+        assert!(
+            summary.lines().count() <= 6,
+            "不应列出全部 20 个文件: {}",
+            summary.lines().count()
+        );
+    }
+
+    /// A10：`max_keywords` 收窄时保留问句前段（顺序不变）。
+    #[test]
+    fn configured_keyword_cap_keeps_first_in_order() {
+        let limits = RetrievalLimits {
+            max_keywords: 2,
+            ..TEST_LIMITS
+        };
+        let kws = extract_keywords("上下文 检索 方案", &[], &limits);
+        assert_eq!(
+            kws,
+            vec!["上下".to_string(), "下文".to_string()],
+            "上限 2 应取问句最前两个词片（跨分隔符的 文检 不该出现）"
+        );
+        let dflt = extract_keywords("上下文 检索 方案", &[], &TEST_LIMITS);
+        assert_eq!(
+            dflt,
+            vec!["上下", "下文", "检索", "方案"],
+            "缺省上限 16 应保留全部词片"
+        );
+    }
+
+    /// A10：`max_search_files` 收窄降级遍历返回的文件数。
+    #[tokio::test]
+    async fn configured_max_search_files_caps_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for i in 0..5 {
+            tokio::fs::write(root.join(format!("f{i}.txt")), "needle\n")
+                .await
+                .unwrap();
+        }
+        let p = OnDemandContextProvider::with_limits(
+            root.to_path_buf(),
+            RetrievalLimits {
+                max_search_files: 1,
+                ..TEST_LIMITS
+            },
+        );
+        let files = p.fallback_search(&["needle".to_string()]).await;
+        assert_eq!(files.len(), 1, "上限 1 应只返回一个文件: {files:?}");
+
+        let dflt = provider(root);
+        let many = dflt.fallback_search(&["needle".to_string()]).await;
+        assert_eq!(many.len(), 5, "缺省上限 20 应全部返回: {many:?}");
+    }
+
+    /// R3-17：五个限额都必须真的被读取。
+    ///
+    /// `rg_timeout_secs` 无法用行为测试判别（要一个挂死的 rg），按 NF-03 的
+    /// 既有做法改为源码级断言：字段出现在取值处，而不是只存在结构体里没人用。
+    #[test]
+    fn retrieval_limits_are_actually_read() {
+        let src = include_str!("on_demand.rs");
+        for field in [
+            "tree_max_depth",
+            "tree_max_entries",
+            "rg_timeout_secs",
+            "max_search_files",
+            "max_keywords",
+        ] {
+            let read = format!("limits.{field}");
+            assert!(
+                src.contains(&read),
+                "{field} 应在遍历/搜索/取词处被读取（找 {read}）"
+            );
+        }
     }
 }

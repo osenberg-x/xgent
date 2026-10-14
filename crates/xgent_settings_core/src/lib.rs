@@ -11,5 +11,7 @@ pub mod store;
 
 pub use global::{GlobalConfig, PluginConfig, Preferences, ProviderConfig, ProviderKind};
 pub use keychain::resolve_api_key;
-pub use project::{ContextStrategy, ProjectConfig, ToolPolicyConfig};
+pub use project::{
+    AgentConfig, ContextLimits, ContextStrategy, ProjectConfig, ToolConfig, ToolPolicyConfig,
+};
 pub use store::{GlobalConfigStore, ProjectConfigStore};

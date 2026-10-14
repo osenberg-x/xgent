@@ -14,7 +14,7 @@ pub mod vector;
 pub use hub::ContextHub;
 pub use hybrid::HybridContextProvider;
 pub use lsp::LspContextProvider;
-pub use on_demand::OnDemandContextProvider;
+pub use on_demand::{OnDemandContextProvider, RetrievalLimits};
 pub use provider::{ContextChunk, ContextProvider, ContextQuery, ContextResult, estimate_tokens};
 pub use repo_map::RepoMapContextProvider;
 pub use vector::VectorContextProvider;
@@ -38,11 +38,12 @@ pub enum BuiltContextProvider {
 pub fn build_context_provider(
     strategy: ContextStrategy,
     project_root: PathBuf,
+    limits: RetrievalLimits,
 ) -> BuiltContextProvider {
     match strategy {
-        ContextStrategy::OnDemand => {
-            BuiltContextProvider::Ready(Box::new(OnDemandContextProvider::new(project_root)))
-        }
+        ContextStrategy::OnDemand => BuiltContextProvider::Ready(Box::new(
+            OnDemandContextProvider::with_limits(project_root, limits),
+        )),
         // B/C/D/E 仍是占位（repo_map/vector/lsp/hybrid 返回空结果）
         ContextStrategy::RepoMap => BuiltContextProvider::Unsupported(strategy),
         ContextStrategy::Vector => BuiltContextProvider::Unsupported(strategy),
@@ -68,7 +69,11 @@ mod tests {
 
     #[test]
     fn ondemand_is_ready() {
-        match build_context_provider(ContextStrategy::OnDemand, PathBuf::from("/proj")) {
+        match build_context_provider(
+            ContextStrategy::OnDemand,
+            PathBuf::from("/proj"),
+            RetrievalLimits::default(),
+        ) {
             BuiltContextProvider::Ready(p) => {
                 // /proj 不存在：树摘要为 None，无 chunks，且不 panic
                 let rt = tokio::runtime::Runtime::new().unwrap();
@@ -96,7 +101,7 @@ mod tests {
             ContextStrategy::Vector,
             ContextStrategy::Hybrid,
         ] {
-            match build_context_provider(s, PathBuf::from("/proj")) {
+            match build_context_provider(s, PathBuf::from("/proj"), RetrievalLimits::default()) {
                 BuiltContextProvider::Unsupported(got) => {
                     assert_eq!(format!("{got:?}"), format!("{s:?}"), "应回报原策略");
                 }

@@ -24,6 +24,163 @@ pub struct ProjectConfig {
     /// 工具信任级别覆盖
     #[serde(default)]
     pub tool_policy: ToolPolicyConfig,
+
+    /// agent 循环与上下文预算参数
+    #[serde(default)]
+    pub agent: AgentConfig,
+
+    /// 工具执行参数
+    #[serde(default)]
+    pub tools: ToolConfig,
+
+    /// 内置检索 provider 的遍历限额
+    #[serde(default)]
+    pub context: ContextLimits,
+}
+
+/// `[agent]` 段：agent 循环的预算与每帧工作量。
+///
+/// 数值键一律 `0` = 未设置，回落到本次转配置前的硬编码常量（R3-17）。
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AgentConfig {
+    /// 每轮对话向检索 provider 申请的 token 预算
+    #[serde(default)]
+    pub retrieval_max_tokens: u32,
+    /// 单个 ECS 帧最多处理的 agent 事件数
+    #[serde(default)]
+    pub max_events_per_frame: u32,
+}
+
+/// `[tools]` 段：工具执行的超时与输出上限。
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ToolConfig {
+    /// 等待用户确认工具调用的秒数
+    #[serde(default)]
+    pub confirm_timeout_secs: u64,
+    /// `run_command` 最长执行秒数
+    #[serde(default)]
+    pub command_timeout_secs: u64,
+    /// `run_command` 捕获输出上限（字节）
+    #[serde(default)]
+    pub command_max_output_bytes: usize,
+}
+
+/// `[context]` 段：内置检索 provider（方案 A）的遍历限额。
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ContextLimits {
+    /// 目录树最大深度
+    #[serde(default)]
+    pub tree_max_depth: u32,
+    /// 目录树最大条目数
+    #[serde(default)]
+    pub tree_max_entries: usize,
+    /// ripgrep 超时秒数
+    #[serde(default)]
+    pub rg_timeout_secs: u64,
+    /// 搜索返回的最大文件数
+    #[serde(default)]
+    pub max_search_files: usize,
+    /// 关键词上限
+    #[serde(default)]
+    pub max_keywords: usize,
+}
+
+/// 内置缺省值——本次转配置前各 crate 的硬编码常量。
+pub mod defaults {
+    /// 每轮检索 token 预算（原 `xgent_agent::bridge` 字面量）。
+    pub const RETRIEVAL_MAX_TOKENS: u32 = 8_000;
+    /// 每帧 agent 事件上限（原 `xgent_agent::agent_loop` 字面量）。
+    pub const MAX_EVENTS_PER_FRAME: u32 = 64;
+    /// 确认等待秒数（原 `xgent_tools::executor` 字面量）。
+    pub const CONFIRM_TIMEOUT_SECS: u64 = 300;
+    /// 命令执行秒数（原 `run_command::COMMAND_TIMEOUT_SECS`）。
+    pub const COMMAND_TIMEOUT_SECS: u64 = 60;
+    /// 命令输出上限字节（原 `run_command::MAX_OUTPUT_BYTES`）。
+    pub const COMMAND_MAX_OUTPUT_BYTES: usize = 64 * 1024;
+    /// 目录树深度（原 `on_demand::TREE_MAX_DEPTH`）。
+    pub const TREE_MAX_DEPTH: u32 = 4;
+    /// 目录树条目（原 `on_demand::TREE_MAX_ENTRIES`）。
+    pub const TREE_MAX_ENTRIES: usize = 200;
+    /// rg 超时秒（原 `on_demand::RG_TIMEOUT_SECS`）。
+    pub const RG_TIMEOUT_SECS: u64 = 10;
+    /// 搜索文件数（原 `on_demand::MAX_SEARCH_FILES`）。
+    pub const MAX_SEARCH_FILES: usize = 20;
+    /// 关键词上限（原 `on_demand::MAX_KEYWORDS`）。
+    pub const MAX_KEYWORDS: usize = 16;
+}
+
+/// `0` 哨兵下的实际取值。
+fn or_default_u32(value: u32, fallback: u32) -> u32 {
+    if value == 0 { fallback } else { value }
+}
+
+/// `0` 哨兵下的实际取值（`u64`）。
+fn or_default_u64(value: u64, fallback: u64) -> u64 {
+    if value == 0 { fallback } else { value }
+}
+
+/// `0` 哨兵下的实际取值（`usize`）。
+fn or_default_usize(value: usize, fallback: usize) -> usize {
+    if value == 0 { fallback } else { value }
+}
+
+impl AgentConfig {
+    /// 生效的检索 token 预算。
+    pub fn effective_retrieval_max_tokens(&self) -> u32 {
+        or_default_u32(self.retrieval_max_tokens, defaults::RETRIEVAL_MAX_TOKENS)
+    }
+
+    /// 生效的每帧事件上限。
+    pub fn effective_max_events_per_frame(&self) -> u32 {
+        or_default_u32(self.max_events_per_frame, defaults::MAX_EVENTS_PER_FRAME)
+    }
+}
+
+impl ToolConfig {
+    /// 生效的确认等待秒数。
+    pub fn effective_confirm_timeout_secs(&self) -> u64 {
+        or_default_u64(self.confirm_timeout_secs, defaults::CONFIRM_TIMEOUT_SECS)
+    }
+
+    /// 生效的命令执行秒数上限。
+    pub fn effective_command_timeout_secs(&self) -> u64 {
+        or_default_u64(self.command_timeout_secs, defaults::COMMAND_TIMEOUT_SECS)
+    }
+
+    /// 生效的命令输出上限字节。
+    pub fn effective_command_max_output_bytes(&self) -> usize {
+        or_default_usize(
+            self.command_max_output_bytes,
+            defaults::COMMAND_MAX_OUTPUT_BYTES,
+        )
+    }
+}
+
+impl ContextLimits {
+    /// 生效的目录树深度上限。
+    pub fn effective_tree_max_depth(&self) -> u32 {
+        or_default_u32(self.tree_max_depth, defaults::TREE_MAX_DEPTH)
+    }
+
+    /// 生效的目录树条目上限。
+    pub fn effective_tree_max_entries(&self) -> usize {
+        or_default_usize(self.tree_max_entries, defaults::TREE_MAX_ENTRIES)
+    }
+
+    /// 生效的 rg 超时秒数。
+    pub fn effective_rg_timeout_secs(&self) -> u64 {
+        or_default_u64(self.rg_timeout_secs, defaults::RG_TIMEOUT_SECS)
+    }
+
+    /// 生效的搜索文件数上限。
+    pub fn effective_max_search_files(&self) -> usize {
+        or_default_usize(self.max_search_files, defaults::MAX_SEARCH_FILES)
+    }
+
+    /// 生效的关键词上限。
+    pub fn effective_max_keywords(&self) -> usize {
+        or_default_usize(self.max_keywords, defaults::MAX_KEYWORDS)
+    }
 }
 
 /// 上下文检索策略。
@@ -95,6 +252,7 @@ mod tests {
                 approved: vec!["read_file".into()],
                 denied: vec!["rm_rf".into()],
             },
+            ..Default::default()
         };
         let j = serde_json::to_string(&cfg).unwrap();
         let cfg2: ProjectConfig = serde_json::from_str(&j).unwrap();
@@ -104,5 +262,94 @@ mod tests {
         assert_eq!(cfg2.context_strategy, ContextStrategy::RepoMap);
         assert_eq!(cfg2.tool_policy.approved, vec!["read_file".to_string()]);
         assert_eq!(cfg2.tool_policy.denied, vec!["rm_rf".to_string()]);
+    }
+
+    /// R3-17 不变量：新节缺省即「未设置」，生效值等于本次转配置前的硬编码常量。
+    #[test]
+    fn new_sections_default_to_previous_constants() {
+        let cfg = ProjectConfig::default();
+        assert_eq!(cfg.agent.effective_retrieval_max_tokens(), 8_000);
+        assert_eq!(cfg.agent.effective_max_events_per_frame(), 64);
+        assert_eq!(cfg.tools.effective_confirm_timeout_secs(), 300);
+        assert_eq!(cfg.tools.effective_command_timeout_secs(), 60);
+        assert_eq!(cfg.tools.effective_command_max_output_bytes(), 65_536);
+        assert_eq!(cfg.context.effective_tree_max_depth(), 4);
+        assert_eq!(cfg.context.effective_tree_max_entries(), 200);
+        assert_eq!(cfg.context.effective_rg_timeout_secs(), 10);
+        assert_eq!(cfg.context.effective_max_search_files(), 20);
+        assert_eq!(cfg.context.effective_max_keywords(), 16);
+    }
+
+    /// 同一判据从 TOML 文本出发：老配置文件不受影响。
+    #[test]
+    fn toml_without_new_sections_resolves_to_builtin_defaults() {
+        let toml_src = r#"
+project_root = "/abs/proj"
+context_strategy = "on_demand"
+
+[tool_policy]
+approved = ["read_file"]
+"#;
+        let cfg: ProjectConfig = toml::from_str(toml_src).unwrap();
+        assert_eq!(cfg.agent.effective_retrieval_max_tokens(), 8_000);
+        assert_eq!(cfg.tools.effective_command_timeout_secs(), 60);
+        assert_eq!(cfg.context.effective_max_keywords(), 16);
+        assert_eq!(cfg.tool_policy.approved, vec!["read_file".to_string()]);
+    }
+
+    #[test]
+    fn new_sections_values_are_honoured_and_roundtrip() {
+        let toml_src = r#"
+[agent]
+retrieval_max_tokens = 2000
+max_events_per_frame = 8
+
+[tools]
+confirm_timeout_secs = 2
+command_timeout_secs = 5
+command_max_output_bytes = 1024
+
+[context]
+tree_max_depth = 2
+tree_max_entries = 5
+rg_timeout_secs = 1
+max_search_files = 1
+max_keywords = 2
+"#;
+        let cfg: ProjectConfig = toml::from_str(toml_src).unwrap();
+        assert_eq!(cfg.agent.effective_retrieval_max_tokens(), 2_000);
+        assert_eq!(cfg.agent.effective_max_events_per_frame(), 8);
+        assert_eq!(cfg.tools.effective_confirm_timeout_secs(), 2);
+        assert_eq!(cfg.tools.effective_command_timeout_secs(), 5);
+        assert_eq!(cfg.tools.effective_command_max_output_bytes(), 1_024);
+        assert_eq!(cfg.context.effective_tree_max_depth(), 2);
+        assert_eq!(cfg.context.effective_tree_max_entries(), 5);
+        assert_eq!(cfg.context.effective_rg_timeout_secs(), 1);
+        assert_eq!(cfg.context.effective_max_search_files(), 1);
+        assert_eq!(cfg.context.effective_max_keywords(), 2);
+
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let cfg2: ProjectConfig = toml::from_str(&s).unwrap();
+        assert_eq!(
+            cfg2.agent.effective_retrieval_max_tokens(),
+            cfg.agent.effective_retrieval_max_tokens()
+        );
+        assert_eq!(
+            cfg2.context.effective_max_keywords(),
+            cfg.context.effective_max_keywords()
+        );
+    }
+
+    #[test]
+    fn explicit_zero_means_unset_not_unlimited() {
+        let toml_src = r#"
+[agent]
+retrieval_max_tokens = 0
+max_events_per_frame = 0
+"#;
+        let cfg: ProjectConfig = toml::from_str(toml_src).unwrap();
+        assert_eq!(cfg.agent.retrieval_max_tokens, 0);
+        assert_eq!(cfg.agent.effective_retrieval_max_tokens(), 8_000);
+        assert_eq!(cfg.agent.effective_max_events_per_frame(), 64);
     }
 }

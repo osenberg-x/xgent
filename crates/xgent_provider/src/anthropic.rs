@@ -29,8 +29,12 @@ use crate::sse::parse_sse_events;
 /// Anthropic API 版本头。
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
-/// 等待首个 SSE 事件的最大秒数。
-const FIRST_EVENT_TIMEOUT_SECS: u64 = 30;
+/// 等待首个 SSE 事件的最大秒数（内置缺省，实际取自配置层定义）。
+const FIRST_EVENT_TIMEOUT_SECS: u64 =
+    xgent_settings_core::global::defaults::FIRST_EVENT_TIMEOUT_SECS;
+
+/// 单次响应输出上限（内置缺省，实际取自配置层定义）。
+const MAX_OUTPUT_TOKENS: u32 = xgent_settings_core::global::defaults::MAX_OUTPUT_TOKENS;
 
 /// 流式消费中相邻两个事件之间的最大空闲秒数。
 const IDLE_TIMEOUT_SECS: u64 = 60;
@@ -50,6 +54,10 @@ pub struct AnthropicProvider {
     /// 不设在 Client 整体上——那会杀死长流式响应；流式 body 由
     /// first/idle 超时兜底（见 run_stream）。
     request_timeout: Duration,
+    /// 等待首个 SSE 事件的上限（配置 `first_event_timeout_secs`）。
+    first_event_timeout: Duration,
+    /// 请求体的 `max_tokens`（配置 `max_output_tokens`）。
+    max_output_tokens: u32,
 }
 
 impl AnthropicProvider {
@@ -71,6 +79,8 @@ impl AnthropicProvider {
             api_key,
             client,
             request_timeout: Duration::from_secs(timeout_secs),
+            max_output_tokens: MAX_OUTPUT_TOKENS,
+            first_event_timeout: Duration::from_secs(FIRST_EVENT_TIMEOUT_SECS),
         }
     }
 
@@ -82,7 +92,25 @@ impl AnthropicProvider {
             api_key,
             client,
             request_timeout: Duration::from_secs(60),
+            max_output_tokens: MAX_OUTPUT_TOKENS,
+            first_event_timeout: Duration::from_secs(FIRST_EVENT_TIMEOUT_SECS),
         }
+    }
+
+    /// 设置请求体的 `max_tokens`（配置驱动，`0` 视为未设置而保留缺省）。
+    pub fn with_max_output_tokens(mut self, tokens: u32) -> Self {
+        if tokens > 0 {
+            self.max_output_tokens = tokens;
+        }
+        self
+    }
+
+    /// 设置等待首个 SSE 事件的上限秒数（配置驱动，`0` 视为未设置）。
+    pub fn with_first_event_timeout_secs(mut self, secs: u64) -> Self {
+        if secs > 0 {
+            self.first_event_timeout = Duration::from_secs(secs);
+        }
+        self
     }
 
     /// messages 端点 URL。
@@ -155,7 +183,7 @@ impl AnthropicProvider {
         let mut body = json!({
             "model": req.model,
             "messages": messages,
-            "max_tokens": 8192,
+            "max_tokens": self.max_output_tokens,
             "stream": true,
         });
         if !system_text.is_empty() {
@@ -315,8 +343,16 @@ impl LlmProvider for AnthropicProvider {
         let (tx, rx) = mpsc::channel::<ChatEvent>(64);
 
         let model = req.model.clone();
+        let first_event_timeout = self.first_event_timeout;
         tokio::spawn(async move {
-            run_anthropic_stream(stream, model, tx).await;
+            run_anthropic_stream_with_timeout(
+                stream,
+                model,
+                tx,
+                first_event_timeout,
+                Duration::from_secs(IDLE_TIMEOUT_SECS),
+            )
+            .await;
         });
 
         Ok((stream_id, rx))
@@ -348,6 +384,10 @@ impl LlmProvider for AnthropicProvider {
 ///   - stop_reason → 映射 StopReason，发 `Done{reason, usage}`
 /// - `message_stop`：消息结束（已由 message_delta 处理 Done）
 /// - `ping`：心跳，跳过
+///
+/// `first_timeout` 限定首事件等待（生产值取自 provider 配置），`idle_timeout`
+/// 限定后续相邻事件等待；两者超时均发 `Error{kind: Network}` 并终止流。
+#[cfg(test)]
 async fn run_anthropic_stream<S>(stream: S, model: String, tx: mpsc::Sender<ChatEvent>)
 where
     S: Stream<Item = Result<Value, ProviderError>> + Send + 'static,
@@ -891,5 +931,80 @@ mod tests {
         assert_eq!(body["system"], "You are helpful");
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
         assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    /// A9：`max_output_tokens` 配置进请求体；缺省（0/未设置）保持 8192。
+    #[test]
+    fn max_output_tokens_from_config_reaches_request_body() {
+        let req = ChatRequest {
+            provider: "test".into(),
+            model: "claude-3".into(),
+            messages: vec![ChatMessage::text(xgent_core::chat::Role::User, "Hi")],
+            tools: None,
+        };
+
+        let cfg = xgent_settings_core::ProviderConfig {
+            kind: xgent_settings_core::ProviderKind::Anthropic,
+            api_base: "https://api.anthropic.com".into(),
+            api_key: "k".into(),
+            max_output_tokens: 4096,
+            ..Default::default()
+        };
+        let p = AnthropicProvider::new("test".into(), "https://x".into(), "k".into())
+            .with_max_output_tokens(cfg.effective_max_output_tokens());
+        assert_eq!(p.build_messages_body(&req)["max_tokens"], 4096);
+
+        // 未配置 → 内置缺省
+        let bare = AnthropicProvider::new("test".into(), "https://x".into(), "k".into());
+        assert_eq!(bare.build_messages_body(&req)["max_tokens"], 8192);
+        // 显式 0 也视为未设置
+        let zero = AnthropicProvider::new("test".into(), "https://x".into(), "k".into())
+            .with_max_output_tokens(0);
+        assert_eq!(zero.build_messages_body(&req)["max_tokens"], 8192);
+    }
+
+    /// A9：配置的首事件等待真的进入 `chat()` 的流消费，而不只是存进结构体。
+    #[tokio::test]
+    async fn configured_first_event_timeout_reaches_the_wait() {
+        use std::time::Instant;
+        use xgent_core::chat::{ChatEvent, ErrorKind};
+
+        let addr = crate::test_support::bind_stalling_sse_endpoint().await;
+        let cfg = xgent_settings_core::ProviderConfig {
+            kind: xgent_settings_core::ProviderKind::Anthropic,
+            api_base: crate::test_support::origin(addr),
+            api_key: "k".into(),
+            first_event_timeout_secs: 1,
+            ..Default::default()
+        };
+        let provider = crate::build_provider("stall", &cfg);
+        let req = ChatRequest {
+            provider: "stall".into(),
+            model: "claude-3".into(),
+            messages: vec![ChatMessage::text(xgent_core::chat::Role::User, "Hi")],
+            tools: None,
+        };
+        let (_stream_id, mut rx) = provider.chat(req).await.expect("指向本机端点的建流应成功");
+
+        let started = Instant::now();
+        let mut kind = None;
+        while kind.is_none() && started.elapsed() < Duration::from_secs(10) {
+            match tokio::time::timeout(Duration::from_secs(9), rx.recv()).await {
+                Ok(Some(ChatEvent::Error { kind: k, .. })) => kind = Some(k),
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        let elapsed = started.elapsed();
+        assert_eq!(
+            kind,
+            Some(ErrorKind::Network),
+            "首事件超时应报 Network，实测 {elapsed:?}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(900) && elapsed < Duration::from_secs(5),
+            "配置 1s 应生效：既等过、又没等到内置 30s，实测 {elapsed:?}"
+        );
     }
 }

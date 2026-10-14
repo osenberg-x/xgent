@@ -30,7 +30,12 @@ impl Plugin for ConfirmDialogPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (show_on_request, hide_on_decision, handle_confirm_keyboard)
+            (
+                show_on_request,
+                hide_on_decision,
+                handle_confirm_keyboard,
+                close_on_settled,
+            )
                 .after(xgent_agent::agent_loop::agent_poll_system),
         );
     }
@@ -378,6 +383,30 @@ fn close_dialog(
         focus.clear();
     }
     commands.entity(dialog).despawn();
+}
+
+/// 请求已终结（确认超时 / 确认被取消）时关闭弹窗并还原焦点。
+///
+/// 超时后 executor 直接返回错误工具结果，弹窗却不会自己消失：它是模态遮罩，
+/// 继续压在界面上会让「允许」按钮接在一个已被丢弃的 receiver 上（点了没反应），
+/// 并独占键盘焦点。判据是「本帧有工具结果到达且弹窗仍在」——内层 tool-call
+/// 循环串行执行，等待确认期间不会有别的工具结果进来，故结果到达即代表该
+/// 请求已终结。用户自己点按钮的路径已在 [`hide_on_decision`] 里关闭弹窗，
+/// 那时查询取不到实体，天然不重复。
+fn close_on_settled(
+    mut commands: Commands,
+    mut reader: MessageReader<xgent_agent::ToolResultMessage>,
+    q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
+    mut focus: ResMut<bevy::input_focus::InputFocus>,
+    chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+) {
+    if reader.read().next().is_none() {
+        return;
+    }
+    let Ok(dialog) = q_dialog.single() else {
+        return;
+    };
+    close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
 }
 
 /// 弹窗激活时的键盘决策：Esc→拒绝、Enter→允许。

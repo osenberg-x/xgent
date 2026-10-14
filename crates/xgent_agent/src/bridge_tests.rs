@@ -85,6 +85,25 @@ impl ContextProvider for MockContext {
     }
 }
 
+/// 记录 agent 实际传入的检索预算（A7）：空结果，但把最后一次 query 的
+/// `max_tokens` 留给你读回。
+#[derive(Default)]
+struct RecordingContext(std::sync::Mutex<Option<u32>>);
+
+#[async_trait]
+impl ContextProvider for RecordingContext {
+    async fn retrieve(&self, q: &ContextQuery) -> ContextResult {
+        *self.0.lock().expect("锁") = Some(q.max_tokens);
+        ContextResult::default()
+    }
+}
+
+impl RecordingContext {
+    fn last_budget(&self) -> Option<u32> {
+        *self.0.lock().expect("锁")
+    }
+}
+
 fn test_app(mock_events: Vec<ChatEvent>) -> App {
     test_app_with_retry_provider(
         Arc::new(MockProvider::new(mock_events)),
@@ -123,8 +142,29 @@ fn test_app_with_retry_provider(
     tool_policy: ToolPolicyConfig,
     retry_config: crate::bridge::RetryConfig,
 ) -> (App, std::path::PathBuf) {
+    test_app_with_context(
+        provider,
+        executor,
+        tool_policy,
+        retry_config,
+        Arc::new(MockContext),
+        xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
+        xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
+    )
+}
+
+/// 同 [`test_app_with_retry_provider`]，但可指定检索 provider 与 `[agent]` 两项参数
+/// （A7 需要观察配置是否真的进入运行时）。
+fn test_app_with_context(
+    provider: Arc<dyn crate::bridge::ProviderClient>,
+    executor: Arc<ToolExecutor>,
+    tool_policy: ToolPolicyConfig,
+    retry_config: crate::bridge::RetryConfig,
+    context: Arc<dyn ContextProvider>,
+    retrieval_max_tokens: u32,
+    max_events_per_frame: u32,
+) -> (App, std::path::PathBuf) {
     let mut app = App::new();
-    let context = Arc::new(MockContext);
     // 用独立临时目录作为项目根。ManuallyDrop 阻止 TempDir 析构删目录
     // （测试进程退出后由 OS 清理）。
     let project_root = std::mem::ManuallyDrop::new(tempfile::tempdir().expect("tempdir"))
@@ -155,6 +195,8 @@ fn test_app_with_retry_provider(
         compaction_settings: crate::compaction::CompactionSettings::default(),
         max_tool_rounds: Some(crate::bridge::loop_limits::MAX_TOOL_ROUNDS),
         max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
+        retrieval_max_tokens,
+        max_events_per_frame,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -755,6 +797,8 @@ fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) ->
         compaction_settings: crate::compaction::CompactionSettings::default(),
         max_tool_rounds: Some(crate::bridge::loop_limits::MAX_TOOL_ROUNDS),
         max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
+        retrieval_max_tokens: xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
+        max_events_per_frame: xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -2549,4 +2593,107 @@ fn http_status_maps_to_error_kind() {
         retry_after_secs: None,
     };
     assert_eq!(e400.to_error_kind(), ErrorKind::ProviderError);
+}
+
+/// A7：`[agent] retrieval_max_tokens` 确实进入检索查询。
+///
+/// 用 2000 而非缺省 8000 断言——若循环仍写死 `max_tokens: 8_000`，
+/// 这条会失败；写成 8000 则对「读配置」与「写常量」两种实现都不敏感。
+#[test]
+fn retrieval_budget_from_config_reaches_context_query() {
+    let recorder = Arc::new(RecordingContext::default());
+    let (mut app, _root) = test_app_with_context(
+        Arc::new(MockProvider::new(vec![
+            ChatEvent::TextDelta { text: "ok".into() },
+            ChatEvent::Done {
+                reason: xgent_core::chat::StopReason::Stop,
+                usage: xgent_core::chat::TokenUsage::default(),
+            },
+        ])),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig::default(),
+        crate::bridge::RetryConfig::default(),
+        recorder.clone(),
+        2_000,
+        64,
+    );
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..50 {
+        app.update();
+    }
+    assert_eq!(
+        recorder.last_budget(),
+        Some(2_000),
+        "检索预算应取自 [agent] retrieval_max_tokens"
+    );
+}
+
+/// A7：每帧事件上限来自 bridge 配置，到界即停但不丢事件。
+#[test]
+fn frame_event_cap_defers_events_without_dropping_them() {
+    let mut events: Vec<ChatEvent> = (0..12)
+        .map(|i| ChatEvent::TextDelta {
+            text: format!("{i}"),
+        })
+        .collect();
+    events.push(ChatEvent::Done {
+        reason: xgent_core::chat::StopReason::Stop,
+        usage: xgent_core::chat::TokenUsage::default(),
+    });
+    let (mut app, _root) = test_app_with_context(
+        Arc::new(MockProvider::new(events)),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig::default(),
+        crate::bridge::RetryConfig::default(),
+        Arc::new(MockContext),
+        8_000,
+        3,
+    );
+    // 配置值应原样带到 ECS 侧 drain
+    assert_eq!(
+        app.world().resource::<AgentBridge>().max_events_per_frame,
+        3,
+        "bridge 应持有配置的每帧上限"
+    );
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..200 {
+        app.update();
+    }
+    let conv = app.world().resource::<crate::conversation::Conversation>();
+    let text = match &conv.messages[1] {
+        xgent_core::chat::AgentMessage::Assistant(a) => a
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                xgent_core::chat::ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>(),
+        _ => panic!("expected Assistant"),
+    };
+    assert_eq!(
+        text, "01234567891011",
+        "每帧 3 条的分闸不得丢事件（截断或漏帧都会改变拼接结果）"
+    );
+    assert_eq!(conv.status, ConversationStatus::Idle);
+}
+
+/// A7：drain 的分闸确实读的是配置字段，而不是留在系统里的字面量。
+#[test]
+fn drain_bound_is_read_from_bridge_not_a_literal() {
+    let src = include_str!("agent_loop.rs");
+    assert!(
+        src.contains("bridge.max_events_per_frame"),
+        "每帧上限应取自 bridge 字段"
+    );
+    assert!(
+        !src.contains("while processed < 64"),
+        "字面量 64 的分闸应已被配置取代"
+    );
 }

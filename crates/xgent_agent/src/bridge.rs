@@ -214,6 +214,10 @@ pub struct AgentBridge {
     /// `None` = 不限。用 `parking_lot::RwLock` 而非裸字段，使 ECS 与异步
     /// task 都能读写而不必重建 bridge。
     pub loop_bounds: Arc<parking_lot::RwLock<LoopBounds>>,
+    /// 单帧最多处理的 agent 事件数（来自 [`AgentBridgeConfig`]，R3-17）。
+    ///
+    /// 到界即停，剩余事件留在 channel 里下帧再取——不丢事件。
+    pub max_events_per_frame: u32,
 }
 
 /// agent loop 的有界执行上限。
@@ -387,6 +391,15 @@ pub struct AgentBridgeConfig {
     pub max_tool_rounds: Option<u32>,
     /// 单轮累计 token 上限（`None` = 不限，慎用）。
     pub max_tokens_per_turn: Option<u64>,
+    /// 每轮对话向检索 provider 申请的 token 预算
+    /// （项目配置 `[agent] retrieval_max_tokens`，R3-17）。
+    pub retrieval_max_tokens: u32,
+    /// 单个 ECS 帧最多处理的 agent 事件数
+    /// （项目配置 `[agent] max_events_per_frame`，R3-17）。
+    ///
+    /// 由 ECS 侧 drain 读取（见 [`AgentBridge::max_events_per_frame`]），
+    /// 到界即停、剩余事件留在 channel 下帧再取——是止损闸，不丢事件。
+    pub max_events_per_frame: u32,
 }
 
 /// agent loop 的默认有界值。
@@ -436,6 +449,8 @@ impl AgentBridge {
         let shared_for_task = shared_confirm.clone();
         let cancel_for_task = current_cancel.clone();
         let bounds_for_task = loop_bounds.clone();
+        // cfg 随后被 move 进异步 task，ECS 侧需要的字段先取出来
+        let max_events_per_frame = cfg.max_events_per_frame;
         runtime.spawn(async move {
             agent_loop_task(
                 cfg,
@@ -458,6 +473,7 @@ impl AgentBridge {
             current_cancel,
             tool_schemas,
             loop_bounds,
+            max_events_per_frame,
         }
     }
 
@@ -537,7 +553,7 @@ async fn agent_loop_task(
                                 _ => None,
                             }),
                             hints,
-                            max_tokens: 8_000,
+                            max_tokens: cfg.retrieval_max_tokens,
                         };
                         let result = cfg.context.retrieve(&query).await;
                         crate::format::refresh_system_message(&mut req, &result);

@@ -207,6 +207,9 @@ mod tests {
 
     #[test]
     fn session_file_path_layout() {
+        // 持 ENV_LOCK：同批其他测试会在进程内 set/remove XGENT_AGENT_DIR，
+        // 不持锁时本测试可能读到中途变化的目录（Runtime 形式化检查实测翻车过）。
+        let _guard = ENV_LOCK.lock();
         let p = session_file_path("abc123");
         assert!(p.ends_with("abc123.jsonl"));
         assert!(p.starts_with(sessions_dir()));
@@ -214,6 +217,7 @@ mod tests {
 
     #[test]
     fn sessions_db_under_agent_dir() {
+        let _guard = ENV_LOCK.lock();
         let p = sessions_db_path();
         assert!(p.ends_with("sessions.db"));
         assert!(p.starts_with(agent_dir()));

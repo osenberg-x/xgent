@@ -136,3 +136,106 @@ M7 是本轮真正学到的东西，但**结论与我先前的记述不同**—�
 ### 工具陷阱（复现过一次，值得记住）
 
 `cargo fmt` 与反证脚本并发跑会互相踩：脚本用 `.bak` 回写源码时 `shutil.move` 保留了旧 mtime，cargo 判定产物仍新于源码，**直接复用了变异体的缓存二进制**，于是「还原后基线」报出一个并不存在的失败。反证脚本必须在回写后 `touch` 源文件；且格式化要在变异批次之外单独跑。
+
+---
+
+## 七、close-search-config-gaps（2026-10-14）：R3-3 与 R3-17
+
+承接 §六 末尾点名的两条未阻塞 R3 遗留项。正式 Spec 见 `docs/comet/specs/code-search/spec.md`（R3-3）与 `docs/comet/specs/runtime-parameters/spec.md`（R3-17）。
+
+### R3-3 `search_files` 只子串匹配
+
+| 落点 | 说明 |
+|:---|:---|
+| `builtins/search_files.rs`：`Matcher` / `compile_matcher` | 新增 `regex`（**默认关**，`false` 时保持字面量子串，既有调用与既有测试逐字不变）、`case_insensitive`（字面与正则两种模式都适用）。正则由 `regex::RegexBuilder` 逐行匹配，不跨行；lookaround 与反向引用属该引擎不认识的构造，与括号不配对同判为非法模式 |
+| `crates/xgent_tools/src/glob.rs`（新增，crate 内） | `glob` 自建翻译成锚定正则：`*` 不跨 `/`、`**` 跨、`?` 单字符、`{a,b}` 分支，其余字符转义。**不含 `/` 的模式只匹配文件名**（ripgrep `--glob` 约定，`"*.rs"` 在任意深度命中）。不引 `globset`：本工具用不到它的 gitignore 语义与字集能力，而 glob 规则必须能在工具描述里一次说清 |
+| `FILE_TYPES` 表 + `type_extensions` | `file_type` 用 ripgrep `--type` 的名称词表（`rust`/`python`/`cpp`… 一个名称覆盖多个扩展名），扩展名比较大小写不敏感 |
+| `ToolSchema` 描述 | 声明四个新参数、默认值与「非法参数是错误而不是未找到」这条判据——选参数的是模型，描述就是契约 |
+| 关键契约 | **坏参数是错误，不是零结果**：非法 regex / 非法 glob / 未知 `file_type` 都在遍历开始之前返回 `is_error`，错因点名是哪个参数以及为什么非法。改前 `"(foo"` 会得到「未找到匹配」，模型据此断定代码不存在并给出错答 |
+| 不变的部分 | 忽略目录、1MB 单文件跳过、`MAX_DEPTH`/`MAX_RESULTS`、取消边界、输出格式 `路径:行号: 内容`、`ToolTier::Read` + `Concurrency::Shared`。被筛掉的文件不读、也不占用结果上限 |
+
+### R3-17 关键参数硬编码
+
+台账点名的 13 个限额全部落成配置（共 14 个键，上下文窗口另有按模型的映射表）。核心不变量：**缺省值逐项等于它替换掉的常量**，不写配置的工程行为与改前等价——由 serde 测试当作数据断言，而不是靠人读 `default` 函数。
+
+| 配置键 | 缺省（= 改前常量） | 接线 |
+|:---|:---|:---|
+| `[providers.<id>] context_window` / `model_context_windows` | `128_000` | `GlobalConfig::resolve_context_window` → `xgent_app` → `AgentBridgeConfig`；次序为按模型 > provider 级 > 内置回落，**走回落时启动打一条 warn** |
+| `[providers.<id>] max_output_tokens` | `8192` | `AnthropicProvider::with_max_output_tokens` → 请求体 `max_tokens`。OpenAI 兼容 / Response API 改前就不发输出上限，本键对它们无效（已写进 Spec，不静默吞掉） |
+| `[providers.<id>] first_event_timeout_secs` | `30` | 两个适配器的 `with_first_event_timeout_secs`，`build_provider` 与 `CustomApiProvider::with_config` 负责透传；idle 与 connect 超时未动 |
+| `[agent] retrieval_max_tokens` / `max_events_per_frame` | `8_000` / `64` | `AgentBridgeConfig` → 检索查询预算；每帧上限作为 `AgentBridge` 字段被 ECS drain 读取（到界即停，剩余留在 channel，**不丢事件**） |
+| `[tools] confirm_timeout_secs` / `command_timeout_secs` / `command_max_output_bytes` | `300` / `60` / `65_536` | `ToolParams::from_tool_config` → `ToolExecutor::with_params` 与 `RunCommand::with_params`；`default_tools(&ToolParams)` |
+| `[context] tree_max_depth` / `tree_max_entries` / `rg_timeout_secs` / `max_search_files` / `max_keywords` | `4` / `200` / `10` / `20` / `16` | `RetrievalLimits::from_context_limits` → `OnDemandContextProvider::with_limits`，透传给同步遍历函数与取词函数 |
+
+约定与取舍：数值键 `0` = 未设置（`Option` + TOML `null` 会让每个消费方都处理 `None`，且这些闸的存在意义就是止损，"完全不限"不可表达）。取值一律走 `effective_*()` 访问器，`0` 的解析只发生在配置层。工具与检索 crate **不 import 配置节类型**，转换在 `xgent_app` 完成，`Tool` / `ContextProvider` 契约与配置层解耦。
+
+未转配置的常量（本就有意的边界）：`MAX_TOOL_OUTPUT_BYTES`（所有读取类工具共享的天花板，`run_command` 的配置值只能在其下收窄）、`IDLE_TIMEOUT_SECS`（60s，台账未点名）、降级遍历的 `VISITED_NODE_LIMIT`（2000，纯止损闸，不属于按工程调优的参数）。
+
+### 实现期间测出并修好的真实断裂：确认超时形同虚设
+
+`[tools] confirm_timeout_secs` 的行为测试（永不回应的确认回调）直接挂死，暴露出改前的等待结构：
+
+```rust
+r = tokio::time::timeout(Duration::from_secs(300), confirm.confirm(req))
+   => match r { Ok(rx) => match rx.await { ... } }   // ← rx.await 不在超时之内
+```
+
+生产实现 `BridgeConfirm::confirm` **立即**返回 receiver（用户的点击发生在之后），所以 `timeout` 包住的只是「取回 receiver」这一步，永不超时；真正的决策等待 `rx.await` 无界——确认请求除了 Abort 没有任何出口，`确认请求超时` 这条错误分支在生产路径上不可达。这与 §五 那批「类型改到位但链路没接上」的缺陷同类：只有让测试真的等一次才暴露。
+
+修法与配套：
+
+- `executor.rs`：把超时改为覆盖「取回 receiver + 等到决策」两段，`biased` 让取消仍优先判定（`abort_beats_confirm_timeout` 用例锁住这一点，R1-2 的取消语义不能因为加超时而退化）。
+- `xgent_ui/src/confirm_dialog.rs::close_on_settled`：超时后 executor 返回的是错误工具结果，弹窗不会自己消失——它是模态遮罩，留着会继续吃键盘焦点，且「允许」按钮接在一个已被丢弃的 receiver 上（点了没反应）。新增一条以 `ToolResultMessage` 到达为判据的关闭路径，并复用既有 `close_dialog` 还原焦点（内层 tool-call 循环串行，等确认期间不会有别的工具结果进来，故判据成立）。
+- 行为变化：用户 5 分钟不响应确认，现在会得到 `确认请求超时` 而不是对话一直挂在确认态。这是 R3-17 台账与 `AGENTS.md` §5.4 一直在描述的行为，此前并未真实发生。
+
+### 一处对 R3-21 的订正（不是本轮范围，但影响下一条变更的估价）
+
+`doc/notes/agent-gap-review.md` R3-21 记「查找替换仅字面匹配，无正则」。实际读码结果更强：`xui::FindState`（`crates/xui/src/text_editor/find.rs`，含 `find_all` / `replace_current` / `replace_all` 与十余条单测）在 `crates/xgent_ui/src/` 里**零消费者**（全目录检索 `find`/`Find`/`replace` 只命中 `tool_panel`、`editor/tabs::find_by_path` 等无关符号）。也就是说编辑器查找替换不是「只支持字面量」，而是产品里根本不可达。下一条变更应按「接 Cmd+F/Cmd+H UI + 正则模式」估工作量。
+
+### 判别力反证（13 个变异体）
+
+方法同 §五/§六：逐个把修复改回缺陷形态 → 跑目标 crate 的 lib 测试 → 确认确有失败 → 还原并 `touch` 源文件（不 touch 会让 cargo 复用变异体的缓存二进制，见 §六 末尾的工具陷阱）。
+
+| 变异 | 结果 | 失败用例 |
+|:---|:---|:---|
+| MU1 `regex` 开关失效（永远走字面量） | 抓到（3 failed） | `regex_mode_matches_by_pattern`、`lookaround_and_backreference_are_invalid_patterns` 等 |
+| MU2 非法正则静默退回字面量 | 抓到（2 failed） | `invalid_regex_is_reported_before_traversal`、`lookaround_and_backreference_are_invalid_patterns` |
+| MU3 字面模式丢弃大小写折叠 | **首轮未抓到 → 是我的测试失效** | 见下 |
+| MU4 glob 的「无 `/` 只匹配文件名」规则关闭 | 抓到（3 failed） | `glob::tests::bare_extension_glob_matches_name_at_any_depth`、`glob_extension_filter_narrows_files` 等 |
+| MU5 未知 `file_type` 静默不过滤 | 抓到（1 failed） | `unknown_file_type_lists_supported_names` |
+| MU6 `run_command` 超时回到常量 60 | 抓到（1 failed） | `configured_command_timeout_kills_slow_command` |
+| MU7 确认超时回到常量 300 | 抓到（120s 内不结束 = TIMEOUT） | `configured_confirm_timeout_expires`（旧形态下直接挂死，正是 §七 那条断裂的表现） |
+| MU8 窗口解析忽略按模型映射 | 抓到（1 failed） | `context_window_precedence_is_model_then_provider_then_fallback` |
+| MU9 缺省值漂移（`max_keywords` 16→8） | 抓到（2 failed） | `new_sections_default_to_previous_constants`、`toml_without_new_sections_resolves_to_builtin_defaults` |
+| MU10 `build_provider` 不交 `max_output_tokens` | 抓到（1 failed） | `build_provider_passes_new_config_keys`（源码级断言） |
+| MU11 检索预算回到字面量 8_000 | 抓到（1 failed） | `retrieval_budget_from_config_reaches_context_query` |
+| MU12 每帧上限回到字面量 64 | 抓到（1 failed） | `drain_bound_is_read_from_bridge_not_a_literal`（源码级断言） |
+| MU13 目录树深度回到字面量 4 | 抓到（1 failed） | `configured_tree_depth_limit_shortens_summary` |
+| MU14 关键词上限回到字面量 16 | 抓到（2 failed） | `configured_keyword_cap_keeps_first_in_order`、`retrieval_limits_are_actually_read` |
+
+### MU3 未抓到暴露的是我自己的缺陷（本轮最有用的一条）
+
+首轮 MU3 报「108 passed，一个都没失败」。按 §六 的 M7 经验，我先怀疑是等价变异——但大小写折叠不可能等价。真实原因是我在插入相邻测试时把一次编辑的换行吃掉了：
+
+```rust
+/// A3：忽略大小写对字面与正则两种模式都生效，缺省仍区分大小写。    #[tokio::test]
+async fn case_insensitive_applies_to_both_modes() {
+```
+
+`#[tokio::test]` 被并进文档注释行，于是这个用例**从未注册进测试二进制**：源码里 21 个 `#[test]/#[tokio::test]`，二进制只有 20 个（总数 108 而非 109）。编译器不报错，只给一条 `dead_code` 警告——而我几次 `cargo check` 都把输出过滤过，警告没进过眼睛。「全绿 + 108 passed」看上去完全自洽。
+
+补回换行后，同一变异立刻失败（`left: 1, right: 3`）。两条可复用的判据：
+
+- **`cargo test -- <filter>` 报 `0 passed; N filtered out` 必须当作失败**，而不是"通过"。反证脚本原先按过滤器跑单个用例，一旦名字没写对就是空跑，`exit=0` 看起来完全正常。改为整 crate 跑 lib 测试后这类哑火无处藏身。
+- **变异批次里"没被抓到"的默认解释不是等价变异，而是先怀疑测试自己失效**：核对源码声明数与 `-- --list` 注册数是否一致，再判等价性。§六 的 M7 是真等价（独立程序对比产出一致），M3 是假阴性（用例根本没运行），两者的处置完全相反——前者记录说明，后者修测试。
+
+### 本轮的验证结果
+
+见 `docs/comet/changes/close-search-config-gaps/verification.md`（Runtime 正式报告）。开发期检查与未跑的检查按本机实测说明：`cargo check --workspace --all-targets`、五个受影响 crate 的 `cargo test --lib`、`cargo fmt -p <crate> -- --check` 为形式化检查；`cargo clippy --workspace` 与 `cargo test --workspace` 未纳入形式化计划——本机磁盘剩 18G、swap 近满，任何链接整个 bevy 图的命令都要 10 分钟以上（本轮 `cargo check --workspace --all-targets` 冷路径实测 9m43s，`cargo test` 单 crate 编译 13m48s），超出命令上限。
+
+### 遗留与下一步
+
+- 设置面板仍只暴露 provider 三项（R3-13）：本轮新增 14 个键后，"只能手改 TOML"的面子更大了，`[tools]`/`[agent]`/`[context]` 与 `context_window` 是最该进 UI 的几项。
+- 编辑器查找替换（R3-21）按 §七 订正后的实际状态估：先接 UI，再谈正则。
+- `@file:<path>` 越界读取（§六 遗留）未动，仍属独立变更。
+- `IDLE_TIMEOUT_SECS`（60s）、降级遍历 `VISITED_NODE_LIMIT`（2000）、共享的 `MAX_TOOL_OUTPUT_BYTES`（64KB）保持常量：台账未点名，且前两者是纯止损闸而非按工程调优的参数。
