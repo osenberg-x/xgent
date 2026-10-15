@@ -97,7 +97,11 @@ fn main() {
     // 插件系统经 ToolExecutorResource 注册工具到同一实例。
     // 确认超时与命令上限取自 `[tools]`（R3-17）。
     let tool_params = xgent_tools::ToolParams::from_tool_config(&project_config.tools);
-    let executor = Arc::new(ToolExecutor::with_params(&tool_params));
+    // 文件改动检查点：执行器写前记快照、写后回填校验值，agent loop 标定轮号，
+    // UI 侧「撤销上一轮」经 AgentBridge.checkpoints 取同一实例（R3-11）。
+    let checkpoints = Arc::new(xgent_tools::CheckpointStore::new(project_root.clone()));
+    let executor =
+        Arc::new(ToolExecutor::with_params(&tool_params).attach_checkpoints(checkpoints.clone()));
     // Editor 命令 channel：agent EditorTool → ECS（经 agent_poll_system 桥接）
     let (editor_cmd_tx, editor_cmd_rx) =
         tokio::sync::mpsc::channel::<xgent_tools::EditorCommandRequest>(32);
@@ -180,6 +184,7 @@ fn main() {
         // 检索预算与每帧事件上限来自 `[agent]`（R3-17）
         retrieval_max_tokens: project_config.agent.effective_retrieval_max_tokens(),
         max_events_per_frame: project_config.agent.effective_max_events_per_frame(),
+        checkpoints: Some(checkpoints),
     });
 
     // 通知订阅端（fs/config 桥接用）

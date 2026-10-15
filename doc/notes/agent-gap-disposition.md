@@ -239,3 +239,72 @@ async fn case_insensitive_applies_to_both_modes() {
 - 编辑器查找替换（R3-21）按 §七 订正后的实际状态估：先接 UI，再谈正则。
 - `@file:<path>` 越界读取（§六 遗留）未动，仍属独立变更。
 - `IDLE_TIMEOUT_SECS`（60s）、降级遍历 `VISITED_NODE_LIMIT`（2000）、共享的 `MAX_TOOL_OUTPUT_BYTES`（64KB）保持常量：台账未点名，且前两者是纯止损闸而非按工程调优的参数。
+
+## 八、add-file-checkpoint-undo（2026-10-15）：R3-11 agent 文件改动的撤销
+
+承接 §七「遗留与下一步」之外台账里最重的一条：R3-11「没有任何机制能撤销 agent 改过的文件」。
+正式 Spec 见 `docs/comet/specs/file-checkpoints/spec.md`（归档时发布）。
+
+### 机制
+
+| 落点 | 说明 |
+|:---|:---|
+| `crates/xgent_tools/src/checkpoint.rs`（新增） | `CheckpointStore`：`begin_turn` / `snapshot_before_write` / `finalize_after_write` / `undo_last_turn`。磁盘布局 `turns/<session>/<turn>.json` 清单 + `blobs/<session>/<turn>-<index>-<hash>.bin` 改前内容。保留 20 轮（`DEFAULT_MAX_TURNS`） |
+| `tool.rs`：`Tool::write_targets`（默认空） | 一次调用会写哪些**已解析的绝对路径**。`write_file`/`edit_file` 用它们本就有的 `resolve_in_project` 实现，读取类工具保持空 → 项目外路径不可能成为撤销目标 |
+| `executor.rs`：`run_tool` | 三条执行路径（自动批准 / 本次允许 / 会话允许）唯一的收口点：写前快照 → 执行 → **仅在结果非 `is_error` 时**回填校验值 |
+| `atomic.rs` | 新增 `atomic_write_bytes`（同目录 tmp + `sync_all` + rename，撤销恢复复用它）；`backup_existing` 与其两个调用点删除 |
+| `xgent_agent/bridge.rs` | `AgentBridgeConfig.checkpoints` → `AgentBridge.checkpoints`；`AgentCommand::StartLoop` 携带 `session: u64`（数值 `SessionId`，不走 `session:N` 反解——既有 `restore()` 会把它解析成 0）；`run_agent_loop` 每轮外层循环开始处 `begin_turn` |
+| `xgent_ui/src/undo.rs`（新增）+ 命令面板 | `agent.undo-changes` 经 `try_register` 注册、`handle_palette_triggers` 在自己的分支里路由（不走 `plugin.` 兜底）。Idle 才放行；结果一行 toast，有跳过/无检查点/写盘失败时再落一条常驻提示 |
+| i18n | 两套语料各 16 个键（`cmd-undo-changes`、`undo-*`、`undo-skip-*`） |
+
+### 三条设计取舍（都写进 Spec，不留实现细节给人猜）
+
+- **校验靠内容哈希，不靠 mtime**（FNV-1a 64，只判「还是不是我写的那份」，非安全摘要）。`touch`、`git checkout` 会让 mtime 判据假阴性，等长改写会让它假阳性。
+- **记不上快照时降级方向是「丢撤销覆盖」而不是「丢写入」**：检查点目录不可写时文件照写、工具结果照成功，该轮标为 uncovered 并在撤销汇报里点名。撤销机制不能反过来弄坏主功能。
+- **撤销只交给用户，不进 agent 工具表**：模型不能自己回滚自己的工作；且撤销只改磁盘，缓冲区一致性沿用既有 fs-watch 通路（干净 buffer 静默重载、脏 buffer 进冲突对话框），不开第二条重载路径。
+
+### 实现期间自己测出的三个真实断裂
+
+1. **blob 名在同一轮内互相覆盖**。名字原本只有「轮号 + 路径哈希」，同一轮第三次写入的快照盖掉了第一、第二次的清单条目仍指向同一个 blob → 撤销只回到 `c2`。补上条目序号（`<turn>-<index>-<hash>.bin`）后 `three_writes_in_a_single_turn_undo_to_pre_turn_content` 才通过。
+2. **保留淘汰差一**。淘汰写在 `begin_turn` 里，第 21 轮开始时看到的还是 20 份清单 → 判定「不超」而全部留下，实际留了 21 轮。改挂到「本轮首次创建清单」时（`record_entry`）。
+3. **FTL 注释符写错**。用 `;` 起注释让 `en-US/main.ftl` 整份语料解析失败，12 个 `xgent_settings` 测试同时炸。fluent 只认 `#`。
+
+三者都不是「看代码看出来的」，是行为测试跑出来的——第 1 条尤其：单元级快照/恢复测试各自都过，只有「同一文件写三次」这条序列暴露了名字冲突。
+
+### 判别力反证（12 个变异体）
+
+| 变异 | 结果 | 失败用例 |
+|:---|:---|:---|
+| M1 `snapshot_before_write` 直接返回 | 抓到（14 failed） | 快照与撤销全链 |
+| M2 blob 名去掉条目序号（轮内互相覆盖） | 抓到（1 failed） | `three_writes_in_a_single_turn_undo_to_pre_turn_content` |
+| M3 `Created` 条目不删文件 | 抓到（2 failed） | `created_file_is_removed_on_undo` 等 |
+| M4 用户删掉的文件被重建 | 抓到（1 failed） | `user_deleted_file_is_not_resurrected` |
+| M5 撤销不比对写后哈希 | 抓到 | `externally_modified_file_is_skipped_and_others_still_restore` |
+| M6 uncovered 不落账 | 抓到 | `unwritable_checkpoint_dir_degrades_without_blocking_the_write` |
+| M7 保留窗口差一 | 抓到 | `retention_keeps_only_the_newest_turns` |
+| M8 轮号不从磁盘探测 | **首轮未抓到 → 真盲区** | 见下 |
+| M9 `write_file` 不声明写入目标 | **首轮未抓到 → 真盲区** | 见下 |
+| M10 Idle 闸消失（忙时也能撤销） | 抓到 | `gate_refuses_while_busy_and_without_store` |
+| M11 `en-US` 少一个键 | **首轮批次接错线**（跑的是 `xgent_settings --lib`，而该断言住在 `xgent_ui --lib`）→ 改跑对 crate 后抓到 | `both_locales_define_every_new_key` |
+| M12 执行器不调快照 | 抓到 | `executor_driven_write_file_is_undone`、`write_tools_record_checkpoints_instead_of_backup_files` |
+
+M8/M9 的处置与 §七 MU3 不同：这次不是测试失效（注册数与声明数一致、用例确实跑了），而是**确实没有一条断言覆盖那两处**。补的三条用例分别把「轮号从磁盘续接」「空轮次不占轮号」「write_file 的目标声明与端到端撤销」钉住，重跑后 M8 由 `empty_turn_does_not_reuse_turn_number` 失败、M9 由 `executor_driven_write_file_is_undone` + `write_file_declares_its_resolved_target` 失败，12/12 全部被抓。
+
+判据（可复用）：**「没被抓到」有两种成因——测试自己失效，或覆盖真的有洞。先用「源码声明数 vs `--list` 注册数」排除前者，再用「这条断言到底在读哪个字段」排查后者**。上一轮是前者，这一轮是后者，两种都必须补东西，不能一句「等价变异」了事。
+
+
+批次本身也出了两种错，都被这轮的多写序列暴露：M11 按「键属于哪个 crate」而不是「断言在哪个 crate」选了测试目标（`xgent_settings --lib` 14 条全过看起来完全正常）；`NO-TEST-RAN` 哨兵用子串 `"0 passed"` 判「用例没跑」，于是 **`60 passed` 也被它命中**（`6` 后面正好接 `0 passed`），把真正失败的 M10 标成了可疑。两处都已修：变异体的测试目标按断言位置选，哨兵改用正则取那份结果的**完整数字**并判 `> 0`。
+
+教训不是「脚本有个 bug」，而是**止损判据本身也要有判别力**：一条靠子串碰出来的哑火哨兵，既会误报也会漏报——它这轮误报了真失败的 M10；反过来 `600 passed` 这类数字它同样命中。数字判定必须锚定边界，不能用「看起来像」。
+
+### 顺带发现的既有缺陷（不在本轮范围）
+
+`EditorIoRuntime.handle` 在 `xgent_app` 里**从未被注入**（全目录只有构造点的 `None`），编辑器文件 IO 因此一直走同步降级路径。撤销刻意依赖 `AgentBridge` 自带的 runtime，不碰这个资源；编辑器侧的注入应作为独立变更处理。
+
+### 遗留与下一步
+
+- 只覆盖 `write_file`/`edit_file`。`run_command` 的副作用（`sed -i`、`git apply`、`cargo fmt`）与插件 `host.write_file` 不可撤销，提示文案与 Spec 都按这个边界说，不暗示全覆盖。
+- 无 redo、无撤销历史 UI、无整会话回滚（本轮明确的 non-goal）。
+- 保留 20 轮是常量，检查点不可关（应用总是挂上存储），也没有对应设置面板项（与 R3-13 同一个缺口）。
+- 历史遗留的 `*.xgent-bak` 不清理；应用仍不确保用户项目把 `.xgent/` 加进 gitignore（既有缺口，记账待办）。
+- A9 的「撤销后编辑器缓冲区一致」是读既有通路验证的，不是 GUI 跑出来的——本应用无法 headless 驱动，报告里如实这么写。

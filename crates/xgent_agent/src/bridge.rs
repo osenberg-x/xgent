@@ -218,6 +218,8 @@ pub struct AgentBridge {
     ///
     /// 到界即停，剩余事件留在 channel 里下帧再取——不丢事件。
     pub max_events_per_frame: u32,
+    /// 检查点存储（与 `ToolExecutor` 同一个 Arc）。UI 侧撤销动作经它执行。
+    pub checkpoints: Option<Arc<xgent_tools::CheckpointStore>>,
 }
 
 /// agent loop 的有界执行上限。
@@ -245,6 +247,8 @@ pub enum AgentCommand {
         req: ChatRequest,
         /// @ 引用解析的编辑器查询（供 context 检索注入）
         editor_queries: Vec<xgent_core::EditorQuery>,
+        /// 会话号（`SessionId` 的数值，**不是** `session:N` 字符串——后者反解会得到 0）
+        session: u64,
     },
     /// 中断当前对话
     Abort,
@@ -400,6 +404,11 @@ pub struct AgentBridgeConfig {
     /// 由 ECS 侧 drain 读取（见 [`AgentBridge::max_events_per_frame`]），
     /// 到界即停、剩余事件留在 channel 下帧再取——是止损闸，不丢事件。
     pub max_events_per_frame: u32,
+    /// 文件改动检查点存储（`None` = 不记录，agent 的写入不可撤销）。
+    ///
+    /// 由 `xgent_app` 与 `ToolExecutor` 共享同一 `Arc`：执行器记快照与回填写入后
+    /// 校验值，本层只负责在每轮开始时标定轮号（`begin_turn`）。
+    pub checkpoints: Option<Arc<xgent_tools::CheckpointStore>>,
 }
 
 /// agent loop 的默认有界值。
@@ -451,6 +460,7 @@ impl AgentBridge {
         let bounds_for_task = loop_bounds.clone();
         // cfg 随后被 move 进异步 task，ECS 侧需要的字段先取出来
         let max_events_per_frame = cfg.max_events_per_frame;
+        let checkpoints_for_ui = cfg.checkpoints.clone();
         runtime.spawn(async move {
             agent_loop_task(
                 cfg,
@@ -474,6 +484,7 @@ impl AgentBridge {
             tool_schemas,
             loop_bounds,
             max_events_per_frame,
+            checkpoints: checkpoints_for_ui,
         }
     }
 
@@ -521,6 +532,7 @@ async fn agent_loop_task(
             AgentCommand::StartLoop {
                 mut req,
                 mut editor_queries,
+                mut session,
             } => {
                 // run_agent_loop 可能在停等期收到迟到的新 StartLoop（ECS Done 置
                 // Idle 后的新用户输入）并上返回——此处循环接手，立即开新对话。
@@ -572,14 +584,17 @@ async fn agent_loop_task(
                         cfg.context_window,
                         &cfg.compaction_settings,
                         &loop_bounds,
+                        cfg.checkpoints.as_ref(),
+                        session,
                     )
                     .await;
                     // 对话结束：清除 current_cancel，ECS Abort 不再误触发
                     *current_cancel.lock() = None;
                     match next {
-                        Some((new_req, new_queries)) => {
+                        Some((new_req, new_queries, new_session)) => {
                             req = new_req;
                             editor_queries = new_queries;
+                            session = new_session;
                         }
                         None => break,
                     }
@@ -644,7 +659,9 @@ async fn run_agent_loop(
     context_window: u32,
     compaction_settings: &crate::compaction::CompactionSettings,
     loop_bounds: &Arc<parking_lot::RwLock<LoopBounds>>,
-) -> Option<(ChatRequest, Vec<xgent_core::EditorQuery>)> {
+    checkpoints: Option<&Arc<xgent_tools::CheckpointStore>>,
+    session: u64,
+) -> Option<(ChatRequest, Vec<xgent_core::EditorQuery>, u64)> {
     use xgent_core::chat::{ContentBlock, Role};
     // 对话级快照：本对话期间配置固定，运行时刷新下次对话生效
     let retry_cfg = retry_config.read().clone();
@@ -653,6 +670,11 @@ async fn run_agent_loop(
     let max_tool_rounds = bounds.max_tool_rounds;
     let max_tokens_per_turn = bounds.max_tokens_per_turn;
     loop {
+        // 外层每进一次 = 一个用户请求轮（首次 StartLoop 与每次 follow-up）。
+        // 标定轮号后，本轮所有写入都归到同一份清单，用户可一次撤销整轮。
+        if let Some(store) = checkpoints {
+            store.begin_turn(session).await;
+        }
         let mut has_tool_calls = true;
         // 本轮最后一次 stream 的 usage 与 model，供 Done 事件携带
         let mut last_usage: Option<xgent_core::chat::TokenUsage> = None;
@@ -1077,7 +1099,7 @@ async fn run_agent_loop(
 
         // 停止边界：先 try_recv steering（防止 steer 在 yield 点丢失，对齐 omp）
         let mut late_steer: Option<String> = None;
-        let mut pending_start: Option<(ChatRequest, Vec<xgent_core::EditorQuery>)> = None;
+        let mut pending_start: Option<(ChatRequest, Vec<xgent_core::EditorQuery>, u64)> = None;
         while let Ok(cmd) = steering_rx.try_recv() {
             match cmd {
                 AgentCommand::Steering { text } => {
@@ -1090,11 +1112,13 @@ async fn run_agent_loop(
                 AgentCommand::StartLoop {
                     req,
                     editor_queries,
+                    session,
                 } => {
                     // Done 已发、ECS 即将 Idle：新对话请求可能已在本函数阻塞
                     // 前入队。立即上返回顶层循环处理，不得丢弃（丢弃会让
-                    // ECS 已置 Thinking 的会话永久卡死）。
-                    pending_start = Some((req, editor_queries));
+                    // ECS 已置 Thinking 的会话永久卡死）。会话号一并上返：新建会话后
+                    // 它可能已变，沿用旧值会把这一轮的写入记到别的会话上。
+                    pending_start = Some((req, editor_queries, session));
                     break;
                 }
                 _ => {}
@@ -1126,11 +1150,12 @@ async fn run_agent_loop(
                 Some(AgentCommand::StartLoop {
                     req: new_req,
                     editor_queries,
+                    session,
                 }) => {
                     // 新对话请求在停等期到达：ECS 收到 Done 置 Idle 后，新用户
                     // 输入走 StartLoop。若在此丢弃，ECS 已置 Thinking 的会话
                     // 永久卡死——上返回顶层循环立即开新对话。
-                    return Some((new_req, editor_queries));
+                    return Some((new_req, editor_queries, session));
                 }
                 Some(AgentCommand::Abort) | None => {
                     // 中断对话：发 Done 通知 ECS 切回 Idle（修复前直接 return 不发 Done，

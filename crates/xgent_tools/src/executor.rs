@@ -37,6 +37,11 @@ pub struct ToolExecutor {
     allowed_all: tokio::sync::Mutex<HashSet<String>>,
     /// 等待用户确认的秒数（项目配置 `[tools] confirm_timeout_secs`，R3-17）。
     confirm_timeout_secs: u64,
+    /// 检查点存储（`None` = 不记录，改动不可撤销）。
+    ///
+    /// 由宿主（`xgent_app`）注入，与 `AgentBridge` 共享同一 `Arc`；执行器是所有
+    /// 写工具的唯一必经点，快照放在这里就不存在「某条路径忘了备份」。
+    checkpoints: Option<Arc<crate::checkpoint::CheckpointStore>>,
 }
 
 impl ToolExecutor {
@@ -53,7 +58,19 @@ impl ToolExecutor {
             tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
             confirm_timeout_secs: params.confirm_timeout_secs,
+            checkpoints: None,
         }
+    }
+
+    /// 挂上检查点存储（链式构造，宿主在 `Arc::new` 之前调用）。
+    pub fn attach_checkpoints(mut self, store: Arc<crate::checkpoint::CheckpointStore>) -> Self {
+        self.checkpoints = Some(store);
+        self
+    }
+
+    /// 当前挂接的检查点存储（宿主/测试确认接线用）。
+    pub fn checkpoints(&self) -> Option<&Arc<crate::checkpoint::CheckpointStore>> {
+        self.checkpoints.as_ref()
     }
 
     /// 用指定工具集合构造（测试用），确认超时取内置缺省。
@@ -63,7 +80,40 @@ impl ToolExecutor {
             tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
             confirm_timeout_secs: crate::ToolParams::default().confirm_timeout_secs,
+            checkpoints: None,
         }
+    }
+
+    /// 执行工具，并在写入前后与检查点存储打点。
+    ///
+    /// 三条执行路径（自动批准 / 本次允许 / 会话允许）都只经此方法调用工具，
+    /// 因此「忘了记检查点」不可能由路径遗漏产生；被拒绝的调用在更早的分支就已
+    /// 返回，不会留下记录。
+    async fn run_tool(
+        &self,
+        tool: &Arc<dyn Tool>,
+        input: serde_json::Value,
+        ctx: &ToolCtx,
+        signal: CancellationToken,
+        on_update: Option<Arc<ToolUpdateCallback>>,
+    ) -> Result<ToolResult, ToolError> {
+        let targets = tool.write_targets(&input, ctx);
+        if !targets.is_empty()
+            && let Some(store) = self.checkpoints.as_ref()
+        {
+            store.snapshot_before_write(&targets, ctx).await;
+        }
+        let result = tool.execute(input, ctx, signal, on_update).await;
+        let wrote = matches!(&result, Ok(r) if !r.is_error);
+        if wrote
+            && !targets.is_empty()
+            && let Some(store) = self.checkpoints.as_ref()
+        {
+            // 回填「agent 写进去的那份」哈希：撤销靠它区分「还是我写的」与
+            // 「用户后来改过」，不靠 mtime（touch / git checkout 会误判）
+            store.finalize_after_write(&targets, ctx).await;
+        }
+        result
     }
 
     pub fn register(&self, tool: Arc<dyn Tool>) {
@@ -140,11 +190,11 @@ impl ToolExecutor {
                 denied: true,
                 side_effect: None,
             }),
-            SecurityPolicy::Approved => tool.execute(input, ctx, signal, on_update).await,
+            SecurityPolicy::Approved => self.run_tool(&tool, input, ctx, signal, on_update).await,
             SecurityPolicy::NeedsConfirmation => {
                 // 会话级 AllowAll 命中则跳过确认
                 if self.allowed_all.lock().await.contains(tool_id) {
-                    return tool.execute(input, ctx, signal, on_update).await;
+                    return self.run_tool(&tool, input, ctx, signal, on_update).await;
                 }
                 let (old_content, new_content) = match tool.preview_diff(&input, ctx).await {
                     Some((old, new)) => (Some(old), Some(new)),
@@ -183,10 +233,12 @@ impl ToolExecutor {
                     },
                 };
                 match decision {
-                    ConfirmDecision::Allow => tool.execute(input, ctx, signal, on_update).await,
+                    ConfirmDecision::Allow => {
+                        self.run_tool(&tool, input, ctx, signal, on_update).await
+                    }
                     ConfirmDecision::AllowAll => {
                         self.allowed_all.lock().await.insert(tool_id.to_string());
-                        tool.execute(input, ctx, signal, on_update).await
+                        self.run_tool(&tool, input, ctx, signal, on_update).await
                     }
                     ConfirmDecision::Deny => Ok(ToolResult {
                         output: "用户拒绝".into(),
@@ -699,10 +751,72 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(content, "1\nTWO\n3\n");
-        // 原文件备份应存在且保留原内容
-        let bak = crate::atomic::backup_path_for(&dir.path().join("a.txt"));
-        let bak_content = tokio::fs::read_to_string(&bak).await.unwrap();
-        assert_eq!(bak_content, "1\n2\n3\n", "备份应保留原内容");
+    }
+
+    /// 写工具改由检查点记录改前状态：不再有旁置 `.xgent-bak`，且撤销可回到写入前。
+    #[tokio::test]
+    async fn write_tools_record_checkpoints_instead_of_backup_files() {
+        use crate::checkpoint::{EntryKind, SkipReason};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let target = root.join("a.txt");
+        tokio::fs::write(&target, "1\n2\n3\n").await.unwrap();
+        let store = std::sync::Arc::new(crate::CheckpointStore::new(root.clone()));
+        let exec = ToolExecutor::with_defaults().attach_checkpoints(store.clone());
+        store.begin_turn(42).await;
+
+        let r = exec
+            .execute(
+                "edit_file",
+                json!({"path": "a.txt", "start_line": 2, "end_line": 2, "new_content": "TWO"}),
+                &ctx(&root, policy(&["edit_file"], &[])),
+                CancellationToken::new(),
+                &AutoAllow,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!r.is_error, "edit_file 应成功: {}", r.output);
+
+        // 不再留旁置备份文件
+        let mut rd = tokio::fs::read_dir(&root).await.unwrap();
+        while let Some(e) = rd.next_entry().await.unwrap() {
+            let n = e.file_name().to_string_lossy().to_string();
+            assert!(!n.ends_with(".xgent-bak"), "不该再产生旁置备份: {n}");
+        }
+
+        let report = store.undo_last_turn(42).await;
+        assert_eq!(report.restored, vec!["a.txt".to_string()]);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .all(|(_, r)| *r != SkipReason::Unverified),
+            "写入成功应已回填校验值"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&target).await.unwrap(),
+            "1\n2\n3\n",
+            "撤销后回到写入前"
+        );
+        let _ = EntryKind::Modified;
+    }
+
+    /// 只读工具不声明写入目标，因此不产生检查点。
+    #[test]
+    fn read_only_tools_declare_no_write_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: Default::default(),
+        };
+        use crate::builtins::{ReadFile, SearchFiles};
+        assert!(ReadFile.write_targets(&json!({"path": "."}), &c).is_empty());
+        assert!(
+            SearchFiles
+                .write_targets(&json!({"pattern": "x"}), &c)
+                .is_empty()
+        );
     }
 
     /// edit_file 的 old_content 不匹配时不得写入。

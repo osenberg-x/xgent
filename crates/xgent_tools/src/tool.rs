@@ -199,6 +199,16 @@ pub trait Tool: Send + Sync {
         None
     }
 
+    /// 本次调用会写入的绝对路径（供执行器在写入前记检查点）。
+    ///
+    /// 默认返回空 = 「本工具不写项目文件」，其改动因此不可撤销；`write_file`
+    /// 与 `edit_file` 覆写它。路径必须用与 `execute` 相同的
+    /// [`crate::path::resolve_in_project`] 解析，二者不一致会让检查点对不上真实文件。
+    /// 同步签名（只做路径解析，不碰磁盘），与 [`Tool::approval_for`] 同族。
+    fn write_targets(&self, _input: &Value, _ctx: &ToolCtx) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
     /// 异步执行工具。
     ///
     /// - `signal`：中断信号，cancel 后工具应尽快返回 `ToolError::Aborted`。

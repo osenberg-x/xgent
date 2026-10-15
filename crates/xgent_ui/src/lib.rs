@@ -31,6 +31,7 @@ pub mod terminal;
 pub mod theme;
 pub mod tool_panel;
 pub mod top_bar;
+pub mod undo;
 pub mod welcome;
 
 use bevy::prelude::*;
@@ -65,6 +66,7 @@ impl Plugin for XgentUiPlugin {
             resize::ResizePlugin,
             shortcuts::ShortcutsPlugin,
             kit::KitPlugin,
+            undo::UndoPlugin,
         ));
     }
 }

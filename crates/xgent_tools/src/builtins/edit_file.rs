@@ -57,6 +57,17 @@ impl Tool for EditFile {
         ToolTier::Write
     }
 
+    /// 被编辑文件的路径，解析方式与 `execute` 一致。
+    fn write_targets(&self, input: &Value, ctx: &ToolCtx) -> Vec<std::path::PathBuf> {
+        match input["path"].as_str() {
+            Some(p) => resolve_in_project(&ctx.project_root, p)
+                .ok()
+                .into_iter()
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     fn concurrency(&self) -> Concurrency {
         Concurrency::Exclusive
     }
@@ -115,9 +126,7 @@ impl Tool for EditFile {
             Ok(n) => n,
             Err(e) => return Ok(err(e)),
         };
-        if let Err(e) = crate::atomic::backup_existing(&full).await {
-            return Ok(err(format!("备份原文件失败 {}: {e}", full.display())));
-        }
+        // 改前状态由执行器记入检查点（见 crate::checkpoint），不再写旁置备份。
         match crate::atomic::atomic_write(&full, &new).await {
             Ok(()) => Ok(ToolResult {
                 output: format!(

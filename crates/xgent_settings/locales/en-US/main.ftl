@@ -136,3 +136,21 @@ toast-copied = Copied to clipboard
 
 diff-empty-nobuffer = No open file
 diff-empty-clean = No unsaved changes
+
+# --- undo agent file changes (R3-11) ---
+cmd-undo-changes = Undo last turn's file changes
+undo-done = Undid file changes of turn { $turn } ({ $count } files)
+undo-nothing = No agent file changes to undo
+undo-busy = Agent is running; stop it before undoing
+undo-unavailable = Undo unavailable: file checkpoints are disabled for this session
+undo-detail = Undo details: { $summary }
+undo-part-restored = restored { $count }
+undo-part-removed = deleted { $count }
+undo-part-skipped = skipped { $count }
+undo-part-uncovered = without checkpoint { $count }
+undo-part-failed = write failed { $count }
+undo-skip-external = changed externally
+undo-skip-deleted = deleted by user
+undo-skip-blob-lost = pre-write content missing
+undo-skip-unverified = ownership unverifiable
+undo-noop = Nothing to restore in this turn

@@ -94,6 +94,15 @@ pub fn register_xgent_commands(mut registry: ResMut<CommandRegistry>, loc: Res<L
         label: tr(&loc, "cmd-settings-open"),
         kind: CommandKind::Action,
     });
+    // 撤销上一轮 agent 文件改动（R3-11）。非 plugin. 前缀：本地图层动作，
+    // 由 undo::request_undo 在会话空闲时执行。
+    registry
+        .try_register(PaletteCommand {
+            id: "agent.undo-changes".into(),
+            label: tr(&loc, "cmd-undo-changes"),
+            kind: CommandKind::Action,
+        })
+        .ok();
 }
 
 fn toggle_palette_visibility(
@@ -379,6 +388,7 @@ pub(crate) fn handle_palette_triggers(
     mut history_state: ResMut<crate::session_history::SessionHistoryState>,
     mut new_session: MessageWriter<NewSessionMessage>,
     mut plugin_command: MessageWriter<xgent_agent::PluginCommandTriggered>,
+    mut undo_writer: MessageWriter<crate::undo::UndoChangesMessage>,
     mut save_lang: MessageWriter<crate::settings_panel::SaveLanguageMessage>,
 ) {
     for ev in reader.read() {
@@ -405,6 +415,10 @@ pub(crate) fn handle_palette_triggers(
             }
             "settings.open" => {
                 settings_state.open = true;
+            }
+            "agent.undo-changes" => {
+                // 交给 undo 系统：只有空闲时才真正撤销，忙时回一句提示
+                undo_writer.write(crate::undo::UndoChangesMessage);
             }
             id if id.starts_with("plugin.") => {
                 // 照设计文档 §5.4 + 偏差修正 5：plugin. 前缀路由到 PluginHost。

@@ -137,3 +137,21 @@ toast-copied = 已复制到剪贴板
 
 diff-empty-nobuffer = 无打开文件
 diff-empty-clean = 无未保存更改
+
+# --- agent 文件改动撤销（R3-11）---
+cmd-undo-changes = 撤销上一轮文件改动
+undo-done = 已撤销第 { $turn } 轮的文件改动（{ $count } 个文件）
+undo-nothing = 没有可撤销的 agent 文件改动
+undo-busy = agent 正在执行，先停止后再撤销
+undo-unavailable = 撤销不可用：本会话未启用文件检查点
+undo-detail = 撤销详情：{ $summary }
+undo-part-restored = 恢复 { $count } 个
+undo-part-removed = 删除 { $count } 个
+undo-part-skipped = 跳过 { $count } 个
+undo-part-uncovered = 无检查点 { $count } 个
+undo-part-failed = 写盘失败 { $count } 个
+undo-skip-external = 已被外部修改
+undo-skip-deleted = 已被删除
+undo-skip-blob-lost = 改前内容丢失
+undo-skip-unverified = 无法确认归属
+undo-noop = 本轮没有需要恢复的改动

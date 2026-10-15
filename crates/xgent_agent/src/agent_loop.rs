@@ -82,6 +82,8 @@ pub fn agent_poll_system(
         let _ = bridge.cmd_tx.try_send(AgentCommand::StartLoop {
             req,
             editor_queries: ev.editor_queries.clone(),
+            // 检查点按 (会话, 轮) 归组；取数值 id，不经 Display 反解
+            session: conv.id.0,
         });
     }
 

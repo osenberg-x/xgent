@@ -197,6 +197,7 @@ fn test_app_with_context(
         max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
         retrieval_max_tokens,
         max_events_per_frame,
+        checkpoints: None,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -799,6 +800,7 @@ fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) ->
         max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
         retrieval_max_tokens: xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
         max_events_per_frame: xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
+        checkpoints: None,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)

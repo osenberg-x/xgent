@@ -18,7 +18,7 @@
 |:---|:---|:---|:---|:---|
 | F-01 | 多轮对话 | ✅ | `xgent_agent/src/bridge.rs`（双层 `run_agent_loop`：外层 follow-up、内层 tool-call+steering；`stream_with_retry` 自动重试可重试错误；流式期 steering 即时中断 race abort、停止边界重新轮询防丢失）+ `compaction.rs`（token 估算 + should_compact 触发 + find_cut_point 切点 + LlmCompactor 摘要） | `plans/step9`、`plans/optimization-from-omp.md` O4/O9 |
 | F-02 | 流式输出 | ✅ | `xgent_provider/src/openai_compat.rs`（SSE → ChatEvent 细粒度事件）→ `xgent_ui/src/chat_panel.rs` | `plans/step5`、ADR-0006 |
-| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id）；**`search_files` 支持 `regex`（默认关，字面量子串）/`case_insensitive`/`glob`/`file_type`，坏参数在遍历前报 `is_error` 而不是伪装成「未找到匹配」**（2026-10-14，见 §5.14） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/code-search/spec.md` |
+| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id）；**`search_files` 支持 `regex`（默认关，字面量子串）/`case_insensitive`/`glob`/`file_type`，坏参数在遍历前报 `is_error` 而不是伪装成「未找到匹配」**（2026-10-14，见 §5 注意点 28）；**`write_file`/`edit_file` 写前记检查点，用户可撤销整轮 agent 文件改动**（2026-10-15，见 §5.14） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/code-search/spec.md`、`docs/comet/specs/file-checkpoint-undo/spec.md` |
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
 | F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；**中文问句按相邻二字组合切词、rg 走 `--fixed-strings` 字面量、`@file:` 线索直接读文件、目录遍历经 spawn_blocking、Hub 合并后复核预算**（2026-10-14，约束见 §5.10）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/context-retrieval/spec.md` |
 | F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only + `list_sessions` + `restore_session`）+ `conversation.rs`（`restore` 方法）+ `xgent_ui/src/session_history.rs`（历史面板 UI）+ `events.rs`（`ListSessionsMessage`/`SessionListMessage`/`RestoreSessionMessage`/`SessionRestoredMessage`）；**新建、列出、恢复** 均完整可用 | `plans/step9`、ADR-0008 |
@@ -629,6 +629,22 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - **台账点名的 13 个运行限额全部转配置**（14 个键）：见 §4.5.1。核心不变量是「缺省值逐项等于它替换掉的常量」，因此不写配置的工程行为等价——这条由 serde 测试当作数据断言，而不是靠人读 `default` 函数。
    - 加新参数请沿 `xgent_app → ToolParams / RetrievalLimits / AgentBridgeConfig → 构造函数注入` 这条路；工具与检索 crate **不 import 配置节类型**，`Tool` / `ContextProvider` 契约与配置层保持解耦（`ToolExecutor::with_defaults()` 仍可用，它取 `ToolParams::default()`）。
    - **本轮查实的一处台账低估**：R3-21 记「编辑器查找替换仅字面匹配」，实际 `xui::FindState` 在 `xgent_ui` 里**零消费者**——查找替换不是「只支持字面量」，而是产品里根本不可达。下一条变更应按"接 UI + 正则"估工作量，别按"加个开关"估。
+
+### 5.14 文件改动检查点与撤销（R3-11）
+
+agent 写过的文件此前**无法退回**：编辑器内的 `UndoStack` 只管缓冲区键入，`write_file`/`edit_file` 留在目标旁边的 `.xgent-bak` 没有任何读取方。现在由 `xgent_tools::checkpoint::CheckpointStore` 承担：
+
+- **落点**：`<project>/.xgent/checkpoints/`，`turns/<会话号>/<轮号>.json` 是清单（撤销的单位），`blobs/<会话号>/<轮号>-<序号>-<路径哈希>.bin` 是改前内容。`.xgent` 本就被检索层忽略，检查点不会回灌进上下文。
+- **打点时机**：`ToolExecutor::run_tool` 是唯一咽喉——三条执行路径（自动批准 / 本次允许 / 会话允许）都经它，**写前**调 `snapshot_before_write`、写入成功后调 `finalize_after_write` 回填「agent 写进去的那份」哈希。新增写文件工具时必须实现 `Tool::write_targets`，否则它的改动天然不可撤销（read/search/run_command 都返回空，属预期）。
+- **轮次归属**：`run_agent_loop` 外层每进一次调 `begin_turn(session)`，会话号取 `SessionId` 的**数值**（`conv.id.0`）经 `AgentCommand::StartLoop` 传入——不能用 `session:N` 字符串反解，既有 `restore()` 会把它解析成 0。
+- **只撤「真正记到东西的一轮」**：清单在首次记到条目时才创建，纯问答或只读工具轮次不留痕，撤销指针不会停在空轮上（否则命令面板点了没反应）。
+- **不覆盖别人的工作**：撤销前比对当前内容与记录的写入后哈希；对不上（用户改过、被 git checkout 过）就**跳过并报名**，其余文件照常恢复；用户删掉的文件不重建。跳过原因分四类：已被外部修改 / 已被删除 / 改前内容丢失 / 无法确认归属。
+- **降级方向**：快照记不下时**不阻塞写入**（撤销机制不能反过来弄坏主功能），但该轮被记入 uncovered，撤销汇报如实说明「有 N 个文件无检查点」，绝不谎报「没有可撤销的改动」。
+- **保留**：每会话 20 轮，超出在**新清单第一次落盘后**淘汰最旧（挂在 begin_turn 上会差一轮——刚要写的那轮不该算进窗口）。blob 名必须带条目序号，否则同轮同文件两次写入互相覆盖，撤销只能退到倒数第二个状态。
+- **入口**：命令面板 `agent.undo-changes`（`try_register`，非 `plugin.` 前缀）→ `undo::request_undo` 只在 `Conversation.status == Idle` 时经 `AgentBridge` 自带的 tokio runtime 执行（**不要**改用 `EditorIoRuntime.handle`：它在 `xgent_app` 里从未注入，依赖它撤销会永远报「不可用」）；汇总走 toast，有跳过/未覆盖/写盘失败时再落一条常驻提示（toast 只活 2.2s）。撤销**只改磁盘**，打开中的 buffer 沿用既有 fs-watch：干净重载、脏的进冲突对话框，不再开第二条重载通路。
+- **边界（必须如实告诉用户）**：`run_command` 的磁盘副作用（`sed -i`、`git apply`、`cargo fmt`）与插件 `host.write_file` 的写入**不在覆盖范围内**；不做 redo，不给 agent 自助撤销的工具（那会覆盖用户同期编辑）。
+
+`.xgent-bak` 的产生已随本机制移除（`atomic::backup_existing` 删除）：单槽位会被下次写入覆盖、无人读取、还污染用户项目的 `git status`。崩溃安全性反而更好——改前内容先于目标写入落盘。用户项目里历史遗留的 `*.xgent-bak` 不做自动清理（删用户的文件不是本机制的决定）。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

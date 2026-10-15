@@ -8,6 +8,7 @@
 
 pub mod atomic;
 pub mod builtins;
+pub mod checkpoint;
 pub mod confirm;
 pub mod editor_tool;
 pub mod executor;
@@ -20,6 +21,9 @@ pub mod tool;
 pub(crate) mod glob;
 
 pub use builtins::{EditFile, ReadFile, RunCommand, SearchFiles, WriteFile};
+pub use checkpoint::{
+    CheckpointEntry, CheckpointStore, SkipReason, TurnKey, TurnManifest, UndoReport, fnv1a64,
+};
 pub use confirm::{ConfirmDecision, ConfirmRequest};
 pub use editor_tool::{EditorCommandRequest, EditorCommandSink, EditorTool};
 pub use executor::{ConfirmCallback, ToolExecutor, ToolExecutorResource};

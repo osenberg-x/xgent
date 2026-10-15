@@ -39,6 +39,17 @@ impl Tool for WriteFile {
         ToolTier::Write
     }
 
+    /// 写入路径同 `execute`：`resolve_in_project` 解析后的绝对路径。
+    fn write_targets(&self, input: &Value, ctx: &ToolCtx) -> Vec<std::path::PathBuf> {
+        match input["path"].as_str() {
+            Some(p) => resolve_in_project(&ctx.project_root, p)
+                .ok()
+                .into_iter()
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     fn concurrency(&self) -> Concurrency {
         Concurrency::Exclusive
     }
@@ -116,18 +127,8 @@ impl Tool for WriteFile {
                 side_effect: None,
             });
         }
-        // 备份原文件（若存在），供回滚路径使用
-        match crate::atomic::backup_existing(&full).await {
-            Ok(_) => {}
-            Err(e) => {
-                return Ok(ToolResult {
-                    output: format!("备份原文件失败 {}: {e}", full.display()),
-                    is_error: true,
-                    denied: false,
-                    side_effect: None,
-                });
-            }
-        }
+        // 改前状态由执行器在调用本工具前记入检查点（crate::checkpoint），
+        // 不再往目标旁边写 `.xgent-bak`：那份备份无人读取，还会污染用户工作区。
         // 原子写：先写同目录临时文件再 rename。直接覆盖在进程崩溃/磁盘满时
         // 会把目标文件截断损坏且原内容不可恢复；同目录 rename 原子。
         match crate::atomic::atomic_write(&full, content).await {
