@@ -12,7 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::confirm::{ConfirmDecision, ConfirmRequest};
 use crate::security::resolve_policy;
-use crate::tool::{SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult, ToolUpdateCallback};
+use crate::tool::{
+    Concurrency, SecurityPolicy, Tool, ToolCtx, ToolError, ToolResult, ToolTier, ToolUpdateCallback,
+};
 
 /// 确认回调 trait：传入确认请求，返回一个可 await 的决策接收端。
 ///
@@ -139,6 +141,51 @@ impl ToolExecutor {
     /// 列出所有已注册工具的 schema（供 provider 的 tools 参数）。
     pub fn schemas(&self) -> Vec<xgent_core::chat::ToolSchema> {
         self.tools.read().values().map(|t| t.schema()).collect()
+    }
+
+    /// 该调用能否与相邻调用**同时**执行（R3-15 的调度判据）。
+    ///
+    /// 三个互相独立的信号全过才算可以，缺一个就串行：
+    /// 1. **不需要用户确认**——`Approved`，或 `NeedsConfirmation` 但该工具已在本会话
+    ///    AllowAll 集合里。确认通道是单槽（`SharedConfirm` 持一个
+    ///    `Mutex<Option<Sender>>`），两个并发请求会互相覆盖 sender，被覆盖那次的
+    ///    等待只能看到 channel closed，用户决策就此丢失。
+    /// 2. 工具自报 [`Concurrency::Shared`]。
+    /// 3. 信任层**恰好**是 [`ToolTier::Read`]。这里不收 `UiOnly`，两个理由都是硬的：
+    ///    - [`crate::security::resolve_policy`] 对 `UiOnly` **无条件放行**（不经确认），
+    ///      所以若算上它，已发货的 `editor.*` 会在默认配置下就成组并发——"默认配置等价于
+    ///      串行"这条不变量当场不成立；
+    ///    - `open_file → goto` 这类编辑器命令**有顺序语义**，把它们并发等于把正确性
+    ///      押在"该工具恰好在 emit 前不 await"这种隐性质上。顺序性要由判据保证。
+    ///    - 第 3 条也不是第 2 条的重复：`Tool::concurrency()` 的 trait 默认值就是 `Shared`，
+    ///      只信第 2 条等于让忘了声明 `Exclusive` 的写工具自动获得并发。
+    ///
+    /// 判定只是**建议**：`execute` 内部仍自行解析策略，真正是否弹窗由它决定。
+    /// 两次读取非原子的唯一分歧方向是「用户在批次运行中点了 AllowAll」，后果是多问
+    /// 一次确认——绝不会少问一次，也绝不会丢决策。
+    pub async fn parallel_safe(
+        &self,
+        tool_id: &str,
+        input: &serde_json::Value,
+        ctx: &ToolCtx,
+    ) -> bool {
+        // 取工具句柄后立即放掉 tools 的读锁：下面要 await allowed_all 的异步锁
+        let Some(tool) = self.tools.read().get(tool_id).cloned() else {
+            return false;
+        };
+        if tool.concurrency() != Concurrency::Shared {
+            return false;
+        }
+        let tier = tool.tier();
+        if tier != ToolTier::Read {
+            return false;
+        }
+        match resolve_policy(tool_id, tier, input, tool.as_ref(), &ctx.tool_policy) {
+            SecurityPolicy::Approved => true,
+            SecurityPolicy::NeedsConfirmation => self.allowed_all.lock().await.contains(tool_id),
+            // 被策略拒绝的调用交给 execute 返回拒绝结果，不参与并发调度
+            SecurityPolicy::Denied => false,
+        }
     }
 
     /// 执行工具调用。
@@ -578,10 +625,186 @@ mod tests {
         assert!(ids.contains(&"run_command"));
     }
 
+    /// `tier = Write` 却自报 `Shared` 的工具：模拟"忘了声明 Exclusive"的新写工具。
+    ///
+    /// 存在的意义是给 tier 判据提供反证对象——`Tool::concurrency()` 的 trait 默认值
+    /// 就是 `Shared`，若并行资格只看它，这类工具会被放进并发组里同时写文件。
+    struct WriteSharedTool;
+
+    #[async_trait::async_trait]
+    impl Tool for WriteSharedTool {
+        fn id(&self) -> &str {
+            "write_shared"
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: "write_shared".into(),
+                description: "tier Write 但声明 Shared".into(),
+                input_schema: json!({"type":"object"}),
+            }
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::Write
+        }
+        fn concurrency(&self) -> Concurrency {
+            Concurrency::Shared
+        }
+        async fn summarize(&self, _input: &Value) -> String {
+            "write_shared".into()
+        }
+        async fn execute(
+            &self,
+            _input: Value,
+            _ctx: &ToolCtx,
+            _signal: CancellationToken,
+            _on_update: Option<Arc<ToolUpdateCallback>>,
+        ) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                output: "ok".into(),
+                is_error: false,
+                denied: false,
+                side_effect: None,
+            })
+        }
+    }
+
+    /// `tier = UiOnly` 且自报 `Shared` 的工具：形状等同已发货的 `EditorTool`。
+    ///
+    /// 它是"默认配置到底等不等价于串行"的判据所在：`resolve_policy` 对 `UiOnly`
+    /// **不经确认直接放行**，所以只要资格里收了 `UiOnly`，`editor.*` 就会在用户
+    /// 什么都没配置的情况下成组并发——而 `open_file → goto` 是有顺序语义的。
+    struct UiOnlySharedTool;
+
+    #[async_trait::async_trait]
+    impl Tool for UiOnlySharedTool {
+        fn id(&self) -> &str {
+            "ui_only_shared"
+        }
+        fn schema(&self) -> ToolSchema {
+            ToolSchema {
+                name: "ui_only_shared".into(),
+                description: "tier UiOnly 且声明 Shared（策略自动放行）".into(),
+                input_schema: json!({"type":"object"}),
+            }
+        }
+        fn tier(&self) -> ToolTier {
+            ToolTier::UiOnly
+        }
+        fn concurrency(&self) -> Concurrency {
+            Concurrency::Shared
+        }
+        async fn summarize(&self, _input: &Value) -> String {
+            "ui_only_shared".into()
+        }
+        async fn execute(
+            &self,
+            _input: Value,
+            _ctx: &ToolCtx,
+            _signal: CancellationToken,
+            _on_update: Option<Arc<ToolUpdateCallback>>,
+        ) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                output: "ok".into(),
+                is_error: false,
+                denied: false,
+                side_effect: None,
+            })
+        }
+    }
+
+    /// R3-15 的并行资格：三条独立判据（策略 / concurrency / tier）缺一条就不并行。
+    #[tokio::test]
+    async fn parallel_safe_requires_all_three_signals() {
+        use crate::builtins::{ReadFile, WriteFile};
+        let dir = tempfile::tempdir().unwrap();
+        let approved = policy(&["sleep", "read_file", "write_shared", "write_file"], &[]);
+        let exec = ToolExecutor::new(vec![
+            Arc::new(SleepTool),
+            Arc::new(ReadFile),
+            Arc::new(WriteSharedTool),
+            Arc::new(UiOnlySharedTool),
+            Arc::new(WriteFile),
+        ]);
+        let c = ctx(dir.path(), approved.clone());
+        // ① 三条全过：Approved + Shared + Read
+        assert!(
+            exec.parallel_safe("sleep", &json!({}), &c).await,
+            "只读且无需确认的调用应可并行"
+        );
+        // ② 策略没过：默认全部 NeedsConfirmation
+        let c2 = ctx(dir.path(), policy(&[], &[]));
+        assert!(
+            !exec.parallel_safe("sleep", &json!({}), &c2).await,
+            "还要弹窗确认的调用不得并行——确认通道只有一个槽位"
+        );
+        // ③ tier 没过：自报 Shared 的写工具（trait 默认就是 Shared，不能只信它）
+        assert!(
+            !exec.parallel_safe("write_shared", &json!({}), &c).await,
+            "Write 层的工具即使自报 Shared 也必须独占"
+        );
+        // ④ concurrency 没过：老实声明 Exclusive 的写工具
+        assert!(
+            !exec
+                .parallel_safe("write_file", &json!({"path":"a.txt","content":"x"}), &c)
+                .await,
+            "声明 Exclusive 的写工具不得进并发组"
+        );
+        // ⑤ UiOnly 一律不并行——即便策略对它**自动放行**（不需要批准、不需要确认），
+        //    资格仍要求 tier == Read。这一条钉住"默认配置等价于串行"这条不变量：
+        //    已发货的 editor.* 属 UiOnly，若不排除就会在用户没配任何东西时成组并发
+        let c4 = ctx(dir.path(), policy(&[], &[]));
+        assert!(
+            !exec.parallel_safe("ui_only_shared", &json!({}), &c4).await,
+            "UiOnly 虽被策略自动放行，仍不得进并发组（编辑器命令有顺序语义）"
+        );
+        // ⑥ 未注册的 id：交给 execute 返回"未知工具"，不参与调度
+        assert!(!exec.parallel_safe("nope", &json!({}), &c).await);
+        // ⑦ 被策略拒绝的调用不并行（拒绝也在 execute 里统一处理）
+        let c3 = ctx(dir.path(), policy(&["sleep"], &["sleep"]));
+        assert!(!exec.parallel_safe("sleep", &json!({}), &c3).await);
+    }
+
+    /// 用户点过 AllowAll 之后，同一调用才获得并行资格：判据读的是活的会话状态。
+    #[tokio::test]
+    async fn parallel_safe_flips_after_allow_all() {
+        struct AllowAllOnce;
+        #[async_trait::async_trait]
+        impl ConfirmCallback for AllowAllOnce {
+            async fn confirm(&self, req: ConfirmRequest) -> oneshot::Receiver<ConfirmDecision> {
+                let (tx, rx) = oneshot::channel();
+                let _ = tx.send(ConfirmDecision::AllowAll);
+                let _ = req;
+                rx
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let c = ctx(dir.path(), policy(&[], &[]));
+        let exec = ToolExecutor::new(vec![Arc::new(SleepTool)]);
+        assert!(
+            !exec.parallel_safe("sleep", &json!({}), &c).await,
+            "尚未确认过的只读调用应保持串行"
+        );
+        // 走一次真实执行路径，让 AllowAll 决策写进会话集合
+        let r = exec
+            .execute(
+                "sleep",
+                json!({}),
+                &c,
+                CancellationToken::new(),
+                &AllowAllOnce,
+                None,
+            )
+            .await;
+        assert!(matches!(r, Ok(ok) if !ok.is_error));
+        assert!(
+            exec.parallel_safe("sleep", &json!({}), &c).await,
+            "AllowAll 之后无需再确认，应可并行"
+        );
+    }
+
     /// 可中断的 mock 工具：execute 内 tokio::select! 监听 signal.cancelled()，
     /// 未取消则等待 1s 完成。用于测试 CancellationToken 中断路径。
     struct SleepTool;
-
     #[async_trait::async_trait]
     impl Tool for SleepTool {
         fn id(&self) -> &str {

@@ -409,6 +409,12 @@ pub struct AgentBridgeConfig {
     /// 由 `xgent_app` 与 `ToolExecutor` 共享同一 `Arc`：执行器记快照与回填写入后
     /// 校验值，本层只负责在每轮开始时标定轮号（`begin_turn`）。
     pub checkpoints: Option<Arc<xgent_tools::CheckpointStore>>,
+    /// 同一轮 tool_calls 里最多同时执行的工具调用数
+    /// （项目配置 `[agent] max_parallel_tools`，缺省 4）。
+    ///
+    /// 只有 `ToolExecutor::parallel_safe` 判为可并行的调用才共享这个额度；
+    /// 写、执行与待确认的调用是屏障，永远独占执行窗口（R3-15）。
+    pub max_parallel_tools: usize,
 }
 
 /// agent loop 的默认有界值。
@@ -586,6 +592,7 @@ async fn agent_loop_task(
                         &loop_bounds,
                         cfg.checkpoints.as_ref(),
                         session,
+                        cfg.max_parallel_tools,
                     )
                     .await;
                     // 对话结束：清除 current_cancel，ECS Abort 不再误触发
@@ -636,6 +643,60 @@ struct StreamOutcome {
     partial_text: Option<String>,
 }
 
+/// 执行**一个**工具调用，只返回结果，不发任何事件。
+///
+/// 事件的报告顺序由调用方（`run_agent_loop` 的分组调度）按模型给出的原始下标
+/// 统一决定：并发时"谁先跑完"不等于"谁先该被报告"，若在执行体里发事件，
+/// 顺序就交给了完成序，UI 与 `req.messages` 的配对顺序都会跟着变。
+///
+/// 流式更新回调在此构造：长时工具（`run_command` 的 stdout 增量、插件的
+/// push-update）经它把中间结果回灌 UI——那是进度，不是结果，先到先发无妨。
+///
+/// 策略解析、确认弹窗与检查点打点都只在 `ToolExecutor::execute` 里发生，
+/// 本函数不复制任何一条判据（并行是调度层，不是第二套执行路径）。
+async fn execute_tool_call(
+    executor: &Arc<ToolExecutor>,
+    ctx: &ToolCtx,
+    shared_confirm: &SharedConfirm,
+    event_tx: &mpsc::Sender<AgentEvent>,
+    cancel_token: &tokio_util::sync::CancellationToken,
+    call: (String, String, serde_json::Value),
+) -> Result<xgent_tools::ToolResult, xgent_tools::ToolError> {
+    let (call_id, tool_id, input) = call;
+    let confirm = BridgeConfirm {
+        event_tx: event_tx.clone(),
+        shared: shared_confirm.clone(),
+    };
+    let update_tx = event_tx.clone();
+    let update_call_id = call_id.clone();
+    let update_tool_id = tool_id.clone();
+    let update_cb: Arc<xgent_tools::ToolUpdateCallback> = Arc::new(move |partial| {
+        let tx = update_tx.clone();
+        let cid = update_call_id.clone();
+        let tid = update_tool_id.clone();
+        let out = partial.output.clone();
+        tokio::spawn(async move {
+            let _ = tx
+                .send(AgentEvent::ToolProgress {
+                    call_id: cid,
+                    tool_id: tid,
+                    output: out,
+                })
+                .await;
+        });
+    });
+    executor
+        .execute(
+            &tool_id,
+            input,
+            ctx,
+            cancel_token.clone(),
+            &confirm,
+            Some(update_cb),
+        )
+        .await
+}
+
 /// 驱动 agent 对话循环（双层）。
 ///
 /// 外层：Follow-up 消息驱动（agent 准备停止时注入新消息继续）。
@@ -661,6 +722,7 @@ async fn run_agent_loop(
     loop_bounds: &Arc<parking_lot::RwLock<LoopBounds>>,
     checkpoints: Option<&Arc<xgent_tools::CheckpointStore>>,
     session: u64,
+    max_parallel_tools: usize,
 ) -> Option<(ChatRequest, Vec<xgent_core::EditorQuery>, u64)> {
     use xgent_core::chat::{ContentBlock, Role};
     // 对话级快照：本对话期间配置固定，运行时刷新下次对话生效
@@ -899,128 +961,136 @@ async fn run_agent_loop(
                         .await;
                 }
 
-                // 逐个执行工具，发 ToolResult 事件
-                for (call_id, name, args) in &outcome.tool_calls {
-                    let cb = BridgeConfirm {
-                        event_tx: event_tx.clone(),
-                        shared: shared_confirm.clone(),
-                    };
-                    // 流式更新回调：长时工具（run_command 的 stdout 增量、
-                    // 插件工具的 push-update）经此把中间结果回灌 UI。
-                    let update_tx = event_tx.clone();
-                    let update_call_id = call_id.clone();
-                    let update_tool_id = name.clone();
-                    let update_cb: Arc<xgent_tools::ToolUpdateCallback> =
-                        Arc::new(move |partial| {
-                            let tx = update_tx.clone();
-                            let cid = update_call_id.clone();
-                            let tid = update_tool_id.clone();
-                            let out = partial.output.clone();
-                            tokio::spawn(async move {
-                                let _ = tx
-                                    .send(AgentEvent::ToolProgress {
-                                        call_id: cid,
-                                        tool_id: tid,
-                                        output: out,
-                                    })
-                                    .await;
-                            });
-                        });
-                    let result = executor
-                        .execute(
-                            name,
-                            args.clone(),
+                // 分组执行：连续「可与邻居同时执行」的调用编成一组并发跑，其余
+                // （写、执行、待确认、未知工具）作屏障独占执行窗口（R3-15）。
+                //
+                // 结果**始终按模型给出的原始下标**报告：先跑完的不抢先。事件顺序与
+                // req.messages 的配对顺序因此和本改动前的串行完全一致，模型与 UI 都
+                // 看不出这里并发过——只体现在耗时上。
+                let cap = max_parallel_tools.max(1);
+                let total = outcome.tool_calls.len();
+                let mut idx = 0usize;
+                while idx < total && !aborted {
+                    // 从 idx 起取连续可并行的区间，长度钳到 cap。区间为空说明 idx 处
+                    // 不可并行——它单独成组，且下一组必须等它结束（屏障）。
+                    let mut end = idx;
+                    while end < total
+                        && end - idx < cap
+                        && executor
+                            .parallel_safe(
+                                &outcome.tool_calls[end].1,
+                                &outcome.tool_calls[end].2,
+                                ctx,
+                            )
+                            .await
+                    {
+                        end += 1;
+                    }
+                    if end == idx {
+                        end = idx + 1;
+                    }
+                    let group = &outcome.tool_calls[idx..end];
+                    // join_all 在当前任务里轮询这些 future，**不 spawn**：loop 被取消
+                    // 或提前返回时，不会有工具调用留在后台继续写文件
+                    let results = futures::future::join_all(group.iter().map(|call| {
+                        execute_tool_call(
+                            executor,
                             ctx,
-                            cancel_token.clone(),
-                            &cb,
-                            Some(update_cb),
+                            shared_confirm,
+                            event_tx,
+                            cancel_token,
+                            call.clone(),
                         )
-                        .await;
-                    match result {
-                        Ok(r) => {
-                            let _ = event_tx
-                                .send(AgentEvent::ToolResult {
-                                    call_id: call_id.clone(),
-                                    tool_id: name.clone(),
-                                    output: r.output.clone(),
-                                    is_error: r.is_error,
-                                    denied: r.denied,
-                                    side_effect: r.side_effect,
-                                })
-                                .await;
-                            executed.push((
-                                call_id.clone(),
-                                name.clone(),
-                                args.clone(),
-                                r.output,
-                                r.is_error,
-                            ));
-                        }
-                        Err(xgent_tools::ToolError::Aborted) => {
-                            // 中断：当前 tool 透传为 ToolResult 逻辑失败，
-                            // 已发 ToolCall 但未执行的 tool_calls 补占位 ToolResult，
-                            // 保证所有 tool_call 都有配对的 tool result（对齐 Length 路径）。
-                            let _ = event_tx
-                                .send(AgentEvent::ToolResult {
-                                    call_id: call_id.clone(),
-                                    tool_id: name.clone(),
-                                    output: "工具执行被中断".into(),
-                                    is_error: true,
-                                    denied: false,
-                                    side_effect: None,
-                                })
-                                .await;
-                            executed.push((
-                                call_id.clone(),
-                                name.clone(),
-                                args.clone(),
-                                "工具执行被中断".into(),
-                                true,
-                            ));
-                            // 剩余已发 ToolCall 但未执行的补占位 ToolResult
-                            let remaining = &outcome.tool_calls[executed.len()..];
-                            for (cid, nm, _) in remaining {
+                    }))
+                    .await;
+                    for ((call_id, name, args), result) in group.iter().zip(results) {
+                        match result {
+                            Ok(r) => {
                                 let _ = event_tx
                                     .send(AgentEvent::ToolResult {
-                                        call_id: cid.clone(),
-                                        tool_id: nm.clone(),
-                                        output: "工具执行因中断而未执行".into(),
+                                        call_id: call_id.clone(),
+                                        tool_id: name.clone(),
+                                        output: r.output.clone(),
+                                        is_error: r.is_error,
+                                        denied: r.denied,
+                                        side_effect: r.side_effect,
+                                    })
+                                    .await;
+                                executed.push((
+                                    call_id.clone(),
+                                    name.clone(),
+                                    args.clone(),
+                                    r.output,
+                                    r.is_error,
+                                ));
+                            }
+                            Err(xgent_tools::ToolError::Aborted) => {
+                                // 同组其余成员已经真实执行完，各有真实结果，照常按序报告；
+                                // 还没启动的后续分组在循环外补占位结果
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolResult {
+                                        call_id: call_id.clone(),
+                                        tool_id: name.clone(),
+                                        output: "工具执行被中断".into(),
                                         is_error: true,
                                         denied: false,
                                         side_effect: None,
                                     })
                                     .await;
                                 executed.push((
-                                    cid.clone(),
-                                    nm.clone(),
-                                    serde_json::Value::Null,
-                                    "工具执行因中断而未执行".into(),
+                                    call_id.clone(),
+                                    name.clone(),
+                                    args.clone(),
+                                    "工具执行被中断".into(),
+                                    true,
+                                ));
+                                aborted = true;
+                            }
+                            Err(e) => {
+                                let output = format!("工具异常: {e}");
+                                let _ = event_tx
+                                    .send(AgentEvent::ToolResult {
+                                        call_id: call_id.clone(),
+                                        tool_id: name.clone(),
+                                        output: output.clone(),
+                                        is_error: true,
+                                        denied: false,
+                                        side_effect: None,
+                                    })
+                                    .await;
+                                executed.push((
+                                    call_id.clone(),
+                                    name.clone(),
+                                    args.clone(),
+                                    output,
                                     true,
                                 ));
                             }
-                            aborted = true;
-                            break;
                         }
-                        Err(e) => {
-                            let output = format!("工具异常: {e}");
-                            let _ = event_tx
-                                .send(AgentEvent::ToolResult {
-                                    call_id: call_id.clone(),
-                                    tool_id: name.clone(),
-                                    output: output.clone(),
-                                    is_error: true,
-                                    denied: false,
-                                    side_effect: None,
-                                })
-                                .await;
-                            executed.push((
-                                call_id.clone(),
-                                name.clone(),
-                                args.clone(),
-                                output,
-                                true,
-                            ));
-                        }
+                    }
+                    idx = end;
+                }
+                // 因中断而根本没启动的分组：补占位 ToolResult，保证每个 tool_call
+                // 都有配对的 tool result（对齐 Length 截断路径）
+                if aborted {
+                    for (cid, nm, _) in &outcome.tool_calls[idx..] {
+                        let _ = event_tx
+                            .send(AgentEvent::ToolResult {
+                                call_id: cid.clone(),
+                                tool_id: nm.clone(),
+                                output: "工具执行因中断而未执行".into(),
+                                is_error: true,
+                                denied: false,
+                                side_effect: None,
+                            })
+                            .await;
+                        executed.push((
+                            cid.clone(),
+                            nm.clone(),
+                            serde_json::Value::Null,
+                            "工具执行因中断而未执行".into(),
+                            true,
+                        ));
                     }
                 }
 

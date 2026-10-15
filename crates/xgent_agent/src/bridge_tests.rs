@@ -150,11 +150,14 @@ fn test_app_with_retry_provider(
         Arc::new(MockContext),
         xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
         xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
     )
 }
 
-/// 同 [`test_app_with_retry_provider`]，但可指定检索 provider 与 `[agent]` 两项参数
-/// （A7 需要观察配置是否真的进入运行时）。
+/// 同 [`test_app_with_retry_provider`]，但可指定检索 provider 与 `[agent]` 的三项限额
+/// （检索预算、每帧事件上限、同轮并发工具上限）——这些用例的判据就是"配置值是否
+/// 真的进入运行时"，所以必须逐参数传进来，不能收进一个结构体再默认。
+#[allow(clippy::too_many_arguments)]
 fn test_app_with_context(
     provider: Arc<dyn crate::bridge::ProviderClient>,
     executor: Arc<ToolExecutor>,
@@ -163,6 +166,7 @@ fn test_app_with_context(
     context: Arc<dyn ContextProvider>,
     retrieval_max_tokens: u32,
     max_events_per_frame: u32,
+    max_parallel_tools: usize,
 ) -> (App, std::path::PathBuf) {
     let mut app = App::new();
     // 用独立临时目录作为项目根。ManuallyDrop 阻止 TempDir 析构删目录
@@ -198,6 +202,7 @@ fn test_app_with_context(
         retrieval_max_tokens,
         max_events_per_frame,
         checkpoints: None,
+        max_parallel_tools,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -801,6 +806,7 @@ fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) ->
         retrieval_max_tokens: xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
         max_events_per_frame: xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
         checkpoints: None,
+        max_parallel_tools: xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -2618,6 +2624,7 @@ fn retrieval_budget_from_config_reaches_context_query() {
         recorder.clone(),
         2_000,
         64,
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
     );
     app.world_mut().write_message(UserInputMessage {
         text: "hi".into(),
@@ -2653,6 +2660,7 @@ fn frame_event_cap_defers_events_without_dropping_them() {
         Arc::new(MockContext),
         8_000,
         3,
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
     );
     // 配置值应原样带到 ECS 侧 drain
     assert_eq!(
@@ -2697,5 +2705,581 @@ fn drain_bound_is_read_from_bridge_not_a_literal() {
     assert!(
         !src.contains("while processed < 64"),
         "字面量 64 的分闸应已被配置取代"
+    );
+}
+
+// ── R3-15：tool_calls 的分组并发执行 ──────────────────────────────
+
+/// 并发探针共享状态：在跑数、历史最大在跑数、以及"至少想看到几个同时在跑"。
+#[derive(Clone, Default)]
+struct ProbeState {
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
+    max_in_flight: Arc<std::sync::atomic::AtomicUsize>,
+    /// 期望的最小并发数；`1` 表示不等（只记录），`>1` 表示必须等到或有界超时
+    target: usize,
+}
+
+impl ProbeState {
+    fn new(target: usize) -> Self {
+        Self {
+            in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            max_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            target,
+        }
+    }
+
+    fn max(&self) -> usize {
+        self.max_in_flight.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// 并发探针工具：进入即在跑数 +1 并记历史最大值；等到"至少有 `target` 个同时在跑"
+/// 或 400ms 有界超时为止；再停留 `holds_ms`（期间监听 cancel）后退出。
+///
+/// **为什么不用总耗时当判据**：耗时断言在负载下 flake，而且"串行但很快"与
+/// "并行但很慢"都能骗过它。在跑数是对并发本身的直接观测；而那个有界等待让
+/// **串行调度必然超时**，于是 max 停在 1——所以这条断言对"调度器退化回串行"敏感，
+/// 正是本能力要防的回归。
+struct ProbeTool {
+    id: &'static str,
+    tier: ToolTier,
+    concurrency: Concurrency,
+    holds_ms: u64,
+    state: ProbeState,
+}
+
+#[async_trait]
+impl Tool for ProbeTool {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.id.into(),
+            description: "并发探针".into(),
+            input_schema: json!({"type":"object"}),
+        }
+    }
+    fn tier(&self) -> ToolTier {
+        self.tier
+    }
+    fn concurrency(&self) -> Concurrency {
+        self.concurrency
+    }
+    async fn summarize(&self, _input: &Value) -> String {
+        self.id.into()
+    }
+    async fn execute(
+        &self,
+        input: Value,
+        _ctx: &ToolCtx,
+        signal: tokio_util::sync::CancellationToken,
+        _on_update: Option<Arc<ToolUpdateCallback>>,
+    ) -> Result<ToolResult, ToolError> {
+        use std::sync::atomic::Ordering;
+        use std::time::{Duration, Instant};
+        let leave = || {
+            self.state.in_flight.fetch_sub(1, Ordering::SeqCst);
+        };
+        let cur = self.state.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.state.max_in_flight.fetch_max(cur, Ordering::SeqCst);
+        // 等到并发到位（或有界超时）：串行调度走的是超时这条路，max 因此停在 1
+        let deadline = Instant::now() + Duration::from_millis(400);
+        while self.state.in_flight.load(Ordering::SeqCst) < self.state.target
+            && Instant::now() < deadline
+            && !signal.is_cancelled()
+        {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        // 停留窗口让同组成员真正重叠；期间 cancel 到达即按中断返回（走 Aborted 路径）
+        tokio::select! {
+            biased;
+            _ = signal.cancelled() => {
+                leave();
+                return Err(ToolError::Aborted);
+            }
+            _ = tokio::time::sleep(Duration::from_millis(self.holds_ms)) => {}
+        }
+        leave();
+        Ok(ToolResult {
+            output: format!("{}:{}", self.id, input["i"]),
+            is_error: false,
+            denied: false,
+            side_effect: None,
+        })
+    }
+}
+
+/// 采集 ToolResult 的到达顺序（`tool_call_id` + 输出 + 是否失败）。
+#[derive(Default, Resource)]
+struct Probed {
+    results: Vec<(String, String, bool)>,
+    confirm_requests: usize,
+}
+
+fn collect_probed(
+    mut tr: MessageReader<ToolResultMessage>,
+    mut cf: MessageReader<ConfirmRequestMessage>,
+    mut out: ResMut<Probed>,
+) {
+    for m in tr.read() {
+        out.results
+            .push((m.tool_call_id.clone(), m.output.clone(), m.is_error));
+    }
+    out.confirm_requests += cf.read().count();
+}
+
+/// 一轮返回这些 tool_calls（id 依次 `c0, c1, …`），第二轮由 MockProvider 回 Done{Stop}。
+fn tool_call_round(calls: &[(&str, u64)]) -> Vec<ChatEvent> {
+    let mut evs = Vec::new();
+    for (k, (name, i)) in calls.iter().enumerate() {
+        evs.push(ChatEvent::ToolCallStart {
+            index: k as u32,
+            id: format!("c{k}"),
+            name: (*name).into(),
+        });
+        evs.push(ChatEvent::ToolCallEnd {
+            index: k as u32,
+            args: json!({ "i": i }),
+        });
+    }
+    evs.push(ChatEvent::Done {
+        reason: xgent_core::chat::StopReason::ToolUse,
+        usage: TokenUsage::default(),
+    });
+    evs
+}
+
+/// 用给定探针工具集、approved 列表与并发上限装配一个 App。
+fn probe_app(
+    calls: &[(&str, u64)],
+    tools: Vec<Arc<dyn Tool>>,
+    approved: &[&str],
+    cap: usize,
+) -> App {
+    let executor = Arc::new(ToolExecutor::new(tools));
+    let policy = ToolPolicyConfig {
+        approved: approved.iter().map(|s| s.to_string()).collect(),
+        denied: vec![],
+    };
+    let (mut app, _root) = test_app_with_context(
+        Arc::new(MockProvider::new(tool_call_round(calls))),
+        executor,
+        policy,
+        crate::bridge::RetryConfig::default(),
+        Arc::new(MockContext),
+        xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
+        xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
+        cap,
+    );
+    app.insert_resource(Probed::default())
+        .add_systems(Update, collect_probed);
+    app.world_mut().write_message(UserInputMessage {
+        text: "run probes".into(),
+        editor_queries: Vec::new(),
+    });
+    app
+}
+
+/// 驱动 App 直到 `want` 条结果到位（或帧数用尽）。每帧之间让出一点时间，
+/// 桥接 runtime 上的工具才有机会推进——探针靠 sleep 重叠，纯空转 update 也能推进，
+/// 但留出时间片能让"该重叠"的情形稳定成立。
+fn drive(app: &mut App, want: usize) {
+    for _ in 0..300 {
+        app.update();
+        if app.world().resource::<Probed>().results.len() >= want {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+}
+
+fn probe(
+    id: &'static str,
+    tier: ToolTier,
+    concurrency: Concurrency,
+    holds_ms: u64,
+    state: &ProbeState,
+) -> Arc<dyn Tool> {
+    Arc::new(ProbeTool {
+        id,
+        tier,
+        concurrency,
+        holds_ms,
+        state: state.clone(),
+    })
+}
+
+/// A1：两个已批准的只读调用**确实同时在跑**。串行调度下二者都等到有界超时，
+/// 观测到的最大并发停在 1，本断言即失败。
+#[test]
+fn approved_read_tools_actually_overlap() {
+    let st = ProbeState::new(2);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 30, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 30, &st),
+    ];
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1)],
+        tools,
+        &["pa", "pb"],
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    drive(&mut app, 2);
+    let probed = app.world().resource::<Probed>();
+    assert_eq!(probed.results.len(), 2, "两个调用都该有结果");
+    assert!(
+        probed.results.iter().all(|(_, _, err)| !err),
+        "探针不该失败：{:?}",
+        probed.results
+    );
+    assert_eq!(
+        st.max(),
+        2,
+        "已批准的连续只读调用应并发执行（串行时这里停在 1）"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status,
+        ConversationStatus::Idle
+    );
+}
+
+/// A2：夹在中间的 `Exclusive` 调用是屏障——三者全都产出、顺序不变，
+/// 而任意时刻最多只有一个工具在跑。
+///
+/// 中间那个探针刻意用 `tier = Read` + `concurrency = Exclusive`（像"读一个有状态的
+/// 会话"那种必须独占的只读工具）：这样这条用例隔离的是 **concurrency 信号本身**。
+/// 若给它 `Exec` 层，`parallel_safe` 的 tier 判据会替它挡下，删掉 concurrency 判据
+/// 也照样全绿——两条判据各有自己的用例才谈得上"三条独立信号"。
+#[test]
+fn exclusive_call_is_a_barrier_for_its_neighbours() {
+    let st = ProbeState::new(1);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 20, &st),
+        probe("px", ToolTier::Read, Concurrency::Exclusive, 20, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 20, &st),
+    ];
+    let mut app = probe_app(
+        &[("pa", 0), ("px", 1), ("pb", 2)],
+        tools,
+        &["pa", "px", "pb"],
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    drive(&mut app, 3);
+    let probed = app.world().resource::<Probed>();
+    assert_eq!(
+        probed
+            .results
+            .iter()
+            .map(|(_, out, _)| out.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pa:0", "px:1", "pb:2"],
+        "屏障前后都要按模型给的顺序报告"
+    );
+    assert_eq!(st.max(), 1, "Exclusive 在跑时不得有第二个工具同时在跑");
+}
+
+/// A4：并发执行时结果仍按**模型给出的顺序**报告——这里完成顺序刻意与调用顺序
+/// 不同（c1 最快、c0 最慢），同时用 target=3 证明三者确实重叠过。
+#[test]
+fn results_keep_model_order_even_when_completion_differs() {
+    let st = ProbeState::new(3);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 120, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 10, &st),
+        probe("pc", ToolTier::Read, Concurrency::Shared, 60, &st),
+    ];
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1), ("pc", 2)],
+        tools,
+        &["pa", "pb", "pc"],
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    drive(&mut app, 3);
+    let probed = app.world().resource::<Probed>();
+    assert_eq!(st.max(), 3, "三个只读调用应同时在跑");
+    assert_eq!(
+        probed
+            .results
+            .iter()
+            .map(|(cid, _, _)| cid.as_str())
+            .collect::<Vec<_>>(),
+        vec!["c0", "c1", "c2"],
+        "事件顺序必须是调用顺序，而不是完成顺序"
+    );
+    assert_eq!(
+        probed
+            .results
+            .iter()
+            .map(|(_, out, _)| out.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pa:0", "pb:1", "pc:2"],
+        "每条结果要与自己的 call_id 配对"
+    );
+}
+
+/// A5：上限=1 时**任何**两个只读调用都不重叠（值确实进了运行时，不是常量 4）。
+#[test]
+fn cap_one_serialises_even_approved_read_tools() {
+    let st = ProbeState::new(2);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 10, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 10, &st),
+        probe("pc", ToolTier::Read, Concurrency::Shared, 10, &st),
+    ];
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1), ("pc", 2)],
+        tools,
+        &["pa", "pb", "pc"],
+        1,
+    );
+    drive(&mut app, 3);
+    assert_eq!(
+        app.world().resource::<Probed>().results.len(),
+        3,
+        "钳到 1 只是不许重叠，不能少跑任何一个调用"
+    );
+    assert_eq!(st.max(), 1, "[agent] max_parallel_tools = 1 应完全串行");
+}
+
+/// A5：上限=2 时最多 2 个在跑，4 个调用全部产出。
+#[test]
+fn cap_two_bounds_the_group() {
+    let st = ProbeState::new(3);
+    let tools = (0..4u64)
+        .map(|k| {
+            probe(
+                match k {
+                    0 => "pa",
+                    1 => "pb",
+                    2 => "pc",
+                    _ => "pd",
+                },
+                ToolTier::Read,
+                Concurrency::Shared,
+                10,
+                &st,
+            )
+        })
+        .collect();
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1), ("pc", 2), ("pd", 3)],
+        tools,
+        &["pa", "pb", "pc", "pd"],
+        2,
+    );
+    drive(&mut app, 4);
+    assert_eq!(app.world().resource::<Probed>().results.len(), 4);
+    assert_eq!(
+        st.max(),
+        2,
+        "并发数应被 max_parallel_tools 钳住（不得出现 3）"
+    );
+}
+
+/// A3 + A6：默认策略（全部 NeedsConfirmation）下**一次只问一个确认**，
+/// 因而既没有并发、也没有确认通道被覆盖的痕迹。
+///
+/// 这条同时是"单槽 SharedConfirm"的守卫：若把待确认的调用放进了并发组，
+/// 第二个请求会覆盖第一个的 sender，被覆盖那次只能报「确认被取消」——
+/// 下面的 `!取消` 与 `confirm_requests` 断言都会炸。
+#[test]
+fn confirmations_are_asked_one_at_a_time_and_never_overlap() {
+    let st = ProbeState::new(2);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 10, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 10, &st),
+    ];
+    // approved 为空 → 两个调用都要弹窗；cap 给到 4 也不会让调度器并行它们
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1)],
+        tools,
+        &[],
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    let mut answered = 0usize;
+    let mut max_unanswered = 0usize;
+    for _ in 0..300 {
+        app.update();
+        {
+            let probed = app.world().resource::<Probed>();
+            max_unanswered = max_unanswered.max(probed.confirm_requests - answered);
+        }
+        if app.world().resource::<Probed>().confirm_requests > answered {
+            answered += 1;
+            app.world_mut().write_message(ConfirmDecisionMessage {
+                decision: xgent_tools::ConfirmDecision::Allow,
+            });
+        }
+        if app.world().resource::<Probed>().results.len() >= 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    let probed = app.world().resource::<Probed>();
+    assert_eq!(probed.confirm_requests, 2, "两个调用各问一次确认");
+    assert_eq!(probed.results.len(), 2, "{:?}", probed.results);
+    assert!(
+        probed.results.iter().all(|(_, _, err)| !err),
+        "确认必须各自落到自己的调用上，不能被覆盖成取消：{:?}",
+        probed.results
+    );
+    assert_eq!(
+        max_unanswered, 1,
+        "确认通道只有一个槽位：同时挂着两个待决请求就会丢用户决策"
+    );
+    assert_eq!(st.max(), 1, "待确认的调用不得进并发组");
+}
+
+/// A7：并发组进行中断止——每个 call_id 仍**恰好**有一个结果（协议配对不破），
+/// 已启动的报中断，没启动的补占位。
+#[test]
+fn abort_during_concurrent_group_pairs_every_call() {
+    let st = ProbeState::new(3);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 600, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 600, &st),
+        probe("pc", ToolTier::Read, Concurrency::Shared, 600, &st),
+    ];
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1), ("pc", 2)],
+        tools,
+        &["pa", "pb", "pc"],
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    // 让三个探针都进入执行（确实在跑），再中止
+    for _ in 0..8 {
+        app.update();
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    assert_eq!(st.max(), 3, "前置条件：三个调用已同时在跑");
+    app.world_mut().write_message(AbortMessage);
+    for _ in 0..200 {
+        app.update();
+        if app.world().resource::<Probed>().results.len() >= 3 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    let probed = app.world().resource::<Probed>();
+    let mut ids: Vec<&str> = probed
+        .results
+        .iter()
+        .map(|(cid, _, _)| cid.as_str())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["c0", "c1", "c2"],
+        "每个 tool_call 都要有配对的 result，不能因为并发而漏发"
+    );
+    assert_eq!(
+        probed.results.iter().filter(|(_, _, err)| *err).count(),
+        3,
+        "三个都是中断态结果：{:?}",
+        probed.results
+    );
+}
+
+/// A7 的另一半：中断发生在**后续分组还没启动**时，那些调用必须补占位结果。
+///
+/// `cap = 1` 让三个调用各自成组；第一个跑完即中止，第二、第三个根本没进 `execute`。
+/// 少了占位补齐，`tool_call` 就变成孤儿，下一次 `StartLoop` 的协议配对会断
+/// （与 max_tokens 截断路径同一条要求）。
+#[test]
+fn abort_before_later_groups_places_placeholders_for_them() {
+    let st = ProbeState::new(1);
+    // 每个调用跑满 350ms：第一条结果被 ECS 收走时，第二个调用正被中断、
+    // 第三个还没启动——这才是「中断落在后续分组之前」要覆盖的情形
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 350, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 350, &st),
+        probe("pc", ToolTier::Read, Concurrency::Shared, 350, &st),
+    ];
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1), ("pc", 2)],
+        tools,
+        &["pa", "pb", "pc"],
+        1,
+    );
+    // 等第一个结果落地（分组已推进到 idx=1），再中止
+    for _ in 0..200 {
+        app.update();
+        if !app.world().resource::<Probed>().results.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    assert_eq!(
+        app.world().resource::<Probed>().results.len(),
+        1,
+        "前置条件：第一个调用已完成"
+    );
+    app.world_mut().write_message(AbortMessage);
+    for _ in 0..200 {
+        app.update();
+        if app.world().resource::<Probed>().results.len() >= 3 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+    let probed = app.world().resource::<Probed>();
+    let mut ids: Vec<&str> = probed
+        .results
+        .iter()
+        .map(|(cid, _, _)| cid.as_str())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["c0", "c1", "c2"],
+        "没启动的两个调用也必须各有一条配对结果（占位）"
+    );
+    assert_eq!(st.max(), 1, "cap=1 下不该出现重叠");
+}
+
+/// A6 的独立用例（不靠 A3 代打）：**默认配置下什么都不该并行**。
+///
+/// 刻意用 `tier = UiOnly` 的探针：`resolve_policy` 对 `UiOnly` 是自动放行的
+/// （不需批准、不弹窗），所以这条正是"用户什么都没配，编辑器命令却已经成组并发"
+/// 那个坑——已发货的 `editor.*` 就属这一层。资格判据把 `UiOnly` 排除后，
+/// 这里必须观测到并发度 1；若判据退回 `Read | UiOnly`，两个探针会真的重叠。
+#[test]
+fn default_config_parallelises_nothing_even_for_auto_approved_ui_only() {
+    let st = ProbeState::new(2);
+    let tools = vec![
+        probe("ua", ToolTier::UiOnly, Concurrency::Shared, 20, &st),
+        probe("ub", ToolTier::UiOnly, Concurrency::Shared, 20, &st),
+    ];
+    // approved 为空 = 出厂默认策略；cap 给到缺省 4 也不该有并发
+    let mut app = probe_app(
+        &[("ua", 0), ("ub", 1)],
+        tools,
+        &[],
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    drive(&mut app, 2);
+    let probed = app.world().resource::<Probed>();
+    assert_eq!(
+        probed.results.len(),
+        2,
+        "UiOnly 调用照样要执行完，只是不重叠：{:?}",
+        probed.results
+    );
+    assert!(
+        probed.results.iter().all(|(_, _, err)| !err),
+        "{:?}",
+        probed.results
+    );
+    assert_eq!(
+        st.max(),
+        1,
+        "默认配置下不得出现并发——UiOnly 被策略自动放行，只能靠 tier 判据挡住"
+    );
+    assert_eq!(
+        probed.confirm_requests, 0,
+        "UiOnly 不该弹窗，这条断言区分它与 A3 那条待确认用例"
     );
 }

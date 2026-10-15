@@ -18,7 +18,7 @@
 |:---|:---|:---|:---|:---|
 | F-01 | 多轮对话 | ✅ | `xgent_agent/src/bridge.rs`（双层 `run_agent_loop`：外层 follow-up、内层 tool-call+steering；`stream_with_retry` 自动重试可重试错误；流式期 steering 即时中断 race abort、停止边界重新轮询防丢失）+ `compaction.rs`（token 估算 + should_compact 触发 + find_cut_point 切点 + LlmCompactor 摘要） | `plans/step9`、`plans/optimization-from-omp.md` O4/O9 |
 | F-02 | 流式输出 | ✅ | `xgent_provider/src/openai_compat.rs`（SSE → ChatEvent 细粒度事件）→ `xgent_ui/src/chat_panel.rs` | `plans/step5`、ADR-0006 |
-| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id）；**`search_files` 支持 `regex`（默认关，字面量子串）/`case_insensitive`/`glob`/`file_type`，坏参数在遍历前报 `is_error` 而不是伪装成「未找到匹配」**（2026-10-14，见 §5 注意点 28）；**`write_file`/`edit_file` 写前记检查点，用户可撤销整轮 agent 文件改动**（2026-10-15，见 §5.14） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/code-search/spec.md`、`docs/comet/specs/file-checkpoint-undo/spec.md` |
+| F-03 | 工具调用 | ✅ | `xgent_tools/src/builtins/`（ReadFile/WriteFile/SearchFiles/RunCommand）+ `executor.rs`；**工具 schema 经 `AgentBridge.tool_schemas` 注入 LLM 请求**（2026-07-20 修复，见诊断文档）；`conv.messages` 记录完整 tool_call/tool_result 配对（带 call_id）；**`search_files` 支持 `regex`（默认关，字面量子串）/`case_insensitive`/`glob`/`file_type`，坏参数在遍历前报 `is_error` 而不是伪装成「未找到匹配」**（2026-10-14，见 §5 注意点 28）；**`write_file`/`edit_file` 写前记检查点，用户可撤销整轮 agent 文件改动**（2026-10-15，见 §5.14）；**同一轮的连续只读工具调用并发执行**（`Tool::concurrency` 从"只声明不消费"变成真判据，见 §5.16） | `plans/step7`、ADR-0007、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/code-search/spec.md`、`docs/comet/specs/file-checkpoint-undo/spec.md`、`docs/comet/specs/tool-concurrency/spec.md` |
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
 | F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；**中文问句按相邻二字组合切词、rg 走 `--fixed-strings` 字面量、`@file:` 线索直接读文件、目录遍历经 spawn_blocking、Hub 合并后复核预算**（2026-10-14，约束见 §5.10）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/context-retrieval/spec.md` |
 | F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only + `list_sessions` + `restore_session`）+ `conversation.rs`（`restore` 方法）+ `xgent_ui/src/session_history.rs`（历史面板 UI）+ `events.rs`（`ListSessionsMessage`/`SessionListMessage`/`RestoreSessionMessage`/`SessionRestoredMessage`）；**新建、列出、恢复** 均完整可用 | `plans/step9`、ADR-0008 |
@@ -646,7 +646,23 @@ agent 写过的文件此前**无法退回**：编辑器内的 `UndoStack` 只管
 
 `.xgent-bak` 的产生已随本机制移除（`atomic::backup_existing` 删除）：单槽位会被下次写入覆盖、无人读取、还污染用户项目的 `git status`。崩溃安全性反而更好——改前内容先于目标写入落盘。用户项目里历史遗留的 `*.xgent-bak` 不做自动清理（删用户的文件不是本机制的决定）。
 
+### 5.16 工具并行执行（R3-15）
+
+`Tool::concurrency()` 自 ADR-0007 起就有 `Shared`/`Exclusive` 两值，但**全仓没有任何读取方**：agent 内层 tool-call 循环把 `outcome.tool_calls` 一个个 `await` 完。现在它成了真判据，落在三处：
+
+- **资格判定 `ToolExecutor::parallel_safe(tool_id, input, ctx)`（xgent_tools）**：三条**互相独立**的信号全过才允许重叠——① 解析出的策略不需要用户确认（`Approved`，或 `NeedsConfirmation` 但该工具已进会话 AllowAll 集合）；② 工具自报 `Concurrency::Shared`；③ `tier()` **恰好**是 `Read`。**③ 承担两件事**：其一，`Tool::concurrency()` 的 trait 默认值就是 `Shared`，只信②等于让忘了声明 `Exclusive` 的写工具自动进并发组；其二，`UiOnly` 被刻意排除——`resolve_policy` 对 `UiOnly` 是**无条件放行**的（不弹窗），收进来就等于让已发货的 `editor.*` 在用户什么都没配的默认配置下就成组并发，而 `open_file → goto` 是有顺序语义的。① 的原因是确认通道只有一个槽位（`bridge.rs` 的 `SharedConfirm` 持 `Mutex<Option<Sender>>`），两个并发请求会互相覆盖 sender，被覆盖那次只能报「确认被取消」，用户决策就此丢失。判定只是**建议**——策略、弹窗与检查点仍只在 `execute` 里发生，并行是调度层，不是第二套执行路径。
+- **分组调度（`bridge.rs::run_agent_loop`）**：从当前下标起取**连续**可并行的区间（长度钳到 `max_parallel_tools`），取不到就说明这里是屏障——单独跑完再继续。**不重排调用去凑并行**：模型先要的写必须先在前面执行。同组用 `futures::join_all` 在**当前任务里**轮询而不是 `spawn`，这样 loop 被取消或提前返回时不会留下后台任务继续写文件。
+- **顺序不变是硬要求**：`ToolResult` 事件与回灌进 `req.messages` 的结果都按模型给出的**原始下标**发，先跑完的不抢先——组完成才是结果可见的粒度。每个 `call_id` 恰好一个 result：同组已启动的成员各有真实结果，因中断而根本没启动的分组补占位（对齐 max_tokens 截断路径）。
+
+配置：`[agent] max_parallel_tools` 缺省 `4`，`0` 表示未设置 → 落回 4（**不是不限**：这个闸是拿去挡子进程/socket/fd 数量的）。经 `xgent_app` → `AgentBridgeConfig` → `run_agent_loop`，工具 crate 不 import 配置类型，与 §5 注意点 28 的解耦方式一致。
+
+**默认配置下这条能力是惰性的**：多数工具默认 `NeedsConfirmation`（`AGENTS.md` §5.4），待确认即不够资格；`UiOnly` 是策略自动放行的例外，靠的正是上面③把它排除。于是不改配置就与串行时代逐字相同，用户把只读工具提进 `approved`（或点了 AllowAll）之后并发才出现。
+
+测试判据（照做别退回耗时断言）：并发用**在跑数**（`AtomicUsize` 进入 +1、退出 −1、记历史最大）+ **有界等待**观测——探针要求"至少看到 N 个同时在跑"，串行调度下必然超时、观测值停在 1，于是"调度器退回串行"会被直接抓到。总耗时判据既 flake 又能被"串行但很快"骗过，别用。`bridge_tests.rs` 的 `ProbeTool` 是这套观测的实现。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
+
+
 
 1. **阅读背景**：开始任务前读 `AGENTS.md`、`doc/design/`、`doc/plans/` 中相关 step 文件；编码时按需查 `../bevy` 源码确认 API（bevy 仍在演进，有 breaking change）。
 2. **先通后优**：每模块先最小可用版本，确保编译通过与基本功能，再迭代。

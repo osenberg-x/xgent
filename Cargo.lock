@@ -9139,6 +9139,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bevy",
+ "futures",
  "parking_lot",
  "serde",
  "serde_json",

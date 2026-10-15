@@ -185,6 +185,8 @@ fn main() {
         retrieval_max_tokens: project_config.agent.effective_retrieval_max_tokens(),
         max_events_per_frame: project_config.agent.effective_max_events_per_frame(),
         checkpoints: Some(checkpoints),
+        // 同轮并发工具调用上限，来自 `[agent]`（R3-15）
+        max_parallel_tools: project_config.agent.effective_max_parallel_tools(),
     });
 
     // 通知订阅端（fs/config 桥接用）

@@ -49,6 +49,9 @@ pub struct AgentConfig {
     /// 单个 ECS 帧最多处理的 agent 事件数
     #[serde(default)]
     pub max_events_per_frame: u32,
+    /// 同一轮 tool_calls 里最多同时执行的工具调用数（只读且无需确认的调用才并发）
+    #[serde(default)]
+    pub max_parallel_tools: usize,
 }
 
 /// `[tools]` 段：工具执行的超时与输出上限。
@@ -91,6 +94,11 @@ pub mod defaults {
     pub const RETRIEVAL_MAX_TOKENS: u32 = 8_000;
     /// 每帧 agent 事件上限（原 `xgent_agent::agent_loop` 字面量）。
     pub const MAX_EVENTS_PER_FRAME: u32 = 64;
+    /// 同一轮并发执行的工具调用上限。
+    ///
+    /// 不是"越快越好"的调优值：并发的是子进程（rg）、socket 与文件描述符，
+    /// 需要一个与"不限"区分的闸；缺省 4 覆盖"读几个文件 + 搜一次代码"这类常见批次。
+    pub const MAX_PARALLEL_TOOLS: usize = 4;
     /// 确认等待秒数（原 `xgent_tools::executor` 字面量）。
     pub const CONFIRM_TIMEOUT_SECS: u64 = 300;
     /// 命令执行秒数（原 `run_command::COMMAND_TIMEOUT_SECS`）。
@@ -133,6 +141,11 @@ impl AgentConfig {
     /// 生效的每帧事件上限。
     pub fn effective_max_events_per_frame(&self) -> u32 {
         or_default_u32(self.max_events_per_frame, defaults::MAX_EVENTS_PER_FRAME)
+    }
+
+    /// 生效的同轮并发工具调用上限（`0` = 未设置 → 缺省 4，**不是**不限）。
+    pub fn effective_max_parallel_tools(&self) -> usize {
+        or_default_usize(self.max_parallel_tools, defaults::MAX_PARALLEL_TOOLS)
     }
 }
 
@@ -270,6 +283,7 @@ mod tests {
         let cfg = ProjectConfig::default();
         assert_eq!(cfg.agent.effective_retrieval_max_tokens(), 8_000);
         assert_eq!(cfg.agent.effective_max_events_per_frame(), 64);
+        assert_eq!(cfg.agent.effective_max_parallel_tools(), 4);
         assert_eq!(cfg.tools.effective_confirm_timeout_secs(), 300);
         assert_eq!(cfg.tools.effective_command_timeout_secs(), 60);
         assert_eq!(cfg.tools.effective_command_max_output_bytes(), 65_536);
@@ -292,9 +306,28 @@ approved = ["read_file"]
 "#;
         let cfg: ProjectConfig = toml::from_str(toml_src).unwrap();
         assert_eq!(cfg.agent.effective_retrieval_max_tokens(), 8_000);
+        assert_eq!(cfg.agent.effective_max_parallel_tools(), 4);
         assert_eq!(cfg.tools.effective_command_timeout_secs(), 60);
         assert_eq!(cfg.context.effective_max_keywords(), 16);
         assert_eq!(cfg.tool_policy.approved, vec!["read_file".to_string()]);
+    }
+
+    /// 并发上限的三态：没写 = 4、写 `0` = 4（**不是**不限）、写 2 = 2。
+    ///
+    /// `0` 必须落回缺省：这个闸的存在意义就是给子进程/socket/fd 数量设上限，
+    /// 把 `0` 解释成"完全不限"正好把它删掉。
+    #[test]
+    fn max_parallel_tools_zero_means_default_not_unlimited() {
+        let absent: ProjectConfig = toml::from_str("[agent]\n").unwrap();
+        assert_eq!(absent.agent.effective_max_parallel_tools(), 4);
+        let zero: ProjectConfig = toml::from_str("[agent]\nmax_parallel_tools = 0\n").unwrap();
+        assert_eq!(zero.agent.effective_max_parallel_tools(), 4);
+        assert_eq!(
+            zero.agent.max_parallel_tools, 0,
+            "原始值仍可读，生效值才钳制"
+        );
+        let two: ProjectConfig = toml::from_str("[agent]\nmax_parallel_tools = 2\n").unwrap();
+        assert_eq!(two.agent.effective_max_parallel_tools(), 2);
     }
 
     #[test]

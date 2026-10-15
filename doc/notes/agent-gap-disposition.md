@@ -94,7 +94,7 @@
 
 仍留在台账 §二 的 R3 行内、本轮未做：R3-2（B/C/D/E 空壳 provider，阻塞于嵌入模型与向量库选型 + D-06 二次重定）、R3-3（`search_files` 正则/glob，属 `xgent_tools`）、R3-17（硬编码参数转配置）。
 
-### 判别力反证（11 个变异体）
+### 判别力反证（13 个变异体）
 
 沿用 §五 的方法：逐个把修复改回缺陷形态，确认对应用例**确实失败**；全部还原后基线转绿。
 
@@ -322,3 +322,82 @@ M8/M9 的处置与 §七 MU3 不同：这次不是测试失效（注册数与声
 - 保留 20 轮是常量，检查点不可关（应用总是挂上存储），也没有对应设置面板项（与 R3-13 同一个缺口）。
 - 历史遗留的 `*.xgent-bak` 不清理；应用仍不确保用户项目把 `.xgent/` 加进 gitignore（既有缺口，记账待办）。
 - A9 的「撤销后编辑器缓冲区一致」是读既有通路验证的，不是 GUI 跑出来的——本应用无法 headless 驱动，报告里如实这么写。
+
+## 九、add-parallel-tool-execution（2026-10-15）：R3-15 工具并行执行
+
+`doc/notes/agent-gap-review.md` R3-15 记的是 `unwired-design`：`Tool::concurrency()` 从 ADR-0007 起就有 `Shared`/`Exclusive` 两值，**全仓零读取方**，agent 内层 tool-call 循环把 `outcome.tool_calls` 逐个 `await` 完。本轮让这个声明变成真判据。能力规格见 `docs/comet/specs/tool-concurrency/spec.md`。
+
+### 机制
+
+| 落点 | 说明 |
+|:---|:---|
+| `xgent_tools/src/executor.rs`：`parallel_safe(tool_id, input, ctx)` | 并行资格需**三条互相独立**的信号全过：① 解析出的策略不需要用户确认（`Approved`，或 `NeedsConfirmation` 但工具已进会话 AllowAll 集合）；② 工具自报 `Concurrency::Shared`；③ `tier()` **恰好**是 `Read`（`UiOnly` 被排除，见下）。判定只是建议——策略、弹窗、检查点仍只在 `execute` 里发生 |
+| `xgent_agent/src/bridge.rs`：`execute_tool_call` + 分组调度 | 从当前下标取**连续**可并行区间（长度钳到 `cap`）；区间为空即屏障，单独跑完再继续。同组用 `futures::join_all` 在**当前任务里**轮询，不 `spawn`——loop 被取消或提前返回时不会留下后台任务继续写文件 |
+| 顺序与配对 | `ToolResult` 事件与回灌 `req.messages` 一律按模型给出的**原始下标**发（先跑完的不抢）；`ToolCall` 事件仍在执行前全部发完；每个 `call_id` 恰好一个 result——同组已启动成员各有真实结果，因中断**根本没启动**的分组补占位 |
+| `xgent_settings_core` + `xgent_app` | `[agent] max_parallel_tools`，缺省 `4`，`0` = 未设置 → 落回 4（**不是不限**：这闸是挡子进程/socket/fd 数量的）。经 `AgentBridgeConfig` 进 `run_agent_loop`，工具 crate 不 import 配置类型 |
+
+### 四条读码事实决定了判据的形状
+
+1. `SharedConfirm` 是**单槽**（`bridge.rs:170`，持 `Mutex<Option<oneshot::Sender>>`）。两个待确认调用并发时，第二个会覆盖第一个的 sender，被覆盖那次只能看到 channel closed 并报「确认被取消」——用户的一次决策就此丢失。所以①不是优化，是必须。
+2. `Tool::concurrency()` 的 **trait 默认值就是 `Shared`**（`tool.rs:184`）。只看②等于让"忘了声明 `Exclusive` 的写工具"自动进并发组，两个写同一路径会打断检查点清单的 read-modify-write（"一文件一条目、倒序回放"直接破）。所以③不是冗余，是第二道独立声明。
+3. `resolve_policy` 对 `UiOnly` **无条件放行**（不经确认），而 `EditorTool` 是 `UiOnly + Shared` 且已发货。所以「默认配置什么都不并行」这条不变量**不能**只靠策略信号成立——必须靠 `tier()==Read` 把 `UiOnly` 挡在外面，否则 `open_file → goto` 这类有顺序语义的编辑器命令会在用户没配任何东西时就并发。这条是独立验证者抓出来的（见下文「验证者抓到的一条真实缺陷」），第一版规格写的是 `Read` 或 `UiOnly`。
+4. 插件调用在插件自己的 task 里本就**串行**（`wasm_host.rs:231` 逐条 `recv().await` 再 `call().await`），所以两个插件调用重叠无害但也无收益；`store.data_mut().cancel_token/push_update` 因此不会被并发写坏。本轮不改插件 host。
+
+**默认配置下这条能力是惰性的**：多数工具默认 `NeedsConfirmation`（`AGENTS.md` §5.4）已被策略信号挡下；`UiOnly` 由策略自动放行，这一半靠 `tier()==Read` 才挡住。于是不改配置就与串行时代逐字相同，用户把只读工具提进 `approved` 或点了 AllowAll，并发才出现。
+
+### 测试判据：用「在跑数 + 有界等待」，不要用耗时
+
+`bridge_tests.rs` 的 `ProbeTool` 进入即在跑数 +1 并记历史最大，然后**有界等待**"至少看到 N 个同时在跑"（400ms 超时），再停留 `holds_ms`（期间 race cancel token）。串行调度下等待必然超时、观测值停在 1——所以"调度器退回串行"会被直接抓到。总耗时判据既 flake，又能被"串行但很快"骗过，明确不用。
+
+### 判别力反证（11 个变异体）
+
+| 变异 | 结果 | 失败用例 |
+|:---|:---|:---|
+| AP1 调度器退回串行（`cap = 1`） | 抓到（4 failed） | overlap、order、cap=2 等 |
+| AP2 忽略上限（`end - idx < cap` → `true`） | 抓到（3 failed） | `cap_two_bounds_the_group`、`cap_one_serialises…` |
+| AP3 结果配对顺序反转（`.iter().rev()`） | 抓到（1 failed） | `results_keep_model_order_even_when_completion_differs` |
+| AP4 不启动分组的占位补齐被删 | 抓到（1 failed） | `abort_before_later_groups_places_placeholders_for_them` |
+| AP5 删掉 `concurrency` 判据 | **首轮批次接错线** → 改跑对 crate 后抓到 | `exclusive_call_is_a_barrier_for_its_neighbours` |
+| AP6 删掉 tier 判据 | 抓到（1 failed） | `parallel_safe_requires_all_three_signals`（`Write`+`Shared` 那例） |
+| AP7 `NeedsConfirmation` 当成可并行 | 抓到（2 failed） | `confirmations_are_asked_one_at_a_time_and_never_overlap` 等 |
+| AP8 AllowAll 不算数 | 抓到（1 failed） | `parallel_safe_flips_after_allow_all` |
+| AP9 `parallel_safe` 恒 false | 抓到（2 failed） | overlap 与 order 两条 |
+| AP10 `0` 解释成不限 | 抓到（3 failed） | `max_parallel_tools_zero_means_default_not_unlimited` |
+| AP11 缺省值漂移 4→8 | 抓到（3 failed） | `new_sections_default_to_previous_constants` 等 serde 数据断言 |
+| AP12/13 把资格判据退回 `Read \| UiOnly` | 双双抓到 | AP12 → `bridge_tests::default_config_parallelises_nothing_even_for_auto_approved_ui_only`；AP13 → `executor::parallel_safe_requires_all_three_signals` 的 UiOnly 那例 |
+
+**AP5 是上一轮 M11 的同类错误重犯**：变异体改的是 `xgent_tools` 的 `parallel_safe`，批次就跑了 `xgent_tools --lib`（129 全绿，看起来"没抓到"）；但隔离 `concurrency` 判据的用例住在 `xgent_agent` 的 `exclusive_call_is_a_barrier_for_its_neighbours`。上一轮已经写过"按断言所在 crate 选测试目标"的判据，这轮仍然先按文件所属 crate 选了一遍——说明判据要落到脚本接口里才算数：本轮给批次加了 `TEST_CRATE` 覆盖表，而不是靠我记得。
+
+**A2 的探针 tier 是刻意选的**：中间那个独占探针用 `Read` + `Exclusive`（"读一个有状态会话"那种必须独占的只读工具）。若给它 `Exec` 层，tier 判据会替它挡下并发，于是删掉 `concurrency` 判据也照样全绿——两条判据各有自己的判别用例，才谈得上"三条独立信号"。这条是写 AP5 时才想清楚的。
+
+### 独立验证者抓到的一条真实缺陷（资格判据因此收紧）
+
+候选 2 的验证判 **9/9 通过**，但它的 risks 里带出一条足以推翻已声明不变量的事实错误：规格、dev-tutorial 与本台账当时都写着「默认配置下没有任何调用会并行，因为所有工具都是 `NeedsConfirmation`」。**前提就是错的**——`resolve_policy` 对 `UiOnly` 层无条件放行，而已发货的 `EditorTool` 正是 `UiOnly + Shared`。也就是说 `editor.*` 调用在用户什么都没配的默认配置下**已经在成组并发**，而我为了「默认惰性」这条约束写下的判据 `tier ∈ {Read, UiOnly}` 恰好把它放进来了；更糟的是这条并发路径的正确性押在「`EditorTool::execute` 恰好在 emit 之前不 await」这种实现偶性上，而 `open_file → goto` 是有顺序语义的。
+
+处置不是把它记成 known limit 然后归档，而是 `--revise-implementation` 回 Build 修：
+
+- 资格判据第③条由 `Read | UiOnly` 收紧为**恰好** `Read`（`executor.rs`），顺序性由判据保证而不是由某个实现碰巧不阻塞保证；
+- 补两条判别：`executor` 侧新增 `UiOnlySharedTool`（形状等同已发货的 editor 工具）断言不并行，即便策略自动放行；`bridge_tests::default_config_parallelises_nothing_even_for_auto_approved_ui_only` 断言默认配置下 `UiOnly` 探针并发度 1 且 `confirm_requests == 0`（后者把它与 A3 那条待确认用例区分开——A6 从此有了自己的用例，不再借 A3 代打）；
+- 规格/文档里那句错前提逐处改成准确表述：多数工具靠策略信号挡下，`UiOnly` 靠 tier 信号挡下，两条各管一半。
+
+判据：**验证通过不等于文档为真。** 九条验收项全过，是因为代码满足了我写下的判据；而那份判据的**理由**里有一句与源码不符——只有独立读者会去核那句话。风险清单不是免责清单：写「默认配置惰性」时我应该自己去读 `resolve_policy` 对 `UiOnly` 的分支，而不是引用需求文档的概括。
+
+### 顺带发现的既有偏差（不在本轮范围）
+
+`crates/xgent_tools/Cargo.toml:18` 依赖 `bevy`，而 `AGENTS.md` §4 的 crate 表把 `xgent_tools` 标为「不依赖 Bevy」。读码结论：整个 crate 只有 `executor.rs:307` 一处用到 bevy——`#[derive(bevy::prelude::Resource, Clone)] pub struct ToolExecutorResource`。也就是说这条依赖只为一个 Resource 派生宏存在，代价是工具 crate 把整个 bevy 图拖进任何想复用它的地方（也拖慢本台账反复提到的 per-crate 编译）。要么把包装类型上移到 `xgent_agent`，要么订正 `AGENTS.md` §4 的表述——两者都是独立变更，本轮只记录不改动（本轮 brief 里"no new dependency"这条自查未违反，但"Bevy-free"那句概括与事实不符，一并订正在此）。
+
+### 形式化检查替我抓到的一处本地漏项
+
+第一候选被 Runtime 的 **c8（`cargo fmt -p <crate> -- --check`）退回 Build**：最后一轮测试编辑后我只格式化了 `xgent_agent`/`xgent_tools`，漏了 `xgent_settings_core`——新加的 `max_parallel_tools_zero_means_default_not_unlimited` 里那条 assert 超长未换行。其余 7 项（agent 68 / tools 129 / settings_core 44 / 邻近基线 / `check --workspace --all-targets` / clippy）当时已经全绿。
+
+这条的价值不在"格式错了改回来"，而在**Handoff 里我先把 fmt 干净写成了证据，之后才真去扫全 8 个 crate**——上一节刚立的判据（证据要指到实际跑过的命令）我自己第一遍也没守住。固定做法：`cargo fmt -p <crate>` 必须按**本轮所有被改 crate 的清单**逐个跑，改完任何一行测试后重跑，不能凭"我记得格式化过了"。
+
+### 边界（诚实记录）
+
+- 只合并**连续**可并行的调用，不重排凑并行：模型先写的写后面跟着四个读，那四个读要等写完才成组。
+- 结果按组可见（组完成才报告），因此同组里先跑完的要等前面的；`ToolProgress` 仍可能乱序交错，那是进度不是结果。
+- 同组在同一个任务里轮询：将来若有工具写出不带 await 点的 CPU 死循环，会卡住整组。现有工具都是 await IO，唯一偏 CPU 的 `run_command` 是 `Exclusive`。测试抓不到这种未来违规。
+- 无跨轮、跨对话的全局限流；`max_parallel_tools` 只管一轮里一个组，也没有设置面板项（仍属 R3-13）。
+- 没有对真实 provider 做耗时基准：本轮证明的是"调度性质"（并发确实在发生），不是"快了多少"。
+- A6 没有独立用例：默认策略下"什么都不批"与 A3 是同一次运行，写成两条只会虚增覆盖数，故如实记为共用。
+
