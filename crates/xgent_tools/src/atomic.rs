@@ -16,14 +16,6 @@ use tokio::io::AsyncWriteExt;
 /// 超过此量级，既防撑爆 LLM 上下文，也防写爆磁盘。
 pub const MAX_WRITE_BYTES: usize = 64 * 1024;
 
-/// 备份文件后缀。
-///
-/// 曾用于「写前把原文件复制一份到目标旁边」，该机制已被
-/// [`crate::checkpoint`] 的检查点存储取代（旁置文件会污染用户项目的
-/// `git status`，且单槽位会被下一次写入覆盖）。保留常量仅用于识别历史残留，
-/// 本仓库不再创建此类文件。
-pub const BACKUP_SUFFIX: &str = "xgent-bak";
-
 /// 原子写字节内容：先写同目录临时文件再 rename。
 ///
 /// 与 [`atomic_write`] 同一套语义（`sync_all` 后 rename、失败清理临时文件），

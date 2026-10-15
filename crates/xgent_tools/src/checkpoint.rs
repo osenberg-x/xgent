@@ -331,7 +331,6 @@ impl CheckpointStore {
             uncovered: mem_uncovered,
             ..Default::default()
         };
-        report.turn = Some(key);
         let manifest = match self.load_manifest(key).await {
             Ok(Some(m)) => Some(m),
             Ok(None) => None,

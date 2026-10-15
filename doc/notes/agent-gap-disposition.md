@@ -297,13 +297,27 @@ M8/M9 的处置与 §七 MU3 不同：这次不是测试失效（注册数与声
 
 教训不是「脚本有个 bug」，而是**止损判据本身也要有判别力**：一条靠子串碰出来的哑火哨兵，既会误报也会漏报——它这轮误报了真失败的 M10；反过来 `600 passed` 这类数字它同样命中。数字判定必须锚定边界，不能用「看起来像」。
 
+### 独立验证者回查后订正的三条自评证据（本轮最该记住的一段）
+
+只读验证者（不是我）逐字读测试体与文案后，判下 11/11，但**否决了我三条自评证据的措辞**——三条都在验收之后被补成事实，而不是被辩解掉：
+
+1. **「`read_only_tools_declare_no_write_targets` 钉住 read_file / search_files / run_command」是假的**：该用例只断言了前两个。现已补 `RunCommand::default()` 的断言。反证 M15：把 `Tool::write_targets` 的 trait 默认从空改成返回项目根，这条用例立刻失败。
+2. **「undo 插件被集成测试 harness 构建的同一个 app 装配」是假的**：`crates/xgent_ui/tests/` 里没有任何 harness 实例化 `UndoPlugin`，`request_undo` / `collect_undo_results` 只有纯函数部分（`gate`、文案构造）被单测覆盖，两条系统本体只在真实 GUI 运行里才跑。报告已按「代码级 + 系统本体未 headless 验证」降级。
+3. **「提示文案与 Spec 都说明了覆盖边界」的文案那半是假的**：撤销详情里从未出现「命令与插件写入不在范围内」，只有 Spec 写了。现补 `undo-coverage-note` 键（两套语料），`detail()` 只要产出常驻提示就带上这句。反证 M13：删掉这句，`skipped_files_are_listed_with_reasons` 失败。
+
+顺带把**标点交回语料**：新增 `undo-part-with-list` / `undo-skip-item` / `undo-list-sep` 三个键接管冒号、括号与列表分隔符。改前 Rust 侧硬编码 `（）`/`：`/`、`，英文语料渲染出来是 `c.rs（changed externally）`——NF-05 说的「用户可见字符串走 i18n」是含标点的。反证 M14：把 en-US 的分隔符换成顿号，`both_locales_define_every_new_key` 与 `english_detail_uses_its_own_punctuation` 双双失败。
+
+同一批清理：删掉无人消费的 `pub const BACKUP_SUFFIX`（备份机制已移除，「留着识别历史残留」是给它自己听的借口，没有任何代码读它）、`undo_turn()` 的冗余二次赋值、`try_register(...).ok()` 改成 `tracing::warn!`（id 冲突意味着命令根本没进面板，静默吞掉只会让人以为功能不存在）。
+
+判据：**验收证据里写测试名，不等于那条测试覆盖了你描述的范围。名字不是身体**——写证据时逐个读回测试体，把它真正断言的字段抄下来。
+
 ### 顺带发现的既有缺陷（不在本轮范围）
 
 `EditorIoRuntime.handle` 在 `xgent_app` 里**从未被注入**（全目录只有构造点的 `None`），编辑器文件 IO 因此一直走同步降级路径。撤销刻意依赖 `AgentBridge` 自带的 runtime，不碰这个资源；编辑器侧的注入应作为独立变更处理。
 
 ### 遗留与下一步
 
-- 只覆盖 `write_file`/`edit_file`。`run_command` 的副作用（`sed -i`、`git apply`、`cargo fmt`）与插件 `host.write_file` 不可撤销，提示文案与 Spec 都按这个边界说，不暗示全覆盖。
+- 只覆盖 `write_file`/`edit_file`。`run_command` 的副作用（`sed -i`、`git apply`、`cargo fmt`）与插件 `host.write_file` 不可撤销。Spec 从一开始就写了这条边界，**用户可见文案是验收之后才补上的**（见上节第 3 条）；现在撤销详情会一并说明，但仍不暗示「agent 做过的事都能退回」。
 - 无 redo、无撤销历史 UI、无整会话回滚（本轮明确的 non-goal）。
 - 保留 20 轮是常量，检查点不可关（应用总是挂上存储），也没有对应设置面板项（与 R3-13 同一个缺口）。
 - 历史遗留的 `*.xgent-bak` 不清理；应用仍不确保用户项目把 `.xgent/` 加进 gitignore（既有缺口，记账待办）。

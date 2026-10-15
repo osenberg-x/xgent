@@ -154,3 +154,7 @@ undo-skip-deleted = deleted by user
 undo-skip-blob-lost = pre-write content missing
 undo-skip-unverified = ownership unverifiable
 undo-noop = Nothing to restore in this turn
+undo-coverage-note = Note: only write_file and edit_file writes are checkpointed; run_command and plugin writes cannot be undone
+undo-part-with-list = { $part }: { $list }
+undo-skip-item = { $path } ({ $reason })
+undo-list-sep = ,{" "}

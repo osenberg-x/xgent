@@ -155,3 +155,7 @@ undo-skip-deleted = 已被删除
 undo-skip-blob-lost = 改前内容丢失
 undo-skip-unverified = 无法确认归属
 undo-noop = 本轮没有需要恢复的改动
+undo-coverage-note = 注：仅 write_file / edit_file 的写入有检查点，run_command 与插件写文件不在撤销范围内
+undo-part-with-list = { $part }：{ $list }
+undo-skip-item = { $path }（{ $reason }）
+undo-list-sep = 、

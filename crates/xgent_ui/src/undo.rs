@@ -205,45 +205,58 @@ pub fn detail(loc: &xgent_settings::Localizer, outcome: &UndoOutcome) -> Option<
         let list = report
             .skipped
             .iter()
-            .map(|(path, reason)| format!("{path}（{}）", skip_reason(loc, *reason)))
+            .map(|(path, reason)| {
+                tr_with(
+                    loc,
+                    "undo-skip-item",
+                    &[
+                        ("path", path.clone()),
+                        ("reason", skip_reason(loc, *reason)),
+                    ],
+                )
+            })
             .collect::<Vec<_>>()
-            .join("、");
-        parts.push(format!(
-            "{}：{list}",
-            tr_with(
-                loc,
-                "undo-part-skipped",
-                &[("count", report.skipped.len().to_string())]
-            )
+            .join(&tr(loc, "undo-list-sep"));
+        parts.push(with_list(
+            loc,
+            "undo-part-skipped",
+            report.skipped.len(),
+            list,
         ));
     }
     if !report.uncovered.is_empty() {
-        parts.push(format!(
-            "{}：{}",
-            tr_with(
-                loc,
-                "undo-part-uncovered",
-                &[("count", report.uncovered.len().to_string())]
-            ),
-            report.uncovered.join("、")
+        parts.push(with_list(
+            loc,
+            "undo-part-uncovered",
+            report.uncovered.len(),
+            report.uncovered.join(&tr(loc, "undo-list-sep")),
         ));
     }
     if !report.failed.is_empty() {
-        parts.push(format!(
-            "{}：{}",
-            tr_with(
-                loc,
-                "undo-part-failed",
-                &[("count", report.failed.len().to_string())]
-            ),
-            report.failed.join("、")
+        parts.push(with_list(
+            loc,
+            "undo-part-failed",
+            report.failed.len(),
+            report.failed.join(&tr(loc, "undo-list-sep")),
         ));
     }
-    Some(tr_with(
+    // 只要落到常驻提示，就把覆盖边界一并说清：本机制只管 write_file/edit_file
+    // 的写入，`sed -i`、`git apply`、插件 host.write_file 从来不在范围内。
+    // 用户在这一刻最可能以为「agent 改的东西都能退回去」。
+    let summary = format!("{} · {}", parts.join(" · "), tr(loc, "undo-coverage-note"));
+    Some(tr_with(loc, "undo-detail", &[("summary", summary)]))
+}
+
+/// 「动作 N 个 + 明细」的拼接形状：冒号由语料给，英文串里不该出现全角标点。
+fn with_list(loc: &xgent_settings::Localizer, key: &str, count: usize, list: String) -> String {
+    tr_with(
         loc,
-        "undo-detail",
-        &[("summary", parts.join(" · "))],
-    ))
+        "undo-part-with-list",
+        &[
+            ("part", tr_with(loc, key, &[("count", count.to_string())])),
+            ("list", list),
+        ],
+    )
 }
 
 /// 跳过原因的可读文案。
@@ -394,6 +407,26 @@ mod tests {
         assert!(text.contains("删除 1 个"), "{text}");
         // 摘要与详情同时在场时，详情必须带上「跳过」的具体路径（toast 2.2s 就没了）
         assert!(text.contains("跳过 1 个"), "{text}");
+        // 覆盖边界必须一起说：命令与插件写入从来不在撤销范围内
+        assert!(text.contains("run_command"), "{text}");
+    }
+
+    /// 标点归语料管：英文详情里不该出现全角括号/冒号/顿号，中文该有。
+    #[test]
+    fn english_detail_uses_its_own_punctuation() {
+        let mut rep = report();
+        rep.uncovered = vec!["d.rs".into(), "e.rs".into()];
+        let outcome = UndoOutcome::Done(Box::new(rep));
+        let en = plain(&detail(&xgent_settings::Localizer::load("en-US"), &outcome).expect("详情"));
+        for ch in ['（', '）', '：', '、'] {
+            assert!(!en.contains(ch), "en-US 混进全角标点 {ch}: {en}");
+        }
+        assert!(en.contains("d.rs, e.rs"), "en 列表分隔符没带上空格: {en}");
+        let zh = plain(&detail(&xgent_settings::Localizer::load("zh-CN"), &outcome).expect("详情"));
+        assert!(
+            zh.contains('：') && zh.contains('、'),
+            "zh 该用全角标点: {zh}"
+        );
     }
 
     #[test]
@@ -418,6 +451,10 @@ mod tests {
             "undo-skip-blob-lost",
             "undo-skip-unverified",
             "undo-noop",
+            "undo-coverage-note",
+            "undo-part-with-list",
+            "undo-skip-item",
+            "undo-list-sep",
         ] {
             let a = tr(&zh, key);
             let b = tr(&en, key);

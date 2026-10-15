@@ -642,7 +642,7 @@ agent 写过的文件此前**无法退回**：编辑器内的 `UndoStack` 只管
 - **降级方向**：快照记不下时**不阻塞写入**（撤销机制不能反过来弄坏主功能），但该轮被记入 uncovered，撤销汇报如实说明「有 N 个文件无检查点」，绝不谎报「没有可撤销的改动」。
 - **保留**：每会话 20 轮，超出在**新清单第一次落盘后**淘汰最旧（挂在 begin_turn 上会差一轮——刚要写的那轮不该算进窗口）。blob 名必须带条目序号，否则同轮同文件两次写入互相覆盖，撤销只能退到倒数第二个状态。
 - **入口**：命令面板 `agent.undo-changes`（`try_register`，非 `plugin.` 前缀）→ `undo::request_undo` 只在 `Conversation.status == Idle` 时经 `AgentBridge` 自带的 tokio runtime 执行（**不要**改用 `EditorIoRuntime.handle`：它在 `xgent_app` 里从未注入，依赖它撤销会永远报「不可用」）；汇总走 toast，有跳过/未覆盖/写盘失败时再落一条常驻提示（toast 只活 2.2s）。撤销**只改磁盘**，打开中的 buffer 沿用既有 fs-watch：干净重载、脏的进冲突对话框，不再开第二条重载通路。
-- **边界（必须如实告诉用户）**：`run_command` 的磁盘副作用（`sed -i`、`git apply`、`cargo fmt`）与插件 `host.write_file` 的写入**不在覆盖范围内**；不做 redo，不给 agent 自助撤销的工具（那会覆盖用户同期编辑）。
+- **边界（必须如实告诉用户）**：`run_command` 的磁盘副作用（`sed -i`、`git apply`、`cargo fmt`）与插件 `host.write_file` 的写入**不在覆盖范围内**——只要产出常驻提示就随文案带上这句（`undo-coverage-note`），不让用户以为「agent 做过的事都能退回」；不做 redo，不给 agent 自助撤销的工具（那会覆盖用户同期编辑）。列表/括号/冒号一律走语料（`undo-list-sep`、`undo-skip-item`、`undo-part-with-list`），**别在 Rust 里硬编码全角标点**，否则英文渲染成 `c.rs（changed externally）`。
 
 `.xgent-bak` 的产生已随本机制移除（`atomic::backup_existing` 删除）：单槽位会被下次写入覆盖、无人读取、还污染用户项目的 `git status`。崩溃安全性反而更好——改前内容先于目标写入落盘。用户项目里历史遗留的 `*.xgent-bak` 不做自动清理（删用户的文件不是本机制的决定）。
 

@@ -810,11 +810,18 @@ mod tests {
             project_root: dir.path().to_path_buf(),
             tool_policy: Default::default(),
         };
-        use crate::builtins::{ReadFile, SearchFiles};
+        use crate::builtins::{ReadFile, RunCommand, SearchFiles};
         assert!(ReadFile.write_targets(&json!({"path": "."}), &c).is_empty());
         assert!(
             SearchFiles
                 .write_targets(&json!({"pattern": "x"}), &c)
+                .is_empty()
+        );
+        // run_command 确实能改磁盘（sed -i / git apply），但它不声明目标：撤销覆盖不到它。
+        // 这条断言钉住「走 trait 默认 = 不可撤销」，UI 文案的覆盖边界以此为据。
+        assert!(
+            RunCommand::default()
+                .write_targets(&json!({"command": "true"}), &c)
                 .is_empty()
         );
     }

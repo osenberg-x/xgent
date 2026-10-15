@@ -96,13 +96,14 @@ pub fn register_xgent_commands(mut registry: ResMut<CommandRegistry>, loc: Res<L
     });
     // 撤销上一轮 agent 文件改动（R3-11）。非 plugin. 前缀：本地图层动作，
     // 由 undo::request_undo 在会话空闲时执行。
-    registry
-        .try_register(PaletteCommand {
-            id: "agent.undo-changes".into(),
-            label: tr(&loc, "cmd-undo-changes"),
-            kind: CommandKind::Action,
-        })
-        .ok();
+    if let Err(e) = registry.try_register(PaletteCommand {
+        id: "agent.undo-changes".into(),
+        label: tr(&loc, "cmd-undo-changes"),
+        kind: CommandKind::Action,
+    }) {
+        // id 冲突意味着这条命令根本没进面板，静默吞掉会让人以为功能不存在
+        tracing::warn!(error = %e, "撤销命令注册失败");
+    }
 }
 
 fn toggle_palette_visibility(
