@@ -1,0 +1,1465 @@
+schema: comet.native.v4
+name: close-settings-gaps
+language: en
+phase: archive
+status: done
+state_version: 25
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 8ce5d35e94e64391107dd6161ad4340bbf32bf3918fa41192550c888e24df6b0
+spec_changes:
+  - capability: settings-panel
+    operation: create
+    source: specs/settings-panel/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 7
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 3
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: '**A1**: opening the panel with a config that sets
+      `providers.openai.api_base = "https://example.test/v1"` and `[agent]
+      max_parallel_tools = 2`, and a config that sets nothing, each render those
+      actual values; an unset numeric field shows the built-in effective default
+      (`4` for `max_parallel_tools`) and states that it is not set. This holds
+      for the existing four provider fields too — reopening the panel no longer
+      shows blanks.'
+    result: passed
+    reason:
+      text: "Read settings_panel.rs::spawn_panel/NumField::display_value and ran the
+        cited cases by name: panel_opens_with_the_stored_values,
+        reopening_the_panel_redraws_the_same_values,
+        unset_field_shows_effective_default_and_says_so all pass. Unset Sentinel
+        fields render the effective value (4 / 8000) plus the
+        settings-field-unset hint; set fields render the stored value. The four
+        provider fields now bind from GlobalConfigRes, so reopening is no longer
+        blank. drain_snapshot is the filler and it preserves fields the panel
+        does not read."
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "**A2**: the tool-policy row for `read_file` under default configuration
+      shows 询问 (`NeedsConfirmation`); after saving 自动执行 it shows 自动执行,
+      `[tool_policy] approved = [\"read_file\"]` is on disk in
+      `.xgent/config.toml`, and `model_context`/`resolve_policy` for a `Read`
+      tool with that policy answers `Approved`. `editor.open_file` (`UiOnly`)
+      shows 自动执行 without any configuration (R3-15's finding must stay visible to
+      the user)."
+    result: passed
+    reason:
+      text: "policy_rows_display_the_resolved_answer and
+        executor::resolved_policy_agrees_with_execution_rules pass by name; rows
+        come from executor.policy_targets() and fold via
+        stored_state/resolved_policy, i.e. the same resolve_policy precedence
+        that decides execution, so a Read tool with empty config displays Ask
+        and UiOnly editor.open_file displays Auto with no configuration. Disk
+        half verified independently:
+        project_tool_policy_lists_replace_and_persist reads tool_policy.approved
+        back from <root>/.xgent/config.toml, and
+        changed_fields_are_written_with_their_daemon_keys shows the UI emits the
+        daemon key names."
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "**A3**: setting `run_command` to 拒绝 writes `tool_policy.denied`, and the
+      next `ToolExecutor::execute` for it returns a `denied` result without
+      touching the confirmation channel."
+    result: passed
+    reason:
+      text: "denied_tool_is_refused_after_policy_handle_changes passes by name and,
+        unlike earlier rounds, now exercises run_command itself as well as
+        read_file: pushing the id into the shared policy handle yields
+        ToolResult denied+is_error while the counting confirmation callback
+        records zero requests, so the confirmation channel is untouched.
+        policy_lists emits tool_policy.denied and the daemon test proves it
+        lands."
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: '**A4**: setting `run_command` to 自动执行 does **not** silence confirmation
+      for a dangerous command: `resolve_policy("run_command", Exec,
+      {"command":"rm -rf /"}, …)` still answers `NeedsConfirmation` while a
+      plain command answers `Approved` (the dynamic-escalation branch of
+      `security.rs:38-45` must survive the UI).'
+    result: passed
+    reason:
+      text: "approved_run_command_still_confirms_dangerous_input passes: with
+        run_command in approved, a plain command produces 0 confirmations and rm
+        -rf produces 1. Read security.rs myself: the dynamic-escalation branch
+        that upgrades an Approved exec tool per-input is untouched by this
+        change, and the UI only ever writes the two lists via policy_lists,
+        never a per-input override."
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "**A5**: the UI never writes the same tool id into both `approved` and
+      `denied`: choosing a third state removes the id from the other list, so a
+      tool that was 自动执行 and becomes 拒绝 lands only in `denied`."
+    result: passed
+    reason:
+      text: "Structural, and I confirmed it in code: PolicyState is a single
+        three-valued enum per row, so one tool id cannot be in both states in
+        the draft; policy_lists emits an id into at most one list and skips Auto
+        for tools whose default already is Auto.
+        choosing_a_state_clears_the_other_lists and
+        policy_rows_fold_into_two_lists_without_redundant_entries pass, showing
+        Auto->Deny lands only in denied."
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: '**A6**: changing `max_parallel_tools` to `1` at runtime makes the next
+      tool-call batch observe a maximum of one call in flight, and changing
+      `retrieval_max_tokens` to `500` makes the next retrieval request carry
+      `max_tokens: 500`, both without rebuilding the bridge or restarting;
+      writing `0` instead means "unset" and resolves back to `4`/`8000`, never
+      to unlimited (the R3-17 trap).'
+    result: passed
+    reason:
+      text: "max_parallel_tools_written_to_handle_bounds_next_turn (observed in-flight
+        maximum 1 after set_run_settings on a bridge built with 4, all four
+        results present) and
+        retrieval_budget_written_to_handle_reaches_next_query (budget 500 seen
+        at the retrieval call, 8000 supplied at assembly) pass by name, both
+        without rebuilding the bridge. The R3-17 trap is closed on both sides:
+        apply_snapshot_returns_to_defaults_when_unset_again resolves 0 back to 4
+        and max_parallel_tools_zero_means_default_not_unlimited keeps the
+        storage rule."
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "**A7**: changing `confirm_timeout_secs` to `1` at runtime makes the
+      *next* confirmation request expire in about a second instead of 300;
+      changing `command_timeout_secs` to `1` makes the *next* `run_command` kill
+      a slow command at about a second instead of 60."
+    result: passed
+    reason:
+      text: confirm_timeout_written_to_handle_expires_next_request passes (handle
+        starts at 300s, written to 1s, next request expires with the i18n'd
+        timeout text);
+        command_timeout_written_to_shared_handle_applies_next_call and
+        output_cap_written_to_shared_handle_applies_next_call pass, both
+        observing the new value on the second call of the same tool instance.
+        Confirmed in code that RunCommand and the executor share one
+        Arc<RwLock<ToolParams>> written by settings_io::apply_snapshot.
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "**A8**: changing `context.tree_max_depth` to `1` at runtime makes the
+      next directory-tree summary shorter than the default depth-4 summary, and
+      `context.max_keywords` to `2` makes the next keyword extraction keep at
+      most 2 keywords in order."
+    result: passed
+    reason:
+      text: retrieval_limits_written_to_shared_handle_apply_next_retrieve and
+        keyword_cap_written_to_shared_handle_applies_next_retrieve pass by name
+        through the public retrieve(), i.e. the value is read at the point of
+        use, not cached; the pre-existing
+        configured_keyword_cap_keeps_first_in_order still passes unchanged, and
+        OnDemandProvider holds one shared RetrievalLimits that apply_snapshot
+        writes.
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "**A9**: a field holding `abc`, a value above its documented cap, and a
+      field left empty are handled distinctly: the first two produce a per-field
+      i18n'd error and no write at all; the empty one is a valid \"unset\" that
+      writes `0`. If the daemon rejects one key mid-batch, the report names the
+      keys already written and the failed key with its reason, and the panel
+      stays open with the failed value still visible."
+    result: passed
+    reason:
+      text: "All four clauses verified independently. (a) No write at all:
+        handle_save_button validates every SettingsNumInput before touching msg,
+        collects rejected, and returns before writer.write;
+        invalid_number_blocks_the_whole_save asserts saved_messages is empty and
+        the status line names the field and the i18n'd reason; over-cap takes
+        the identical Err branch and field_error_text renders
+        settings-error-out-of-range with the max. (b) Empty writes 0: proven on
+        the emitted message, not only in the parser --
+        changed_fields_are_written_with_their_daemon_keys asserts the ConfigItem
+        for the emptied tools.confirm_timeout_secs carries json!(0). (c) Naming:
+        apply_save_report renders settings-written-keys with ev.written joined
+        by the corpus settings-list-sep, then settings-failed-prefix and per-key
+        settings-failed-item with the daemon reason;
+        partial_save_reports_written_and_failed_keys asserts both landed key
+        names, the failed key, the reason, and explicitly that no bare count
+        digit appears. (d) Rejected value stays visible: I re-derived the
+        ordering myself. toggle_panel gates only on snapshot.tick >
+        *last_rendered (Local<u32>) and never calls is_changed(); drain_save
+        advances tick and lands ready.error only when report.failed is empty and
+        otherwise never deref_mut's ready. I confirmed in ../bevy
+        change_detection/traits.rs that DerefMut::deref_mut calls set_changed()
+        unconditionally and that merely acquiring ResMut does not, so a failed
+        save leaves the resource untouched and the panel cannot be rebuilt out
+        from under the edit. Ran the three app cases plus the panel case by
+        name: a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame
+        (real SettingsPanelPlugin plus real drain_snapshot/drain_save in one
+        App), drain_save_advances_the_render_counter_only_when_every_key_landed,
+        a_clean_save_surfaces_a_re_read_failure_and_a_rejected_one_does_not,
+        failed_save_keeps_the_rejected_value_on_screen -- all pass, and the
+        panel stays open in both."
+      truncated: false
+  - id: A10
+    source: brief.md
+    text: "**A10**: `config.read`/`config.write` with `scope=project` and a project
+      root return and persist `[tool_policy]`/`[agent]`/`[tools]`/`[context]`
+      values in `<project>/.xgent/config.toml`, reject an unknown key with `未知配置
+      key` exactly as the global path does, and broadcast `config.changed` only
+      to clients subscribed to that project (a second window on a different
+      project is not notified). `scope=project` without a resolvable root is
+      rejected rather than silently treated as global."
+    result: passed
+    reason:
+      text: "Ran the cited daemon cases by name under the mandated sandboxed HOME:
+        project_write_lands_on_disk_and_reads_back,
+        project_read_of_whole_config_covers_every_section (all four sections),
+        project_read_seeds_from_disk_on_first_access,
+        project_cache_is_per_root_not_shared,
+        project_unknown_key_reads_null_and_write_errors,
+        project_config_write_notifies_only_that_projects_subscribers,
+        project_config_without_root_is_rejected_not_downgraded,
+        project_config_with_missing_directory_is_rejected -- all pass, so the
+        file path, the per-root cache, the unknown-key rejection and the
+        root-scoped broadcast are behaviourally covered.
+        legacy_wire_without_project_root_still_parses passes, confirming old
+        clients are unaffected."
+      truncated: false
+  - id: A11
+    source: brief.md
+    text: "**A11**: writing `providers.openai.context_window = 32000` over IPC
+      succeeds (it is no longer `未知配置 key`), invalidates the provider pool as
+      other `providers.*` writes do, and the next conversation's compaction
+      decision uses the new window; `max_output_tokens` and
+      `first_event_timeout_secs` round-trip through the daemon and reach the
+      provider built for the next request."
+    result: passed
+    reason:
+      text: "write_provider_context_limit_fields_reach_config passes
+        (context_window/max_output_tokens/first_event_timeout_secs write, read
+        back, land in the coordinator and resolve),
+        provider_write_invalidates_the_pool_cache and
+        non_provider_write_keeps_the_pool_cache pass so invalidation is scoped
+        to providers.*, and unknown_global_provider_field_still_errors plus
+        model_context_windows_is_readable_but_not_writable_as_a_field bound the
+        whitelist. The compaction clause is behavioural, not handle-only:
+        runtime_narrowed_window_drives_the_next_compaction_decision passes, and
+        I checked xgent_provider myself for the claim it reaches a built
+        provider -- build_provider_passes_new_config_keys passes (that crate's
+        whole suite is green, 50 tests, although A14 never listed it)."
+      truncated: false
+  - id: A12
+    source: brief.md
+    text: "**A12**: a second UI window on the same project, without any interaction
+      of its own, updates its displayed values and its live tool policy after
+      the first window saves — driven by `config.changed`;
+      `GlobalConfigRes`/`ProjectConfigRes` reflect the new state."
+    result: passed
+    reason:
+      text: "Each link verified where it lives and by name: daemon-side routing
+        (project_config_write_notifies_only_that_projects_subscribers, carries
+        project_root and scope), the receiving window's filter
+        concerns_root_filters_peer_changes_by_scope_and_root,
+        apply_snapshot_replaces_every_handle for the live policy, and
+        drain_snapshot which writes GlobalConfigRes/ProjectConfigRes and always
+        advances tick, so an untouched window repaints.
+        snapshot_refresh_keeps_the_pending_policy_choice guards the draft across
+        that repaint. Boundary, not a defect: no test launches two GUI
+        processes."
+      truncated: false
+  - id: A13
+    source: brief.md
+    text: "**A13**: every new user-visible string exists in both
+      `crates/xgent_settings/locales/zh-CN/main.ftl` and `.../en-US/main.ftl`,
+      punctuation included; deleting one key from `en-US` fails the guard test,
+      and the English panel renders no Chinese punctuation."
+    result: passed
+    reason:
+      text: "I read the guard rather than trusting it:
+        every_panel_key_exists_in_both_locales harvests settings-* literals from
+        the real source via include_str! and asserts each renders differently
+        from its own name in BOTH bundles, which is exactly a
+        delete-a-key-from-en-US failure (Localizer falls back to the key).
+        settings-written-keys is a literal at settings_panel.rs:1706 so it is in
+        the scanned set, and I confirmed the values by hand: zh 已写入：{ $keys } /
+        en written: { $keys }. On the Fluent isolation marks the suite compares
+        through a visible() helper that strips U+2066..U+2069, and
+        punctuation_belongs_to_the_corpus_not_to_rust renders
+        settings-failed-item with real arguments in both locales (a：b / a: b),
+        so the key names are present contiguously rather than swallowed; the
+        report's separators and colons come from settings-list-sep /
+        settings-report-sep, never Rust literals, and
+        english_panel_text_has_no_cjk_except_language_names plus
+        config_write_errors_avoid_fullwidth_punctuation keep Chinese punctuation
+        out of the English path. 3 i18n tests pass by name. Caveat reported
+        below: daemon rejection reasons are still Chinese prose surfaced
+        verbatim inside the English report."
+      truncated: false
+  - id: A14
+    source: brief.md
+    text: "**A14**: `cargo test -p xgent_settings_core --lib`, `-p xgent_daemon
+      --lib`, `-p xgent_tools --lib`, `-p xgent_context --lib`, `-p xgent_agent
+      --lib`, `-p xgent_ui --lib`, `cargo test -p xgent_ui --test
+      settings_input_focus`, `cargo check --workspace --all-targets` and `cargo
+      fmt -p <crate> -- --check` for every touched crate pass, with all
+      pre-existing tests untouched in behaviour. The GUI-only paths (actual
+      mouse interaction with the new rows) are recorded as such rather than
+      claimed."
+    result: passed
+    reason:
+      text: "Runtime c1-c13 are bound evidence for this candidateId (all suites, cargo
+        check --workspace --all-targets, per-crate fmt). I additionally re-ran
+        by name rather than trusting the handoff: every test name cited in it
+        greps to real source (the two that did not were my own transcription
+        truncations -- the real names are
+        project_unknown_key_reads_null_and_write_errors and
+        english_panel_text_has_no_cjk_except_language_names), and the quoted
+        numbers are true: settings_panel_values 19 / settings_panel_i18n 3 /
+        settings_input_focus 2, xgent_app 21 total (11 in-bin, confirmed
+        independently by the filtered-out count), xgent_ui 114 total,
+        xgent_daemon 54, xgent_tools 136, xgent_context 44, xgent_agent 74.
+        Safety re-verified by me, not claimed: md5 of
+        /Users/xdo/.xgent/agent/config.toml is e1ea7dffa427cf1fb72b0b82e2654e6c
+        before and after the daemon runs and /tmp/xgent-daemon-test-home stayed
+        empty. A14's own text records the GUI-only pointer paths as boundaries
+        rather than claims, and they are indeed recorded. Note taken:
+        xgent_daemon is bin-only so the executed form is cargo test -p
+        xgent_daemon, as the handoff states."
+      truncated: false
+builder_handoff:
+  candidate_id: 3790d1ed-e843-41e5-96cd-e33edaf0bab9
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:ae770b76-78c8-44cc-a8fe-b3d1fcc6dbcc
+  iteration: 7
+  summary:
+    text: >-
+      Iteration 7. The round-6 independent Verifier judged all 14 acceptance
+      items PASS on candidate f3c0a0b1 and published those findings to me, but
+      its final-result used result="pass" where the schema requires
+      passed|failed|blocked, so Runtime rejected it as invalid-data and CLOSED
+      that verifier attempt; the corrected file could no longer attach. Nothing
+      about the implementation was contradicted — Runtime's own instruction now
+      is to resubmit this candidate and re-dispatch a Verifier, which is what
+      this handoff does.
+
+
+      Two seams that same Verifier found by reading the code are fixed here
+      rather than argued about:
+
+      1. apply_save_result dropped the post-save re-read error
+      (SnapshotResult.error), so a daemon that was reachable for the writes but
+      failed the read-back left the panel's top error line stale. drain_save now
+      lands ready.error in the same branch that advances tick (only a rebuild
+      renders that line), and deliberately does NOT touch the resource when a
+      key was rejected — a rebuild there would wipe the rejected value the user
+      must still see, and in that case the per-key report is what explains the
+      outcome. Both halves are asserted by
+      a_clean_save_surfaces_a_re_read_failure_and_a_rejected_one_does_not;
+      mutant M45 (delete the assignment) fails it.
+
+      2. Stale evidence numbers: A1's note still said settings_panel_values ->
+      18 passed (that suite is 19 now); corrected, and every per-crate number
+      below was re-run on this candidate.
+
+
+      A9's frame-order part is unchanged from iteration 5/6 and was
+      independently re-confirmed by that Verifier (toggle_panel rebuilds only on
+      a tick delta; is_changed() is absent; a rejected save never dirties
+      SettingsSnapshotReady; drain_snapshot, the only other producer, always
+      advances tick in the same write). The naming clause added in iteration 6
+      was also re-checked by it offline against real Fluent rendering in both
+      locales. Confirmed scope, key set and acceptance text are unchanged.
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_ui/tests/settings_panel_values.rs::panel_opens_with_the\
+          _stored_values — sets api_base='https://example.test/v1' and [agent]
+          max_parallel_tools=2 through the resources, opens the panel, then
+          reads the components: ApiBaseInput/ApiKeyInput/ModelInput EditableText
+          equal the stored values and the max_parallel_tools input shows '2'.
+          Ran myself: cargo test -p xgent_ui --test settings_panel_values -> 19
+          passed."
+        - reopening_the_panel_redraws_the_same_values — close + reopen still
+          shows '2' and the stored api_base (the pre-change panel showed
+          blanks).
+        - unset_field_shows_effective_default_and_says_so — default config shows
+          '4' and '8000' and the settings-field-unset hint node exists; mutant
+          M19 (EditableText::default(), i.e. no prefill) fails 5 of these tests.
+      note: "Values come from GlobalConfigRes/ProjectConfigRes, which xgent_app now
+        fills from the daemon (settings_io::drain_snapshot) instead of the panel
+        guessing. Suite re-run for this candidate: settings_panel_values 19
+        passed."
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - settings_panel_values.rs::policy_rows_display_the_resolved_answer —
+          with an empty [tool_policy], read_file/write_file show Ask and the
+          registered UiOnly editor tool shows Auto; after denied=[read_file] the
+          same row shows Deny.
+        - xgent_tools/src/executor.rs::resolved_policy_agrees_with_execution_rules
+          — the display path calls the same resolve_policy the executor uses
+          (UiOnly -> Approved with no config; denied beats approved for the same
+          id).
+        - "Disk half:
+          xgent_daemon/src/config_store.rs::project_tool_policy_lists_replace_a\
+          nd_persist reads <root>/.xgent/config.toml back after the write;
+          settings_panel_values.rs::changed_fields_are_written_with_their_daemo\
+          n_keys proves the UI emits the daemon key names."
+      note: The brief's wording says `model_context`/resolve_policy; the executable
+        half is resolve_policy via ToolExecutor::resolved_policy.
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - "xgent_tools/src/executor.rs::denied_tool_is_refused_after_policy_han\
+          dle_changes — now loops over BOTH `read_file` and `run_command`: each
+          id pushed into the shared policy handle yields ToolResult{denied:true,
+          is_error:true}, and the counting confirm callback recorded 0 requests
+          across both calls (so denial precedes confirmation and precedes
+          run_command's per-input escalation)."
+        - settings_panel_values.rs::choosing_a_state_clears_the_other_lists —
+          clicking 拒绝 on run_command's row... (asserted for read_file) emits
+          tool_policy.denied=[read_file] and tool_policy.approved=[] rather than
+          only the denied list.
+        - xgent_daemon/src/config_store.rs::project_tool_policy_lists_replace_and_persist
+          proves the denied list lands on disk under <root>/.xgent/config.toml.
+      note: "Corrected after the Verifier: my first handoff cited this test as if it
+        denied run_command. It now does, alongside read_file, so the item's own
+        tool id is exercised."
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - "xgent_tools/src/executor.rs::approved_run_command_still_confirms_dan\
+          gerous_input — same approved config: `cargo check`-style plain command
+          0 confirmations, `rm -rf …` 1 confirmation."
+        - xgent_tools/src/security.rs::dangerous_input_forces_confirmation_even_when_approved
+          (pre-existing, unmodified) still passes.
+      note: "The UI cannot silence dynamic escalation: policy_lists writes the id,
+        resolve_policy's escalation branch is untouched."
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - settings_panel.rs::policy_lists (pure) +
+          settings_panel_values.rs::policy_rows_fold_into_two_lists_without_redundant_entries
+          and choosing_a_state_clears_the_other_lists — Auto adds to approved
+          and removes from denied, Deny the mirror, Ask removes from both;
+          UiOnly defaults are not recorded at all (mutant M18 fails).
+      note: "Invariant is structural: the row state is one enum, so the same id cannot
+        land in both lists."
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - xgent_agent/src/bridge_tests.rs::max_parallel_tools_written_to_handle_bounds_next_turn
+          — probe_app built with cap 4, then bridge.set_run_settings(cap 1);
+          observed in-flight maximum is 1 with all four results present.
+        - retrieval_budget_written_to_handle_reaches_next_query —
+          RecordingContext.last_budget() == Some(500) after writing the handle,
+          with 8000 supplied at assembly.
+        - xgent_app/src/settings_io.rs::apply_snapshot_returns_to_defaults_when_unset_again
+          — writing 0 back resolves to 4, and an unconfigured provider resolves
+          to the built-in 128_000 window.
+        - xgent_settings_core/src/project.rs::max_parallel_tools_zero_means_default_not_unlimited
+          and
+          xgent_daemon/src/config_store.rs::writing_zero_to_provider_limits_keeps_the_unset_sentinel
+          keep the sentinel semantics pinned at the storage and daemon layers.
+      note: M6 (loop ignores the handle) fails 9 agent tests, so the read point is
+        proven, not just the field's existence.
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - xgent_tools/src/executor.rs::confirm_timeout_written_to_handle_expires_next_request
+          — handle starts at the built-in 300s, written to 1s, next confirmation
+          expires with 确认请求超时 in about a second (mutant M3 makes the suite take
+          301s).
+        - xgent_tools/src/builtins/run_command.rs::command_timeout_written_to_shared_handle_applies_next_call
+          and output_cap_written_to_shared_handle_applies_next_call — the second
+          call in the same tool instance observes the new timeout/cap; M4 fails
+          4 tools tests.
+      note: Both consumers hold the same Arc<RwLock<ToolParams>> the executor was
+        built with, written by settings_io::apply_snapshot.
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - "xgent_context/src/on_demand.rs::retrieval_limits_written_to_shared_h\
+          andle_apply_next_retrieve — through the public retrieve(): depth 4
+          lists src/sub/deep.rs, writing 1 removes it while src/top.rs stays."
+        - keyword_cap_written_to_shared_handle_applies_next_retrieve — cap 4
+          retrieves beta.txt, cap 1 does not but still retrieves alpha.txt
+          (order preserved).
+        - Pre-existing configured_keyword_cap_keeps_first_in_order still passes
+          unchanged.
+      note: M5 (limits frozen at construction) fails both new context tests.
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - "apply_save_report now NAMES the keys that landed: the failed branch
+          renders tr_with(\"settings-written-keys\", keys =
+          ev.written.join(list_sep)) plus the failed key and the daemon's
+          reason;
+          settings_panel_values.rs::partial_save_reports_written_and_failed_keys
+          asserts the status line contains both tool_policy.denied and
+          agent.max_parallel_tools and that no bare digit is left (mutant M43,
+          pushing tr_with_saved(len) instead, fails it with 1 failed). Before
+          this round ev.written was read nowhere in xgent_ui, which is the
+          clause the Verifier rejected."
+        - "Message-level unset sentinel:
+          changed_fields_are_written_with_their_daemon_keys empties
+          tools.confirm_timeout_secs and asserts the emitted ConfigItem value is
+          json!(0) — 'the empty one is a valid \"unset\" that writes 0' proven
+          on the message the panel emits, not only in parse_num_field. Mutant
+          M44 (Sentinel empty -> Unchanged) fails 2 tests."
+        - "xgent_app/src/settings_io.rs::a_failed_save_leaves_the_rejected_valu\
+          e_in_the_real_panel_frame — end-to-end in one App with the real
+          systems: open panel -> push_snapshot (tick advances, panel rebuilds to
+          the disk value 4) -> user types 7 -> push a SaveTaskResult whose
+          report rejects context.tree_max_depth -> assert tick unchanged, the
+          box still reads 7 and the panel is still open -> push_snapshot with 6
+          -> the box rebuilds to 6. No side's logic is replicated in the test;
+          the ordering is Bevy's own. Mutant M41 (drain_save ignores
+          report.failed) and M42 (panel never rebuilds) each fail it."
+        - xgent_app/src/settings_io.rs::drain_save_advances_the_render_counter_only_when_every_key_landed
+          — clean batch +1, batch with one rejected key +0, batch where every
+          key failed +0.
+        - "crates/xgent_ui/tests/settings_panel_values.rs::failed_save_keeps_th\
+          e_rejected_value_on_screen — pins the panel's rule in isolation: a
+          frame that marks the resource dirty and rewrites ProjectConfigRes
+          while tick does not move must NOT rebuild (this is the exact condition
+          that killed rounds 2 and 3), and the next real tick advance must
+          rebuild. Mutant M40 (revert the gate to is_changed() && tick > 0)
+          fails only this test, which is why the rule is asserted separately
+          from the integration case."
+        - "xgent_ui/src/settings_panel.rs::toggle_panel — the rebuild trigger is
+          `snapshot.tick > *last_rendered` with `last_rendered: Local<u32>`; the
+          spawn branch syncs it, the close branch leaves it. is_changed() is not
+          consulted anywhere in the panel."
+        - xgent_app/src/settings_io.rs::provider_writes_are_detected_from_the_report
+          + refresh_provider_after_save — the provider re-fetch still happens
+          after providers.* writes (the daemon-side half,
+          session.rs::provider_write_invalidates_the_pool_cache, is unchanged).
+        - "Unchanged from earlier rounds: invalid_number_blocks_the_whole_save
+          (per-field i18n'd error, nothing written),
+          empty_input_means_unset_or_unchanged_by_mode (Sentinel empty -> 0,
+          Plain empty -> untouched, 'abc' and over-cap rejected),
+          partial_save_reports_written_and_failed_keys, and the daemon side
+          project_write_wrong_type_names_the_field_and_keeps_previous_value /
+          failed_project_save_leaves_memory_unchanged."
+        - xgent_app/src/settings_io.rs::a_clean_save_surfaces_a_re_read_failure_and_a_rejected_one_does_not
+          — the post-save re-read error is landed into
+          SettingsSnapshotReady.error only in the all-succeeded branch (that is
+          the branch that may rebuild, and rebuilding is the only way the top
+          error line repaints); with a rejected key the resource is untouched
+          and the per-key report carries the outcome. Mutant M45 (drop the
+          assignment) fails this test.
+      note: Success path still reports a count in the toast that closes the panel;
+        naming is rendered in the report that stays on screen. On a
+        partially-failed save the snapshot-read reason is intentionally not
+        shown in the top line, because showing it requires the rebuild that
+        would erase the rejected value — the per-key report states what landed
+        and what did not. The three-round frame-order problem stays closed by
+        the tick-delta gate plus the no-touch-on-failure rule (integration case
+        + M40/M41/M42).
+    - id: A10
+      status: implemented-with-evidence
+      evidence:
+        - xgent_daemon/src/config_store.rs::project_write_lands_on_disk_and_reads_back,
+          project_tool_policy_lists_replace_and_persist,
+          project_read_of_whole_config_covers_every_section,
+          project_read_seeds_from_disk_on_first_access,
+          project_cache_is_per_root_not_shared,
+          project_unknown_key_reads_null_and_write_errors,
+          corrupt_project_toml_reports_the_file_path,
+          failed_project_save_leaves_memory_unchanged.
+        - xgent_daemon/src/session.rs::project_config_write_notifies_only_that_projects_subscribers
+          (second client on another root receives nothing; notification carries
+          project_root/scope/value),
+          project_config_without_root_is_rejected_not_downgraded,
+          project_config_with_missing_directory_is_rejected,
+          legacy_global_read_still_works_without_project_root.
+        - xgent_core/src/config.rs::legacy_wire_without_project_root_still_parses.
+      note: cargo test -p xgent_daemon -> 54 passed (that package is bin-only with no
+        tests/ directory, so the plain per-package form is what runs; Runtime's
+        c4 now wraps it in a sandboxed HOME).
+    - id: A11
+      status: implemented-with-evidence
+      evidence:
+        - xgent_daemon/src/config_store.rs::write_provider_context_limit_fields_reach_config
+          — context_window/max_output_tokens/first_event_timeout_secs write,
+          read back, land in the coordinator, and resolve to the new effective
+          values; M12 (arm removed) fails 3 daemon tests.
+        - model_context_windows_is_readable_but_not_writable_as_a_field and
+          unknown_global_provider_field_still_errors.
+        - session.rs::provider_write_invalidates_the_pool_cache — pool.get
+          before/after a providers.* write returns a different Arc;
+          non_provider_write_keeps_the_pool_cache shows the invalidation is not
+          a blanket clear (M25 fails the first).
+        - xgent_daemon already rebuilds providers via
+          xgent_provider::build_provider, and the pre-existing
+          build_provider_passes_new_config_keys pins that
+          max_output_tokens/first_event_timeout_secs reach the constructed
+          provider.
+        - "New note: max_output_tokens is only sent by the Anthropic adapter, so
+          the panel labels that field 'settings-field-anthropic-only' instead of
+          presenting it as universally effective
+          (field_table_mirrors_core_defaults asserts the label; M32 removes it
+          and fails)."
+        - xgent_agent/src/bridge_tests.rs::runtime_narrowed_window_drives_the_next_compaction_decision
+          — control run keeps a 1_000_000 window and prompt=9999 produces no
+          CompactedMessage; the experiment replaces the window with 10 through
+          bridge.set_run_settings AFTER AgentBridge::new (the same handle the
+          panel save writes) and the next conversation does compact, i.e. the
+          compaction decision reads the runtime window per StartLoop. Mutant M37
+          (loop ignores settings.context_window) fails it.
+      note: A11's compaction clause is now behavioural, not only 'the handle carries
+        the new number' (apply_snapshot_replaces_every_handle). No real provider
+        is contacted; MockProvider reports the usage.
+    - id: A12
+      status: implemented-with-evidence
+      evidence:
+        - session.rs::project_config_write_notifies_only_that_projects_subscribers
+          proves a peer on the same root receives config.changed with the root,
+          and a peer on another root does not.
+        - xgent_app/src/settings_io.rs::concerns_root_filters_peer_changes_by_scope_and_root
+          pins the receiving window's filter (global always; project only for
+          its own root; missing root ignored).
+        - "apply_snapshot_replaces_every_handle + panel resync:
+          apply_peer_change re-reads both configs, drain_snapshot writes
+          GlobalConfigRes/ProjectConfigRes and advances
+          SettingsSnapshotReady.tick, and toggle_panel rebuilds on that delta
+          (a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame
+          drives exactly this path through push_snapshot;
+          reopening_the_panel_redraws_the_same_values covers the spawn path)."
+        - snapshot_refresh_keeps_the_pending_policy_choice — an unsaved policy
+          draft survives the tick-driven re-render, so the peer-refresh path
+          cannot make the highlight disagree with what the save would write (M31
+          fails if the draft is dropped again).
+      note: "Two real windows in one process are not run: the notification routing,
+        the filter and the apply are each tested where they live, but no test
+        opens two GUI processes. Recorded as a boundary rather than claimed."
+    - id: A13
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/tests/settings_panel_i18n.rs —
+          every_panel_key_exists_in_both_locales scans settings_panel.rs for the
+          "settings-*" literals actually used (44 new keys including the
+          Anthropic-only note, plus the two dynamically formatted language
+          labels) and fails if either bundle lacks one;
+          english_panel_text_has_no_cjk_except_language_names rejects CJK in
+          English values; punctuation_belongs_to_the_corpus_not_to_rust checks
+          the separators and the 'key：reason' shape per locale on visible text
+          (fluent wraps placeables in U+2066..U+2069).
+        - M26 (delete one en-US key) and M27 (Chinese separator in en-US) each
+          fail exactly one test; field_table_mirrors_core_defaults requires the
+          Anthropic-only note to stay present (M32).
+        - "xgent_daemon/src/config_store.rs::config_write_errors_avoid_fullwidt\
+          h_punctuation — the daemon's rejection reason is shown verbatim inside
+          the panel's per-key report, so three messages that read '期望…，收到: …'
+          and the model_context_windows read-only message (which used full-width
+          parentheses) were rewritten to half-width, and this test asserts no
+          CJK punctuation survives in six global/project rejection paths.
+          Boundary recorded honestly: the reason text itself stays Chinese — the
+          daemon has no Localizer and internationalising daemon diagnostics
+          would need a protocol change (error code + args), which is outside
+          this capability."
+        - "New key settings-written-keys added to BOTH bundles (zh '已写入：{ $keys
+          }' / en 'written: { $keys }'); the key list is joined with the
+          corpus's own settings-list-sep (zh 、 / en ', ') rather than a Rust
+          literal, so no separator or colon is invented in code.
+          every_panel_key_exists_in_both_locales scans the literals actually
+          used in settings_panel.rs and now covers this key;
+          english_panel_text_has_no_cjk_except_language_names and
+          punctuation_belongs_to_the_corpus_not_to_rust still pass
+          (xgent_settings 14 passed)."
+      note: The existing xgent_settings guard all_keys_present_in_both_langs passes
+        unchanged (14 in that crate), and settings_panel_i18n's three tests
+        (both-locale key scan, no-CJK-in-English-values, punctuation owned by
+        the corpus) still pass after the daemon wording change.
+    - id: A14
+      status: implemented-with-evidence
+      evidence:
+        - "Per-crate results re-run on THIS candidate (iteration 7), all 0
+          failures: xgent_core 36, xgent_settings_core 44, xgent_settings 14,
+          xgent_daemon 54 (HOME sandboxed), xgent_tools 136, xgent_context 44,
+          xgent_agent 74, xgent_app 21 (11 in-bin tests incl. the real-frame A9
+          case and the new re-read-error case, + the 10 ipc integration
+          targets), xgent_ui 114 (lib 62, settings_panel_values 19,
+          settings_panel_i18n 3, settings_input_focus 2, interaction_model 7,
+          file_preview 7, ...). cargo check --workspace --all-targets passed;
+          cargo fmt -p <crate> -- --check clean for all nine crates; clippy
+          attributes no warning to the files this change touched this round."
+        - "The GUI regression net was repaired rather than removed:
+          every_settings_input_carries_tab_index guards the component contract
+          behind the historical defect (M29 proves it bites), the keyboard
+          dispatch half stays in settings_panel_input_accepts_typing, and the
+          pick mechanism itself stays in tests/interaction_model.rs. Deleting
+          TabIndex(0) no longer passes the suite."
+        - "`cargo test -p xgent_daemon --lib` as literally written in A14 has no
+          lib target for that bin crate; the executed equivalent is `cargo test
+          -p xgent_daemon`, and it now leaves the developer's
+          ~/.xgent/agent/config.toml untouched (md5 stable across a run, zero
+          fixture entries), which is what the previous candidate did not do."
+        - "Daemon suite executed under a sandboxed HOME
+          (/tmp/xgent-daemon-test-home) as an extra blast-radius limit: the fake
+          home produced no config.toml and the developer's real
+          ~/.xgent/agent/config.toml keeps md5 e1ea7dffa427cf1fb72b0b82e2654e6c
+          before and after. Runtime's c4 encodes the same sandbox so a future
+          isolation regression cannot reach the user's file through the formal
+          check either."
+        - "Round-3 mutation batch: M33 1 failed / M34 1 failed / M35 1 failed /
+          M37 1 failed / M38 1 failed, each caught by the test named in its
+          acceptance item; every test name cited anywhere in this handoff was
+          grep-verified in source before submitting (the previous iteration's
+          phantom test is the reason)."
+        - "Mutation batches across iterations 5-7, each caught by the test that
+          should catch it: M40 (panel gate reverted to is_changed) 1 failed in
+          xgent_ui only — the asymmetry is structural since xgent_ui cannot
+          dev-depend on xgent_app; M41 (advance tick without checking failed) 1
+          failed in xgent_app; M42 (panel never rebuilds on a tick delta) 1
+          failed; M43 (report falls back to a bare count) 1 failed; M44
+          (Sentinel empty treated as unchanged) 2 failed; M45 (drop the re-read
+          error assignment) 1 failed; plus the re-run of M33/M34/M35/M37/M38
+          from earlier iterations. Every test name cited in this handoff and in
+          doc/ was grep-verified in source and run by name."
+      note: "Two boundaries recorded rather than papered over: (1) a real mouse press
+        on a settings row in a live window is not automatically testable here —
+        headless Bevy in this workspace yields no child-node coordinates (no
+        UiRoot, the panel root measures 0x0), so the pre-existing
+        settings_input_focus.rs keeps its keyboard-dispatch half, gains
+        every_settings_input_carries_tab_index as the component contract behind
+        the historical defect, and the pointer-geometry hop stays
+        human-verified; (2) no test opens two live GUI processes."
+  checks:
+    - name:
+        text: cargo test -p xgent_app
+        truncated: false
+      result: passed
+      note:
+        text: "21 passed (11 in-bin: real-frame A9 case, tick-counter rule,
+          re-read-error rule, touches_provider, apply_snapshot/live handles,
+          provider_client; + 10 ipc integration targets)"
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test settings_panel_values --test
+          settings_panel_i18n --test settings_input_focus
+        truncated: false
+      result: passed
+      note:
+        text: 19 / 3 / 2 passed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui
+        truncated: false
+      result: passed
+      note:
+        text: 114 passed across lib + every integration target
+        truncated: false
+    - name:
+        text: cargo test -p xgent_daemon (HOME sandboxed)
+        truncated: false
+      result: passed
+      note:
+        text: 54 passed; nothing landed in the fake home; developer config md5
+          e1ea7dffa427cf1fb72b0b82e2654e6c unchanged
+        truncated: false
+    - name:
+        text: cargo test -p xgent_core -p xgent_settings_core -p xgent_settings -p
+          xgent_tools -p xgent_context -p xgent_agent
+        truncated: false
+      result: passed
+      note:
+        text: 36 / 44 / 14 / 136 / 44 / 74, 0 failures
+        truncated: false
+    - name:
+        text: cargo check --workspace --all-targets
+        truncated: false
+      result: passed
+      note:
+        text: clean
+        truncated: false
+    - name:
+        text: cargo fmt -p <crate> -- --check (all nine crates)
+        truncated: false
+      result: passed
+      note:
+        text: clean; never cargo fmt --all (it rewrites the ../bevy checkout)
+        truncated: false
+    - name:
+        text: cargo clippy -p xgent_app -p xgent_ui -p xgent_settings --all-targets
+        truncated: false
+      result: passed
+      note:
+        text: no warning attributed to files this change touched this round; remaining
+          warnings live in crates the change did not edit
+        truncated: false
+    - name:
+        text: mutation batches (iterations 5-7)
+        truncated: false
+      result: passed
+      note:
+        text: M40/M41/M42/M43/M44/M45 each fail exactly their catcher;
+          M33/M34/M35/M37/M38 re-run still caught
+        truncated: false
+    - name:
+        text: user-data safety
+        truncated: false
+      result: passed
+      note:
+        text: daemon suite under sandboxed HOME; isolation helper + its own guard test
+          (M34) hold; config md5 identical before/after
+        truncated: false
+    - name:
+        text: cargo clippy --workspace / cargo test --workspace
+        truncated: false
+      result: not-run
+      note:
+        text: each links the whole bevy graph and costs a long rebuild here; per-crate
+          suites + check --workspace --all-targets + clippy over touched crates
+          are the coverage instead
+        truncated: false
+    - name:
+        text: real GUI window interaction (mouse click on a policy row, panel scrolling,
+          two live windows)
+        truncated: false
+      result: not-run
+      note:
+        text: cannot be driven headlessly in this workspace; recorded as a boundary
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: GUI pointer chain (PointerPress -> AcquireFocus on a settings row, and
+        panel scrolling) is human-verified only; headless Bevy in this workspace
+        produces no child-node coordinates without a UiRoot, so display/save
+        assertions read components and the TabIndex contract is guarded as a
+        component assertion.
+      truncated: false
+    - text: "No two-window end-to-end run: daemon routing, the receiving window's root
+        filter (concerns_root) and the apply path (apply_snapshot) are each
+        tested where they live, but no test launches two GUI processes."
+      truncated: false
+    - text: "Damage already done and not undoable: the developer's previous
+        ~/.xgent/agent/config.toml content was overwritten by the un-isolated
+        tests before the fix landed. It is now a pristine default; the
+        contaminated snapshot is at /tmp/xgent-config.test-contaminated.toml.
+        Future runs are isolated and the isolation itself is under test."
+      truncated: false
+    - text: The brief's A14 lists `cargo test -p xgent_daemon --lib`; that package is
+        bin-only, so the executed form is `cargo test -p xgent_daemon`.
+      truncated: false
+    - text: Concurrent edits of the same key from two windows stay last-write-wins; a
+        save that partially succeeded is not rolled back (each key is
+        independent and the report says exactly which landed).
+      truncated: false
+    - text: "Keys outside the panel remain TOML-only by decision: theme (single dark
+        preset, no consumer), plugin
+        enabled/auto_update/auto_install/plugin_settings (update_plugin_settings
+        has no caller), context_strategy (stubs exit(2)), provider_override,
+        model_override (dead key), extra_headers and the model_context_windows
+        table."
+      truncated: false
+    - text: "No real-provider latency or cost measurement: this change proves
+        configured values are read at their point of use."
+      truncated: false
+    - text: max_output_tokens stays an Anthropic-only knob; the panel now labels it as
+        such rather than removing it, since the daemon does send it for that
+        kind.
+      truncated: false
+    - text: xgent_tools still depends on bevy for one derive (ToolExecutorResource),
+        so AGENTS.md §4's 'not dependent on Bevy' line remains inaccurate —
+        recorded in ledger §九, untouched here.
+      truncated: false
+    - text: Daemon config-rejection reasons are surfaced verbatim in the panel and
+        remain Chinese sentences (now free of full-width punctuation).
+        Internationalising them needs an error-code protocol on the daemon side
+        and is out of this capability's scope.
+      truncated: false
+    - text: "Runtime's c4 deliberately runs the daemon suite with
+        HOME=/tmp/xgent-daemon-test-home: the in-test isolation
+        (isolate_agent_dir) is the fix, the sandbox is the blast-radius limit
+        for the next regression."
+      truncated: false
+    - text: "The panel's redraw decision is a monotone counter
+        (SettingsSnapshotReady.tick) compared against the last rendered value,
+        never a Bevy change flag: ResMut::deref_mut marks resources dirty on any
+        write, so is_changed() cannot distinguish 'authoritative values landed'
+        from 'somebody touched the resource'."
+      truncated: false
+    - text: M40 (panel gate reverted to is_changed()) is only visible to the xgent_ui
+        test, not to the xgent_app integration case, because the app no longer
+        dirties SettingsSnapshotReady at all on a failed save; both layers are
+        kept deliberately.
+      truncated: false
+    - text: The success branch still reports a count in the toast that closes the
+        panel; the naming requirement is rendered in the report that stays on
+        screen (partial/failed save). Naming every landed key in the closing
+        toast would be text nobody reads.
+      truncated: false
+    - text: Daemon config-rejection reasons remain Chinese sentences
+        (punctuation-free) surfaced verbatim in the panel; internationalising
+        daemon diagnostics needs an error-code protocol and is out of this
+        capability.
+      truncated: false
+    - text: "On a partially-failed save the snapshot re-read reason is not written to
+        the panel's top line: rendering it requires the rebuild that would erase
+        the rejected value, so the per-key report carries the outcome instead."
+      truncated: false
+    - text: The round-6 verifier's semantic result was 14/14 pass but was rejected for
+        using result="pass" instead of passed|failed|blocked, which closed its
+        attempt; iteration 7 resubmits the same implementation (plus the two
+        read-code seams above) for a fresh verification round.
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-16T03:08:06.136Z
+blockers: []
+verification:
+  candidate_id: 3790d1ed-e843-41e5-96cd-e33edaf0bab9
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:667d5d8b-7be0-4185-95aa-50305bd4e85a
+  iteration: 7
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: c1
+      name:
+        text: cargo test -p xgent_core --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 4387
+    - id: c2
+      name:
+        text: cargo test -p xgent_settings_core --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 4478
+    - id: c3
+      name:
+        text: cargo test -p xgent_settings --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 9882
+    - id: c4
+      name:
+        text: cargo test -p xgent_daemon (HOME sandboxed so a test cannot reach the
+          developer's config)
+        truncated: false
+      argv_display:
+        - text: -lc
+          truncated: false
+        - text: mkdir -p /tmp/xgent-daemon-test-home && HOME=/tmp/xgent-daemon-test-home
+            RUSTUP_HOME=/Users/xdo/.rustup CARGO_HOME=/Users/xdo/.cargo cargo
+            test -p xgent_daemon
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 18237
+    - id: c5
+      name:
+        text: cargo test -p xgent_tools --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 11181
+    - id: c6
+      name:
+        text: cargo test -p xgent_context --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 9591
+    - id: c7
+      name:
+        text: cargo test -p xgent_agent --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 13350
+    - id: c8
+      name:
+        text: cargo test -p xgent_app
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 44418
+    - id: c9
+      name:
+        text: cargo test -p xgent_ui --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 7976
+    - id: c10
+      name:
+        text: cargo test -p xgent_ui --test settings_panel_values --test
+          settings_panel_i18n --test settings_input_focus
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: settings_panel_values
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: settings_panel_i18n
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: settings_input_focus
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 44935
+    - id: c11
+      name:
+        text: cargo check --workspace --all-targets
+        truncated: false
+      argv_display:
+        - text: check
+          truncated: false
+        - text: --workspace
+          truncated: false
+        - text: --all-targets
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 170152
+    - id: c12
+      name:
+        text: cargo clippy -p xgent_core -p xgent_settings_core -p xgent_daemon -p
+          xgent_tools -p xgent_context -p xgent_agent --all-targets
+        truncated: false
+      argv_display:
+        - text: clippy
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --all-targets
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 3217
+    - id: c13
+      name:
+        text: cargo fmt -p <crate> -- --check (9 touched crates)
+        truncated: false
+      argv_display:
+        - text: -lc
+          truncated: false
+        - text: for c in xgent_core xgent_settings_core xgent_settings xgent_daemon
+            xgent_tools xgent_context xgent_agent xgent_ui xgent_app; do cargo
+            fmt -p $c -- --check || exit 1; done; echo 'fmt clean'
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 5984
+  summary:
+    text: "Independent read-and-run verification of candidate 3790d1ed against
+      A1..A14, all 14 items assessed exactly once. Verdict pass. A9 is genuinely
+      closed and I re-derived its ordering story rather than accepting it:
+      toggle_panel rebuilds only on a SettingsSnapshotReady.tick delta
+      (Local<u32>) with no is_changed() anywhere in the panel; drain_save
+      advances tick and lands ready.error only when report.failed is empty and
+      otherwise never derefs the resource; I confirmed in ../bevy that
+      ResMut::deref_mut marks changed unconditionally while acquisition does
+      not, which is what killed round 3. All four A9 clauses are pinned at the
+      message/status level (no write for abc and over-cap, empty emits json!(0),
+      landed keys named by name with the failed key and reason, panel open,
+      rejected value still on screen), including a real-frame test with the real
+      SettingsPanelPlugin plus the real drain_snapshot/drain_save. The M40/M41
+      asymmetry is confirmed real and structural -- xgent_app is bin-only, so
+      its harness is unimportable from xgent_ui. Both-locale rendering of
+      settings-written-keys verified with the U+2066..U+2069 isolation marks
+      accounted for. Every Builder-cited test name greps to source and passes by
+      name; quoted suite counts (19/3/2, app 21, ui 114, daemon 54, tools 136,
+      context 44, agent 74) all matched; the developer config md5 held at
+      e1ea7dffa427cf1fb72b0b82e2654e6c before and after the sandboxed daemon
+      runs and the fake home stayed empty. No repo file was touched by me: git
+      status --porcelain is byte-identical to the capture taken before my first
+      Runtime action, and no probe or mutant was built (Verify is read-only, so
+      I verified the mutant claims by reading code and Bevy's change-detection
+      implementation instead of executing them). Remaining items are boundaries,
+      most already recorded: headless pointer interaction, no two live GUI
+      processes, daemon reasons still Chinese prose, count-only toast on the
+      closing success path, no top-line reason on a partially-failed save, plus
+      two I found and the handoff does not list -- panel rows do not pick up
+      tools registered after it was built, and a theme change does not repaint."
+    truncated: false
+  risks:
+    - text: "A9/M40 asymmetry is real, not a hole, and I verified it independently:
+        M40 (reverting the panel gate to is_changed()) is caught only by
+        xgent_ui/tests/settings_panel_values.rs::failed_save_keeps_the_rejected\
+        _value_on_screen, because the app's drain_save no longer touches
+        SettingsSnapshotReady at all on a failed save, so the app-side frame
+        never exhibits 'dirty resource with unmoved tick'. The panel test
+        manufactures that state deliberately and more strictly than production
+        does. M41 (advance tick without checking failed) is caught only in
+        xgent_app for the mirror reason. The Builder's structural argument holds
+        and is in fact stronger than stated: xgent_app is a bin-only crate (no
+        lib target, Cargo.toml has no [lib]), so its private settings_io::tests
+        harness is not importable from xgent_ui tests at all -- not even through
+        Cargo's cycle-tolerant dev-dependencies. The composition is still
+        covered, by
+        a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame running
+        the real SettingsPanelPlugin and the real drain_snapshot/drain_save in
+        one App. Residual exposure is only for a future third producer of
+        SettingsSnapshotReady that dirties it without advancing tick; today
+        drain_snapshot is the only other one and it always advances."
+      truncated: false
+    - text: "Tick-delta repaint, assessed against the committed baseline rather than
+        the intermediate rounds: at HEAD toggle_panel had no rebuild gate at all
+        (spawn on open, despawn on close), so nothing that used to repaint can
+        have stopped repainting -- the gate is strictly more responsive than
+        pre-change behaviour. Language switch repaints (save_language ->
+        read_both -> drain_snapshot, which advances tick unconditionally); peer
+        config.changed repaints; a successful save repaints; reopening always
+        spawns fresh and resyncs last_rendered. Two things still do not repaint
+        while the panel is open, and I found neither documented in the handoff:
+        newly registered tools (plugin proxy tools appearing after the panel is
+        built, since rows are snapshotted from executor.policy_targets() at
+        spawn) and a Theme change (preferences.theme has no consumer and only
+        one dark preset exists, so no user-visible impact today). Both are also
+        unfixed at HEAD, so they are boundaries, not regressions -- but the
+        tool-row one deserves an explicit note in doc/dev-tutorial.md."
+      truncated: false
+    - text: "English report text can still contain Chinese words, though no Chinese
+        punctuation: daemon rejection reasons are surfaced verbatim, and A13's
+        no-CJK guard only scans corpus values, not runtime-injected daemon
+        strings. Recorded by the Builder as out of scope (needs an error-code
+        protocol), but a user sees it."
+      truncated: false
+    - text: The closing success path still reports a count only (settings-saved-count
+        toast) while the panel closes; naming exists only on the report that
+        stays on screen. Consistent with the spec's 'some keys land, one fails'
+        wording, but the acceptance sentence's 'names the keys already written'
+        is satisfied only on the failure path.
+      truncated: false
+    - text: On a partially-failed save the post-save re-read error is deliberately not
+        written to the panel's top line, because rendering it requires the
+        rebuild that would erase the rejected value; the per-key report carries
+        the outcome instead. A clean save with a failed re-read does surface it
+        (a_clean_save_surfaces_a_re_read_failure_and_a_rejected_one_does_not).
+        Documented, a real trade-off, not silent loss.
+      truncated: false
+    - text: "A14's 'pre-existing tests untouched in behaviour' is met in substance but
+        not literally:
+        crates/xgent_ui/tests/settings_input_focus.rs::settings_panel_input_acc\
+        epts_typing no longer drives the real PointerPress -> AcquireFocus ->
+        InputFocus chain; it now sets InputFocus directly and the TabIndex
+        contract moved into every_settings_input_carries_tab_index. The click
+        mechanism itself remains covered generically by the pre-existing
+        interaction_model.rs::click_focuses_text_input_with_tab_index (7 tests
+        in that target pass). No test was deleted or #[ignore]d and no other
+        pre-existing test lost assertions, so I treated it as the recorded
+        GUI-only boundary the acceptance text allows -- but the panel-specific
+        click-to-focus wiring has no automated guard, and the Builder's stated
+        cause (headless produces no child-node coordinates without a UiRoot) is
+        a claim I could not reproduce or refute without editing code, which
+        Verify forbids."
+      truncated: false
+    - text: No two live GUI processes are run anywhere, and no real-provider latency
+        or cost is measured. A10/A11/A12 are therefore proven link-by-link where
+        each lives, not end-to-end across processes.
+      truncated: false
+    - text: "Process note for the record: two earlier rounds had claimed-but-absent
+        tests and stale counts. This candidate has none that I could find --
+        every cited name exists and passes, and every quoted number matched. The
+        only inaccuracies were introduced by my own truncation of two names,
+        corrected above."
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-16T03:53:51.151Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A9
+      - A14
+    summary:
+      text: "I assessed all 14 scopes independently: read the implementation
+        (protocol, daemon store + session routing, tools
+        executor/security/run_command, context on_demand, agent bridge/loop,
+        xgent_app settings_io/main, xgent_ui settings_panel) and the actual
+        bodies of the cited tests, re-ran the daemon suite (52 passed) and the
+        three settings-panel binaries (16+3+1 passed), and confirmed the daemon
+        --lib substitution myself. 12 of 14 hold on evidence I verified. A9
+        fails because the code contradicts its last clause (any save attempt
+        bumps the snapshot tick and rebuilds the panel from daemon values, so a
+        rejected value is not kept visible) and the test that appears to cover
+        it injects only the report message. A14 fails because a pre-existing
+        test was changed in behaviour, not adapted:
+        settings_panel_input_accepts_typing had its real press -> AcquireFocus
+        -> InputFocus assertion deleted and replaced by setting InputFocus
+        directly, leaving the panel's original 'cannot type' defect unguarded by
+        any test. Beyond the acceptance items I raise one high-severity finding
+        that contradicts a claim in the Builder's own summary and in
+        dev-tutorial note 29: two new session.rs tests write the developer's
+        real ~/.xgent/agent/config.toml (the file currently holds the test
+        fixture, timestamped to Runtime check c4, and the leak reproduces into
+        any XGENT_AGENT_DIR I point at), plus the max_output_tokens control
+        being inert for the default provider kind, the PolicyDraft/re-render
+        divergence, and several narrower coverage and wording gaps. Nothing in
+        the shipped runtime paths weakens resolve_policy or the
+        dynamic-escalation branch, which I verified by reading security.rs
+        (untouched by this diff) and the executor's counting tests."
+      truncated: false
+    completed_at: 2026-10-15T21:11:01.012Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A9
+    summary:
+      text: 第 2 轮独立复核（candidate 6a1e3622）：14 项里 13 项通过、A9 不通过，总判定 failed。四项声称修复的实况：A14
+        的 TabIndex 契约守卫成立（读码+用例结构核实，删 TabIndex 必炸）、max_output_tokens 的 Anthropic
+        标注成立、重渲染复用活 PolicyDraft 成立、daemon 测试隔离有效但“由用例钉住”的说法不实（该用例不存在）；A9 的
+        hold_rerender 在生产帧序下挡不住重建，用 /tmp 复现实验证伪。
+      truncated: false
+    completed_at: 2026-10-15T22:18:20.151Z
+  - goal_cycle: 1
+    iteration: 3
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: "Builder handoff Runtime checks failed: c13"
+      truncated: false
+    completed_at: 2026-10-15T23:37:48.234Z
+  - goal_cycle: 1
+    iteration: 4
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Observed implementation write before
+        crates/xgent_ui/tests/settings_panel_values.rs
+      truncated: false
+    completed_at: 2026-10-16T00:05:47.251Z
+  - goal_cycle: 1
+    iteration: 5
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Observed implementation write before crates/xgent_ui/src/settings_panel.rs
+      truncated: false
+    completed_at: 2026-10-16T01:30:52.821Z
+  - goal_cycle: 1
+    iteration: 6
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Observed implementation write before crates/xgent_ui/src/settings_panel.rs
+      truncated: false
+    completed_at: 2026-10-16T02:31:38.365Z
+  - goal_cycle: 1
+    iteration: 7
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: "Independent read-and-run verification of candidate 3790d1ed against
+        A1..A14, all 14 items assessed exactly once. Verdict pass. A9 is
+        genuinely closed and I re-derived its ordering story rather than
+        accepting it: toggle_panel rebuilds only on a SettingsSnapshotReady.tick
+        delta (Local<u32>) with no is_changed() anywhere in the panel;
+        drain_save advances tick and lands ready.error only when report.failed
+        is empty and otherwise never derefs the resource; I confirmed in ../bevy
+        that ResMut::deref_mut marks changed unconditionally while acquisition
+        does not, which is what killed round 3. All four A9 clauses are pinned
+        at the message/status level (no write for abc and over-cap, empty emits
+        json!(0), landed keys named by name with the failed key and reason,
+        panel open, rejected value still on screen), including a real-frame test
+        with the real SettingsPanelPlugin plus the real
+        drain_snapshot/drain_save. The M40/M41 asymmetry is confirmed real and
+        structural -- xgent_app is bin-only, so its harness is unimportable from
+        xgent_ui. Both-locale rendering of settings-written-keys verified with
+        the U+2066..U+2069 isolation marks accounted for. Every Builder-cited
+        test name greps to source and passes by name; quoted suite counts
+        (19/3/2, app 21, ui 114, daemon 54, tools 136, context 44, agent 74) all
+        matched; the developer config md5 held at
+        e1ea7dffa427cf1fb72b0b82e2654e6c before and after the sandboxed daemon
+        runs and the fake home stayed empty. No repo file was touched by me: git
+        status --porcelain is byte-identical to the capture taken before my
+        first Runtime action, and no probe or mutant was built (Verify is
+        read-only, so I verified the mutant claims by reading code and Bevy's
+        change-detection implementation instead of executing them). Remaining
+        items are boundaries, most already recorded: headless pointer
+        interaction, no two live GUI processes, daemon reasons still Chinese
+        prose, count-only toast on the closing success path, no top-line reason
+        on a partially-failed save, plus two I found and the handoff does not
+        list -- panel rows do not pick up tools registered after it was built,
+        and a theme change does not repaint."
+      truncated: false
+    completed_at: 2026-10-16T03:53:51.151Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-15T17:12:41.366Z
