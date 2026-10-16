@@ -1,0 +1,445 @@
+schema: comet.native.v4
+name: review-ui-v8-prototype
+language: en
+phase: archive
+status: done
+state_version: 12
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: f58c712de7eafae37ca59c5b9c1e839182472e97d282136e5dfd50acead0e454
+spec_changes: []
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 2
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: 关闭任一 closable 页签（如「文件预览」，或注册后的 git/mcp/cost）不再抛 `TypeError:
+      Assignment to constant variable`；页签与对应页同步消失；控制台零报错；关闭当前激活页签后选中态回落到相邻页签。"
+    result: passed
+    reason:
+      text: 原型:698 `let DESC=[`（原 const 重赋值 TypeError 的根因已除）；✕ 处理器 :715-719 重绑 DESC
+        合法、同步清理 S.registered 与 railGit/railMcp 显示（:717）、激活页关闭后 S.active 回落 order
+        最小剩余 side 页签（:718）并同步重渲染页签+页面（:719）；editor 页签
+        closable:false（:699）保证回落列表恒非空；pages 与 tabs 同 DOM
+        数据源（renderTabs/renderPages 同用 DESC），删除即同步消失；我的脚本提取内联 script 过 node
+        --check，无 throw 路径。（代码语义证据；点击级走查按 brief 留用户）
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: 流式响应中点击「停止」：打字立即停止，按钮变回「发送」，agent pill 回「空闲」；不再出现后续逐帧追加与完成 toast。"
+    result: passed
+    reason:
+      text: interval 句柄已入共享态：startStream 末尾 S.streamIv=iv（:980）；stopStream :957-960
+        clearInterval(S.streamIv)（:958）并恢复 agentPill『空闲』+ updSend；停止入口两处：sendBtn
+        流式分支 :1087 与 document Esc 分支 :1109；完成 toast（:977）只存在于 interval
+        回调内，clearInterval 后不再触发 → 无逐帧追加与完成 toast。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: 输入 `@` 触发补全后按 Enter：采纳补全项（路径替换 `@…` 片段、菜单关闭）且消息不发送；补全菜单关闭时 Enter
+      行为不变（空文本不发、有文本发送）。"
+    result: passed
+    reason:
+      text: "#input.onkeydown :1052-1060：补全分支（menu .show 且含 Enter/↑/↓/Esc）排在发送分支之前并
+        return（:1053-1058），Enter → acceptComp()（:1055）；acceptComp :1062-1070 用
+        c.dataset.query 定位 '@…' 片段就地替换为 '@'+path、更新 #charHint、关菜单、不调
+        startStream；Esc 关菜单并 stopPropagation 阻断 document 层（:1056）；菜单关闭时走 :1060
+        原发送分支——空文本 guard（:1060 与 :1000）不发、有文本发送，行为不变。"
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: 命令面板内按 ↑/↓ 在 `.pitem` 间移动 `sel` 状态；Enter 执行当前选中项绑定的动作（与鼠标点击一致）；Esc
+      关闭面板（既有行为保持）。"
+    result: passed
+    reason:
+      text: "#pq.onkeydown :1041-1050：箭头键在 $$('#plist .pitem') 环移 .sel 并
+        scrollIntoView(block:'nearest')（:1046-1049），Enter 触发选中项
+        .click()（:1045）——与鼠标共走同一 onclick 动作（:911 设置/抽屉/关面板）；空列表 early
+        return（:1043）；Esc 仍走既有 document 模态栈 pop（:1105-1106）。"
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: 「缺陷复现」开 → 设置面板模型列表出现既有 `.bad2` 警告条且不可滚动；关 → 恢复可滚动且警告条消失（C2
+      对照两边均真实成立）。"
+    result: passed
+    reason:
+      text: syncToggles :874 classList.toggle('bad2',S.bad) 两条路径均接通：tBad 切换（:1005 直接调
+        syncToggles）与模态打开（applyModal :855）；CSS
+        .mlist.bad2{overflow:hidden;position:relative}（:293）+ ::after『⚠
+        max_height 但无滚动（缺陷 C2）』（:294-295），off 恢复基类 .mlist
+        overflow-y:scroll（:292）；:1139 注入 200 行数据保证两侧对照真实成立。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: 「缺陷复现」开 → 文件树长文件名真实溢出（无省略号）；关 → 出现尾部 `…`（C3 对照两边均真实成立）。"
+    result: passed
+    reason:
+      text: 选择器失配已修：bindTree 生成 span.lb.bad（:825 普通行/:827 mono 行），CSS 现为 .tree
+        .lb.bad{overflow:visible;text-overflow:clip}（:212）→ bad 模式长名真实溢出无省略；off
+        恢复 .tree .lb{overflow:hidden;text-overflow:ellipsis}（:211）出尾部 …，mono 行在
+        if(!S.bad) 下做 JS 中段 '…' 截断（:831）——C3 对照双向真实（尾部/中段并存与 M3 卡描述一致，附段 :395
+        已照实入账）。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "A7: 「缺陷复现」开 → 终端页签底部状态条被裁出视口并出现 D2 警告条；关 → 底条完整可见；控制条 toast
+      文案列出的清单与实际可复现项一致（C1/C2/C3/D2/E2）。"
+    result: passed
+    reason:
+      text: R1 已落地：PAGE.terminal 包裹容器带 termwrap 类（:779），.v8.bad
+        .termwrap{position:relative}（:225）+ .v8.bad .termwrap::after pinned 于
+        wrapper bottom:0（:227-228）与 C1
+        条（:221-222）同构——绝对定位衬在页容器底缘、不随滚动移动、随开关出现/消失；真实复现保留：.v8.bad .term{flex:0 0
+        auto;height:100%}（:226）把 term-foot（:239，32px）推出 termwrap 底缘、被 .dock
+        overflow:hidden（:187-188）裁出视口。旧 .v8.bad .term::after 选择器零命中（我已独立 grep 16
+        组 forbid 全零）。文案对齐：tBad toast :1006 点名 C1/C2/C3/D2 并指 E2 由流式演示呈现；复现卡 note
+        :647 逐项点名含 E2；流完成 E2 toast :977 保持——清单与实际可复现项一致。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "A8: git 面板变更列表 M/A/D/U 徽标分别呈黄/绿/红/绿配色（样式选择器对 `.srcline` 场景生效），注册表探针「注册
+      Git 面板」后直接可见。"
+    result: passed
+    reason:
+      text: ".git/.git.M/.git.A,.git.U/.git.D 已提升为全局类选择器（:214-217，无 .tree 前缀）→ 对
+        PAGE.git #gitList（:784-794）的 .srcline>span.git 生效：M 黄（--st-pending）、A/U
+        绿（--st-ok）、D 红（--st-fail）；renderGit :917-923 生成 <span class=\"git
+        M/A/U/D\">；regGit 探针 :1120-1123 注册即显示
+        railGit、S.active='git'、renderTabs/renderPages/renderGit → 徽标直接可见。"
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "A9: 终端文本中所有 `\\x1b` 控制符被清除（含第二处
+      ESC）；死代码（`treeData(`、`S.estCell`、`window.__iv`、`.slice(0,0)`、`t.style.col\
+      or=''`、``$$('.lb.mono',)``）与死 CSS（`.broken`/`.hint`、`.tree .lb.mid`、`.term
+      .cw`）在文件内 grep 零命中。"
+    result: passed
+    reason:
+      text: renderTerm 两分支均 l.replace(/\x1b/g,'')（:933-934，全局正则），:930 行『\x1b[完成]\x1b
+        总计…』两处 ESC 全清；死代码/死 CSS 我独立 grep 16 组 forbid（const
+        DESC、window.__iv、treeData、estCell、slice(0,0)、t.style.color=''、$$('.lb.mono',)
+        尾逗号、('#sp',R)/('#stTool',R)、li.bad
+        .lb、replace('\x1b'、.broken{、.hint{、.tree .lb.mid、.term .cw、.v8.bad
+        .term::after）文件内全零命中；1151 行定型文件 node --check 通过。
+      truncated: false
+  - id: A10
+    source: brief.md
+    text: "A10: `docs/plans/ui-v8-tasks.md` 文末「附」段含本轮复评记录（日期 + 缺陷清单 +
+      已修复结论），与原型最终状态一致。"
+    result: passed
+    reason:
+      text: 附段『附：原型复审（2026-10-16，已完成）』位于文末（:382 起，文件 405 行）：含范围声明、10
+        组缺陷清单（:386-399）、原/现双行号约定（:388，原=1125 底稿/现=1151 定型）与复测口径 19+3 必现/15
+        失配零命中（:403-404）；我交叉核对了 20+ 处『现』行号于实文件（let DESC :698、✕ 块
+        :715-719、stopStream :957、S.streamIv :980、input keydown
+        :1052-1059、acceptComp :1062、#pq :1041-1050、toggle('bad2') :874、.lb.bad
+        :212、spans :825/:827、if(!S.bad) :831、.git.* :214-217、renderTerm
+        :933-934、:930、termwrap :779、:225/:226/:227-228、C1 条 :221-222、toast
+        :1006、note :647、E2 toast :977、PAGE.git :784-794、term-foot
+        :239、.mlist.bad2 :293-294）全部与真实文件吻合；复测口径与我对 Runtime c1/c2 EncodedCommand
+        解码结果（19 needT + 3 needP + 15 forbidT）逐项一致。
+      truncated: false
+builder_handoff:
+  candidate_id: 00f7c8ff-4731-4d8d-959d-b53c99759809
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:a0a609bf-e75e-492e-bbd8-7a3d12a5e202
+  iteration: 2
+  summary:
+    text: 迭代 2 修复三项（其余七项实现不变）：① D2 警告条改为固定位置呈现——PAGE.terminal 包裹容器加 termwrap 类（原型
+      :779），新增 .v8.bad .termwrap{position:relative}（:225）与 .v8.bad
+      .termwrap::after（:227-228，与 C1 警告条 :221-222 同构），警告条 pinned
+      衬在页容器底缘随开关出现/消失，不再藏在滚动内容尾部；.v8.bad .term{flex:0 0
+      auto;height:100%}（:226）保持真实复现底条被裁。② 文案对齐缺陷清单：tBad
+      toast（:1006）与「缺陷复现」note（:647）逐项点名 C1/C2/C3/D2，note 补 E2 流式演示指引（触发一次流式演示可看到
+      E2 —— 工具卡压在流式文本之前）；流完成分支的 E2 缺陷 toast（:977）保持。③
+      台账附段行号校准：引入「原/现」双行号约定（原=1125 行底稿历史存档、现=1151 行定型基准），10
+      项缺陷的行号引用逐条换成定型文件实查行号，复测口径更新为 19 组必现 + 3 组附段识别 + 15 组失配零命中。范围不变：仅
+      docs/design/ui-prototype-v8.html 与 docs/plans/ui-v8-tasks.md 附段；crates/**
+      零改动，documentation-only 无产品行为变更。用户本轮新增的模型对话框重设计需求（模型选择/思考等级等设置移至输入框右下角、参照流行
+      agent 交互、保留 XGent 3D 特色）属于新功能面，超出本 brief 范围（brief Non-goals
+      明确不新增功能面），本候选不实现，将另立变更处理。验证：更新后的
+      c1（prototype-static-patterns，EncodedCommand）与 c2（prototype-js-syntax）本地实测均
+      exit 0。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - DESC 声明为 let 可重赋值（原型 :698），页签 ✕ 处理器内 DESC 重绑定合法化（:716）
+        - 关闭时同步清理 S.registered 与 railGit/railMcp 隐藏（:716-717），S.active 回落 order
+          最小剩余 side 页签（:718），页签与页面区同步重渲染（:719）
+        - c1 断言 let DESC=[ 存在、const DESC 零命中
+      note: 关闭任一可关页签不再抛 TypeError，页签与页面同步消失，选中态回落。点击级浏览器走查留 Verifier。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - stopStream() 统一收口（:957）+ startStream 末尾 S.streamIv=iv 保存句柄（:980）
+        - 发送按钮流式分支与 document Esc 流式分支均改走 stopStream；完成 toast 只在 interval
+          回调内触发（:977），停止后不再出现后续追加
+        - c1 断言 window.__iv 零命中、function stopStream()/S.streamIv=iv 存在
+      note: 停止按钮与 Esc 均能真正中断打字机演示，不再有逐帧追加与完成 toast。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - "#input.onkeydown 补全分支（ArrowDown/ArrowUp/Enter/Escape 且菜单展开）排于发送分支之前并
+          return（:1052-1059）"
+        - "Enter 走 acceptComp()（:1062 起）：读 .ci.sel 的 .p 路径，以 c.dataset.query 回找
+          lastIndexOf('@query') 就地替换，更新 #charHint，不发送"
+        - Esc 关菜单并 stopPropagation 阻断 document 层（:1056）；菜单关闭后 Enter 走原发送路径；c1 断言
+          c.dataset.query 与 function acceptComp() 存在
+      note: 补全打开时 Enter 只采纳不发送；关闭菜单后行为不变。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - "#pq.onkeydown 新增 ↑/↓/Enter（:1041-1050）：在 $$('#plist .pitem') 内环移
+          .sel、scrollIntoView(block:nearest)、Enter 触发选中项 click()（走既有 onclick
+          动作）"
+        - 空列表 early return；Esc 关面板沿用既有模态栈；c1 断言 pq').onkeydown 与 scrollIntoView(
+          存在
+      note: 命令面板键盘优先导航达成：↑/↓ 移动、Enter 执行、Esc 关闭。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - syncToggles() 内
+          $('#mlist').classList.toggle('bad2',S.bad)（:873-874），applyModal 打开与
+          tBad 切换两路径均走到
+        - bad=on：模型列表 overflow:hidden 滚不动并出现 C2 警告条；off：恢复滚动且警告条消失（200 行数据两侧可观察）
+        - c1 断言 toggle('bad2',S.bad) 存在
+      note: C2 对照双向真实成立（本轮另补 toast/note 文案点名，见 A7/A9）。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - CSS .tree .lb.bad{overflow:visible;text-overflow:clip}（:212）与 bindTree
+          生成的 <span class="lb ${S.bad?'bad':''}">（:825 普通行/:827 mono 行）对齐
+        - 中段省略仅 if(!S.bad) 执行（:831）：bad 模式长名真实溢出无省略，good 模式尾部 … 与 mono 中段截断保留
+        - c1 断言 .tree .lb.bad{ 存在、li.bad .lb 零命中
+      note: C3 双向对照成立。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - D2 警告条改为 pinned 呈现：PAGE.terminal 包裹容器加 termwrap 类（:779），.v8.bad
+          .termwrap{position:relative}（:225）+ .v8.bad
+          .termwrap::after（:227-228），与 C1
+          警告条（:221-222）同构；警告条固定衬在页容器底缘，随开关出现/消失，不随滚动内容移动
+        - .v8.bad .term{flex:0 0
+          auto;height:100%}（:226）保持真实复现：term-foot（:239-240）被推出底帧、被祖先
+          overflow:hidden 裁掉；off 恢复 flex:1;min-height:0 契约，底条回归
+        - 文案对齐：tBad toast（:1006）点名 C1/C2/C3/D2 并给出 E2 演示指引，「缺陷复现」note（:647）逐项点名含
+          E2；流完成分支 E2 缺陷 toast 保持（:977）；旧 .v8.bad .term::after 选择器列入 c1 forbid
+          并清零
+      note: bad=on 底条被裁 + 固定位置警告条可见；off 底条回归。视觉走查留 Verifier。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - ".git/.git.M/.git.A,.git.U/.git.D 全局类选择器（:214-217），PAGE.git #gitList 的
+          .srcline>span.git M/A/U/D 徽标四色可辨"
+        - 类名与徽标字符未动；c1 断言 .git.M{/.git.A,.git.U{/.git.D{ 以全局形式存在
+      note: 注册表探针「注册 Git 面板」后立即可见。
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - renderTerm 两分支 l.replace(/\x1b/g,'')（:933-934），:930 行数据两处 \x1b
+          控制符全部清除，[完成] 不再携带 ANSI 残片
+        - 死代码/死 CSS 清零并在本轮追加旧选择器 .v8.bad .term::after 到 forbid：c1 15
+          组失配模式全零命中；c2（prototype-js-syntax）node --check 通过
+      note: 控制台与 DOM 侧无死路径；静态断言可重复执行。
+    - id: A10
+      status: implemented-with-evidence
+      evidence:
+        - docs/plans/ui-v8-tasks.md 文末「附：原型复审（2026-10-16，已完成）」本轮更新：引入 原/现
+          双行号约定（原=1125 行底稿历史存档、现=1151 行定型基准），10 项行号引用逐条校准
+        - 复测口径同步：19 组必现 + 3 组附段识别 + 15 组失配（含旧 D2 选择器）零命中；pinned 呈现与文案对齐详情入账，原内容不动
+        - c1 断言 附：原型复审 / 2026-10-16 / 组缺陷 命中
+      note: A10 由附段本身满足。
+  checks:
+    - name:
+        text: prototype-static-patterns
+        truncated: false
+      result: passed
+      note:
+        text: PowerShell 模式断言（迭代 2 新脚本，EncodedCommand）：19 组必现 + 3 组附段识别命中，15 组失配（含旧
+          .v8.bad .term::after）零命中，exit 0
+        truncated: false
+    - name:
+        text: prototype-js-syntax
+        truncated: false
+      result: passed
+      note:
+        text: 提取内联 script 写临时文件，node --check，exit 0
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 行为验收项（关页签回落点击、停止中断流式、补全 Enter 采纳、面板键盘导航、D2/C2/C3/E2 视觉对照）为浏览器走查边界，未脚本化，由
+        Verifier 手动/语义复核
+      truncated: false
+    - text: D2 警告条为 pinned 模拟（与 C1/C2 同构），非 as-built 真实像素测量；『被裁 38px』为 toast 文案口径
+      truncated: false
+    - text: 静态断言经 EncodedCommand（UTF-16LE）载体执行；PowerShell 控制台对 CJK 显示乱码仅为 codepage
+        问题，不影响文件与检查
+      truncated: false
+    - text: 模型对话框重设计为用户新增需求，超出本 brief 范围（Non-goals 不新增功能面），本候选不实现，将另立变更处理
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-16T10:12:51.134Z
+blockers: []
+verification:
+  candidate_id: 00f7c8ff-4731-4d8d-959d-b53c99759809
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:2091ba60-910d-44d1-a0f2-27ae817654b1
+  iteration: 2
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: c1
+      name:
+        text: prototype-static-patterns
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -NonInteractive
+          truncated: false
+        - text: -OutputFormat
+          truncated: false
+        - text: Text
+          truncated: false
+        - text: -EncodedCommand
+          truncated: false
+        - text: JABQAHIAbwBnAHIAZQBzAHMAUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAnAA0ACgAkAEUAcgByAG8AcgBBAGMAdABpAG8AbgBQAHIAZQBmAGUAcgBlAG4AYwBlACAAPQAgACcAUwB0AG8AcAAnAAoAJABoAHQAIAA9ACAAJwBkAG8AYwBzAC8AZABlAHMAaQBnAG4ALwB1AGkALQBwAHIAbwB0AG8AdAB5AHAAZQAtAHYAOAAuAGgAdABtAGwAJwAKACQAbQBkACAAPQAgACcAZABvAGMAcwAvAHAAbABhAG4AcwAvAHUAaQAtAHYAOAAtAHQAYQBzAGsAcwAuAG0AZAAnAAoAJAB0ACAAPQAgAFsASQBPAC4ARgBpAGwAZQBdADoAOgBSAGUAYQBkAEEAbABsAFQAZQB4AHQAKAAoAFIAZQBzAG8AbAB2AGUALQBQAGEAdABoACAALQBMAGkAdABlAHIAYQBsAFAAYQB0AGgAIAAkAGgAdAApACwAIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAApAAoAJABwACAAPQAgAFsASQBPAC4ARgBpAGwAZQBdADoAOgBSAGUAYQBkAEEAbABsAFQAZQB4AHQAKAAoAFIAZQBzAG8AbAB2AGUALQBQAGEAdABoACAALQBMAGkAdABlAHIAYQBsAFAAYQB0AGgAIAAkAG0AZAApACwAIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAApAAoAJABuAGUAZQBkAFQAIAA9ACAAQAAoAAoAIAAgACcAbABlAHQAIABEAEUAUwBDAD0AWwAnACwACgAgACAAJwAuAHQAcgBlAGUAIAAuAGwAYgAuAGIAYQBkAHsAJwAsAAoAIAAgACcALgBnAGkAdAAuAE0AewAnACwACgAgACAAJwAuAGcAaQB0AC4AQQAsAC4AZwBpAHQALgBVAHsAJwAsAAoAIAAgACcALgBnAGkAdAAuAEQAewAnACwACgAgACAAJwAuAHYAOAAuAGIAYQBkACAALgB0AGUAcgBtAHsAJwAsAAoAIAAgACcALgB2ADgALgBiAGEAZAAgAC4AdABlAHIAbQB3AHIAYQBwAHsAcABvAHMAaQB0AGkAbwBuADoAcgBlAGwAYQB0AGkAdgBlAH0AJwAsAAoAIAAgACcALgB2ADgALgBiAGEAZAAgAC4AdABlAHIAbQB3AHIAYQBwADoAOgBhAGYAdABlAHIAJwAsAAoAIAAgACcALgB2ADgALgBiAGEAZAAgAC4AZgBhAGsAZQA6ADoAYQBmAHQAZQByACcALAAKACAAIAAnAGYAdQBuAGMAdABpAG8AbgAgAHMAdABvAHAAUwB0AHIAZQBhAG0AKAApACcALAAKACAAIAAnAFMALgBzAHQAcgBlAGEAbQBJAHYAPQBpAHYAJwAsAAoAIAAgACcAYwAuAGQAYQB0AGEAcwBlAHQALgBxAHUAZQByAHkAJwAsAAoAIAAgACcAZgB1AG4AYwB0AGkAbwBuACAAYQBjAGMAZQBwAHQAQwBvAG0AcAAoACkAJwAsAAoAIAAgACcAcABxACcAJwApAC4AbwBuAGsAZQB5AGQAbwB3AG4AJwAsAAoAIAAgACcAcwBjAHIAbwBsAGwASQBuAHQAbwBWAGkAZQB3ACgAJwAsAAoAIAAgACcAdABvAGcAZwBsAGUAKAAnACcAYgBhAGQAMgAnACcALABTAC4AYgBhAGQAKQAnACwACgAgACAAJwByAGUAcABsAGEAYwBlACgALwBcAHgAMQBiAC8AZwAnACwACgAgACAAJwBFADIAIADlXXdRYVOLUyhXQW0PX4dlLGdLTk1SJwAsAAoAIAAgACcA5onRUwBOIWtBbQ9fFG86ee9TC3cwUiAARQAyACcACgApAAoAJABmAG8AcgBiAGkAZABUACAAPQAgAEAAKAAKACAAIAAnAGMAbwBuAHMAdAAgAEQARQBTAEMAJwAsAAoAIAAgACcAdwBpAG4AZABvAHcALgBfAF8AaQB2ACcALAAKACAAIAAnAHQAcgBlAGUARABhAHQAYQAnACwACgAgACAAJwBlAHMAdABDAGUAbABsACcALAAKACAAIAAnAHMAbABpAGMAZQAoADAALAAwACkAJwAsAAoAIAAgACcAdAAuAHMAdAB5AGwAZQAuAGMAbwBsAG8AcgA9ACcAJwAnACcAJwAsAAoAIAAgACcAKAAnACcALgBsAGIALgBtAG8AbgBvACcAJwAsACkAJwAsAAoAIAAgACcALgB0AHIAZQBlACAALgBsAGIALgBtAGkAZAAnACwACgAgACAAJwAuAHQAZQByAG0AIAAuAGMAdwAnACwACgAgACAAJwAuAGIAcgBvAGsAZQBuAHsAJwAsAAoAIAAgACcAbABpAC4AYgBhAGQAIAAuAGwAYgAnACwACgAgACAAJwByAGUAcABsAGEAYwBlACgAJwAnAFwAeAAxAGIAJwAnACcALAAKACAAIAAnACgAJwAnACMAcwBwACcAJwAsAFIAKQAnACwACgAgACAAJwAoACcAJwAjAHMAdABUAG8AbwBsACcAJwAsAFIAKQAnACwACgAgACAAJwAuAHYAOAAuAGIAYQBkACAALgB0AGUAcgBtADoAOgBhAGYAdABlAHIAJwAKACkACgAkAG4AZQBlAGQAUAAgAD0AIABAACgAJwBElhr/n1OLVw1ZoVsnACwAIAAnADIAMAAyADYALQAxADAALQAxADYAJwAsACAAJwDEfjp/d5YnACkACgAkAG0AIAA9ACAAQAAoACQAbgBlAGUAZABUACAAfAAgAFcAaABlAHIAZQAtAE8AYgBqAGUAYwB0ACAAewAgAC0AbgBvAHQAIAAkAHQALgBDAG8AbgB0AGEAaQBuAHMAKAAkAF8AKQAgAH0AKQAKACQAaAAgAD0AIABAACgAJABmAG8AcgBiAGkAZABUACAAfAAgAFcAaABlAHIAZQAtAE8AYgBqAGUAYwB0ACAAewAgACQAdAAuAEMAbwBuAHQAYQBpAG4AcwAoACQAXwApACAAfQApAAoAJABwAG0AIAA9ACAAQAAoACQAbgBlAGUAZABQACAAfAAgAFcAaABlAHIAZQAtAE8AYgBqAGUAYwB0ACAAewAgAC0AbgBvAHQAIAAkAHAALgBDAG8AbgB0AGEAaQBuAHMAKAAkAF8AKQAgAH0AKQAKAGkAZgAgACgAJABtAC4AQwBvAHUAbgB0ACAALQBvAHIAIAAkAGgALgBDAG8AdQBuAHQAIAAtAG8AcgAgACQAcABtAC4AQwBvAHUAbgB0ACkAIAB7AAoAIAAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAKAAnAEYAQQBJAEwATQBJAFMAUwA9AFsAJwAgACsAIAAoACQAbQAgAC0AagBvAGkAbgAgACcAOwAnACkAIAArACAAJwBdACAARgBBAEkATABIAEkAVAA9AFsAJwAgACsAIAAoACQAaAAgAC0AagBvAGkAbgAgACcAOwAnACkAIAArACAAJwBdACAARgBBAEkATABQAEEARwBFAD0AWwAnACAAKwAgACgAJABwAG0AIAAtAGoAbwBpAG4AIAAnADsAJwApACAAKwAgACcAXQAnACkACgAgACAAZQB4AGkAdAAgADEACgB9AAoAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAoACcATwBLACAAbgBlAGUAZABUAD0AJwAgACsAIAAkAG4AZQBlAGQAVAAuAEMAbwB1AG4AdAAgACsAIAAnACAAZgBvAHIAYgBpAGQAVAA9ACcAIAArACAAJABmAG8AcgBiAGkAZABUAC4AQwBvAHUAbgB0ACAAKwAgACcAIABuAGUAZQBkAFAAPQAnACAAKwAgACQAbgBlAGUAZABQAC4AQwBvAHUAbgB0ACkACgBlAHgAaQB0ACAAMAAKAA==
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 350
+    - id: c2
+      name:
+        text: prototype-js-syntax
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -NonInteractive
+          truncated: false
+        - text: -OutputFormat
+          truncated: false
+        - text: Text
+          truncated: false
+        - text: -EncodedCommand
+          truncated: false
+        - text: JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQAgAD0AIAAnAFMAdABvAHAAJwAKACQAcwByAGMAIAA9ACAAWwBJAE8ALgBGAGkAbABlAF0AOgA6AFIAZQBhAGQAQQBsAGwAVABlAHgAdAAoACgAUgBlAHMAbwBsAHYAZQAtAFAAYQB0AGgAIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACcAZABvAGMAcwAvAGQAZQBzAGkAZwBuAC8AdQBpAC0AcAByAG8AdABvAHQAeQBwAGUALQB2ADgALgBoAHQAbQBsACcAKQAsACAAWwBUAGUAeAB0AC4ARQBuAGMAbwBkAGkAbgBnAF0AOgA6AFUAVABGADgAKQAKACQAbQAxACAAPQAgAFsAcgBlAGcAZQB4AF0AOgA6AE0AYQB0AGMAaABlAHMAKAAkAHMAcgBjACwAIAAnACgAPwBzACkAPABzAGMAcgBpAHAAdABbAF4APgBdACoAPgAoAC4AKgA/ACkAPAAvAHMAYwByAGkAcAB0AD4AJwApAAoAaQBmACAAKAAkAG0AMQAuAEMAbwB1AG4AdAAgAC0AZQBxACAAMAApACAAewAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAJwBGAEEASQBMAE4ATwBTAEMAUgBJAFAAVAAnADsAIABlAHgAaQB0ACAAMQAgAH0ACgAkAGQAaQByACAAPQAgAEoAbwBpAG4ALQBQAGEAdABoACAAKABbAEkATwAuAFAAYQB0AGgAXQA6ADoARwBlAHQAVABlAG0AcABQAGEAdABoACgAKQApACAAJwB2ADkALQBqAHMAYwAnAAoATgBlAHcALQBJAHQAZQBtACAALQBJAHQAZQBtAFQAeQBwAGUAIABEAGkAcgBlAGMAdABvAHIAeQAgAC0ARgBvAHIAYwBlACAALQBQAGEAdABoACAAJABkAGkAcgAgAHwAIABPAHUAdAAtAE4AdQBsAGwACgAkAGkAIAA9ACAAMAAKACQAZgBpAGwAZQBzACAAPQAgAEAAKAApAAoAZgBvAHIAZQBhAGMAaAAgACgAJABtAG0AIABpAG4AIAAkAG0AMQApACAAewAKACAAIAAkAGkAKwArAAoAIAAgACQAZgAgAD0AIABKAG8AaQBuAC0AUABhAHQAaAAgACQAZABpAHIAIAAoACcAYgBsAGsAJwAgACsAIAAkAGkAIAArACAAJwAuAGoAcwAnACkACgAgACAAWwBJAE8ALgBGAGkAbABlAF0AOgA6AFcAcgBpAHQAZQBBAGwAbABUAGUAeAB0ACgAJABmACwAIAAkAG0AbQAuAEcAcgBvAHUAcABzAFsAMQBdAC4AVgBhAGwAdQBlACwAIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAApAAoAIAAgACQAZgBpAGwAZQBzACAAKwA9ACAAJABmAAoAfQAKACYAIABuAG8AZABlACAALQAtAGMAaABlAGMAawAgAEAAZgBpAGwAZQBzAAoAaQBmACAAKAAkAEwAQQBTAFQARQBYAEkAVABDAE8ARABFACAALQBuAGUAIAAwACkAIAB7ACAAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAnAEYAQQBJAEwAUwBZAE4AVABBAFgAJwA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUAIAB9AAoAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAoACcATwBLACAAYgBsAG8AYwBrAHMAPQAnACAAKwAgACQAbQAxAC4AQwBvAHUAbgB0ACkACgBlAHgAaQB0ACAAMAAKAA==
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 493
+  summary:
+    text: 迭代 2 三项返工（R1 pinned D2 警告条、R2 文案对齐含 E2、R3 附段行号/口径校准）全部落实且 round-1
+      十项保持成立：我对 HTML 与附段全文精读，自行执行 23 need/16 forbid 模式断言与 node
+      --check（均通过），并独立解码 Runtime c1/c2 的 EncodedCommand 核实其断言集与验收口径吻合（19+3 need
+      / 15 forbid，含旧 .v8.bad .term::after 归零）；范围边界确认——原型内未混入模型对话框重设计等新功能面（grep
+      零命中），crates 无本变更产物。A1-A10 十项全过，判定 pass。
+    truncated: false
+  risks:
+    - text: A1-A4、A5-A7 的交互与视觉为代码语义+静态断言判定（应用内无法开浏览器），按 brief『浏览器手动走查留给用户在 Verify
+        结果接受前自查』执行；残余风险限于浏览器特异行为（焦点/scrollIntoView 细节）。
+      truncated: false
+    - text: toast/note 文案保留审计报告的历史口径『被裁 38px』（docs/notes/ui-v8-audit.md:104 页签条
+        38px）；原型的 DOM 复现裁掉的是 32px 的 term-foot（定性一致，像素数字为历史缺陷口径，Builder
+        known_limits 已如实注明）。
+      truncated: false
+    - text: 工作区 isolation=current，树上存在此前会话遗留的未提交改动（crates/** 编辑器/终端工作、doc→docs
+        迁移、AGENTS.md 等）；本候选按内容核验仅涉及 docs/design/ui-prototype-v8.html 与
+        docs/plans/ui-v8-tasks.md 附段两个交付物，未发现归属本变更的 crates 改动。
+      truncated: false
+    - text: A1 激活页关闭的回落目标是 order 最小剩余页签而非字面『相邻』页签——brief D-1 允许实现选择，附段 :390
+        已照实入账，不构成偏差。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-16T10:27:48.607Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: "All ten acceptance items verified independently against the prototype's
+        actual JS/CSS and the tasks appendix: the fixed patterns are all
+        present, the forbidden dead-code/mismatched-selector patterns all
+        zero-grep, the extracted inline script passes node --check, and runtime
+        c1/c2 receipts were independently re-established (my own reruns, not
+        just trust in the logged exits). Verdict passed; residual risks are
+        limited to browser-only behavior confirmation left user-side and two
+        copy-level nuances (toast does not enumerate five defect IDs; fallback
+        targets the order-minimal tab)."
+      truncated: false
+    completed_at: 2026-10-16T09:50:33.220Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 返工项：1) D2 警告条改为固定位置呈现（与 C1/C2 警告条同构，不再藏在滚动尾部）；2) tBad toast 与缺陷复现卡片说明补全缺陷
+        ID/E2 清单对齐；3) 台账附段行号校准与原型终态一致。用户新增需求：重新设计对话模型对话框——模型选择/思考等级( reasoning
+        effort )等设置移至输入框右下角，参照当前流行 agent 交互（如 Claude/Zed/Cursor 的底部内联选择器）但保留
+        XGent 自身特色（后续 3D 特点）。
+      truncated: false
+    completed_at: 2026-10-16T10:03:01.158Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 迭代 2 三项返工（R1 pinned D2 警告条、R2 文案对齐含 E2、R3 附段行号/口径校准）全部落实且 round-1
+        十项保持成立：我对 HTML 与附段全文精读，自行执行 23 need/16 forbid 模式断言与 node
+        --check（均通过），并独立解码 Runtime c1/c2 的 EncodedCommand 核实其断言集与验收口径吻合（19+3
+        need / 15 forbid，含旧 .v8.bad .term::after
+        归零）；范围边界确认——原型内未混入模型对话框重设计等新功能面（grep 零命中），crates 无本变更产物。A1-A10 十项全过，判定
+        pass。
+      truncated: false
+    completed_at: 2026-10-16T10:27:48.607Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-16T08:41:02.254Z
