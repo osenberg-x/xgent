@@ -40,9 +40,23 @@ pub fn build_context_provider(
     project_root: PathBuf,
     limits: RetrievalLimits,
 ) -> BuiltContextProvider {
+    build_context_provider_shared(
+        strategy,
+        project_root,
+        std::sync::Arc::new(parking_lot::RwLock::new(limits)),
+    )
+}
+
+/// 同 [`build_context_provider`]，但限额走**共享句柄**：宿主改项目配置
+/// `[context]` 后，下一次检索用的就是新值（R3-13 的热应用要求）。
+pub fn build_context_provider_shared(
+    strategy: ContextStrategy,
+    project_root: PathBuf,
+    limits: std::sync::Arc<parking_lot::RwLock<RetrievalLimits>>,
+) -> BuiltContextProvider {
     match strategy {
         ContextStrategy::OnDemand => BuiltContextProvider::Ready(Box::new(
-            OnDemandContextProvider::with_limits(project_root, limits),
+            OnDemandContextProvider::with_shared_limits(project_root, limits),
         )),
         // B/C/D/E 仍是占位（repo_map/vector/lsp/hybrid 返回空结果）
         ContextStrategy::RepoMap => BuiltContextProvider::Unsupported(strategy),

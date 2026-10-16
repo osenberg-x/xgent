@@ -200,22 +200,47 @@ async fn config_read(req: Request, shared: &Shared) -> Response {
             );
         }
     };
-    // Project 作用域未实现：daemon 的 ConfigCoordinator 只有全局权威副本。
-    // 显式拒绝而非静默按 Global 处理——静默降级会让调用方误以为写到了项目
-    // 配置（字段语义两侧不一致）。
+    // Project 作用域：按请求携带的项目根读取权威副本（首次访问从磁盘载入）。
+    // 缺 root 或根不是已存在的目录都显式拒绝，绝不静默按 Global 处理——
+    // 两侧字段语义不同，静默降级会让调用方以为读到的就是项目配置。
     if params.scope == xgent_core::config::ConfigScope::Project {
-        return Response::err(
-            req.id,
-            RpcError::new(
-                xgent_core::proto::INVALID_PARAMS,
-                "config scope=project 未实现，当前仅支持 global".to_string(),
-                None,
+        let root = match resolve_project_root(params.project_root.as_deref()) {
+            Ok(r) => r,
+            Err(msg) => {
+                return Response::err(
+                    req.id,
+                    RpcError::new(xgent_core::proto::INVALID_PARAMS, msg, None),
+                );
+            }
+        };
+        let mut cfg = shared.config.write().await;
+        return match cfg.read_project(&root, &params.key) {
+            Ok(v) => Response::ok(req.id, v),
+            Err(e) => Response::err(
+                req.id,
+                RpcError::new(xgent_core::proto::INTERNAL_ERROR, e.to_string(), None),
             ),
-        );
+        };
     }
     let cfg = shared.config.read().await;
     let value = cfg.read(&params.key);
     Response::ok(req.id, value)
+}
+
+/// 解析并校验 project 作用域携带的项目根。
+///
+/// 只要求「非空且是已存在的目录」：不要求客户端先 `fs.watch` 过该根——
+/// 启动时的订阅是异步的，把写入压在订阅成功上会让先保存后订阅完成的窗口
+/// 收到一条无从解释的失败。
+fn resolve_project_root(raw: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let Some(s) = raw.filter(|s| !s.is_empty()) else {
+        return Err("config scope=project 需要 project_root".to_string());
+    };
+    let path = std::path::PathBuf::from(s);
+    if !path.is_dir() {
+        return Err(format!("项目根不存在或不是目录: {s}"));
+    }
+    Ok(path)
 }
 
 /// config.write：写入并广播 config.changed
@@ -233,16 +258,38 @@ async fn config_write(
             );
         }
     };
-    // Project 作用域未实现：同 config_read，显式拒绝
+    // Project 作用域：写入该根的权威副本并只通知订阅了该项目的客户端。
+    // 按项目路由而非全局广播——同一 daemon 上可能开着多个项目，别的项目的
+    // 窗口不该因此重画自己的设置面板。
     if params.scope == xgent_core::config::ConfigScope::Project {
-        return Response::err(
-            req.id,
-            RpcError::new(
-                xgent_core::proto::INVALID_PARAMS,
-                "config scope=project 未实现，当前仅支持 global".to_string(),
-                None,
-            ),
+        let root = match resolve_project_root(params.project_root.as_deref()) {
+            Ok(r) => r,
+            Err(msg) => {
+                return Response::err(
+                    req.id,
+                    RpcError::new(xgent_core::proto::INVALID_PARAMS, msg, None),
+                );
+            }
+        };
+        let changed = {
+            let mut cfg = shared.config.write().await;
+            match cfg.write_project(&root, &params.key, params.value) {
+                Ok(c) => c,
+                Err(e) => {
+                    return Response::err(
+                        req.id,
+                        RpcError::new(xgent_core::proto::INTERNAL_ERROR, e.to_string(), None),
+                    );
+                }
+            }
+        };
+        let notif = Notification::new(
+            notifications::CONFIG_CHANGED,
+            serde_json::to_value(&changed).unwrap_or_default(),
         );
+        let reg = shared.registry.read().await;
+        reg.broadcast_to_project(&root, notif, Some(client_id));
+        return Response::ok(req.id, serde_json::json!({"ok": true}));
     }
     let changed = {
         let mut cfg = shared.config.write().await;
@@ -591,5 +638,306 @@ mod tests {
         // 通知无 id 字段
         assert!(!line.contains(r#""id""#));
         assert!(line.contains(r#""fs.changed""#));
+    }
+    // ---- config scope=project ----
+
+    /// 构造一份 `Shared`：注册三个客户端（两个各自订阅一个项目根，第三个当写入方）。
+    fn shared_for_project_tests() -> (
+        Shared,
+        mpsc::Receiver<Notification>,
+        mpsc::Receiver<Notification>,
+        xgent_core::ids::ClientId,
+        xgent_core::ids::ClientId,
+        xgent_core::ids::ClientId,
+    ) {
+        use crate::fs_watcher::FsWatcher;
+        use crate::lifecycle::Lifecycle;
+        use crate::provider_pool::ProviderPool;
+        use crate::registry::ClientRegistry;
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        // 注册表先在锁外构造好再装入：async 测试里拿 blocking 锁会踩到运行时限制
+        let mut reg = ClientRegistry::new();
+        let (a_tx, a_rx) = mpsc::channel::<Notification>(8);
+        let (b_tx, b_rx) = mpsc::channel::<Notification>(8);
+        let (w_tx, _w_rx) = mpsc::channel::<Notification>(8);
+        let id_a = reg.register(a_tx);
+        let id_b = reg.register(b_tx);
+        let id_writer = reg.register(w_tx);
+        let (fs_tx, fs_rx) = mpsc::channel::<crate::fs_watcher::FsEvent>(1);
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
+        let shared = Shared {
+            registry: Arc::new(RwLock::new(reg)),
+            pool: Arc::new(ProviderPool::new(Arc::new(RwLock::new(
+                crate::config_store::ConfigCoordinator::with_config(Default::default()),
+            )))),
+            config: Arc::new(RwLock::new(
+                crate::config_store::ConfigCoordinator::with_config(Default::default()),
+            )),
+            watcher: Arc::new(FsWatcher::new(fs_tx).expect("watcher 应可构造")),
+            lifecycle: Arc::new(Lifecycle::new(shutdown_tx)),
+            fs_events: Arc::new(tokio::sync::Mutex::new(fs_rx)),
+        };
+        (shared, a_rx, b_rx, id_a, id_b, id_writer)
+    }
+
+    #[tokio::test]
+    async fn project_config_write_notifies_only_that_projects_subscribers() {
+        use xgent_core::config::ConfigScope;
+        let dir_a = tempfile::tempdir().expect("项目 A");
+        let dir_b = tempfile::tempdir().expect("项目 B");
+        let root_a = dir_a.path().to_path_buf();
+        let root_b = dir_b.path().to_path_buf();
+        let (shared, mut a_rx, mut b_rx, id_a, id_b, id_writer) = shared_for_project_tests();
+        {
+            let mut reg = shared.registry.write().await;
+            reg.subscribe(id_a, root_a.clone());
+            reg.subscribe(id_b, root_b.clone());
+        }
+
+        let req = Request::new(
+            1,
+            methods::CONFIG_WRITE,
+            serde_json::to_value(ConfigWriteRequest {
+                scope: ConfigScope::Project,
+                key: "agent.max_parallel_tools".into(),
+                value: serde_json::json!(2),
+                project_root: Some(root_a.display().to_string()),
+            })
+            .unwrap(),
+        );
+        let resp = config_write(req, &shared, id_writer).await;
+        assert!(resp.error.is_none(), "写入应成功: {:?}", resp.error);
+
+        let notif = a_rx.recv().await.expect("项目 A 的订阅者应收到通知");
+        assert_eq!(notif.method, notifications::CONFIG_CHANGED);
+        assert_eq!(
+            notif.params["project_root"],
+            serde_json::json!(root_a.display().to_string()),
+            "通知必须携带项目根，否则收到它的窗口无从判断是否与己相关"
+        );
+        assert_eq!(notif.params["scope"], serde_json::json!("project"));
+        assert_eq!(notif.params["value"], serde_json::json!(2));
+        assert!(
+            b_rx.try_recv().is_err(),
+            "订阅另一个项目的客户端不该收到这次变更"
+        );
+
+        // 读回来就是刚写的值（走同一条 IPC 通道，不是测试内部直连存储）
+        let read = Request::new(
+            2,
+            methods::CONFIG_READ,
+            serde_json::to_value(ConfigReadRequest {
+                scope: ConfigScope::Project,
+                key: "agent.max_parallel_tools".into(),
+                project_root: Some(root_a.display().to_string()),
+            })
+            .unwrap(),
+        );
+        let resp = config_read(read, &shared).await;
+        assert_eq!(resp.result.expect("应有结果"), serde_json::json!(2));
+        assert_eq!(
+            xgent_settings_core::ProjectConfigStore::load(&root_a)
+                .expect("项目配置应落盘")
+                .agent
+                .max_parallel_tools,
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn project_config_without_root_is_rejected_not_downgraded() {
+        use xgent_core::config::ConfigScope;
+        let (shared, _a_rx, _b_rx, _id_a, _id_b, id_writer) = shared_for_project_tests();
+        let req = Request::new(
+            1,
+            methods::CONFIG_READ,
+            serde_json::to_value(ConfigReadRequest {
+                scope: ConfigScope::Project,
+                key: "agent.max_parallel_tools".into(),
+                project_root: None,
+            })
+            .unwrap(),
+        );
+        let resp = config_read(req, &shared).await;
+        let err = resp.error.expect("缺 project_root 应报错");
+        assert_eq!(err.code, xgent_core::proto::INVALID_PARAMS);
+        assert!(err.message.contains("project_root"), "{}", err.message);
+
+        let wreq = Request::new(
+            2,
+            methods::CONFIG_WRITE,
+            serde_json::to_value(ConfigWriteRequest {
+                scope: ConfigScope::Project,
+                key: "agent.max_parallel_tools".into(),
+                value: serde_json::json!(7),
+                project_root: Some("".into()),
+            })
+            .unwrap(),
+        );
+        let resp = config_write(wreq, &shared, id_writer).await;
+        assert!(resp.error.is_some(), "空 project_root 的写入同样应被拒绝");
+    }
+
+    #[tokio::test]
+    async fn project_config_with_missing_directory_is_rejected() {
+        use xgent_core::config::ConfigScope;
+        let (shared, _a_rx, _b_rx, _id_a, _id_b, id_writer) = shared_for_project_tests();
+        let req = Request::new(
+            1,
+            methods::CONFIG_WRITE,
+            serde_json::to_value(ConfigWriteRequest {
+                scope: ConfigScope::Project,
+                key: "agent.max_parallel_tools".into(),
+                value: serde_json::json!(7),
+                project_root: Some("/definitely/not/a/project/root".into()),
+            })
+            .unwrap(),
+        );
+        let resp = config_write(req, &shared, id_writer).await;
+        let err = resp.error.expect("不存在的根应报错");
+        assert!(err.message.contains("不存在或不是目录"), "{}", err.message);
+    }
+
+    /// 旧客户端发的全局请求里没有 `project_root`：行为必须与改动前一致。
+    #[tokio::test]
+    async fn legacy_global_read_still_works_without_project_root() {
+        let (shared, _a_rx, _b_rx, _id_a, _id_b, _id_writer) = shared_for_project_tests();
+        let req = Request::new(
+            1,
+            methods::CONFIG_READ,
+            serde_json::json!({"scope":"global","key":"default_provider"}),
+        );
+        let resp = config_read(req, &shared).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        // 空配置下 default_provider 读回空串（全局读的是字符串字段，不是 Null）
+        assert_eq!(resp.result.expect("应有结果"), serde_json::json!(""));
+    }
+
+    #[test]
+    fn resolve_project_root_rejects_absent_and_non_directory() {
+        assert!(resolve_project_root(None).is_err());
+        assert!(resolve_project_root(Some("")).is_err());
+        assert!(resolve_project_root(Some("/no/such/project/here")).is_err());
+        let dir = tempfile::tempdir().expect("临时项目根");
+        assert_eq!(
+            resolve_project_root(Some(&dir.path().display().to_string())).unwrap(),
+            dir.path()
+        );
+    }
+
+    /// 写 `providers.<id>.*` 必须让 provider 池缓存失效——否则改了限额/凭据后
+    /// 旧实例（旧配置）继续被 chat 使用，直到 daemon 重启。
+    #[tokio::test]
+    async fn provider_write_invalidates_the_pool_cache() {
+        // 这两个用例会写全局配置，必须先隔离落盘位置
+        crate::test_util::isolate_agent_dir();
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+        use xgent_core::config::{ConfigScope, ConfigWriteRequest};
+        use xgent_settings_core::global::{ProviderConfig, ProviderKind};
+
+        let mut global = xgent_settings_core::GlobalConfig::default();
+        global.providers.insert(
+            "myai".to_string(),
+            ProviderConfig {
+                kind: ProviderKind::OpenAiCompat,
+                api_base: "https://old.example.test/v1".into(),
+                api_key: "sk-old".into(),
+                ..Default::default()
+            },
+        );
+        // 池与 handler 共用同一份权威配置，否则这条测试证不到"写进去的是池读的那份"
+        let config = Arc::new(RwLock::new(
+            crate::config_store::ConfigCoordinator::with_config(global),
+        ));
+        let (fs_tx, fs_rx) = mpsc::channel::<crate::fs_watcher::FsEvent>(1);
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
+        let shared = Shared {
+            registry: Arc::new(RwLock::new(crate::registry::ClientRegistry::new())),
+            pool: Arc::new(crate::provider_pool::ProviderPool::new(config.clone())),
+            config,
+            watcher: Arc::new(crate::fs_watcher::FsWatcher::new(fs_tx).expect("watcher 应可构造")),
+            lifecycle: Arc::new(crate::lifecycle::Lifecycle::new(shutdown_tx)),
+            fs_events: Arc::new(tokio::sync::Mutex::new(fs_rx)),
+        };
+        let id_writer = xgent_core::ids::ClientId(7);
+        let before = shared.pool.get("myai").await.expect("应能构造 provider");
+
+        let req = Request::new(
+            1,
+            methods::CONFIG_WRITE,
+            serde_json::to_value(ConfigWriteRequest {
+                scope: ConfigScope::Global,
+                key: "providers.myai.context_window".into(),
+                value: serde_json::json!(32000),
+                project_root: None,
+            })
+            .unwrap(),
+        );
+        let resp = config_write(req, &shared, id_writer).await;
+        assert!(resp.error.is_none(), "新增限额字段应可写: {:?}", resp.error);
+
+        let after = shared.pool.get("myai").await.expect("应能重新构造");
+        assert!(
+            !Arc::ptr_eq(&before, &after),
+            "providers.* 写入后池缓存应失效，下一次取用应重建实例"
+        );
+    }
+
+    /// 不碰 `providers.*` 的写入不应白白让池失效。
+    #[tokio::test]
+    async fn non_provider_write_keeps_the_pool_cache() {
+        // 这两个用例会写全局配置，必须先隔离落盘位置
+        crate::test_util::isolate_agent_dir();
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+        use xgent_core::config::{ConfigScope, ConfigWriteRequest};
+        use xgent_settings_core::global::{ProviderConfig, ProviderKind};
+
+        let mut global = xgent_settings_core::GlobalConfig::default();
+        global.providers.insert(
+            "myai".to_string(),
+            ProviderConfig {
+                kind: ProviderKind::OpenAiCompat,
+                api_base: "https://a.example.test/v1".into(),
+                api_key: "sk-a".into(),
+                ..Default::default()
+            },
+        );
+        let config = Arc::new(RwLock::new(
+            crate::config_store::ConfigCoordinator::with_config(global),
+        ));
+        let (fs_tx, fs_rx) = mpsc::channel::<crate::fs_watcher::FsEvent>(1);
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
+        let shared = Shared {
+            registry: Arc::new(RwLock::new(crate::registry::ClientRegistry::new())),
+            pool: Arc::new(crate::provider_pool::ProviderPool::new(config.clone())),
+            config,
+            watcher: Arc::new(crate::fs_watcher::FsWatcher::new(fs_tx).expect("watcher 应可构造")),
+            lifecycle: Arc::new(crate::lifecycle::Lifecycle::new(shutdown_tx)),
+            fs_events: Arc::new(tokio::sync::Mutex::new(fs_rx)),
+        };
+        let id_writer = xgent_core::ids::ClientId(7);
+        let before = shared.pool.get("myai").await.expect("应能构造 provider");
+        let req = Request::new(
+            1,
+            methods::CONFIG_WRITE,
+            serde_json::to_value(ConfigWriteRequest {
+                scope: ConfigScope::Global,
+                key: "default_model".into(),
+                value: serde_json::json!("gpt-4o"),
+                project_root: None,
+            })
+            .unwrap(),
+        );
+        let resp = config_write(req, &shared, id_writer).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        let after = shared.pool.get("myai").await.expect("应能取用");
+        assert!(
+            Arc::ptr_eq(&before, &after),
+            "与 provider 无关的写入不该重建 provider"
+        );
     }
 }

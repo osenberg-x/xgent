@@ -8,6 +8,7 @@ mod daemon;
 mod fs_event_bridge;
 mod ipc_client;
 mod provider_client;
+mod settings_io;
 mod startup;
 
 use std::sync::Arc;
@@ -93,44 +94,6 @@ fn main() {
         Arc::new(IpcProviderClient::new(ipc.clone())) as Arc<dyn xgent_agent::ProviderClient>;
     // 项目配置（工具策略、工具/检索/agent 限额、context_strategy 都取自这里）
     let project_config = ProjectConfigStore::load(&project_root).unwrap_or_default();
-    // ToolExecutor 作为 Resource（与 AgentBridge 共享同一 Arc）。
-    // 插件系统经 ToolExecutorResource 注册工具到同一实例。
-    // 确认超时与命令上限取自 `[tools]`（R3-17）。
-    let tool_params = xgent_tools::ToolParams::from_tool_config(&project_config.tools);
-    // 文件改动检查点：执行器写前记快照、写后回填校验值，agent loop 标定轮号，
-    // UI 侧「撤销上一轮」经 AgentBridge.checkpoints 取同一实例（R3-11）。
-    let checkpoints = Arc::new(xgent_tools::CheckpointStore::new(project_root.clone()));
-    let executor =
-        Arc::new(ToolExecutor::with_params(&tool_params).attach_checkpoints(checkpoints.clone()));
-    // Editor 命令 channel：agent EditorTool → ECS（经 agent_poll_system 桥接）
-    let (editor_cmd_tx, editor_cmd_rx) =
-        tokio::sync::mpsc::channel::<xgent_tools::EditorCommandRequest>(32);
-    let editor_sink = Arc::new(xgent_agent::ChannelEditorCommandSink::new(editor_cmd_tx));
-    let editor_tool = xgent_tools::EditorTool::new(editor_sink);
-    executor.register(Arc::new(editor_tool));
-    // ContextHub 包装内置 provider + 动态插件 provider。
-    // 作为 Arc<dyn ContextProvider> 注入 bridge（agent 无感于内置 vs 插件）。
-    //
-    // 内置 provider 按项目配置的 context_strategy 选择（R2-4）。无实现的
-    // 策略显式报错而非静默回退：静默回退会让误配置的项目看起来完全正常。
-    let builtin_ctx: Arc<dyn xgent_context::ContextProvider> =
-        match xgent_context::build_context_provider(
-            project_config.context_strategy,
-            project_root.clone(),
-            xgent_context::RetrievalLimits::from_context_limits(&project_config.context),
-        ) {
-            xgent_context::BuiltContextProvider::Ready(p) => Arc::from(p),
-            xgent_context::BuiltContextProvider::Unsupported(s) => {
-                tracing::error!(
-                    strategy = ?s,
-                    "context_strategy 尚无实现，已中止启动（不静默回退到其他策略）。                     可用策略：on_demand"
-                );
-                std::process::exit(2);
-            }
-        };
-    let context_hub = Arc::new(ContextHub::default());
-    context_hub.set_builtin(vec![builtin_ctx]);
-    let context = context_hub.clone() as Arc<dyn xgent_context::ContextProvider>;
     // 加载全局配置（daemon 也持有同一份，此处用于派生默认 provider/model 与重试配置）
     let global_config = GlobalConfigStore::load().unwrap_or_default();
 
@@ -162,31 +125,67 @@ fn main() {
         if m.is_empty() { None } else { Some(m) }
     });
     let (provider_id, model) = derive_provider_model(provider_id, model);
+    // 上下文窗口：provider 的按模型覆盖 > provider 级值 > 内置缺省（含告警）。
+    let context_window = resolve_context_window(&global_config, &provider_id, &model);
+    // 运行期可改配置的共享句柄集：设置面板写入这四个句柄，各消费方就地读到
+    // （`[tool_policy]` → 下一次工具调用；`[agent]` + 窗口 → 下一条消息；
+    //   `[tools]` → 下一次确认 / 命令；`[context]` → 下一次检索）。
+    let live_settings = settings_io::LiveSettings::new(&project_config, context_window);
+    // ToolExecutor 作为 Resource（与 AgentBridge 共享同一 Arc）。
+    // 插件系统经 ToolExecutorResource 注册工具到同一实例。
+    // 确认超时与命令上限取自 `[tools]`（R3-17），并挂在共享句柄上（R3-13）。
+    let checkpoints = Arc::new(xgent_tools::CheckpointStore::new(project_root.clone()));
+    let executor = Arc::new(
+        ToolExecutor::with_shared_params(live_settings.tool_params.clone())
+            .attach_checkpoints(checkpoints.clone()),
+    );
+    // Editor 命令 channel：agent EditorTool → ECS（经 agent_poll_system 桥接）
+    let (editor_cmd_tx, editor_cmd_rx) =
+        tokio::sync::mpsc::channel::<xgent_tools::EditorCommandRequest>(32);
+    let editor_sink = Arc::new(xgent_agent::ChannelEditorCommandSink::new(editor_cmd_tx));
+    let editor_tool = xgent_tools::EditorTool::new(editor_sink);
+    executor.register(Arc::new(editor_tool));
+    // ContextHub 包装内置 provider + 动态插件 provider。
+    // 作为 Arc<dyn ContextProvider> 注入 bridge（agent 无感于内置 vs 插件）。
+    //
+    // 内置 provider 按项目配置的 context_strategy 选择（R2-4）。无实现的
+    // 策略显式报错而非静默回退：静默回退会让误配置的项目看起来完全正常。
+    let builtin_ctx: Arc<dyn xgent_context::ContextProvider> =
+        match xgent_context::build_context_provider_shared(
+            project_config.context_strategy,
+            project_root.clone(),
+            live_settings.retrieval_limits.clone(),
+        ) {
+            xgent_context::BuiltContextProvider::Ready(p) => Arc::from(p),
+            xgent_context::BuiltContextProvider::Unsupported(s) => {
+                tracing::error!(
+                    strategy = ?s,
+                    "context_strategy 尚无实现，已中止启动（不静默回退到其他策略）。                     可用策略：on_demand"
+                );
+                std::process::exit(2);
+            }
+        };
+    let context_hub = Arc::new(ContextHub::default());
+    context_hub.set_builtin(vec![builtin_ctx]);
+    let context = context_hub.clone() as Arc<dyn xgent_context::ContextProvider>;
     // Compaction provider：复用 agent 的 ProviderClient，与对话同 provider/model。
     let compactor: Arc<dyn xgent_agent::CompactionProvider> = Arc::new(
         xgent_agent::LlmCompactor::new(provider.clone(), provider_id.clone(), model.clone()),
     );
-    // 上下文窗口：provider 的按模型覆盖 > provider 级值 > 内置缺省（含告警）。
-    let context_window = resolve_context_window(&global_config, &provider_id, &model);
     let bridge = AgentBridge::new(AgentBridgeConfig {
         provider,
         executor: executor.clone(),
         context,
         project_root: project_root.clone(),
-        tool_policy: project_config.tool_policy.clone(),
+        tool_policy: live_settings.tool_policy.clone(),
         retry_config: Arc::new(parking_lot::RwLock::new(retry_config)),
         compaction: Some(compactor),
-        context_window,
+        run_settings: live_settings.run_settings.clone(),
         compaction_settings: xgent_agent::CompactionSettings::default(),
         // 有界执行：防止 LLM 反复请求同一 tool_call 导致无限执行与无限计费（R1-1）
         max_tool_rounds: Some(xgent_agent::loop_limits::MAX_TOOL_ROUNDS),
         max_tokens_per_turn: Some(xgent_agent::loop_limits::MAX_TOKENS_PER_TURN),
-        // 检索预算与每帧事件上限来自 `[agent]`（R3-17）
-        retrieval_max_tokens: project_config.agent.effective_retrieval_max_tokens(),
-        max_events_per_frame: project_config.agent.effective_max_events_per_frame(),
         checkpoints: Some(checkpoints),
-        // 同轮并发工具调用上限，来自 `[agent]`（R3-15）
-        max_parallel_tools: project_config.agent.effective_max_parallel_tools(),
     });
 
     // 通知订阅端（fs/config 桥接用）
@@ -255,6 +254,7 @@ fn main() {
         xgent_plugin_host::PluginHostPlugin,
         xgent_ui::XgentUiPlugin,
         crate::config_bridge::ConfigBridgePlugin,
+        crate::settings_io::SettingsIoPlugin,
         crate::fs_event_bridge::FsEventBridgePlugin,
     ))
     .insert_resource(args)
@@ -277,6 +277,10 @@ fn main() {
         kind: None,
     })
     .insert_resource(ToolExecutorResource(executor.clone()))
+    // 项目配置的读模型：设置面板打开前要看到真实值（此前从未被插入，
+    // 注释却写着"由 xgent_app 在打开项目时插入"）
+    .insert_resource(xgent_settings::ProjectConfigRes(project_config.clone()))
+    .insert_resource(live_settings)
     .insert_resource(PluginHostResource(plugin_host.clone()))
     .insert_resource(PluginEventRx(parking_lot::Mutex::new(event_rx)))
     .insert_resource(xgent_plugin_host::PluginOpRx(parking_lot::Mutex::new(

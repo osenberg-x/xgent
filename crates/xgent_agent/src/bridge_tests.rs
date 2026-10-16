@@ -192,17 +192,19 @@ fn test_app_with_context(
         executor,
         context,
         project_root: project_root.clone(),
-        tool_policy,
+        tool_policy: Arc::new(parking_lot::RwLock::new(tool_policy)),
         retry_config: Arc::new(parking_lot::RwLock::new(retry_config)),
         compaction: None,
-        context_window: 128_000,
+        run_settings: Arc::new(parking_lot::RwLock::new(crate::bridge::RunSettings {
+            retrieval_max_tokens,
+            max_events_per_frame,
+            max_parallel_tools,
+            context_window: 128_000,
+        })),
         compaction_settings: crate::compaction::CompactionSettings::default(),
         max_tool_rounds: Some(crate::bridge::loop_limits::MAX_TOOL_ROUNDS),
         max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
-        retrieval_max_tokens,
-        max_events_per_frame,
         checkpoints: None,
-        max_parallel_tools,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -773,6 +775,14 @@ impl crate::compaction::CompactionProvider for MockCompactor {
 
 /// 构造带 compaction 的测试 App（小 context_window 触发压缩）。
 fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) -> App {
+    test_app_with_compaction_window(provider, 10)
+}
+
+/// 同上，但窗口由调用方给定（要验"运行期改窗口"的用例用）。
+fn test_app_with_compaction_window(
+    provider: Arc<dyn crate::bridge::ProviderClient>,
+    context_window: u32,
+) -> App {
     let mut app = App::new();
     let context = Arc::new(MockContext);
     let project_root = std::mem::ManuallyDrop::new(tempfile::tempdir().expect("tempdir"))
@@ -793,20 +803,21 @@ fn test_app_with_compaction(provider: Arc<dyn crate::bridge::ProviderClient>) ->
         executor: Arc::new(ToolExecutor::with_defaults()),
         context,
         project_root: project_root.clone(),
-        tool_policy: ToolPolicyConfig::default(),
+        tool_policy: Arc::new(parking_lot::RwLock::new(ToolPolicyConfig::default())),
         retry_config: Arc::new(parking_lot::RwLock::new(
             crate::bridge::RetryConfig::default(),
         )),
         compaction: Some(compactor),
-        // 极小窗口 + 默认 80% 阈值 → 8 token 即触发
-        context_window: 10,
+        run_settings: Arc::new(parking_lot::RwLock::new(crate::bridge::RunSettings {
+            retrieval_max_tokens: xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
+            max_events_per_frame: xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
+            max_parallel_tools: xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+            context_window,
+        })),
         compaction_settings: crate::compaction::CompactionSettings::default(),
         max_tool_rounds: Some(crate::bridge::loop_limits::MAX_TOOL_ROUNDS),
         max_tokens_per_turn: Some(crate::bridge::loop_limits::MAX_TOKENS_PER_TURN),
-        retrieval_max_tokens: xgent_settings_core::project::defaults::RETRIEVAL_MAX_TOKENS,
-        max_events_per_frame: xgent_settings_core::project::defaults::MAX_EVENTS_PER_FRAME,
         checkpoints: None,
-        max_parallel_tools: xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
     };
     let bridge = AgentBridge::new(cfg);
     app.add_plugins(MinimalPlugins)
@@ -874,6 +885,85 @@ fn compaction_triggers_when_over_threshold() {
     let collected = app.world().resource::<CompactedCollected>();
     assert!(collected.count >= 1, "compaction 应至少触发一次");
     assert_eq!(collected.last_before, 9999);
+}
+
+/// A11 的行为半边：上下文窗口是**运行期**读的，不是 bridge 构造时冻结的。
+///
+/// 面板保存 `providers.<id>.context_window` → `xgent_app` 写 `run_settings` 共享
+/// 句柄 → agent loop 每次 StartLoop 取一次快照。对照组全程宽窗口（9999 token
+/// 不触发压缩），实验组在 bridge 构造**之后**才把窗口改成 10——正是面板保存时
+/// 发生的顺序。若 loop 用的是构造时的窗口，实验组不会触发压缩。
+#[test]
+fn runtime_narrowed_window_drives_the_next_compaction_decision() {
+    // 对照：全程宽窗口 → 不压缩
+    let wide_provider = Arc::new(MockProvider::new(vec![
+        ChatEvent::TextDelta {
+            text: "hello".into(),
+        },
+        ChatEvent::Done {
+            reason: xgent_core::chat::StopReason::Stop,
+            usage: TokenUsage {
+                prompt: 9999,
+                completion: 1,
+            },
+        },
+    ]));
+    let mut wide = test_app_with_compaction_window(
+        wide_provider as Arc<dyn crate::bridge::ProviderClient>,
+        1_000_000,
+    );
+    wide.insert_resource(CompactedCollected::default())
+        .add_systems(Update, collect_compacted);
+    wide.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..50 {
+        wide.update();
+    }
+    assert_eq!(
+        wide.world().resource::<CompactedCollected>().count,
+        0,
+        "宽窗口下 9999 token 不该触发压缩"
+    );
+
+    // 实验：同一份宽窗口构造，随后经句柄改窄（= 面板保存后的写入顺序）
+    let narrow_provider = Arc::new(MockProvider::new(vec![
+        ChatEvent::TextDelta {
+            text: "hello".into(),
+        },
+        ChatEvent::Done {
+            reason: xgent_core::chat::StopReason::Stop,
+            usage: TokenUsage {
+                prompt: 9999,
+                completion: 1,
+            },
+        },
+    ]));
+    let mut narrowed = test_app_with_compaction_window(
+        narrow_provider as Arc<dyn crate::bridge::ProviderClient>,
+        1_000_000,
+    );
+    let mut settings = narrowed.world().resource::<AgentBridge>().run_settings();
+    settings.context_window = 10;
+    narrowed
+        .world_mut()
+        .resource_mut::<AgentBridge>()
+        .set_run_settings(settings);
+    narrowed
+        .insert_resource(CompactedCollected::default())
+        .add_systems(Update, collect_compacted);
+    narrowed.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..50 {
+        narrowed.update();
+    }
+    assert!(
+        narrowed.world().resource::<CompactedCollected>().count >= 1,
+        "改窄窗口后的下一条对话应按新窗口触发压缩"
+    );
 }
 
 /// 流式 mock provider：发首个 delta 后暂停等待 steering 信号，再继续。
@@ -2664,7 +2754,10 @@ fn frame_event_cap_defers_events_without_dropping_them() {
     );
     // 配置值应原样带到 ECS 侧 drain
     assert_eq!(
-        app.world().resource::<AgentBridge>().max_events_per_frame,
+        app.world()
+            .resource::<AgentBridge>()
+            .run_settings()
+            .max_events_per_frame,
         3,
         "bridge 应持有配置的每帧上限"
     );
@@ -2699,8 +2792,8 @@ fn frame_event_cap_defers_events_without_dropping_them() {
 fn drain_bound_is_read_from_bridge_not_a_literal() {
     let src = include_str!("agent_loop.rs");
     assert!(
-        src.contains("bridge.max_events_per_frame"),
-        "每帧上限应取自 bridge 字段"
+        src.contains("bridge.run_settings().max_events_per_frame"),
+        "每帧上限应取自 bridge 的共享设置句柄"
     );
     assert!(
         !src.contains("while processed < 64"),
@@ -3281,5 +3374,174 @@ fn default_config_parallelises_nothing_even_for_auto_approved_ui_only() {
     assert_eq!(
         probed.confirm_requests, 0,
         "UiOnly 不该弹窗，这条断言区分它与 A3 那条待确认用例"
+    );
+}
+
+// ---- R3-13：配置句柄写入后，下一轮用的就是新值 ----
+
+/// `max_parallel_tools` 写进共享句柄后，**下一轮**调度按新上限钳制。
+///
+/// 装配时给的是 4；随后把句柄改成 1。若上限在构造时被拷进 loop 参数（改动前的
+/// 形状），观测到的并发仍是 4，本断言即炸。
+#[test]
+fn max_parallel_tools_written_to_handle_bounds_next_turn() {
+    let st = ProbeState::new(2);
+    let tools = (0..4u64)
+        .map(|k| {
+            probe(
+                match k {
+                    0 => "pa",
+                    1 => "pb",
+                    2 => "pc",
+                    _ => "pd",
+                },
+                ToolTier::Read,
+                Concurrency::Shared,
+                10,
+                &st,
+            )
+        })
+        .collect();
+    let mut app = probe_app(
+        &[("pa", 0), ("pb", 1), ("pc", 2), ("pd", 3)],
+        tools,
+        &["pa", "pb", "pc", "pd"],
+        4,
+    );
+    let bridge = app.world().resource::<AgentBridge>();
+    let mut rs = bridge.run_settings();
+    rs.max_parallel_tools = 1;
+    bridge.set_run_settings(rs);
+
+    drive(&mut app, 4);
+    assert_eq!(
+        st.max(),
+        1,
+        "写入句柄的 1 应钳住下一轮的并发（装配值是 4，说明读的不是构造时的拷贝）"
+    );
+    assert_eq!(app.world().resource::<Probed>().results.len(), 4);
+}
+
+/// `[agent] retrieval_max_tokens` 写进句柄后，下一次检索请求带新预算。
+#[test]
+fn retrieval_budget_written_to_handle_reaches_next_query() {
+    let recorder = Arc::new(RecordingContext::default());
+    let (mut app, _root) = test_app_with_context(
+        Arc::new(MockProvider::new(vec![
+            ChatEvent::TextDelta { text: "ok".into() },
+            ChatEvent::Done {
+                reason: xgent_core::chat::StopReason::Stop,
+                usage: xgent_core::chat::TokenUsage::default(),
+            },
+        ])),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig::default(),
+        crate::bridge::RetryConfig::default(),
+        recorder.clone(),
+        8_000,
+        64,
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    let bridge = app.world().resource::<AgentBridge>();
+    let mut rs = bridge.run_settings();
+    rs.retrieval_max_tokens = 500;
+    bridge.set_run_settings(rs);
+
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..50 {
+        app.update();
+    }
+    assert_eq!(
+        recorder.last_budget(),
+        Some(500),
+        "检索预算应从共享句柄读，而不是装配时的 8000"
+    );
+}
+
+/// `[tool_policy]` 写进句柄后，下一轮工具调用不再问确认（面板那条路的端到端）。
+#[test]
+fn tool_policy_written_to_handle_stops_asking_next_turn() {
+    let st = ProbeState::new(2);
+    let tools = vec![
+        probe("pa", ToolTier::Read, Concurrency::Shared, 10, &st),
+        probe("pb", ToolTier::Read, Concurrency::Shared, 10, &st),
+    ];
+    // approved 为空：默认要问确认
+    let mut app = probe_app(&[("pa", 0), ("pb", 1)], tools, &[], 4);
+    app.world()
+        .resource::<AgentBridge>()
+        .tool_policy
+        .write()
+        .approved = vec!["pa".to_string(), "pb".to_string()];
+
+    drive(&mut app, 2);
+    let probed = app.world().resource::<Probed>();
+    assert_eq!(probed.results.len(), 2, "两个探针都应产出结果");
+    assert_eq!(
+        probed.confirm_requests, 0,
+        "策略句柄改完后下一轮不该再问确认"
+    );
+}
+
+/// `max_events_per_frame` 写进句柄后，下一帧的分闸跟着变（不丢事件的性质由
+/// `frame_event_cap_defers_events_without_dropping_them` 钉住）。
+#[test]
+fn frame_event_cap_written_to_handle_is_read_next_frame() {
+    use crate::bridge::RunSettings;
+    let mut events: Vec<ChatEvent> = (0..6)
+        .map(|i| ChatEvent::TextDelta {
+            text: format!("{i}"),
+        })
+        .collect();
+    events.push(ChatEvent::Done {
+        reason: xgent_core::chat::StopReason::Stop,
+        usage: xgent_core::chat::TokenUsage::default(),
+    });
+    let (mut app, _root) = test_app_with_context(
+        Arc::new(MockProvider::new(events)),
+        Arc::new(ToolExecutor::with_defaults()),
+        ToolPolicyConfig::default(),
+        crate::bridge::RetryConfig::default(),
+        Arc::new(MockContext),
+        8_000,
+        64,
+        xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
+    );
+    app.world()
+        .resource::<AgentBridge>()
+        .set_run_settings(RunSettings {
+            max_events_per_frame: 2,
+            ..app.world().resource::<AgentBridge>().run_settings()
+        });
+    app.world_mut().write_message(UserInputMessage {
+        text: "hi".into(),
+        editor_queries: Vec::new(),
+    });
+    for _ in 0..200 {
+        app.update();
+    }
+    let conv = app.world().resource::<crate::conversation::Conversation>();
+    let text = match &conv.messages[1] {
+        xgent_core::chat::AgentMessage::Assistant(a) => a
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                xgent_core::chat::ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>(),
+        _ => panic!("应有助手消息"),
+    };
+    assert_eq!(text, "012345", "每帧 2 条的分闸下仍应拼出全部文本");
+    assert_eq!(
+        app.world()
+            .resource::<AgentBridge>()
+            .run_settings()
+            .max_events_per_frame,
+        2,
+        "drain 应读共享句柄里的新分闸"
     );
 }

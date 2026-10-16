@@ -72,14 +72,21 @@ impl ToolParams {
     }
 }
 
-/// 默认内置工具集合。
+/// 默认内置工具集合（参数按快照拷贝，运行期不再随配置变化）。
 pub fn default_tools(params: &ToolParams) -> Vec<Arc<dyn Tool>> {
+    default_tools_shared(Arc::new(parking_lot::RwLock::new(*params)))
+}
+
+/// 默认内置工具集合，`run_command` 与调用方**共享**同一参数句柄。
+///
+/// 宿主（`xgent_app`）用这条构造执行器，改 `[tools]` 后下一次命令调用即生效。
+pub fn default_tools_shared(params: Arc<parking_lot::RwLock<ToolParams>>) -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(ReadFile),
         Arc::new(WriteFile),
         Arc::new(EditFile),
         Arc::new(SearchFiles),
-        Arc::new(RunCommand::with_params(params)),
+        Arc::new(RunCommand::with_shared_params(params)),
     ]
 }
 

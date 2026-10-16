@@ -1,10 +1,25 @@
-//! 设置面板：provider 配置（api_base / api_key / model）。
+//! 设置面板：把两份配置里可改的键显示成可读、可改、可保存的表单。
 //!
-//! 面板由 top_bar settings 按钮或命令面板 `settings.open` 触发开关。
-//! 用户填写 provider 配置后点保存，发 [`SaveProviderConfigMessage`]，
-//! 由 `xgent_app` 中的系统经 IPC 写入 daemon 全局配置。
+//! 面板由顶栏齿轮按钮、provider 标签或命令面板 `settings.open` 触发开关。
+//! 面板自己**不**读写磁盘也不发 IPC：打开时发 [`RequestSettingsSnapshotMessage`]，
+//! 由 `xgent_app` 经 daemon 取回当前值写进 [`GlobalConfigRes`] 与
+//! [`ProjectConfigRes`]；保存时只把**改动过的键**装进 [`SaveSettingsMessage`]，
+//! 写回结果经 [`SettingsSaveReportMessage`] 如实报告（哪些键已写入、哪个键失败及原因）。
 //!
-//! 使用官方 `EditableText` 处理输入（光标/删除/IME 全由官方 text_input 系统）。
+//! 四条贯穿全文件的判据：
+//! - **显示的是生效值**。数值项有两种语义，面板必须分清：
+//!   - [`NumMode::Sentinel`]（项目配置的全部数值键 + provider 的
+//!     `context_window`/`max_output_tokens`/`first_event_timeout_secs`）：
+//!     存 `0` 表示"未设置"，输入框显示内置缺省并标注未设置——`0` 不等于 0，
+//!     也不等于"不限"（`max_parallel_tools = 0` 是 4）。
+//!   - [`NumMode::Plain`]（`timeout_secs` 与两个重试延迟）：core 没给这些键定义
+//!     缺省回落，存的就是生效的，因此显示原值；**留空表示不修改**。
+//! - **只写脏键**：未改动的字段一个都不发，所以密钥框留空不会清空已存的 api_key。
+//! - **先校验后写**：任何一个字段非法就一条都不写，并点出是哪个字段。
+//! - **不猜策略**：工具三态行显示 [`ToolExecutor::resolved_policy`] 的解析结果，
+//!   与执行时同一条判据（`denied` → `approved` → 动态升级 → tier 缺省）。
+//!
+//! 输入框使用官方 `EditableText`（光标/删除/IME 全交官方 text_input 系统）。
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::Hovered;
@@ -12,7 +27,13 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::{Button, TextInput};
-use xgent_settings::Localizer;
+use xgent_settings::{GlobalConfigRes, Localizer, ProjectConfigRes};
+use xgent_settings_core::global::{ProviderConfig, ProviderKind};
+use xgent_settings_core::project::ToolPolicyConfig;
+use xgent_settings_core::{
+    ProjectConfig, global::defaults as glob_defaults, project::defaults as proj_defaults,
+};
+use xgent_tools::{SecurityPolicy, ToolExecutor, ToolExecutorResource};
 
 use crate::fonts::ui_text;
 use crate::i18n::tr;
@@ -50,7 +71,7 @@ pub struct SettingsCloseButtonMarker;
 #[derive(Component)]
 pub struct KindButton {
     /// 该按钮代表的 provider 类型
-    pub kind: xgent_settings_core::global::ProviderKind,
+    pub kind: ProviderKind,
     /// 是否当前选中
     pub selected: bool,
 }
@@ -59,13 +80,13 @@ pub struct KindButton {
 #[derive(Resource, Debug, Clone)]
 pub struct KindSelector {
     /// 当前选中的 provider 类型
-    pub current: xgent_settings_core::global::ProviderKind,
+    pub current: ProviderKind,
 }
 
 impl Default for KindSelector {
     fn default() -> Self {
         Self {
-            current: xgent_settings_core::global::ProviderKind::OpenAiCompat,
+            current: ProviderKind::OpenAiCompat,
         }
     }
 }
@@ -76,35 +97,68 @@ pub struct SettingsPanelState {
     pub open: bool,
 }
 
-/// 保存 provider 配置消息（UI → xgent_app IPC 系统）。
-#[derive(Message, Debug, Clone)]
-pub struct SaveProviderConfigMessage {
-    /// provider id（providers map key），如 "openai"
-    pub provider_id: String,
-    /// provider 类型
-    pub kind: xgent_settings_core::global::ProviderKind,
-    /// API base URL
-    pub api_base: String,
-    /// API key
-    pub api_key: String,
-    /// 模型名（落 model_overrides["default"]）
-    pub model: String,
+/// 配置快照状态。
+///
+/// 面板自己没有读配置的通路（权威在 daemon），所以打开时要先要一份快照；
+/// `tick` 由 `xgent_app` 在"权威值确实变了、且可以安全重建输入框"时 +1，
+/// 面板据此重渲染（有键被 daemon 拒掉的保存不推进 `tick`，见
+/// `xgent_app::settings_io::apply_save_result`）。
+#[derive(Resource, Debug, Clone, Default)]
+pub struct SettingsSnapshotReady {
+    /// 已取到一份可用的配置快照
+    pub ready: bool,
+    /// 渲染计数：`xgent_app` 每落一份"可以安全按磁盘重建输入框"的权威快照就 +1，
+    /// 面板按**增量**重渲染（见 `toggle_panel`）。
+    pub tick: u32,
+    /// 快照读取失败的原因（非空即显示，不把"读不到"演成"全是默认值"）
+    pub error: String,
 }
 
-/// 请求拉取模型列表（UI → xgent_app IPC 系统）。
+/// 请求取回当前配置快照（面板打开时 UI → `xgent_app`）。
+#[derive(Message, Debug, Clone, Default)]
+pub struct RequestSettingsSnapshotMessage;
+
+/// 一条待写入的配置项（点分键 + 值）。
+#[derive(Message, Debug, Clone)]
+pub struct SaveSettingsMessage {
+    /// 项目作用域的改动（写 `<project>/.xgent/config.toml`）
+    pub project: Vec<ConfigItem>,
+    /// 全局作用域的改动（写 `~/.xgent/agent/config.toml`）
+    pub global: Vec<ConfigItem>,
+}
+
+/// 单个配置键值对。
+#[derive(Debug, Clone)]
+pub struct ConfigItem {
+    /// 点分配置键
+    pub key: String,
+    /// 新值
+    pub value: serde_json::Value,
+}
+
+/// 保存结果（`xgent_app` → 面板）。
+#[derive(Message, Debug, Clone)]
+pub struct SettingsSaveReportMessage {
+    /// 已成功写入的键
+    pub written: Vec<String>,
+    /// 写入失败的键与 daemon 给的原因
+    pub failed: Vec<(String, String)>,
+}
+
+/// 拉取模型列表（UI → `xgent_app`）。
 #[derive(Message, Debug, Clone)]
 pub struct FetchModelsMessage {
     /// provider id
     pub provider_id: String,
     /// api_base（用于构建 provider）
     pub api_base: String,
-    /// api_key
+    /// api_key（编辑中的草稿凭据，不落盘）
     pub api_key: String,
     /// provider 类型
-    pub kind: xgent_settings_core::global::ProviderKind,
+    pub kind: ProviderKind,
 }
 
-/// 模型列表结果（xgent_app → UI）。
+/// 模型列表结果（`xgent_app` → UI）。
 #[derive(Message, Debug, Clone)]
 pub struct ModelListResultMessage {
     /// 模型 id 列表
@@ -124,13 +178,6 @@ pub struct ModelListState {
     pub error: String,
 }
 
-/// 保存语言偏好消息（UI → xgent_app IPC 系统）。
-#[derive(Message, Debug, Clone)]
-pub struct SaveLanguageMessage {
-    /// 语言代码，如 "zh-CN" / "en-US"
-    pub language: String,
-}
-
 /// 刷新模型按钮标记。
 #[derive(Component, Default)]
 pub struct FetchModelsButtonMarker;
@@ -145,56 +192,494 @@ pub struct ModelItemMarker {
 #[derive(Component, Default)]
 pub struct ModelListContainerMarker;
 
+/// 语言选择按钮标记。
+#[derive(Component, Clone)]
+pub struct LanguageButton {
+    /// 该按钮代表的语言代码
+    pub lang: String,
+}
+
+/// 数值设置输入框标记。
+#[derive(Component, Clone)]
+pub struct SettingsNumInput {
+    /// 配置键（provider 字段是短名，保存时再拼成 `providers.<id>.<key>`）
+    pub key: &'static str,
+    /// 打开面板时的存储值（脏检查基准）
+    pub stored: u64,
+    /// 打开面板时显示的生效值（未设置时即内置缺省）
+    pub effective: u64,
+    /// 该字段属于全局（provider）作用域
+    pub global: bool,
+    /// 语义：`0`/留空 是否表示"未设置"
+    pub mode: NumMode,
+    /// 允许上限
+    pub max: u64,
+}
+
+/// 数值字段的语义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumMode {
+    /// `0` = 未设置，回落到内置缺省（显示缺省值，留空即写 `0` 清除）
+    Sentinel,
+    /// 存储值即生效值（留空 = 不修改）
+    Plain,
+}
+
+/// 数值字段校验失败。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldError {
+    /// 不是非负整数
+    NotANumber,
+    /// 超出该字段允许的上限
+    OutOfRange {
+        /// 允许上限
+        max: u64,
+    },
+}
+
+/// 解析后的输入值。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParsedField {
+    /// 未修改（Plain 模式下留空）
+    Unchanged,
+    /// 新存储值
+    Value(u64),
+}
+
+/// 一个数值设置字段（渲染 + 校验 + 脏检查的数据）。
+#[derive(Debug, Clone)]
+pub struct NumField {
+    /// 配置键
+    pub key: &'static str,
+    /// 标签的 i18n 键
+    pub label_key: &'static str,
+    /// 存储值
+    pub stored: u64,
+    /// 生效值（Sentinel 且未设置时为内置缺省）
+    pub effective: u64,
+    /// 允许上限
+    pub max: u64,
+    /// 语义
+    pub mode: NumMode,
+    /// 该值只在特定条件下生效时的说明文案键（`None` = 无保留条件）
+    pub note_key: Option<&'static str>,
+}
+
+impl NumField {
+    /// 输入框应显示的数字。
+    pub fn display_value(&self) -> u64 {
+        match self.mode {
+            NumMode::Sentinel => self.effective,
+            NumMode::Plain => self.stored,
+        }
+    }
+
+    /// 是否处于"未设置"状态（仅 Sentinel 语义有此概念）。
+    pub fn is_unset(&self) -> bool {
+        matches!(self.mode, NumMode::Sentinel) && self.stored == 0
+    }
+}
+
+/// 解析输入框文本为待写值。
+///
+/// - [`NumMode::Sentinel`]：空串 = 未设置 = 写 `0`；
+/// - [`NumMode::Plain`]：空串 = 不修改（写 `0` 对这类键有真实含义，不能由留空触发）。
+pub fn parse_num_field(text: &str, max: u64, mode: NumMode) -> Result<ParsedField, FieldError> {
+    let t = text.trim();
+    if t.is_empty() {
+        return match mode {
+            NumMode::Sentinel => Ok(ParsedField::Value(0)),
+            NumMode::Plain => Ok(ParsedField::Unchanged),
+        };
+    }
+    let v: u64 = t.parse().map_err(|_| FieldError::NotANumber)?;
+    if v > max {
+        return Err(FieldError::OutOfRange { max });
+    }
+    Ok(ParsedField::Value(v))
+}
+
+/// 项目作用域数值字段（顺序即面板顺序，也是校验/标签的查找表）。
+///
+/// 缺省值与上限都取自 `xgent_settings_core`，本文件不写死数字。
+pub fn project_num_fields(cfg: &ProjectConfig) -> Vec<NumField> {
+    let rows = vec![
+        NumField {
+            key: "agent.retrieval_max_tokens",
+            label_key: "settings-retrieval-max-tokens",
+            stored: cfg.agent.retrieval_max_tokens as u64,
+            effective: cfg.agent.effective_retrieval_max_tokens() as u64,
+            max: 1_000_000,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "agent.max_parallel_tools",
+            label_key: "settings-max-parallel-tools",
+            stored: cfg.agent.max_parallel_tools as u64,
+            effective: cfg.agent.effective_max_parallel_tools() as u64,
+            // 上限刻意很小：这一闸挡的是子进程/socket/fd 数量，4 已是常见批次的量级
+            max: 64,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "agent.max_events_per_frame",
+            label_key: "settings-max-events-per-frame",
+            stored: cfg.agent.max_events_per_frame as u64,
+            effective: cfg.agent.effective_max_events_per_frame() as u64,
+            max: 10_000,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "tools.confirm_timeout_secs",
+            label_key: "settings-confirm-timeout",
+            stored: cfg.tools.confirm_timeout_secs,
+            effective: cfg.tools.effective_confirm_timeout_secs(),
+            max: 86_400,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "tools.command_timeout_secs",
+            label_key: "settings-command-timeout",
+            stored: cfg.tools.command_timeout_secs,
+            effective: cfg.tools.effective_command_timeout_secs(),
+            max: 86_400,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "tools.command_max_output_bytes",
+            label_key: "settings-command-max-output",
+            stored: cfg.tools.command_max_output_bytes as u64,
+            effective: cfg.tools.effective_command_max_output_bytes() as u64,
+            max: 16 * 1024 * 1024,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "context.tree_max_depth",
+            label_key: "settings-tree-max-depth",
+            stored: cfg.context.tree_max_depth as u64,
+            effective: cfg.context.effective_tree_max_depth() as u64,
+            max: 64,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "context.tree_max_entries",
+            label_key: "settings-tree-max-entries",
+            stored: cfg.context.tree_max_entries as u64,
+            effective: cfg.context.effective_tree_max_entries() as u64,
+            max: 100_000,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "context.rg_timeout_secs",
+            label_key: "settings-rg-timeout",
+            stored: cfg.context.rg_timeout_secs,
+            effective: cfg.context.effective_rg_timeout_secs(),
+            max: 3_600,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "context.max_search_files",
+            label_key: "settings-max-search-files",
+            stored: cfg.context.max_search_files as u64,
+            effective: cfg.context.effective_max_search_files() as u64,
+            max: 10_000,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "context.max_keywords",
+            label_key: "settings-max-keywords",
+            stored: cfg.context.max_keywords as u64,
+            effective: cfg.context.effective_max_keywords() as u64,
+            max: 256,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+    ];
+    rows
+}
+
+/// provider（全局作用域）数值字段。
+pub fn provider_num_fields(pc: &ProviderConfig) -> Vec<NumField> {
+    vec![
+        NumField {
+            key: "context_window",
+            label_key: "settings-context-window",
+            stored: pc.context_window as u64,
+            effective: pc.resolve_context_window("").0 as u64,
+            max: 1_000_000_000,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "max_output_tokens",
+            label_key: "settings-max-output-tokens",
+            stored: pc.max_output_tokens as u64,
+            effective: pc.effective_max_output_tokens() as u64,
+            max: 1_000_000_000,
+            mode: NumMode::Sentinel,
+            // build_provider 只在 Anthropic 分支发送 max_tokens；OpenAI 兼容下
+            // 这个框改了也不影响请求，所以必须写明，不能让人以为配上了
+            note_key: Some("settings-field-anthropic-only"),
+        },
+        NumField {
+            key: "first_event_timeout_secs",
+            label_key: "settings-first-event-timeout",
+            stored: pc.first_event_timeout_secs,
+            effective: pc.effective_first_event_timeout_secs(),
+            max: 3_600,
+            mode: NumMode::Sentinel,
+            note_key: None,
+        },
+        NumField {
+            key: "timeout_secs",
+            label_key: "settings-request-timeout",
+            stored: pc.timeout_secs,
+            effective: pc.timeout_secs,
+            max: 86_400,
+            // core 里 0 就是"请求立刻超时"，没有回落缺省一说 → 不按未设置处理
+            mode: NumMode::Plain,
+            note_key: None,
+        },
+        NumField {
+            key: "retry_initial_delay_ms",
+            label_key: "settings-retry-initial-delay",
+            stored: pc.retry_initial_delay_ms,
+            effective: pc.retry_initial_delay_ms,
+            max: 600_000,
+            mode: NumMode::Plain,
+            note_key: None,
+        },
+        NumField {
+            key: "retry_max_delay_ms",
+            label_key: "settings-retry-max-delay",
+            stored: pc.retry_max_delay_ms,
+            effective: pc.retry_max_delay_ms,
+            max: 3_600_000,
+            mode: NumMode::Plain,
+            note_key: None,
+        },
+        NumField {
+            key: "max_retries",
+            label_key: "settings-max-retries",
+            stored: pc.max_retries.unwrap_or(0) as u64,
+            effective: pc.max_retries.unwrap_or(0) as u64,
+            max: 20,
+            // `None`（无限重试）在面板里不显示成数字：留空 = 不修改
+            mode: NumMode::Plain,
+            note_key: None,
+        },
+    ]
+}
+
+/// 字段键 → 定义（校验与标签都从这张表取，避免两处数字漂移）。
+///
+/// 两张表都查：provider 字段的键是短名（`context_window`），保存时才拼成
+/// `providers.<id>.<key>`，而错误文案要按短名找标签。
+pub fn num_spec(key: &str) -> Option<NumField> {
+    project_num_fields(&ProjectConfig::default())
+        .into_iter()
+        .chain(provider_num_fields(&ProviderConfig::default()))
+        .find(|f| f.key == key)
+}
+
+/// 内置缺省（测试断言"未设置显示的是 core 的缺省"时用）。
+pub const DEFAULT_MAX_PARALLEL_TOOLS: u64 = proj_defaults::MAX_PARALLEL_TOOLS as u64;
+/// 内置上下文窗口缺省。
+pub const DEFAULT_CONTEXT_WINDOW: u64 = glob_defaults::CONTEXT_WINDOW as u64;
+
+/// 工具策略三态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyState {
+    /// 自动执行
+    Auto,
+    /// 每次询问
+    Ask,
+    /// 拒绝
+    Deny,
+}
+
+impl PolicyState {
+    /// 由解析后的安全策略映射成三态。
+    pub fn from_policy(p: SecurityPolicy) -> Self {
+        match p {
+            SecurityPolicy::Approved => Self::Auto,
+            SecurityPolicy::NeedsConfirmation => Self::Ask,
+            SecurityPolicy::Denied => Self::Deny,
+        }
+    }
+
+    /// 该状态对应的按钮文案 i18n 键。
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Auto => "settings-policy-auto",
+            Self::Ask => "settings-policy-ask",
+            Self::Deny => "settings-policy-deny",
+        }
+    }
+}
+
+/// 一行工具策略。
+#[derive(Debug, Clone)]
+pub struct PolicyRow {
+    /// 工具 id
+    pub tool_id: String,
+    /// 当前显示的状态
+    pub state: PolicyState,
+}
+
+/// 未保存的策略草稿（点击即改显示，保存才落盘）。
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PolicyDraft {
+    /// tool_id → 用户新选的状态
+    pub changes: std::collections::HashMap<String, PolicyState>,
+}
+
+/// 策略按钮标记。
+#[derive(Component, Clone)]
+pub struct PolicyButton {
+    /// 工具 id
+    pub tool_id: String,
+    /// 该按钮代表的状态
+    pub state: PolicyState,
+}
+
+/// 面板状态提示行标记（保存结果写在这里）。
+#[derive(Component, Default)]
+pub struct SettingsStatusMarker;
+
 /// 设置面板插件。
 pub struct SettingsPanelPlugin;
 
 impl Plugin for SettingsPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<SaveProviderConfigMessage>()
+        app.add_message::<RequestSettingsSnapshotMessage>()
+            .add_message::<SaveSettingsMessage>()
+            .add_message::<SettingsSaveReportMessage>()
             .add_message::<FetchModelsMessage>()
             .add_message::<ModelListResultMessage>()
             .add_message::<SaveLanguageMessage>()
             .insert_resource(SettingsPanelState::default())
             .insert_resource(KindSelector::default())
             .insert_resource(ModelListState::default())
+            .insert_resource(SettingsSnapshotReady::default())
+            .insert_resource(PolicyDraft::default())
             .add_systems(
                 Update,
                 (
                     toggle_panel,
                     handle_kind_button,
+                    handle_panel_dismiss,
+                    handle_policy_button,
                     handle_save_button,
                     handle_fetch_models,
                     handle_model_list_results,
                     handle_model_click,
+                    apply_save_report,
                 )
                     .chain(),
             );
     }
 }
 
-/// 根据开关状态 spawn/despawn 面板。
+/// 保存语言偏好消息（UI → `xgent_app`，命令面板与设置面板共用）。
+#[derive(Message, Debug, Clone)]
+pub struct SaveLanguageMessage {
+    /// 语言代码，如 "zh-CN" / "en-US"
+    pub language: String,
+}
+
+/// 根据开关状态 spawn/despawn 面板，并在快照更新时重渲染。
+///
+/// 重渲染只认 `tick` 的**增量**，不认 `is_changed()`：`ResMut` 的 `deref_mut` 会无条件
+/// 标脏，把重建挂在脏标记上等于"任何碰到这份资源的帧都要重画一次"——被 daemon 拒掉
+/// 的那个值前两轮就是这样在下一帧被磁盘值换掉的。`xgent_app` 那边则有键被拒时连这份
+/// 资源都不碰，两边各留一道。
 fn toggle_panel(
     state: Res<SettingsPanelState>,
     mut commands: Commands,
     q_panel: Query<Entity, With<SettingsPanelMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
+    global: Res<GlobalConfigRes>,
+    project: Res<ProjectConfigRes>,
+    snapshot: Res<SettingsSnapshotReady>,
+    executor: Res<ToolExecutorResource>,
+    provider_info: Res<xgent_agent::ProviderInfo>,
+    draft: Res<PolicyDraft>,
+    mut writer: MessageWriter<RequestSettingsSnapshotMessage>,
+    mut last_rendered: Local<u32>,
 ) {
     let panel_exists = q_panel.single().is_ok();
 
     if state.open && !panel_exists {
-        spawn_panel(&mut commands, &theme, &loc);
-    } else if !state.open
-        && panel_exists
-        && let Ok(entity) = q_panel.single()
-    {
-        commands.entity(entity).despawn();
+        *last_rendered = snapshot.tick;
+        writer.write(RequestSettingsSnapshotMessage);
+        spawn_panel(
+            &mut commands,
+            &theme,
+            &loc,
+            &global,
+            &project,
+            &executor,
+            &snapshot,
+            &provider_info,
+            &draft,
+        );
+    } else if state.open && panel_exists && snapshot.tick > *last_rendered {
+        // 权威快照真的推进了：重渲染，让显示跟上磁盘
+        *last_rendered = snapshot.tick;
+        if let Ok(entity) = q_panel.single() {
+            commands.entity(entity).despawn();
+        }
+        spawn_panel(
+            &mut commands,
+            &theme,
+            &loc,
+            &global,
+            &project,
+            &executor,
+            &snapshot,
+            &provider_info,
+            &draft,
+        );
+    } else if !state.open && panel_exists {
+        if let Ok(entity) = q_panel.single() {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
 /// spawn 设置面板 overlay。
-fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
+fn spawn_panel(
+    commands: &mut Commands,
+    theme: &Theme,
+    loc: &Localizer,
+    global: &GlobalConfigRes,
+    project: &ProjectConfigRes,
+    executor_res: &ToolExecutorResource,
+    snapshot: &SettingsSnapshotReady,
+    provider_info: &xgent_agent::ProviderInfo,
+    draft: &PolicyDraft,
+) {
     let font = theme.font_size;
+    // 面板编辑的是"当前正在用的 provider"，缺省回落 config 的 default_provider
+    let pid = if provider_info.id.is_empty() {
+        global.default_provider.clone()
+    } else {
+        provider_info.id.clone()
+    };
+    let pc = global.providers.get(&pid).cloned().unwrap_or_default();
+
     commands
         .spawn((
             Node {
@@ -211,20 +696,21 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
             SettingsPanelMarker,
         ))
         .with_children(|p| {
+            // 卡片本身是可滚动容器：设置项一多就超过视口高度，
+            // 用 xui 的 ScrollArea（与对话区/终端同一套）而不是裸 Overflow——
+            // 裸 Overflow 在根节点无 UiRoot 时量不出尺寸，子节点会全部叠在原点。
+            let mut area = xui::scroll_area::ScrollArea::vertical();
+            area.node.width = Val::Px(640.0);
+            area.node.height = Val::Percent(92.0);
+            area.node.padding = UiRect::all(px(space::LG));
+            area.node.row_gap = px(space::SM);
+            area.node.border = UiRect::all(px(1.0));
             p.spawn((
-                Node {
-                    padding: UiRect::all(px(space::LG)),
-                    border: UiRect::all(px(1.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(space::MD),
-                    min_width: px(420.0),
-                    ..default()
-                },
+                area,
                 BackgroundColor(theme.elevated),
                 BorderColor::all(theme.border),
             ))
             .with_children(|card| {
-                // 标题（H3 档）
                 card.spawn(ui_text(
                     tr(loc, "settings-title"),
                     type_scale::H3,
@@ -233,126 +719,75 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     type_scale::line_height::UI,
                 ));
 
-                // Provider ID
-                card.spawn(ui_text(
-                    tr(loc, "settings-provider-id"),
-                    type_scale::BODY,
-                    400,
-                    theme.text_dim,
-                    type_scale::line_height::UI,
-                ));
-                card.spawn(text_input_node(theme, font, ProviderIdInput));
+                if let Some(line) = error_line(snapshot) {
+                    card.spawn(ui_text(
+                        line,
+                        type_scale::BODY_SM,
+                        400,
+                        theme.st_fail,
+                        type_scale::line_height::UI,
+                    ));
+                }
+                if !snapshot.ready {
+                    card.spawn(ui_text(
+                        tr(loc, "settings-loading"),
+                        type_scale::BODY,
+                        400,
+                        theme.text_dim,
+                        type_scale::line_height::UI,
+                    ));
+                    spawn_button_row(card, theme, loc);
+                    return;
+                }
 
-                // Kind 选择（横排按钮组，MVP 暴露 4 变体，隐藏 Custom）
-                card.spawn(ui_text(
-                    tr(loc, "settings-kind"),
-                    type_scale::BODY,
-                    400,
-                    theme.text_dim,
-                    type_scale::line_height::UI,
-                ));
-                card.spawn((Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(space::SM),
-                    ..default()
-                },))
-                    .with_children(|row| {
-                        let kinds = [
-                            (
-                                xgent_settings_core::global::ProviderKind::OpenAiCompat,
-                                tr(loc, "settings-kind-openai-compat"),
-                            ),
-                            (
-                                xgent_settings_core::global::ProviderKind::ResponseApi,
-                                tr(loc, "settings-kind-response-api"),
-                            ),
-                            (
-                                xgent_settings_core::global::ProviderKind::Anthropic,
-                                tr(loc, "settings-kind-anthropic"),
-                            ),
-                            (
-                                xgent_settings_core::global::ProviderKind::Ollama,
-                                tr(loc, "settings-kind-ollama"),
-                            ),
-                        ];
-                        for (kind, label) in kinds {
-                            row.spawn((
-                                Button,
-                                Hovered::default(),
-                                Node {
-                                    padding: UiRect::all(px(space::SM)),
-                                    ..default()
-                                },
-                                ui_text(
-                                    label,
-                                    type_scale::BODY,
-                                    400,
-                                    theme.text,
-                                    type_scale::line_height::UI,
-                                ),
-                                KindButton {
-                                    kind,
-                                    selected: false,
-                                },
-                            ));
-                        }
-                    });
-
-                // API Base
-                card.spawn(ui_text(
-                    tr(loc, "settings-api-base"),
-                    type_scale::BODY,
-                    400,
-                    theme.text_dim,
-                    type_scale::line_height::UI,
-                ));
-                card.spawn(text_input_node(theme, font, ApiBaseInput));
-
-                // API Key
-                card.spawn(ui_text(
-                    tr(loc, "settings-api-key"),
-                    type_scale::BODY,
-                    400,
-                    theme.text_dim,
-                    type_scale::line_height::UI,
-                ));
-                card.spawn(text_input_node(theme, font, ApiKeyInput));
-
-                // Model
-                card.spawn(ui_text(
-                    tr(loc, "settings-model"),
-                    type_scale::BODY,
-                    400,
-                    theme.text_dim,
-                    type_scale::line_height::UI,
-                ));
-                // Model 输入 + 刷新按钮行
-                card.spawn((Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(space::SM),
-                    ..default()
-                },))
-                    .with_children(|row| {
-                        row.spawn(text_input_node(theme, font, ModelInput));
-                        row.spawn((
-                            Button,
-                            Hovered::default(),
-                            Node {
-                                padding: UiRect::all(px(space::SM)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.surface),
-                            ui_text(
-                                "↻",
-                                type_scale::BODY,
-                                400,
-                                theme.text_dim,
-                                type_scale::line_height::UI,
-                            ),
-                            FetchModelsButtonMarker,
-                        ));
-                    });
-                // 模型列表容器（动态填充）
+                // ── Provider ─────────────────────────────────
+                section(card, theme, loc, "settings-section-provider");
+                spawn_labelled_input(
+                    card,
+                    theme,
+                    loc,
+                    font,
+                    "settings-provider-id",
+                    &pid,
+                    ProviderIdInput,
+                    false,
+                );
+                spawn_kind_row(card, theme, loc, &pc.kind);
+                spawn_labelled_input(
+                    card,
+                    theme,
+                    loc,
+                    font,
+                    "settings-api-base",
+                    &pc.api_base,
+                    ApiBaseInput,
+                    false,
+                );
+                spawn_labelled_input(
+                    card,
+                    theme,
+                    loc,
+                    font,
+                    "settings-api-key",
+                    &pc.api_key,
+                    ApiKeyInput,
+                    true,
+                );
+                let model = pc
+                    .model_overrides
+                    .get("default")
+                    .cloned()
+                    .unwrap_or_else(|| global.default_model.clone());
+                spawn_labelled_input(
+                    card,
+                    theme,
+                    loc,
+                    font,
+                    "settings-model",
+                    &model,
+                    ModelInput,
+                    false,
+                );
                 card.spawn((
                     Node {
                         width: Val::Percent(100.0),
@@ -363,67 +798,432 @@ fn spawn_panel(commands: &mut Commands, theme: &Theme, loc: &Localizer) {
                     },
                     ModelListContainerMarker,
                 ));
+                for f in provider_num_fields(&pc) {
+                    spawn_num_field(card, theme, loc, font, &f, true);
+                }
 
-                // 按钮行
+                // ── 工具策略 ─────────────────────────────────
+                section(card, theme, loc, "settings-section-tool-policy");
+                card.spawn(ui_text(
+                    tr(loc, "settings-tool-policy-hint"),
+                    type_scale::BODY_SM,
+                    400,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ));
+                for row in policy_rows(&executor_res.0, &project.tool_policy, draft) {
+                    spawn_policy_row(card, theme, loc, &row);
+                }
+
+                // ── agent / tools / context ──────────────────
+                for (section_key, prefix) in [
+                    ("settings-section-agent", "agent."),
+                    ("settings-section-tools", "tools."),
+                    ("settings-section-context", "context."),
+                ] {
+                    section(card, theme, loc, section_key);
+                    for f in project_num_fields(project)
+                        .into_iter()
+                        .filter(|f| f.key.starts_with(prefix))
+                    {
+                        spawn_num_field(card, theme, loc, font, &f, false);
+                    }
+                }
+
+                // ── 语言 ────────────────────────────────────
+                section(card, theme, loc, "settings-section-language");
                 card.spawn((Node {
                     flex_direction: FlexDirection::Row,
-                    column_gap: px(space::MD),
+                    column_gap: px(space::SM),
                     ..default()
                 },))
-                    .with_children(|btns| {
-                        btns.spawn((
-                            Button,
-                            Hovered::default(),
-                            Node {
-                                padding: UiRect {
-                                    left: px(space::LG),
-                                    right: px(space::LG),
-                                    top: px(space::SM + 1.0),
-                                    bottom: px(space::SM + 1.0),
+                    .with_children(|row| {
+                        for lang in ["zh-CN", "en-US"] {
+                            let selected = global.preferences.language == lang;
+                            row.spawn((
+                                Button,
+                                Hovered::default(),
+                                Node {
+                                    padding: UiRect {
+                                        left: px(space::MD),
+                                        right: px(space::MD),
+                                        top: px(2.0),
+                                        bottom: px(2.0),
+                                    },
+                                    border_radius: BorderRadius::all(px(
+                                        crate::theme::radius::CTRL,
+                                    )),
+                                    ..default()
                                 },
-                                border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.accent),
-                            ui_text(
-                                tr(loc, "settings-save"),
-                                type_scale::BODY_SM,
-                                510,
-                                theme.accent_text,
-                                type_scale::line_height::CTRL,
-                            ),
-                            SettingsSaveButtonMarker,
-                        ));
-                        btns.spawn((
-                            Button,
-                            Hovered::default(),
-                            Node {
-                                padding: UiRect::all(px(space::SM)),
-                                border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::NONE),
-                            ui_text(
-                                tr(loc, "settings-close"),
-                                type_scale::BODY_SM,
-                                510,
-                                theme.text_dim,
-                                type_scale::line_height::CTRL,
-                            ),
-                            SettingsCloseButtonMarker,
-                        ));
+                                BackgroundColor(if selected { theme.accent } else { theme.subtle }),
+                                ui_text(
+                                    tr(loc, &format!("settings-lang-{lang}")),
+                                    type_scale::BODY_SM,
+                                    if selected { 600 } else { 400 },
+                                    if selected {
+                                        theme.accent_text
+                                    } else {
+                                        theme.text_dim
+                                    },
+                                    type_scale::line_height::CTRL,
+                                ),
+                                LanguageButton {
+                                    lang: lang.to_string(),
+                                },
+                            ));
+                        }
                     });
+
+                spawn_button_row(card, theme, loc);
+                card.spawn(ui_text(
+                    "",
+                    type_scale::BODY_SM,
+                    400,
+                    theme.text_dim,
+                    type_scale::line_height::UI,
+                ))
+                .insert(SettingsStatusMarker);
             });
         });
 }
 
-/// 创建一个 EditableText 输入框节点。
+/// 快照读取失败时的提示行（成功时 `None`）。
+fn error_line(snapshot: &SettingsSnapshotReady) -> Option<String> {
+    if snapshot.error.is_empty() {
+        None
+    } else {
+        Some(snapshot.error.clone())
+    }
+}
+
+/// 保存 + 关闭按钮行。
+fn spawn_button_row(
+    card: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+) {
+    card.spawn((Node {
+        flex_direction: FlexDirection::Row,
+        column_gap: px(space::MD),
+        ..default()
+    },))
+        .with_children(|btns| {
+            btns.spawn((
+                Button,
+                Hovered::default(),
+                Node {
+                    padding: UiRect {
+                        left: px(space::LG),
+                        right: px(space::LG),
+                        top: px(space::SM + 1.0),
+                        bottom: px(space::SM + 1.0),
+                    },
+                    border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
+                    ..default()
+                },
+                BackgroundColor(theme.accent),
+                ui_text(
+                    tr(loc, "settings-save"),
+                    type_scale::BODY_SM,
+                    510,
+                    theme.accent_text,
+                    type_scale::line_height::CTRL,
+                ),
+                SettingsSaveButtonMarker,
+            ));
+            btns.spawn((
+                Button,
+                Hovered::default(),
+                Node {
+                    padding: UiRect::all(px(space::SM)),
+                    border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                ui_text(
+                    tr(loc, "settings-close"),
+                    type_scale::BODY_SM,
+                    510,
+                    theme.text_dim,
+                    type_scale::line_height::CTRL,
+                ),
+                SettingsCloseButtonMarker,
+            ));
+        });
+}
+
+/// provider kind 选择行（MVP 暴露 4 个变体，`Custom` 不给按钮）。
+fn spawn_kind_row(
+    card: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+    current: &ProviderKind,
+) {
+    card.spawn(ui_text(
+        tr(loc, "settings-kind"),
+        type_scale::BODY,
+        400,
+        theme.text_dim,
+        type_scale::line_height::UI,
+    ));
+    card.spawn((Node {
+        flex_direction: FlexDirection::Row,
+        column_gap: px(space::SM),
+        ..default()
+    },))
+        .with_children(|row| {
+            let kinds = [
+                (ProviderKind::OpenAiCompat, "settings-kind-openai-compat"),
+                (ProviderKind::ResponseApi, "settings-kind-response-api"),
+                (ProviderKind::Anthropic, "settings-kind-anthropic"),
+                (ProviderKind::Ollama, "settings-kind-ollama"),
+            ];
+            for (kind, label_key) in kinds {
+                let selected = *current == kind;
+                row.spawn((
+                    Button,
+                    Hovered::default(),
+                    Node {
+                        padding: UiRect {
+                            left: px(space::MD),
+                            right: px(space::MD),
+                            top: px(2.0),
+                            bottom: px(2.0),
+                        },
+                        border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
+                        ..default()
+                    },
+                    BackgroundColor(if selected { theme.accent } else { theme.subtle }),
+                    ui_text(
+                        tr(loc, label_key),
+                        type_scale::BODY_SM,
+                        if selected { 600 } else { 400 },
+                        if selected {
+                            theme.accent_text
+                        } else {
+                            theme.text_dim
+                        },
+                        type_scale::line_height::CTRL,
+                    ),
+                    KindButton { kind, selected },
+                ));
+            }
+        });
+}
+
+/// 小节标题。
+fn section(
+    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+    label_key: &str,
+) {
+    p.spawn(ui_text(
+        tr(loc, label_key),
+        type_scale::BODY,
+        600,
+        theme.text,
+        type_scale::line_height::UI,
+    ));
+}
+
+/// 「标签 + 输入框」一行（文本字段，初值来自当前配置）。
+fn spawn_labelled_input(
+    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+    font: f32,
+    label_key: &str,
+    value: &str,
+    marker: impl Bundle,
+    with_fetch: bool,
+) {
+    p.spawn(ui_text(
+        tr(loc, label_key),
+        type_scale::BODY,
+        400,
+        theme.text_dim,
+        type_scale::line_height::UI,
+    ));
+    if with_fetch {
+        // 模型字段带一个 ↻ 按钮：拉取列表是临时凭据探测，不写配置
+        p.spawn((Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: px(space::SM),
+            ..default()
+        },))
+            .with_children(|row| {
+                row.spawn(text_input_node(theme, font, value, marker));
+                row.spawn((
+                    Button,
+                    Hovered::default(),
+                    Node {
+                        padding: UiRect::all(px(space::SM)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.surface),
+                    ui_text(
+                        "↻",
+                        type_scale::BODY,
+                        400,
+                        theme.text_dim,
+                        type_scale::line_height::UI,
+                    ),
+                    FetchModelsButtonMarker,
+                ));
+            });
+    } else {
+        p.spawn(text_input_node(theme, font, value, marker));
+    }
+}
+
+/// 一行数值字段：标签 + 预填输入框 +（未设置时）提示。
+fn spawn_num_field(
+    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+    font: f32,
+    f: &NumField,
+    global: bool,
+) {
+    p.spawn(ui_text(
+        tr(loc, f.label_key),
+        type_scale::BODY,
+        400,
+        theme.text_dim,
+        type_scale::line_height::UI,
+    ));
+    let shown = if matches!(f.mode, NumMode::Plain) && f.stored == 0 {
+        String::new()
+    } else {
+        f.display_value().to_string()
+    };
+    p.spawn(text_input_node(
+        theme,
+        font,
+        &shown,
+        SettingsNumInput {
+            key: f.key,
+            stored: f.stored,
+            effective: f.effective,
+            global,
+            mode: f.mode,
+            max: f.max,
+        },
+    ));
+    if let Some(note) = f.note_key {
+        p.spawn(ui_text(
+            tr(loc, note),
+            type_scale::MICRO,
+            400,
+            theme.text_muted,
+            type_scale::line_height::UI,
+        ));
+    }
+    if f.is_unset() {
+        // 只显示数字会让人以为这就是自己配的值；把"这是内置缺省"写在旁边
+        p.spawn(ui_text(
+            tr(loc, "settings-field-unset"),
+            type_scale::MICRO,
+            400,
+            theme.text_muted,
+            type_scale::line_height::UI,
+        ));
+    }
+}
+
+/// 一行工具策略：工具名 + 三个状态按钮。
+fn spawn_policy_row(
+    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+    row: &PolicyRow,
+) {
+    p.spawn((Node {
+        flex_direction: FlexDirection::Row,
+        column_gap: px(space::SM),
+        align_items: AlignItems::Center,
+        ..default()
+    },))
+        .with_children(|line| {
+            line.spawn(ui_text(
+                row.tool_id.clone(),
+                type_scale::BODY_SM,
+                400,
+                theme.text,
+                type_scale::line_height::UI,
+            ));
+            for state in [PolicyState::Auto, PolicyState::Ask, PolicyState::Deny] {
+                let selected = state == row.state;
+                line.spawn((
+                    Button,
+                    Hovered::default(),
+                    Node {
+                        padding: UiRect {
+                            left: px(space::SM),
+                            right: px(space::SM),
+                            top: px(2.0),
+                            bottom: px(2.0),
+                        },
+                        border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
+                        ..default()
+                    },
+                    BackgroundColor(if selected { theme.accent } else { theme.subtle }),
+                    ui_text(
+                        tr(loc, state.label_key()),
+                        type_scale::MICRO,
+                        if selected { 600 } else { 400 },
+                        if selected {
+                            theme.accent_text
+                        } else {
+                            theme.text_dim
+                        },
+                        type_scale::line_height::CTRL,
+                    ),
+                    PolicyButton {
+                        tool_id: row.tool_id.clone(),
+                        state,
+                    },
+                ));
+            }
+        });
+}
+
+/// 由执行器与已存策略（叠加草稿）算出各行的显示状态。
+pub fn policy_rows(
+    executor: &ToolExecutor,
+    stored: &ToolPolicyConfig,
+    draft: &PolicyDraft,
+) -> Vec<PolicyRow> {
+    executor
+        .policy_targets()
+        .into_iter()
+        .map(|(tool_id, _tier)| {
+            let base = stored_state(executor, &tool_id, stored);
+            PolicyRow {
+                state: draft.changes.get(&tool_id).copied().unwrap_or(base),
+                tool_id,
+            }
+        })
+        .collect()
+}
+
+/// 已存配置解析出的三态（走执行器的同一条判据）。
+fn stored_state(executor: &ToolExecutor, tool_id: &str, stored: &ToolPolicyConfig) -> PolicyState {
+    PolicyState::from_policy(
+        executor
+            .resolved_policy(tool_id, stored)
+            .unwrap_or(SecurityPolicy::NeedsConfirmation),
+    )
+}
+
+/// 创建一个 `EditableText` 输入框节点。
 ///
 /// 例外：输入框无 `Text` 组件（内容存于 [`EditableText`] 编辑器），若改用
 /// [`ui_text`] 会额外插入 `Text::new("")`，被 `measure_text_system` 当静态
 /// 文本节点测量，与输入框自身的 `TextInputMeasure` 冲突。故保留显式
 /// `TextFont::from_font_size`（构造器式写法，非裸字面量）。
-fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bundle {
+fn text_input_node(theme: &Theme, font: f32, value: &str, marker: impl Bundle) -> impl Bundle {
     (
         Node {
             padding: UiRect::all(px(space::SM)),
@@ -439,11 +1239,11 @@ fn text_input_node(theme: &Theme, font: f32, marker: impl Component) -> impl Bun
         // 文本输入 → 竖线 I-beam 指针
         crate::cursor::CursorStyle::Text,
         crate::cursor::CursorHit::default(),
-        EditableText::default(),
-        TextInput,
         // 0.20 起点击聚焦只认 TabIndex（PointerFocusPlugin 的 AcquireFocus 解析器）：
         // 缺它则点击输入框会把焦点清到窗口，键盘事件无处投递 → 无法输入
         TabIndex(0),
+        EditableText::new(value.to_string()),
+        TextInput,
     )
 }
 
@@ -462,7 +1262,6 @@ fn handle_kind_button(
 ) {
     for kb in q_kind.iter() {
         selector.current = kb.kind;
-        // 更新所有 kind 按钮的选中状态与背景色
         for (e, kb) in q_all.iter() {
             let selected = kb.kind == selector.current;
             commands.entity(e).insert((
@@ -476,50 +1275,292 @@ fn handle_kind_button(
     }
 }
 
+/// 处理策略按钮点击：记进草稿并即时高亮（保存才落盘）。
+fn handle_policy_button(
+    q_hit: Query<&PolicyButton, Added<Pressed>>,
+    mut draft: ResMut<PolicyDraft>,
+    mut commands: Commands,
+    q_all: Query<(Entity, &PolicyButton)>,
+    theme: Res<Theme>,
+) {
+    for hit in q_hit.iter() {
+        draft.changes.insert(hit.tool_id.clone(), hit.state);
+        for (e, btn) in q_all.iter() {
+            if btn.tool_id != hit.tool_id {
+                continue;
+            }
+            let selected = btn.state == hit.state;
+            commands.entity(e).insert(BackgroundColor(if selected {
+                theme.accent
+            } else {
+                theme.subtle
+            }));
+        }
+    }
+}
+
 /// 处理保存/关闭按钮点击。
+///
+/// 保存只发脏键，且：
+/// - 任一数值字段非法 → 一条也不写，报出是哪个字段；
+/// - provider id 为空 → 不写、不关面板（此前会静默关面板，让用户以为已存）。
+/// 处理关闭与语言选择：两者都不经"保存"通路（语言有既有的持久化消息）。
+fn handle_panel_dismiss(
+    q_close: Query<(), (With<SettingsCloseButtonMarker>, Added<Pressed>)>,
+    q_lang: Query<&LanguageButton, Added<Pressed>>,
+    global: Res<GlobalConfigRes>,
+    mut draft: ResMut<PolicyDraft>,
+    mut state: ResMut<SettingsPanelState>,
+    mut lang_writer: MessageWriter<SaveLanguageMessage>,
+) {
+    for _ in q_close.iter() {
+        state.open = false;
+        draft.changes.clear();
+    }
+    for hit in q_lang.iter() {
+        if global.preferences.language != hit.lang {
+            lang_writer.write(SaveLanguageMessage {
+                language: hit.lang.clone(),
+            });
+        }
+    }
+}
+
 fn handle_save_button(
     q_save: Query<(), (With<SettingsSaveButtonMarker>, Added<Pressed>)>,
-    q_close: Query<(), (With<SettingsCloseButtonMarker>, Added<Pressed>)>,
     q_id: Query<&EditableText, With<ProviderIdInput>>,
     q_base: Query<&EditableText, With<ApiBaseInput>>,
     q_key: Query<&EditableText, With<ApiKeyInput>>,
     q_model: Query<&EditableText, With<ModelInput>>,
+    q_nums: Query<(&EditableText, &SettingsNumInput)>,
+    mut q_status: Query<&mut Text, With<SettingsStatusMarker>>,
     kind_selector: Res<KindSelector>,
-    mut state: ResMut<SettingsPanelState>,
-    mut writer: MessageWriter<SaveProviderConfigMessage>,
+    global: Res<GlobalConfigRes>,
+    project: Res<ProjectConfigRes>,
+    executor_res: Res<ToolExecutorResource>,
+    mut draft: ResMut<PolicyDraft>,
+    mut writer: MessageWriter<SaveSettingsMessage>,
+    loc: Res<Localizer>,
+    theme: Res<Theme>,
 ) {
     for _ in q_save.iter() {
-        let provider_id = q_id
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
-        let api_base = q_base
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
-        let api_key = q_key
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
-        let model = q_model
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
+        let provider_id = trim_text(&q_id);
+        let mut msg = SaveSettingsMessage {
+            project: Vec::new(),
+            global: Vec::new(),
+        };
 
-        if !provider_id.is_empty() {
-            writer.write(SaveProviderConfigMessage {
-                provider_id,
-                kind: kind_selector.current,
-                api_base,
-                api_key,
-                model,
+        // 1. 数值字段：先全部校验，任何一个非法都不写
+        let mut rejected: Vec<String> = Vec::new();
+        for (text, meta) in q_nums.iter() {
+            let raw = text.value().to_string();
+            match parse_num_field(&raw, meta.max, meta.mode) {
+                Ok(ParsedField::Unchanged) => {}
+                // 未设置的字段显示的是内置缺省：原样保存回来不算改动，
+                // 否则打开一次面板就会把缺省值写进用户的配置文件
+                Ok(ParsedField::Value(v))
+                    if matches!(meta.mode, NumMode::Sentinel)
+                        && meta.stored == 0
+                        && v == meta.effective => {}
+                Ok(ParsedField::Value(v)) if v != meta.stored => {
+                    let key = if meta.global {
+                        format!("providers.{provider_id}.{}", meta.key)
+                    } else {
+                        meta.key.to_string()
+                    };
+                    let item = ConfigItem {
+                        key,
+                        value: serde_json::json!(v),
+                    };
+                    if meta.global {
+                        msg.global.push(item);
+                    } else {
+                        msg.project.push(item);
+                    }
+                }
+                Ok(ParsedField::Value(_)) => {}
+                Err(e) => rejected.push(crate::i18n::tr_with(
+                    &loc,
+                    "settings-failed-item",
+                    &[
+                        ("key", field_label_text(&loc, meta.key)),
+                        ("reason", field_error_text(&loc, &e)),
+                    ],
+                )),
+            }
+        }
+        if !rejected.is_empty() {
+            set_status(
+                &mut q_status,
+                &theme,
+                &rejected.join(&tr(&loc, "settings-list-sep")),
+            );
+            return;
+        }
+
+        // 2. provider 文本字段（同样只发变化过的）
+        let current = global
+            .providers
+            .get(&provider_id)
+            .cloned()
+            .unwrap_or_default();
+        let base = trim_text(&q_base);
+        if base != current.api_base {
+            msg.global.push(ConfigItem {
+                key: format!("providers.{provider_id}.api_base"),
+                value: serde_json::Value::String(base),
             });
         }
-        state.open = false;
-    }
+        let api_key = trim_text(&q_key);
+        if !api_key.is_empty() && api_key != current.api_key {
+            msg.global.push(ConfigItem {
+                key: format!("providers.{provider_id}.api_key"),
+                value: serde_json::Value::String(api_key),
+            });
+        }
+        let model = trim_text(&q_model);
+        let stored_model = current
+            .model_overrides
+            .get("default")
+            .cloned()
+            .unwrap_or_default();
+        if model != stored_model {
+            msg.global.push(ConfigItem {
+                key: format!("providers.{provider_id}.model_overrides"),
+                value: serde_json::Value::String(model),
+            });
+        }
+        if kind_selector.current != current.kind {
+            msg.global.push(ConfigItem {
+                key: format!("providers.{provider_id}.kind"),
+                value: serde_json::to_value(kind_selector.current)
+                    .unwrap_or(serde_json::Value::Null),
+            });
+        }
+        if global.default_provider != provider_id {
+            msg.global.push(ConfigItem {
+                key: "default_provider".into(),
+                value: serde_json::Value::String(provider_id.clone()),
+            });
+        }
 
-    for _ in q_close.iter() {
-        state.open = false;
+        // 3. 工具策略两张列表
+        let executor: &ToolExecutor = &executor_res.0;
+        let rows: Vec<PolicyRow> = executor
+            .policy_targets()
+            .into_iter()
+            .map(|(tool_id, _)| {
+                let base = stored_state(executor, &tool_id, &project.tool_policy);
+                PolicyRow {
+                    state: draft.changes.get(&tool_id).copied().unwrap_or(base),
+                    tool_id,
+                }
+            })
+            .collect();
+        // 空配置下的状态：不写覆盖时本来就会自动执行的工具（UiOnly）不进列表
+        let defaults = |id: &str| {
+            PolicyState::from_policy(
+                executor
+                    .resolved_policy(id, &ToolPolicyConfig::default())
+                    .unwrap_or(SecurityPolicy::NeedsConfirmation),
+            )
+        };
+        let (approved, denied) = policy_lists(&rows, defaults);
+        if approved != project.tool_policy.approved {
+            msg.project.push(ConfigItem {
+                key: "tool_policy.approved".into(),
+                value: serde_json::json!(approved),
+            });
+        }
+        if denied != project.tool_policy.denied {
+            msg.project.push(ConfigItem {
+                key: "tool_policy.denied".into(),
+                value: serde_json::json!(denied),
+            });
+        }
+
+        // provider 项要写进 `providers.<id>.*`，id 为空就没地方落——这时整批不发，
+        // 但只改项目作用域的项不该被"没填 provider id"挡住（此前会）
+        if !msg.global.is_empty() && provider_id.is_empty() {
+            set_status(
+                &mut q_status,
+                &theme,
+                &tr(&loc, "settings-needs-provider-id"),
+            );
+            return;
+        }
+        if msg.project.is_empty() && msg.global.is_empty() {
+            set_status(&mut q_status, &theme, &tr(&loc, "settings-nothing-to-save"));
+            return;
+        }
+        writer.write(msg);
+        draft.changes.clear();
+    }
+}
+
+/// 把三态选择折算成 `approved` / `denied` 两份列表。
+///
+/// 某工具若**不写配置时就已经**是自动执行（`UiOnly` 的 tier 缺省），不为它写
+/// `approved` 条目——列表里只留用户真正改变过的东西。
+pub fn policy_lists(
+    rows: &[PolicyRow],
+    default_state: impl Fn(&str) -> PolicyState,
+) -> (Vec<String>, Vec<String>) {
+    let mut approved = Vec::new();
+    let mut denied = Vec::new();
+    for row in rows {
+        match row.state {
+            PolicyState::Deny => denied.push(row.tool_id.clone()),
+            PolicyState::Auto => {
+                if default_state(&row.tool_id) != PolicyState::Auto {
+                    approved.push(row.tool_id.clone());
+                }
+            }
+            PolicyState::Ask => {}
+        }
+    }
+    approved.sort();
+    approved.dedup();
+    denied.sort();
+    denied.dedup();
+    (approved, denied)
+}
+
+/// 取输入框文本（去首尾空白）。
+fn trim_text<F: bevy::ecs::query::QueryFilter>(q: &Query<&EditableText, F>) -> String {
+    q.single()
+        .map(|e| e.value().to_string().trim().to_string())
+        .unwrap_or_default()
+}
+
+/// 字段标签文案（找不到定义时如实报"未知字段"，不静默显示空标签）。
+fn field_label_text(loc: &Localizer, key: &str) -> String {
+    match num_spec(key) {
+        Some(f) => tr(loc, f.label_key),
+        None => format!("{key}"),
+    }
+}
+
+/// 校验错误的本地化文案（数字经 fluent 参数交给语料，不在 Rust 侧拼标点）。
+fn field_error_text(loc: &Localizer, e: &FieldError) -> String {
+    match e {
+        FieldError::NotANumber => tr(loc, "settings-error-not-a-number"),
+        FieldError::OutOfRange { max } => crate::i18n::tr_with(
+            loc,
+            "settings-error-out-of-range",
+            &[("max", max.to_string())],
+        ),
+    }
+}
+
+/// 把提示写进面板状态行。
+fn set_status(
+    q_status: &mut Query<&mut Text, With<SettingsStatusMarker>>,
+    _theme: &Theme,
+    text: &str,
+) {
+    if let Ok(mut t) = q_status.single_mut() {
+        t.0 = text.to_string();
     }
 }
 
@@ -532,22 +1573,14 @@ fn handle_fetch_models(
     kind_selector: Res<KindSelector>,
     mut fetch_writer: MessageWriter<FetchModelsMessage>,
     mut model_state: ResMut<ModelListState>,
+    loc: Res<Localizer>,
 ) {
     for _ in q_fetch.iter() {
-        let provider_id = q_id
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
-        let api_base = q_base
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
-        let api_key = q_key
-            .single()
-            .map(|e| e.value().to_string())
-            .unwrap_or_default();
+        let provider_id = trim_text(&q_id);
+        let api_base = trim_text(&q_base);
+        let api_key = trim_text(&q_key);
         if provider_id.is_empty() || api_base.is_empty() {
-            model_state.error = "需要填写 Provider ID 和 API Base".into();
+            model_state.error = tr(&loc, "settings-fetch-models-needs-fields");
             model_state.loading = false;
             continue;
         }
@@ -568,6 +1601,7 @@ fn handle_model_list_results(
     mut model_state: ResMut<ModelListState>,
     mut commands: Commands,
     theme: Res<Theme>,
+    loc: Res<Localizer>,
     q_container: Query<Entity, With<ModelListContainerMarker>>,
 ) {
     for ev in reader.read() {
@@ -575,56 +1609,58 @@ fn handle_model_list_results(
         model_state.error = ev.error.clone();
         model_state.models = ev.models.clone();
 
-        // 重建列表 UI
-        if let Ok(container) = q_container.single() {
-            commands.entity(container).despawn_related::<Children>();
-            if !ev.error.is_empty() {
-                commands.entity(container).with_children(|c| {
+        let Ok(container) = q_container.single() else {
+            continue;
+        };
+        commands.entity(container).despawn_related::<Children>();
+        let lines: Vec<(String, Color)> = if !ev.error.is_empty() {
+            vec![(ev.error.clone(), theme.st_fail)]
+        } else if ev.models.is_empty() {
+            vec![(tr(&loc, "settings-model-list-empty"), theme.text_muted)]
+        } else {
+            ev.models
+                .iter()
+                .map(|m| (m.clone(), theme.text_dim))
+                .collect()
+        };
+        let models = ev.models.clone();
+        commands.entity(container).with_children(|c| {
+            for (text, color) in lines {
+                let model_id = if models.contains(&text) {
+                    Some(text.clone())
+                } else {
+                    None
+                };
+                if let Some(model_id) = model_id {
+                    c.spawn((
+                        Button,
+                        Hovered::default(),
+                        Node {
+                            padding: UiRect::all(px(space::XS)),
+                            border: UiRect::bottom(px(1.0)),
+                            ..default()
+                        },
+                        BorderColor::all(theme.line),
+                        ui_text(
+                            text,
+                            type_scale::BODY,
+                            400,
+                            color,
+                            type_scale::line_height::UI,
+                        ),
+                        ModelItemMarker { model_id },
+                    ));
+                } else {
                     c.spawn(ui_text(
-                        ev.error.clone(),
+                        text,
                         type_scale::MICRO,
                         400,
-                        theme.st_fail,
+                        color,
                         type_scale::line_height::UI,
                     ));
-                });
-            } else if ev.models.is_empty() {
-                commands.entity(container).with_children(|c| {
-                    c.spawn(ui_text(
-                        "（无模型）",
-                        type_scale::MICRO,
-                        400,
-                        theme.text_muted,
-                        type_scale::line_height::UI,
-                    ));
-                });
-            } else {
-                commands.entity(container).with_children(|c| {
-                    for model_id in &ev.models {
-                        c.spawn((
-                            Button,
-                            Hovered::default(),
-                            Node {
-                                padding: UiRect::all(px(space::XS)),
-                                border: UiRect::bottom(px(1.0)),
-                                ..default()
-                            },
-                            BorderColor::all(theme.line),
-                            ui_text(
-                                model_id.clone(),
-                                type_scale::BODY,
-                                400,
-                                theme.text_dim,
-                                type_scale::line_height::UI,
-                            ),
-                            ModelItemMarker {
-                                model_id: model_id.clone(),
-                            },
-                        ));
-                    }
-                });
+                }
             }
-        }
+        });
     }
 }
 
@@ -633,11 +1669,63 @@ fn handle_model_click(
     q_items: Query<&ModelItemMarker, Added<Pressed>>,
     mut q_model: Query<&mut EditableText, With<ModelInput>>,
 ) {
+    let Some(item) = q_items.iter().next() else {
+        return;
+    };
     if let Ok(mut model_input) = q_model.single_mut() {
-        for marker in q_items.iter() {
-            // 用 clear + Insert 语义：先 clear 再 Insert
-            model_input.clear();
-            model_input.queue_edit(bevy::text::TextEdit::Insert(marker.model_id.clone().into()));
-        }
+        model_input.clear();
+        model_input.queue_edit(bevy::text::TextEdit::Insert(item.model_id.clone().into()));
+    }
+}
+
+/// 把保存结果如实报出去：成功就收起面板并弹一条 toast（面板马上要消失，
+/// 只写进它内部的状态行等于没写），失败则保持打开并把逐键原因写进状态行。
+fn apply_save_report(
+    mut reader: MessageReader<SettingsSaveReportMessage>,
+    mut q_status: Query<&mut Text, With<SettingsStatusMarker>>,
+    mut state: ResMut<SettingsPanelState>,
+    theme: Res<Theme>,
+    loc: Res<Localizer>,
+    mut toast: MessageWriter<crate::kit::ToastMessage>,
+) {
+    for ev in reader.read() {
+        let text = if ev.failed.is_empty() {
+            state.open = false;
+            let done = tr_with_saved(&loc, ev.written.len());
+            toast.write(crate::kit::ToastMessage { text: done.clone() });
+            done
+        } else {
+            // 分隔符与冒号都来自语料：英文串里不该出现中文顿号或分号
+            let sep = tr(&loc, "settings-report-sep");
+            let list_sep = tr(&loc, "settings-list-sep");
+            let mut parts: Vec<String> = Vec::new();
+            if !ev.written.is_empty() {
+                // 落盘的键要**点名**，只报个数用户就看不出"哪几个进去了、哪个没进"
+                parts.push(crate::i18n::tr_with(
+                    &loc,
+                    "settings-written-keys",
+                    &[("keys", ev.written.join(&list_sep))],
+                ));
+            }
+            parts.push(tr(&loc, "settings-failed-prefix"));
+            for (key, why) in &ev.failed {
+                parts.push(crate::i18n::tr_with(
+                    &loc,
+                    "settings-failed-item",
+                    &[("key", key.clone()), ("reason", why.clone())],
+                ));
+            }
+            parts.join(&sep)
+        };
+        set_status(&mut q_status, &theme, &text);
+    }
+}
+
+/// 「已保存 N 项」文案（0 项时说不成，退成"无改动"）。
+fn tr_with_saved(loc: &Localizer, n: usize) -> String {
+    if n == 0 {
+        tr(loc, "settings-nothing-to-save")
+    } else {
+        crate::i18n::tr_with(loc, "settings-saved-count", &[("count", n.to_string())])
     }
 }

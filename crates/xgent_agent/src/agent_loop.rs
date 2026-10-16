@@ -189,9 +189,9 @@ pub fn agent_poll_system(
     // 4. 非阻塞轮询事件 channel
     // 同上：tokio Mutex 用 try_lock 而非 blocking_lock，避免主线程被异步 task 阻塞。
     let mut processed = 0;
-    // 每帧上限来自配置 `[agent] max_events_per_frame`（R3-17）：到界即停，
-    // 剩余事件留在 channel 下帧再取，不丢事件。
-    let frame_event_limit = bridge.max_events_per_frame;
+    // 每帧上限来自配置 `[agent] max_events_per_frame`（R3-17），经共享句柄读取：
+    // 面板改完下一帧就按新值 drain。到界即停，剩余事件留在 channel 下帧再取，不丢事件。
+    let frame_event_limit = bridge.run_settings().max_events_per_frame;
     let Ok(mut event_rx) = bridge.event_rx.try_lock() else {
         bevy::log::debug!("agent 事件 channel 正被异步 task 持有，跳过本帧轮询");
         return;

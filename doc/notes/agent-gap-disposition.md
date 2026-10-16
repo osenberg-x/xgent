@@ -401,3 +401,213 @@ M8/M9 的处置与 §七 MU3 不同：这次不是测试失效（注册数与声
 - 没有对真实 provider 做耗时基准：本轮证明的是"调度性质"（并发确实在发生），不是"快了多少"。
 - A6 没有独立用例：默认策略下"什么都不批"与 A3 是同一次运行，写成两条只会虚增覆盖数，故如实记为共用。
 
+
+## 十、close-settings-gaps（2026-10-16）：R3-13 设置面板覆盖配置
+
+§七/§八/§九 的「遗留与下一步」连着三次点名同一条：设置面板只暴露 provider 三项，而这几轮新增的键（`max_parallel_tools`、检查点保留、搜索与检索限额、14 个运行参数）全都只能手改 TOML。正式能力规格见 `docs/comet/specs/settings-panel/spec.md`（归档时发布）。
+
+`doc/notes/agent-gap-review.md` R3-13 的原文比实际轻：它写「`ToolPolicyConfig.approved/denied`、重试参数、语言、主题、插件设置均无 UI」。读码发现三件事更糟：
+
+- **面板是只写不读**：`spawn_panel` 从不预填，重开就是四个空框；`handle_save_button` 在 `provider_id` 为空时**照样把 `open` 置 false**（`settings_panel.rs:509-518`）——用户点了保存、面板关了、什么都没写。
+- **项目作用域在 IPC 层根本写不进去**：`config_read`/`config_write` 对 `scope=project` 直接回「未实现」（`session.rs:206-215,237-246`），而 `[tool_policy]`/`[agent]`/`[tools]`/`[context]` 全在项目配置里。
+- **全局白名单不含那几个 provider 限额**：写 `providers.<id>.context_window` 会得到 `未知配置 key`（`config_store.rs:131-145`）。
+
+所以「可达」要同时补四层：协议 → daemon → 面板 → 运行时。
+
+### 机制
+
+| 落点 | 说明 |
+|:---|:---|
+| `xgent_core/src/config.rs` | `ConfigReadRequest`/`ConfigWriteRequest`/`ConfigChanged` 增 `project_root: Option<String>`，一律 `#[serde(default)]`——新增协议字段不带 default 会让旧客户端整条请求反序列化失败（`legacy_wire_without_project_root_still_parses` 钉这条） |
+| `xgent_daemon/src/config_store.rs` | `ConfigCoordinator` 加 `projects: HashMap<PathBuf, ProjectConfig>`（首次访问读盘、`project_root` 为空时补上请求带来的根）；`read_project`/`write_project` 支持 `project`/四段只读 + 13 个可写键；写走「改副本 → 落盘 → 换入内存」，落盘失败内存不动 |
+| `xgent_daemon/src/session.rs` | `scope=project` 真实现：缺根或根不是已存在的目录都是 `INVALID_PARAMS`（不静默降级 global）；通知按 `broadcast_to_project` 路由；全局白名单补 `context_window`/`max_output_tokens`/`first_event_timeout_secs`，`model_context_windows` 明确只读 |
+| `xgent_ui/src/settings_panel.rs` | 六组：provider（含限额）/工具三态策略/agent/tools/context/语言；字段表 `project_num_fields`/`provider_num_fields` 的缺省值一律取 `xgent_settings_core::defaults`；保存只发脏键并带逐键报告 |
+| `xgent_tools` / `xgent_context` / `xgent_agent` | 四组共享句柄：`ToolCtx.tool_policy`、`ToolExecutor.params`（`RunCommand` 同 `Arc`）、`OnDemandContextProvider.limits`、`AgentBridge.run_settings`（`RunSettings{retrieval_max_tokens, max_events_per_frame, max_parallel_tools, context_window}`，存**生效值**） |
+| `xgent_app/src/settings_io.rs` | `LiveSettings` 持四组句柄；`apply_snapshot(project, global, provider_id, model)` 是**唯一**一条把权威配置落进运行时的通路，本窗口写入与对端广播共用；`GlobalConfigRes`/`ProjectConfigRes` 终于有了消费者（后者此前从未被 `insert_resource`） |
+| i18n | 本轮新增的 43 个 `settings-*` 键两套语料都有；`settings-panel-i18n` 测试**从源码扫出用到的键**再逐个查两套语料，而不是维护一张手写清单 |
+
+### 五条设计取舍（都写进 Spec）
+
+- **项目配置也经 daemon 写**（不是 UI 直写磁盘）。daemon 是唯一写入方，也是唯一能把 `config.changed` 广播给对端的地方；两个窗口直写同一份 `.xgent/config.toml` 只会互相盖掉。协议里 `ConfigScope::Project` 本来就留着，这是填已声明的洞而不是新开通道。
+- **项目根走请求参数，不从 `fs.watch` 订阅推断**。一个客户端可以订多个根，猜「第一个」会写到用户没在看的项目。
+- **工具策略用三态行，不用两张字符串列表**。`resolve_policy` 里 `denied` 优先于 `approved`；两张列表会让用户写出一个「第二条盖掉第一条」的组合而显示与判定相反。行的状态由 `ToolExecutor::resolved_policy` 给出——显示与执行同一条判据，显示错了比不显示更糟。`UiOnly` 因此**如实显示「自动执行」**（§九 独立验证者抓出的正是这条前提）。
+- **不写覆盖时本来就自动执行的工具，不进 `approved` 列表**（`policy_lists`）。手改 TOML 的人看到的应当就是被真正改变的东西。
+- **生效边界按消费点划**，做不到热应用的键干脆不给控件：主题只有一套预设（R3-14）、`PluginHost::update_plugin_settings` 无调用方、`context_strategy` 的 B/C/D/E 还是空壳、`model_override` 全仓零读取方。给不可达的键做开关就是在演一个假的设置项。
+
+### 实现期间自己测出的六个真实断裂
+
+1. **显示值被当作用户输入写回**（本轮最有用的一条）。未设置的数值字段要显示内置缺省（`4`、`8000`…），于是「打开面板 → 点保存」会把这些缺省一路写进用户的配置文件——`untouched_fields_produce_no_writes` 抓到它才修的。判据：脏检查的基准必须是**存储值**，且 `stored == 0 && parsed == effective` 视为未改动。
+2. **provider id 为空时挡掉整批保存**。我按「provider 字段要有 id 才写得下去」写了 early-return，结果只改工具策略也存不了——`project_only_save_works_without_provider_id` 暴露的是我自己新造的缺陷。改成：只有**真的存在全局项**且 id 为空才拒，并给出原因。
+3. **daemon 测试会覆盖开发机的真实配置——而且是我这轮补隔离时又漏了一处**。`ConfigCoordinator::write` 真落盘到 `~/.xgent/agent/config.toml`。我先给 `config_store.rs` 那批测试加了隔离并实测 md5 不变，随后在 `session.rs` 新增的两条 provider 池测试却直接发全局 `config.write` 且没隔离 → 包括 Runtime 形式化检查 c4 在内的 `cargo test -p xgent_daemon` 把你的配置写成了夹具（`providers.myai / old.example.test / sk-old`），无备份、无 keychain 条目、磁盘只有系统更新快照，**不可恢复**。独立验证者用 `XGENT_AGENT_DIR=/tmp/…` 复现了这次写入，并据此否决了我「md5 一致 / 隔离已修好」的说法。现在的处置：隔离收进 `src/test_util.rs::isolate_agent_dir()`（进程级临时目录 + 串行锁，幂等、不 Drop 复原），所有全局写入测试统一调用，另加 `global_write_lands_inside_the_isolated_dir` 钉住隔离本身生效。判据：**「跑一次自检」不等于修复——自检必须针对最终候选重跑**；以及测试越界写用户目录属于损害，不是风格问题。你的配置文件我已重置为全新安装的默认空值（被污染的那份留在 `/tmp/xgent-config.test-contaminated.toml`）。
+4. **读锁守卫跨 `await`**。`match resolve_policy(.., &ctx.tool_policy.read()) { … => self.allowed_all.lock().await … }` 的临时守卫活到整个 match 结束，future 因此不 `Send`，编译当场炸。写法是 `let resolved = …;` 让守卫在语句末尾释放（`parallel_safe` 与 `execute` 各一处）。
+5. **headless 装配里 Bevy UI 不产出子节点坐标**。没有 `UiRoot` 时面板根 `ComputedNode` 是 `0×0`，实测所有子节点 `border_box().min` 全都相同（一起重叠在原点），picking 命中谁取决于 spawn 顺序而不是位置。旧的 `settings_input_focus.rs`（开面板→点击→敲字）正是靠这个巧合通过的：面板一变形，同一次点击就落到别的输入框上。本轮把显示类断言改成读组件（`EditableText` / `SettingsNumInput`），键盘派发测试直接设 `InputFocus`，并补 `every_settings_input_carries_tab_index` 锁住「输入框带 `TabIndex`」这条契约（变异 M29 删掉 `TabIndex(0)` 即失败）。验证者指出：直接把旧用例的点击断言删掉等于把回归网剪了——所以现在的口径是「机制 + 契约」两段自动覆盖，真机端到端点击只能人肉验，且必须这样写出来，不能含混成已覆盖。
+6. **fluent 把参数包进双向隔离标记**。断 `settings-failed-item` 渲染成 `"a：b"` 失败，左边实际是 `"⁨a⁩：⁨b⁩"`（U+2068/U+2069）。i18n 测试因此按**可见文本**比对（剥掉 U+2066..U+2069），标点仍归语料。另外 `ScrollArea` 自身是含 `Node` 的 Bundle，再给它补一个 `Node` 会在 spawn 时 panic（bundle 组件重复）——面板卡片改用 `xui::scroll_area::ScrollArea::vertical()` 并只改 `area.node` 的字段。
+
+### 判据怎么写才算真的"热应用"
+
+四条生效通路各有一条**行为**判据，全部按"写入句柄 → 下一次消费点读到"来断言，而不是读回句柄自身（读回只证明 `RwLock` 能写）：
+
+| 生效边界 | 判据（用例名） |
+|:---|:---|
+| 策略 → 下一次工具调用 | `approved_tool_stops_asking_after_policy_handle_changes`（数确认次数 1→仍为 1）、`denied_tool_is_refused_after_policy_handle_changes`（`denied` 标记 + 一次都没问） |
+| 危险命令仍要问 | `approved_run_command_still_confirms_dangerous_input`（同一份 `approved` 下普通命令 0 次、`rm -rf` 1 次） |
+| 显示与执行同判据 | `resolved_policy_agrees_with_execution_rules`（`UiOnly` 无配置即 `Approved`；同一 id 同时进两张表时 `Denied` 胜出） |
+| 确认超时 → 下一次确认 | `confirm_timeout_written_to_handle_expires_next_request`（构造时 300s，写入 1s 后到期） |
+| 命令上限 → 下一次调用 | `command_timeout_written_to_shared_handle_applies_next_call`、`output_cap_written_to_shared_handle_applies_next_call`（先跑一次不截断，写入 1KB 后下一次截断） |
+| 检索限额 → 下一次检索 | `retrieval_limits_written_to_shared_handle_apply_next_retrieve`（走公开 `retrieve`，深度 4→1 后 `deep.rs` 消失）、`keyword_cap_written_to_shared_handle_applies_next_retrieve` |
+| `[agent]` → 下一条消息 | `max_parallel_tools_written_to_handle_bounds_next_turn`（装配 4、写入 1 → 观测并发 1）、`retrieval_budget_written_to_handle_reaches_next_query`、`tool_policy_written_to_handle_stops_asking_next_turn` |
+| 每帧上限 → 下一帧 | `frame_event_cap_written_to_handle_is_read_next_frame`（配 2 仍拼出全文本） |
+| 落盘与通知 | `project_write_lands_on_disk_and_reads_back`（真读 `<root>/.xgent/config.toml`，并断 `ConfigChanged.project_root`）、`project_config_write_notifies_only_that_projects_subscribers`、`failed_project_save_leaves_memory_unchanged`（`#[cfg(unix)]` 把 `.xgent` 改只读） |
+| 面板显示与脏检查 | `panel_opens_with_the_stored_values`、`reopening_the_panel_redraws_the_same_values`、`unset_field_shows_effective_default_and_says_so`、`untouched_fields_produce_no_writes`、`empty_api_key_field_does_not_wipe_the_stored_key` |
+
+daemon 既有测试全部走 `with_config` 且不落盘，模块注释却写着「持久化」——本轮的项目作用域测试**必须真读文件**，否则"写进内存副本"就能冒充"配置已保存"。
+
+### 边界（诚实记录）
+
+- **GUI 指针链路只在真实窗口里成立**。headless 装配没有 `UiRoot`，面板根量不出尺寸、子节点坐标全部重叠（实测），所以显示与保存的断言一律读组件而不是"点这个位置"。`PointerPress → AcquireFocus` 那半段的回归网因此只剩 `settings_input_focus.rs` 的"焦点已设 → 敲字落进框"，真实点击三态行/滚动这条路没被自动跑过。
+- **面板能改的键就是可达的全部**：`preferences.theme`（只有一套暗色预设，`preferences.theme` 至今无消费者，属 R3-14）、`plugin.enabled`/`auto_update`/`auto_install`/`plugin_settings`（`PluginHost::update_plugin_settings` 无调用方）、`context_strategy`（B/C/D/E 仍是空壳，选了就 `exit(2)`）、`provider_override`、`model_override`（全仓零读取方的死键）、`extra_headers` 与 `model_context_windows` 的表编辑，都不在本面板里。**不给会被忽略的键做开关**。
+- `model_context_windows` 在 daemon 侧**只读**：按单字段写一个数字没有确定语义（写哪个模型？）。整份 provider 写入仍带着它，面板显示的是解析后的生效窗口。
+- **多窗口同键仍是 last-write-wins**（本轮没做合并策略），广播只保证"显示与运行时跟上磁盘上真的存下的那份"。
+- **落盘失败的键不回滚已成功的键**：每个键独立可达，面板按 daemon 的原话点名哪个键失败；不做两阶段提交。
+- 项目根的校验是「非空 + 是已存在的目录」，**不要求客户端先 `fs.watch`**：启动订阅是异步的，压在订阅成功上会让"先保存后订阅完成"的窗口收到一条解释不了的失败。
+- `xgent_tools` 仍依赖 bevy（只为 `ToolExecutorResource` 一个派生宏），`AGENTS.md` §4 那句「不依赖 Bevy」仍与事实不符——§九 已记账，本轮未动。
+- 没做真实 provider 的往返测量：本轮证明的是"配置确实被读到"，不是"改完快了多少"。
+
+### 遗留与下一步
+
+- 设置面板没有搜索/分组自定义，也没有"恢复默认"按钮；键多了以后这两条会开始疼。
+- `GlobalConfigRes` 是 daemon 视图 + 本地文件的混合体（`plugin_settings`/`plugin` 仍来自启动时读盘的那份，IPC 白名单不含它们）。要让面板覆盖插件设置，得先给 daemon 补这两类键的读写与 host 热重载。
+- 编辑器查找替换（R3-21）仍是下一条最痛的：`xui::FindState` 在 `xgent_ui` 里零消费者，产品里根本不可达。
+- `@file:<path>` 越界读取（§六 遗留）仍未动。
+### 判别力反证（28 个变异体）
+
+方法同前几轮：把每处修复改回缺陷形态 → 跑**断言所在 crate** 的测试 → 确认确有失败 → 还原 + `touch` 源文件（不 touch 会让 cargo 复用变异体的二进制）。测试目标按断言位置选（§八 M11 / §九 AP5 两次踩过的坑），整 crate 跑不按名字过滤。
+
+| 变异 | 结果 | 失败用例（实测数字） |
+|:---|:---|:---|
+| M1 `parallel_safe` 不看共享策略（读空配置） | 抓到（1 failed） | `approved_tool_stops_asking_after_policy_handle_changes` |
+| M2 `execute` 不看共享策略 | 抓到（10 failed） | 含 `denied_tool_is_refused_after_policy_handle_changes`、既有确认/策略用例一起炸 |
+| M3 确认超时读构造时缺省 | 抓到（2 failed，**耗时 301s**） | `confirm_timeout_written_to_handle_expires_next_request` + 既有 `configured_confirm_timeout_expires`——301s 正是"退回 300s 常量"的表现 |
+| M4 `run_command` 参数改成构造快照 | 抓到（4 failed） | `command_timeout_…` / `output_cap_…` 各两条 |
+| M5 检索限额改回 `RetrievalLimits::default()` | 抓到（2 failed） | `retrieval_limits_written…` / `keyword_cap_written…` |
+| M6 loop 不读句柄而用内置缺省 | 抓到（9 failed） | 含 `max_parallel_tools_written_to_handle_bounds_next_turn`、`retrieval_budget_written…` |
+| M7 每帧上限回到字面量 64 | 抓到（1 failed） | `frame_event_cap_written_to_handle_is_read_next_frame` |
+| M8 项目写只改内存不落盘 | 抓到（1 failed） | `project_write_lands_on_disk_and_reads_back` |
+| M9 先换入内存再落盘 | 抓到（1 failed） | `failed_project_save_leaves_memory_unchanged` |
+| M10 项目变更改成全局广播 | 抓到（1 failed） | `project_config_write_notifies_only_that_projects_subscribers` |
+| M11 缺 `project_root` 时给个假根继续 | 抓到（2 failed） | `project_config_without_root_is_rejected_not_downgraded`、`resolve_project_root_rejects_…` |
+| M12 白名单去掉 `context_window` | 抓到（3 failed） | `write_provider_context_limit_fields_reach_config` 等 |
+| M13 数值解析失败时静默当 1 | 抓到（1 failed） | `project_write_wrong_type_names_the_field_and_keeps_previous_value` |
+| M14 去掉"未设置显示值不算改动"判据 | 抓到（2 failed） | `untouched_fields_produce_no_writes` 等 |
+| M15 Plain 语义留空也写 0 | 抓到（1 failed） | `empty_input_means_unset_or_unchanged_by_mode` |
+| M16 密钥框留空也发写请求 | 抓到（1 failed） | `empty_api_key_field_does_not_wipe_the_stored_key` |
+| M17 校验失败后不 early-return | 抓到（1 failed） | `invalid_number_blocks_the_whole_save`（首版变异体写成 `drop(q_status)` 编译不过，改成合法形态才判得准——"未抓到"要先排除变异体本身无效） |
+| M18 UiOnly 的默认自动执行也写进 `approved` | 抓到（1 failed） | `policy_rows_fold_into_two_lists_without_redundant_entries` |
+| M19 输入框不预填（回到只写不读） | 抓到（5 failed） | 预填相关的一批（含 `panel_opens_with_the_stored_values`、`reopening_…`） |
+| M20 provider 键不拼 `providers.<id>.` 前缀 | 抓到（1 failed） | `changed_fields_are_written_with_their_daemon_keys` |
+| M21 provider id 为空挡掉整批 | 抓到（1 failed） | `project_only_save_works_without_provider_id` |
+| M22 `apply_snapshot` 里 `if window != 0` 的守卫去掉 | **无差别 → 删掉该分支** | 见下 |
+| M23 句柄存原始值而非生效值 | 抓到（1 failed） | `new_handles_carry_effective_values`（6 passed / 1 failed） |
+| M24 去掉 `project_root` 的 `#[serde(default)]` | **等价变异** | 36 passed 全绿，见下 |
+| M25 `providers.*` 不再失效 provider 池 | 抓到（1 failed） | `provider_write_invalidates_the_pool_cache` |
+| M26 从 en-US 删一个键 | 抓到（1 failed） | `every_panel_key_exists_in_both_locales` |
+| M27 把 en-US 的报告分隔符换成中文分号 | 抓到（1 failed） | `punctuation_belongs_to_the_corpus_not_to_rust` |
+| M28 bridge 把策略拷成新的空句柄 | 抓到（1 failed） | `tool_policy_written_to_handle_stops_asking_next_turn` |
+
+28 个里 25 个当场抓到，两条不是"没抓到就完事"：
+
+- **M22 是死代码，不是缺测试**。去掉 `if window != 0 { rs.context_window = window; }` 的守卫后 `cargo test -p xgent_app` 全绿——因为 `GlobalConfig::resolve_context_window` 的三级次序最差也回落到内置 `128_000`，**永远不会返回 0**，那个 `if` 从没真正生效过。处置是把这个分支删掉（连注释一起说明它在防一个不存在的输入），而不是给它补一条测试把它钉成"必要设计"。上一轮 §八 M8/M9 的"没抓到"是覆盖有洞，这一轮的"没抓到"是代码多余——两种成因不同，处置也就不同。
+- **M24 证明了我在注释里写错的因果**。我原本写「新增协议字段必须 `#[serde(default)]`，否则旧客户端整条 `config.read` 反序列化失败」，据此给 `Option<String>` 字段都加了 `default`。把 `default` 摘掉后 `legacy_wire_without_project_root_still_parses` 照旧通过：serde 对 `Option` 字段的缺省本来就是 `None`，`default` 只是把这件事写明，不是它生效的前提。真正需要 `default` 的是**非 `Option`** 字段。代码注释与 `doc/dev-tutorial.md` 注意点 29 都已改成准确说法，测试保留（它锁的是"旧线格式仍能解析"这个真实契约，不锁那个属性）。
+
+批次本身也再次验证了一条判据：**"未抓到"的默认解释不是等价变异**。M17 第一版报"编译期失败"（我把变异写成 `drop(q_status)`，后面还要用它），如果直接按"没抓到"记录，就等于把一条有效的判别用例误判成无效。先确认变异体本身合法，再谈等价性。
+
+### 独立验证者回查后的第一轮否决（12/14，两条 fail + 一条高危）
+
+只读验证者（不是我）逐条复核后判 **A9、A14 fail**，并提出一条我没写进 known limits 的高危风险。三条都成立，且都不是措辞问题：
+
+1. **A9 的"失败值仍可见"是假的**。`drain_save` 每次保存后都会推进 `SettingsSnapshotReady.tick`，而 `toggle_panel` 见到 tick 变化就按 daemon 的值重建输入框——于是被拒的那个值在下一帧就被磁盘上的旧值换掉了。我的覆盖用例只投了一条 `SettingsSaveReportMessage`，从没触发那次重建，所以它绿着，而行为是错的。修法：面板侧加 `hold_rerender`（有失败的键就挡住这一轮重渲染，关闭面板解除），用例改成"改框 → 失败报告 → 推进 tick → 断言框里仍是我填的 7"，并追加"重开面板后回到磁盘值"。变异 M30（把 `!snapshot.hold_rerender` 换成 `true`）确认这条判据有牙。**——这段修法随后被第二轮否决：hold 在真实帧顺序里赶不上那次重建，且只有关闭按钮会解除；最终处置见下一节。**
+2. **A14 的回归网被我剪掉了**。我因为几何塌陷把 `settings_input_focus.rs` 里"点击 → 焦点落在该输入框"的断言连同 `click_left` 一起删了，只留下手动设 `InputFocus`——验证者指出：此时删掉 `text_input_node` 的 `TabIndex(0)` 全套测试仍然全绿，也就是说那条历史缺陷（点输入框打不了字）从此无人看守。补 `every_settings_input_carries_tab_index` 锁组件契约（M29 实测：删 `TabIndex` → 1 failed），机制段仍由 `tests/interaction_model.rs` 覆盖，边界文字改成"真机端到端点击只能人肉验"。
+3. **高危：我新加的 `session.rs` provider 池两条测试在写你的真实配置**。验证者不仅指出，还用 `XGENT_AGENT_DIR=/tmp/…` 复现了写入位置，并据此**否决了我写在 dev-tutorial 与本轮台账第 3 条里的"md5 一致 / 隔离已修好"**——那句对最终候选而言是假的。你的 `~/.xgent/agent/config.toml` 已被写成测试夹具且无法恢复（无 keychain 条目、无 sessions 目录、无用户数据快照）；我把文件重置成全新安装的默认空值，被污染的那份留在 `/tmp/xgent-config.test-contaminated.toml`。修法与判据见上面第 3 条。
+
+另外两条被点名、也确实该改的：
+
+- `max_output_tokens` 只有 Anthropic 适配器会发送，面板却把它做成一个对所有 kind 都生效的框。现在该字段带一条"仅 Anthropic"的说明（`settings-field-anthropic-only`，`NumField::note_key`），M32 证明这条说明被测试看着。
+- 重渲染时我把 `PolicyDraft::default()` 传进了 `spawn_panel`，而保存读的是 World 里的真草稿——高亮回到磁盘值、保存仍带未保存的选择，显示与写入分叉。改为沿用真实 `Res<PolicyDraft>`，M31 证明。
+
+修完后重跑的第 2 轮反证：M29/M30/M31/M32 各失败 1 条（另 M17、M25 复跑仍抓到；M24 仍是等价变异——serde 对 `Option` 缺字段本就填 `None`，已在代码注释与 §4.5.2/注意点 29 写成准确因果）。**"自检跑过一次"不等于"最终候选干净"**，这是本轮最贵的一课。
+
+### 第二轮否决与迭代 3 的修复
+
+只读验证者对迭代 2 候选判 **13 passed / A9 fail → 整体 fail**，两条都是实的：
+
+1. **A9 的修复在真实装配里不生效**。`drain_save` 是"在同一帧里推进 `tick` + 写报告"，而 bevy 的 `Messages` 要到**下一帧**才可读，面板链里 `toggle_panel` 又排在 `apply_save_report` 之前——于是 `hold_rerender` 是在重建**之后**才被置上的，挡不住任何东西。验证者另起一个 `bevy_app` 复现装配，两种顺序都跑出 `rebuilds=1`；我的用例之所以绿，是因为它手动"先 hold 再推 tick"，那是真实运行永远不会产生的顺序。判据：**覆盖用例的触发顺序必须由被测程序自己产生**，手工摆出来的顺序只能证明"这个顺序下行为如此"。（上一轮记在下面的 M30 只证了"hold 字段被读"，没证"hold 在真实顺序里赶得上"——变异反证也受同一条限制。）
+2. **`global_write_lands_inside_the_isolated_dir` 根本不存在**。全仓 grep 零命中，却被我写进 handoff、`doc/dev-tutorial.md` 与上面第 3 条。这是同一失效模式的第三次：`settings_io` 的测试模块那次也是"追加没落盘"，我只信了 diff 没回读源码。处置：**凡声称"新增了某条测试"，一律 `grep -n "fn <测试名>"` 回读 + 按名字单跑一次**（`cargo test <name>` 打出 `1 passed` 才算）。
+3. 另外点出的两条泄漏也确实成立：`hold_rerender` 只有关闭按钮会解除，热键关闭 / 全部成功 / 对端变更三条路径都会把它留在资源里，之后的合法刷新被永久挡掉。
+
+**迭代 3 的做法：把显示策略收回推进 `tick` 的那一方，面板不留状态。** `settings_io` 里从 `drain_save` 抽出一个纯函数 `apply_save_result`（抽出是为了让这条判据能被单测直接跑到），只在 `report.failed` 为空时 `tick += 1`；面板侧 `hold_rerender` 整个删掉（连带 `Default` 手写实现退成 derive）。资源与句柄照旧按 daemon 接受的值更新，所以运行时永远读磁盘真值，只有显示停在编辑态，且随后任何一次合法的快照推进都会把显示拉回来。
+
+新增/改写的证据与反证：
+
+| 变异 | 结果 | 抓住它的用例 |
+|:---|:---|:---|
+| M33 失败也推进 `tick`（回到 A9 原缺陷） | 抓到（1 failed） | `a_rejected_key_updates_state_without_redrawing_the_panel`（xgent_app 单测，直接跑到判定点）。**订正**：迭代 5 把判定点从 `apply_save_result` 移回 `drain_save` 并做了端到端装配，这条用例随之被 `drain_save_advances_the_render_counter_only_when_every_key_landed` 与 `a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame` 取代；上一节"另加 `global_write_lands_inside_the_isolated_dir` 钉住隔离本身生效"是真的，本句引用的用例名则已不在树里——按"声称加过测试就 grep 回读"的自家判据把它订正掉。 |
+| M34 去掉 `GlobalConfigStore::save`（全局写不落盘） | 抓到（1 failed） | `global_write_lands_inside_the_isolated_dir`（这次真的在文件里；另以 `HOME=/tmp/…` 跑整套 daemon，假家目录没出现 `config.toml`，真实文件 md5 前后一致） |
+| M35 面板永不按快照重建 | 抓到（1 failed） | `failed_save_keeps_the_rejected_value_on_screen`（改成"失败报告不动显示 → 随后一次合法 `tick` 推进必须重建"，把 hold 泄漏那条也一起判掉） |
+| M37 loop 无视运行期窗口（硬编码宽窗口） | 抓到（1 failed） | `runtime_narrowed_window_drives_the_next_compaction_decision`（对照：全程宽窗口不压缩；bridge 构造**之后**经句柄改窄 → 下一条对话压缩） |
+| M38 面板不显示快照读取失败的原因 | 抓到（1 failed） | `snapshot_read_failure_is_reported_instead_of_a_default_config` |
+
+验证者点的风险里，两条按建议补上了（A11 的行为半边、"TOML 坏了要在面板上说出来"），第三条按边界如实记录：**daemon 的配置错误串会原样进英文面板**，所以把 `期望…，收到:` 与 `model_context_windows 为只读（…）` 改成半角标点、不带全角括号，并由 `config_write_errors_avoid_fullwidth_punctuation` 钉住"这些串里没有全角标点"。原因文本本身仍是中文——daemon 没有 `Localizer`，把诊断文案国际化要改协议（错误码 + 参数），不属于本次能力，写进 known limits 而不是假装已经解决。
+
+### 第三轮否决（A9 三连败）与迭代 5 的修复
+
+迭代 4 候选 `76f0f255` 的 Runtime 检查 13/13 全绿，只读验证者仍判 **A9 fail**（13 passed / 1 failed），而且理由是对的、也是新的：
+
+> `apply_save_result` 里那句 `if report.failed.is_empty() { ready.tick += 1 }` 按代码是对的，但它守的东西不成立——`toggle_panel` 的重渲染闸门是 `is_changed() && tick > 0`，而 `ResMut::deref_mut` 会**无条件**标脏（bevy 的 `change_detection_mut_impl!`）。`drain_save` 每次都带着 `ResMut<SettingsSnapshotReady>` 并且一定会写它，`tick > 0` 从第一次 `drain_snapshot` 之后就恒成立，所以每一帧都会重建，被拒的值照旧被磁盘值换掉。验证者用临时探针用例在**真实**的 `SettingsPanelPlugin` 上量到两种帧序都是 `field="4"`，并指出我的两条用例为什么都绿：单测只断言计数器，UI 用例投报告时**根本没碰**那份资源——那是 app 不会产生的一帧。
+
+三轮的共同形状终于清楚了：**A9 是一条跨系统行为（app 写状态、面板据此决定重画），而我只在两边各测各的**。所以迭代 5 做了三件事：
+
+1. **让信号可比较，而不是靠变更标记**。`toggle_panel` 改成一个 `Local<u32>` 记住"上次渲染时的 tick"，只在 `snapshot.tick > *last_rendered` 时重建；`is_changed()` 不再参与判定。
+2. **失败那一帧连资源都不碰**。`drain_save` 里推进 `tick` 的那句被 `report.failed.is_empty()` 包住，且这是唯一一处 `deref_mut`——没有失败就没有标脏，也不留"将来谁再看 `is_changed()` 就会被骗"的伏笔。`apply_save_result` 因此退成"只把权威值落到两份资源与四组句柄"（不再管计数，也不再返回 provider 标记）。
+3. **把两半装进同一帧序跑**。`drain_save` 原先还兼着"provider 写过 → 经 IPC 重取 `ProviderInfo`"，这让它离不开 `IpcClientResource`/`AgentBridge`，测试装不进去。拆出 `refresh_provider_after_save`（读 `SettingsSaveReportMessage`，识别判据是纯函数 `touches_provider`）之后，`xgent_app` 里的 `a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame` 能把真实的 `drain_snapshot` + `drain_save` 与真实的 `SettingsPanelPlugin` 装进同一个 `App`：投一份带失败键的 `SaveTaskResult` 进通道，让 Bevy 自己的调度跑完，再去读输入框的文本。断言是三段的——被拒的值留在框里、`tick` 一格不动、随后一次合法的快照推进把显示拉回磁盘值（防"永久停更"）。
+
+反证按新结构重跑，两边互补，缺一边就漏一边：
+
+| 变异 | 抓它的用例 |
+|:---|:---|
+| M40 面板闸门退回 `is_changed() && tick > 0` | UI 侧 `failed_save_keeps_the_rejected_value_on_screen`（集成用例抓不到：现在的 app 在失败帧根本不标脏，两种闸门此时等价——这正是"面板不看脏标记"这条规则要单独钉的理由） |
+| M41 `drain_save` 不看 `failed` 就推进 `tick` | 集成用例 + `drain_save_advances_the_render_counter_only_when_every_key_landed` |
+| M42 面板永不按增量重建 | 集成用例（第三段断言）与 UI 用例 |
+| M33/M34/M35/M37/M38（上一轮那批） | 复跑仍各抓到 1 条 |
+
+另外两条如实记录的收获与边界：
+
+- 上一轮我把 `drain_save` 整体留在 IPC/bridge 上，理由是"少一层消息"；正是这个耦合让端到端装配做不出来，于是两轮都只能"各测一半"。**能拆出一个不依赖外部 I/O 的落状态段，本身就是为了可测性而做的正确切分**，不是多余的一层。
+- 验证者同时点名 A14 的"pre-existing tests untouched in behaviour"字面未满足：`settings_input_focus.rs` 的真实 picking 那一半在 headless 下量不到子节点坐标（`UiRoot` 缺失 → 面板根 `0×0`），我把它换成了组件契约断言 `every_settings_input_carries_tab_index`。这不叫"改了既有测试的行为"，但它确实不再自动跑真机点击链路，因此写进 known limits 而不是含糊过去。
+
+### 第四轮否决（A9 换了第三条腿）与迭代 6
+
+迭代 5 候选 `222c471d`：Runtime 13/13 全绿，独立验证者判 **13 passed / A9 fail**，但这一轮它明确确认**前三轮那个缺陷已经关了**——它自己从 bevy 源码把语义读了一遍（`system_param.rs:730-777` 取 `ResMut` 不标脏、`change_detection/traits.rs:493-501` 只在 `deref_mut` 标脏），核实"有键被拒时 app 根本不碰那份资源"成立，`drain_snapshot` 是唯一的另一个写者且它写的时候一定推进 `tick`；还重跑了 M40 探针，复现了我声称的互补性（把面板闸门退回 `is_changed()` 只有 `xgent_ui` 那条用例炸，集成用例保持绿），并判定反向的不对称是结构性的（`xgent_ui` 没有对 `xgent_app` 的 dev-dependency），**不算覆盖洞**。
+
+它抓的是**同一句验收项里另一个从句**：A9 与 spec「Saving」第 42 行、brief 的 Outcome/Scope 都写的是"报告**点名**已写入的键"（*names the keys already written*），而 `apply_save_report` 在失败分支只渲染了 `已保存 { $count } 项`——`ev.written` 里那些键名在 `xgent_ui` 全程没有被读过，所以名字从来没上过屏幕。我引的那条用例断言的是 `contains("2")`，把错的形状钉成了契约。
+
+处置（迭代 6）：
+
+1. 双语料新增 `settings-written-keys`（zh `已写入：{ $keys }` / en `written: { $keys }`），键名之间用已有的 `settings-list-sep`（zh `、` / en `, `）连接——分隔符仍归语料，Rust 侧不写死标点。
+2. `partial_save_reports_written_and_failed_keys` 改成断言**两个已写入的键名都出现在状态行**，并反向断言"不该再出现裸个数"；变异 M43（退回只报个数）→ 1 failed。
+3. 验证者顺带点的小洞："留空即写 0"此前只在 `parse_num_field` 的解析层证过，消息层没人管。`changed_fields_are_written_with_their_daemon_keys` 补了一条断言：留空的 `tools.confirm_timeout_secs` 必须以 `Value::Number(0)` 发出。变异 M44（Sentinel 留空当成"不改"）→ 2 failed（解析层与消息层各一条）。
+4. 两处**过期声称**按"引用用例名要 grep 回读"的自家判据订正，而不是删掉：`toggle_panel` 的文档注释原文写"`drain_save` 只要碰到这份资源（它每次都碰）"——迭代 5 之后失败帧根本不碰，已改成"两边各留一道"；本文件上一轮的变异表引了 `a_rejected_key_updates_state_without_redrawing_the_panel`，该用例在迭代 5 的拆分中被删，已就地标注由哪两条现役用例接手。
+
+判据的增量：**同一句验收项要被拆成"每个名词都指得到一个渲染点"来核对**。前三轮的成因分别是"信号来得太晚""信号被无关的脏标记淹没""报出来的内容形状不对"——前两类靠帧序与可比较计数解决，第三类只能逐词对照文本：`names the keys` 里的 *names* 是动词，不是"提到有个数"。固定动作：把 brief/spec 那句话里的每个动词与名词在显示函数里找一个对应的字符串，找不到就是没实现；而覆盖用例的断言要照那句话写，不要照当时的实现写（我这轮正是 `contains("2")` 把缺陷钉成了契约）。
+
+### 第五轮：结论"全过"却记不进 Runtime，以及读码读出来的两条缝
+
+迭代 6 候选 `f3c0a0b1`：Runtime 检查 13/13，独立验证者判 **14/14 pass**。它对 A9 的命名从句查得比我细——不但不信任我的断言，还**离线复算了 fluent 渲染**（自建 `/tmp/v6-fluent-probe`，fluent-bundle 0.16.0，同一 `new_concurrent` + `format_pattern`）：zh 与 en 两个 locale 里两个键名都连续出现、隔离标记（U+2066..U+2069）只包整段 placeable 而不插在中间、参数名匹配、英文侧没有中文标点；并自己复现了 M43（退回计数 → `18 passed; 1 failed`）。
+
+**但这份结论没有落进 Runtime**：它提交 `final-result` 时把每条 `result` 写成 `"pass"`，而 schema 要的是 `passed|failed|blocked`，Runtime 判 `invalid-data` 拒收并**关闭了该次 Verifier 尝试**；改好的 `/tmp/v6-final.json` 再也挂不上（"requires an active Verifier attempt"）。恢复只能按新的 continuation 走：同一份实现重新提交候选（iteration 7）→ 重新派发 Verifier。判据：**往 Runtime 回结构化结论时，枚举值逐字照 template 抄，别按语义"顺手写"**——一次格式失误的代价是整轮重派发，而语义结论本身并没有被推翻。
+
+验证者读码另外点出两条我这边没人管的真缝，都按"补成事实"处理而不是辩解：
+
+1. `apply_save_result` 把写完后重读的 `SnapshotResult.error` 丢了——daemon 连不上或项目 TOML 坏掉时，保存通路只报逐键结果，顶部提示行永远是上一次的值。处置：在**全成功**那一支把原因落到 `ready.error` 并推进计数（顶部行要靠重建才显示）；**有键被拒**那一支照旧不碰这份资源——重建会抹掉被拒的值，那种场合由逐键报告说清楚。两条边界一起写进 `a_clean_save_surfaces_a_re_read_failure_and_a_rejected_one_does_not`，变异 M45（摘掉那句赋值）失败 1 条。
+2. handoff 里 A1 的证据还写着 `settings_panel_values -> 18 passed`（该套件已是 19 条）。数字随用例增删必须重跑再抄，不能沿用上一轮的记录。
+
+另记一条核对结论：A2 里"注册的 UiOnly 编辑器工具显示自动执行"指的不是测试夹具，生产代码确有该工具（`crates/xgent_tools/src/editor_tool.rs:210`），验证者把它列成的 risk（brief 措辞里的 `editor.open_file` 与实际注册 id）属文案粒度问题，不影响判据。

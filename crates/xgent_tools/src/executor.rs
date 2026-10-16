@@ -37,8 +37,11 @@ pub struct ToolExecutor {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
     /// 会话级 AllowAll 集合：用户选过 AllowAll 的工具不再确认
     allowed_all: tokio::sync::Mutex<HashSet<String>>,
-    /// 等待用户确认的秒数（项目配置 `[tools] confirm_timeout_secs`，R3-17）。
-    confirm_timeout_secs: u64,
+    /// 运行参数（项目配置 `[tools]`，R3-17），**运行期可换**。
+    ///
+    /// 与 `RunCommand` 共享同一句柄，也由 `xgent_app` 的实时配置持有：
+    /// 确认超时与命令上限因此在下一次调用就按新值走，不必重启。
+    params: Arc<RwLock<crate::ToolParams>>,
     /// 检查点存储（`None` = 不记录，改动不可撤销）。
     ///
     /// 由宿主（`xgent_app`）注入，与 `AgentBridge` 共享同一 `Arc`；执行器是所有
@@ -53,13 +56,23 @@ impl ToolExecutor {
     }
 
     /// 用给定运行参数构造并注册内置工具（`xgent_app` 由项目配置派生）。
+    ///
+    /// 参数被拷进一个新的共享句柄；要运行期改参数请用
+    /// [`ToolExecutor::with_shared_params`]。
     pub fn with_params(params: &crate::ToolParams) -> Self {
-        let tools: Vec<Arc<dyn Tool>> = crate::default_tools(params);
+        Self::with_shared_params(Arc::new(RwLock::new(*params)))
+    }
+
+    /// 用**共享**参数句柄构造并注册内置工具。
+    ///
+    /// 宿主把同一个 `Arc` 既交给执行器又留作己用，写入即生效于下一次调用。
+    pub fn with_shared_params(params: Arc<RwLock<crate::ToolParams>>) -> Self {
+        let tools: Vec<Arc<dyn Tool>> = crate::default_tools_shared(params.clone());
         let map = tools.into_iter().map(|t| (t.id().to_string(), t)).collect();
         Self {
             tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
-            confirm_timeout_secs: params.confirm_timeout_secs,
+            params,
             checkpoints: None,
         }
     }
@@ -75,15 +88,55 @@ impl ToolExecutor {
         self.checkpoints.as_ref()
     }
 
-    /// 用指定工具集合构造（测试用），确认超时取内置缺省。
+    /// 用指定工具集合构造（测试用），运行参数取内置缺省的快照。
     pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
         let map = tools.into_iter().map(|t| (t.id().to_string(), t)).collect();
         Self {
             tools: RwLock::new(map),
             allowed_all: tokio::sync::Mutex::new(HashSet::new()),
-            confirm_timeout_secs: crate::ToolParams::default().confirm_timeout_secs,
+            params: Arc::new(RwLock::new(crate::ToolParams::default())),
             checkpoints: None,
         }
+    }
+
+    /// 当前运行参数句柄（宿主用来写入新值，执行器与 `run_command` 都读它）。
+    pub fn params(&self) -> Arc<RwLock<crate::ToolParams>> {
+        self.params.clone()
+    }
+
+    /// 已注册工具的 id 与信任层（设置面板的三态策略行据此列出）。
+    ///
+    /// 按 id 排序：面板行的顺序要稳定，否则每次重开面板都在换位置。
+    pub fn policy_targets(&self) -> Vec<(String, ToolTier)> {
+        let mut rows: Vec<(String, ToolTier)> = self
+            .tools
+            .read()
+            .values()
+            .map(|t| (t.id().to_string(), t.tier()))
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        rows
+    }
+
+    /// 该工具在给定策略配置下**解析后**的答案（设置面板显示用）。
+    ///
+    /// 走的是与执行同一条判据（[`crate::security::resolve_policy`]），只是这里用
+    /// `Null` 输入取样：`run_command` 这类按输入升级的工具在空输入下返回静态 tier，
+    /// 面板据此显示"配置的缺省"，具体危险命令仍由执行时的动态升级拦住——显示的
+    /// 是配置层的答案，不是"任何输入都免确认"的承诺。
+    pub fn resolved_policy(
+        &self,
+        tool_id: &str,
+        policy: &xgent_settings_core::project::ToolPolicyConfig,
+    ) -> Option<SecurityPolicy> {
+        let tool = self.tools.read().get(tool_id).cloned()?;
+        Some(resolve_policy(
+            tool_id,
+            tool.tier(),
+            &serde_json::Value::Null,
+            tool.as_ref(),
+            policy,
+        ))
     }
 
     /// 执行工具，并在写入前后与检查点存储打点。
@@ -180,7 +233,9 @@ impl ToolExecutor {
         if tier != ToolTier::Read {
             return false;
         }
-        match resolve_policy(tool_id, tier, input, tool.as_ref(), &ctx.tool_policy) {
+        // 先取出策略再 match：读锁守卫必须在这条语句结束时释放，不能跨 await 持有
+        let resolved = resolve_policy(tool_id, tier, input, tool.as_ref(), &ctx.tool_policy.read());
+        match resolved {
             SecurityPolicy::Approved => true,
             SecurityPolicy::NeedsConfirmation => self.allowed_all.lock().await.contains(tool_id),
             // 被策略拒绝的调用交给 execute 返回拒绝结果，不参与并发调度
@@ -223,12 +278,14 @@ impl ToolExecutor {
                 });
             }
         };
+        // 策略读的是共享句柄的当前值：面板改完 [tool_policy] 后这一次调用就按新值判
+        // （读锁守卫在语句结束即释放，下面要 await 确认与执行）
         let policy = resolve_policy(
             tool_id,
             tool.tier(),
             &input,
             tool.as_ref(),
-            &ctx.tool_policy,
+            &ctx.tool_policy.read(),
         );
         match policy {
             SecurityPolicy::Denied => Ok(ToolResult {
@@ -262,13 +319,16 @@ impl ToolExecutor {
                 // 挂着，除 Abort 外没有出口（2026-10-14 由 `[tools]
                 // confirm_timeout_secs` 的行为测试暴露，见台账 §七）。
                 // `biased` 让取消优先判定，Abort 不被超时抢跑。
+                // 超时秒数在**发起这次确认时**读取（而不是构造执行器时）：
+                // 面板改完 `[tools] confirm_timeout_secs` 后，下一次确认就按新值等。
+                let confirm_timeout_secs = self.params.read().confirm_timeout_secs;
                 let decision = tokio::select! {
                     biased;
                     _ = signal.cancelled() => {
                         return Err(ToolError::Aborted);
                     }
                     r = tokio::time::timeout(
-                        std::time::Duration::from_secs(self.confirm_timeout_secs),
+                        std::time::Duration::from_secs(confirm_timeout_secs),
                         async {
                             let rx = confirm.confirm(req).await;
                             rx.await
@@ -357,10 +417,7 @@ mod tests {
     }
 
     fn ctx(root: &std::path::Path, policy: ToolPolicyConfig) -> ToolCtx {
-        ToolCtx {
-            project_root: root.to_path_buf(),
-            tool_policy: policy,
-        }
+        ToolCtx::with_policy(root.to_path_buf(), policy)
     }
 
     fn policy(approved: &[&str], denied: &[&str]) -> ToolPolicyConfig {
@@ -1127,5 +1184,252 @@ mod tests {
             big.len()
         );
         assert!(r.output.contains("已截断"), "应含截断标记");
+    }
+
+    // ---- R3-13：配置改完即生效（不需要重建执行器） ----
+
+    /// 丢掉命令的 sink：只为把 `editor` 工具挂进执行器，让策略行列出它。
+    struct NullSink;
+    #[async_trait::async_trait]
+    impl crate::EditorCommandSink for NullSink {
+        fn emit(&self, _req: crate::EditorCommandRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// 数确认次数并一律放行的 mock。
+    struct CountingAllow {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl ConfirmCallback for CountingAllow {
+        async fn confirm(&self, _req: ConfirmRequest) -> oneshot::Receiver<ConfirmDecision> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (tx, rx) = oneshot::channel();
+            let _ = tx.send(ConfirmDecision::Allow);
+            rx
+        }
+    }
+
+    /// 共享策略句柄：把某工具提进 `approved` 后，**下一次调用**就不再问确认。
+    ///
+    /// 判据是确认次数（1 → 仍为 1），不是耗时：策略若被 `ToolCtx` 按值拷走，
+    /// 第二次调用会再问一次，计数变 2。
+    #[tokio::test]
+    async fn approved_tool_stops_asking_after_policy_handle_changes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let policy = std::sync::Arc::new(RwLock::new(ToolPolicyConfig::default()));
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: policy.clone(),
+        };
+        std::fs::write(dir.path().join("a.txt"), "hi").unwrap();
+        let exec = ToolExecutor::with_defaults();
+        let count = std::sync::Arc::new(AtomicUsize::new(0));
+        let confirm = CountingAllow {
+            calls: count.clone(),
+        };
+
+        exec.execute(
+            "read_file",
+            json!({"path": "a.txt"}),
+            &ctx,
+            CancellationToken::new(),
+            &confirm,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1, "默认配置应问一次确认");
+
+        policy.write().approved.push("read_file".to_string());
+        exec.execute(
+            "read_file",
+            json!({"path": "a.txt"}),
+            &ctx,
+            CancellationToken::new(),
+            &confirm,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "改完策略后下一次调用应自动放行（问过一次就不该再问）"
+        );
+    }
+
+    /// 共享策略句柄：把工具提进 `denied` 后，下一次调用直接拒绝且不碰确认通道。
+    ///
+    /// 两个 id 都要跑：`read_file` 代表普通只读工具，`run_command` 是设置面板
+    /// 三态行里最常被拒绝的那一个（Exec 层 + 按输入动态升级），只测前者就等于
+    /// 没测到"拒绝优先于动态升级"这条次序。
+    #[tokio::test]
+    async fn denied_tool_is_refused_after_policy_handle_changes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let policy = std::sync::Arc::new(RwLock::new(ToolPolicyConfig::default()));
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: policy.clone(),
+        };
+        std::fs::write(dir.path().join("a.txt"), "hi").unwrap();
+        let exec = ToolExecutor::with_defaults();
+        let count = std::sync::Arc::new(AtomicUsize::new(0));
+        let confirm = CountingAllow {
+            calls: count.clone(),
+        };
+
+        let cases = [
+            ("read_file", json!({"path": "a.txt"})),
+            ("run_command", json!({"command": "true"})),
+        ];
+        for (id, input) in cases {
+            policy.write().denied.push(id.to_string());
+            let r = exec
+                .execute(id, input, &ctx, CancellationToken::new(), &confirm, None)
+                .await
+                .unwrap();
+            assert!(r.denied, "{id} 被拒绝时应标 denied: {}", r.output);
+            assert!(r.is_error, "{id} 的拒绝应作为逻辑失败回灌");
+        }
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "denied 不该先问一次确认（两个工具都不该问）"
+        );
+    }
+
+    /// 设为自动执行**不能**让危险命令免确认：动态升级判据读的是输入，
+    /// 与策略来自共享句柄这件事互不干扰（R1-5 的修复不得被 UI 通路弄回去）。
+    #[tokio::test]
+    async fn approved_run_command_still_confirms_dangerous_input() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let policy = std::sync::Arc::new(RwLock::new(ToolPolicyConfig {
+            approved: vec!["run_command".to_string()],
+            denied: vec![],
+        }));
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: policy.clone(),
+        };
+        let exec = ToolExecutor::with_defaults();
+        let count = std::sync::Arc::new(AtomicUsize::new(0));
+        let confirm = CountingAllow {
+            calls: count.clone(),
+        };
+
+        // 普通命令：approved 命中，自动放行
+        exec.execute(
+            "run_command",
+            json!({"command": "true"}),
+            &ctx,
+            CancellationToken::new(),
+            &confirm,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 0, "普通命令应免确认");
+
+        // 危险命令：同一份配置下仍要问
+        exec.execute(
+            "run_command",
+            json!({"command": "rm -rf /tmp/definitely-not-here"}),
+            &ctx,
+            CancellationToken::new(),
+            &confirm,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "配置 approved 后危险命令仍须询问一次"
+        );
+    }
+
+    /// 确认超时读的是共享参数句柄：改小之后**下一次确认**就按新值到期。
+    ///
+    /// 执行器构造时句柄里是内置的 300s；若超时被缓存在执行器字段上，
+    /// 这条测试会等 300s 而不是 1s。
+    #[tokio::test]
+    async fn confirm_timeout_written_to_handle_expires_next_request() {
+        use std::time::Instant;
+        let dir = tempfile::tempdir().unwrap();
+        let params = std::sync::Arc::new(RwLock::new(crate::ToolParams::default()));
+        assert_eq!(params.read().confirm_timeout_secs, 300);
+        let exec = ToolExecutor::with_shared_params(params.clone());
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: Default::default(),
+        };
+        params.write().confirm_timeout_secs = 1;
+
+        let hold = NeverAnswers::new();
+        let started = Instant::now();
+        let r = exec
+            .execute(
+                "read_file",
+                json!({"path": "missing.txt"}),
+                &ctx,
+                CancellationToken::new(),
+                &hold,
+                None,
+            )
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        assert!(
+            r.output.contains("确认请求超时"),
+            "应走超时支路: {}",
+            r.output
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "写入句柄的 1s 应被下一次确认为准: {elapsed:?}"
+        );
+    }
+
+    /// 面板的三态显示与执行走同一条判据（显示错了比不显示更糟）。
+    #[test]
+    fn resolved_policy_agrees_with_execution_rules() {
+        let exec = ToolExecutor::with_defaults();
+        exec.register(std::sync::Arc::new(crate::EditorTool::new(
+            std::sync::Arc::new(NullSink),
+        )));
+
+        // UiOnly：不写任何配置就是自动执行
+        assert_eq!(
+            exec.resolved_policy(crate::EditorTool::ID, &ToolPolicyConfig::default()),
+            Some(SecurityPolicy::Approved),
+            "editor 工具应显示为自动执行"
+        );
+        // 默认：其余工具需确认
+        assert_eq!(
+            exec.resolved_policy("read_file", &ToolPolicyConfig::default()),
+            Some(SecurityPolicy::NeedsConfirmation)
+        );
+        // denied 优先
+        assert_eq!(
+            exec.resolved_policy("read_file", &policy(&["read_file"], &["read_file"])),
+            Some(SecurityPolicy::Denied)
+        );
+        // 未知工具没有行
+        assert_eq!(
+            exec.resolved_policy("no_such_tool", &Default::default()),
+            None
+        );
+        // 三态行按 id 排序且含内置工具
+        let targets = exec.policy_targets();
+        let ids: Vec<&str> = targets.iter().map(|(id, _)| id.as_str()).collect();
+        assert!(ids.contains(&"read_file") && ids.contains(&"run_command"));
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted, "策略行应按 id 稳定排序");
     }
 }

@@ -20,10 +20,8 @@ use crate::tool::{
 /// 超时与输出上限取自 [`crate::ToolParams`]（项目配置 `[tools]`，R3-17），
 /// 缺省即本次转配置前的硬编码常量，避免卡死 agent loop 与无界输出。
 pub struct RunCommand {
-    /// 最长执行秒数
-    timeout_secs: u64,
-    /// 捕获输出上限（字节）
-    max_output_bytes: usize,
+    /// 运行参数句柄（与执行器/宿主共享）：超时与输出上限在每次调用开始时取一次。
+    params: Arc<parking_lot::RwLock<crate::ToolParams>>,
 }
 
 /// 危险命令模式（小写匹配）：命中则 [`RunCommand::approval_for`] 返回
@@ -76,12 +74,14 @@ impl RunCommand {
         Self::with_params(&crate::ToolParams::default())
     }
 
-    /// 用给定运行参数构造（来自项目配置 `[tools]`）。
+    /// 用给定运行参数构造（来自项目配置 `[tools]`）。参数按快照拷贝。
     pub fn with_params(params: &crate::ToolParams) -> Self {
-        Self {
-            timeout_secs: params.command_timeout_secs,
-            max_output_bytes: params.command_max_output_bytes,
-        }
+        Self::with_shared_params(Arc::new(parking_lot::RwLock::new(*params)))
+    }
+
+    /// 用**共享**参数句柄构造：宿主改 `[tools]` 后下一次调用即生效。
+    pub fn with_shared_params(params: Arc<parking_lot::RwLock<crate::ToolParams>>) -> Self {
+        Self { params }
     }
 }
 
@@ -168,6 +168,9 @@ impl Tool for RunCommand {
             c
         };
         cmd.current_dir(&ctx.project_root);
+        // 本次调用的参数快照（一次调用内一致，不随中途改配置漂移）
+        let timeout_secs = self.params.read().command_timeout_secs;
+        let max_output_bytes = self.params.read().command_max_output_bytes;
         // 合并 stdout/stderr
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -219,13 +222,13 @@ impl Tool for RunCommand {
                 }
                 return Err(ToolError::Aborted);
             }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(self.timeout_secs)) => {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
                 // 超时：杀整个进程组
                 if let Some(c) = child_opt.as_mut() {
                     kill_child(c);
                     let _ = c.wait().await;
                 }
-                return Err(ToolError::Timeout(self.timeout_secs));
+                return Err(ToolError::Timeout(timeout_secs));
             }
             s = async { child_opt.as_mut().unwrap().wait().await } => match s {
                 Ok(st) => st,
@@ -253,13 +256,13 @@ impl Tool for RunCommand {
         let stdout = String::from_utf8_lossy(&stdout_data).to_string();
         let stderr = String::from_utf8_lossy(&stderr_data).to_string();
         let is_error = !status.success();
-        let mut text = crate::truncate_output_to(&stdout, self.max_output_bytes);
+        let mut text = crate::truncate_output_to(&stdout, max_output_bytes);
         if !stderr.is_empty() {
             if !text.is_empty() {
                 text.push('\n');
             }
             text.push_str("[stderr]\n");
-            text.push_str(&crate::truncate_output_to(&stderr, self.max_output_bytes));
+            text.push_str(&crate::truncate_output_to(&stderr, max_output_bytes));
         }
         text.push_str(&format!("\n[exit: {}]", status));
         Ok(ToolResult {
@@ -523,5 +526,80 @@ mod tests {
         assert_eq!(p.command_timeout_secs, 60);
         assert_eq!(p.command_max_output_bytes, 65_536);
         assert_eq!(p.confirm_timeout_secs, 300);
+    }
+    // ---- R3-13：参数句柄共享后，改配置下一次调用即生效 ----
+
+    /// 命令超时读的是共享句柄：构造时是内置 60s，写入 1s 后**下一次调用**按 1s 到期。
+    /// 若超时在构造时被拷进工具字段，这条会等满 3s 而失败（不是 flake，是判据）。
+    #[tokio::test]
+    async fn command_timeout_written_to_shared_handle_applies_next_call() {
+        use std::time::Instant;
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: Default::default(),
+        };
+        let params = std::sync::Arc::new(parking_lot::RwLock::new(crate::ToolParams::default()));
+        assert_eq!(params.read().command_timeout_secs, 60);
+        let tool = RunCommand::with_shared_params(params.clone());
+
+        params.write().command_timeout_secs = 1;
+        let started = Instant::now();
+        let r = tool
+            .execute(
+                json!({"command": "sleep 3"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await;
+        assert!(
+            matches!(r, Err(ToolError::Timeout(1))),
+            "应按写入的 1s 超时并回报该值: {r:?}"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    /// 输出上限同样按调用读取：写入 1KB 后下一次调用即截断。
+    #[tokio::test]
+    async fn output_cap_written_to_shared_handle_applies_next_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolCtx {
+            project_root: dir.path().to_path_buf(),
+            tool_policy: Default::default(),
+        };
+        let params = std::sync::Arc::new(parking_lot::RwLock::new(crate::ToolParams::default()));
+        let tool = RunCommand::with_shared_params(params.clone());
+
+        // 先用缺省上限跑一次：4KB 不该被截断
+        let before = tool
+            .execute(
+                json!({"command": "seq 1 900"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            !before.output.contains("中间部分已截断"),
+            "缺省上限下不该截断"
+        );
+
+        params.write().command_max_output_bytes = 1024;
+        let after = tool
+            .execute(
+                json!({"command": "seq 1 900"}),
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            after.output.contains("中间部分已截断"),
+            "写入 1KB 上限后下一次调用应截断: len={}",
+            after.output.len()
+        );
     }
 }

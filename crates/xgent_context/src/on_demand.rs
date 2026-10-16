@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::provider::{
     ContextChunk, ContextProvider, ContextQuery, ContextResult, estimate_tokens, is_cjk_char,
@@ -104,19 +105,31 @@ impl RetrievalLimits {
 /// 方案 A 上下文提供者。
 pub struct OnDemandContextProvider {
     project_root: PathBuf,
-    limits: RetrievalLimits,
+    /// 遍历/搜索限额，**运行期可换**（项目配置 `[context]`）。
+    ///
+    /// 与宿主共享同一句柄：设置面板改完限额后，下一次检索用的就是新值。
+    /// 每次检索开始时取一次快照，单次检索内部保持一致。
+    limits: Arc<parking_lot::RwLock<RetrievalLimits>>,
 }
 
 impl OnDemandContextProvider {
     pub fn new(project_root: PathBuf) -> Self {
-        Self {
+        Self::with_shared_limits(
             project_root,
-            limits: RetrievalLimits::default(),
-        }
+            Arc::new(parking_lot::RwLock::new(RetrievalLimits::default())),
+        )
     }
 
-    /// 用给定限额构造（`xgent_app` 由项目配置 `[context]` 派生）。
+    /// 用给定限额构造（`xgent_app` 由项目配置 `[context]` 派生）。限额按快照拷贝。
     pub fn with_limits(project_root: PathBuf, limits: RetrievalLimits) -> Self {
+        Self::with_shared_limits(project_root, Arc::new(parking_lot::RwLock::new(limits)))
+    }
+
+    /// 用**共享**限额句柄构造：宿主改 `[context]` 后下一次检索即生效。
+    pub fn with_shared_limits(
+        project_root: PathBuf,
+        limits: Arc<parking_lot::RwLock<RetrievalLimits>>,
+    ) -> Self {
         Self {
             project_root,
             limits,
@@ -129,19 +142,21 @@ impl OnDemandContextProvider {
     }
 
     /// 当前生效的限额。
-    pub fn limits(&self) -> &RetrievalLimits {
-        &self.limits
+    pub fn limits(&self) -> RetrievalLimits {
+        *self.limits.read()
     }
 }
 
 #[async_trait]
 impl ContextProvider for OnDemandContextProvider {
     async fn retrieve(&self, query: &ContextQuery) -> ContextResult {
+        // 一次检索取一份限额快照，整次检索内部保持一致
+        let limits = self.limits();
         let mut total_tokens: u32 = 0;
         let max = query.max_tokens.max(1);
 
         // 1. 目录树摘要
-        let tree = self.tree_summary().await;
+        let tree = self.tree_summary(&limits).await;
         let tree_tokens = tree.as_ref().map(|t| estimate_tokens(t)).unwrap_or(0);
         if tree_tokens < max {
             total_tokens += tree_tokens;
@@ -177,9 +192,9 @@ impl ContextProvider for OnDemandContextProvider {
         }
 
         // 4. 关键词搜索
-        let keywords = extract_keywords(&query.user_message, &query.hints, &self.limits);
+        let keywords = extract_keywords(&query.user_message, &query.hints, &limits);
         if !keywords.is_empty() && total_tokens < max {
-            let files = self.search(&keywords).await;
+            let files = self.search(&keywords, &limits).await;
             for f in files {
                 if total_tokens >= max {
                     break;
@@ -205,9 +220,10 @@ impl ContextProvider for OnDemandContextProvider {
 
 impl OnDemandContextProvider {
     /// 生成目录树摘要（跳过 .git/target 等）。遍历在 blocking pool 上执行。
-    async fn tree_summary(&self) -> Option<String> {
+    async fn tree_summary(&self, limits: &RetrievalLimits) -> Option<String> {
         let root = self.project_root.clone();
-        let limits = self.limits;
+        // 拷贝一份交给 blocking 线程：闭包要 'static，不能借用 self 的参数
+        let limits = *limits;
         let lines = tokio::task::spawn_blocking(move || collect_tree_lines(&root, &limits))
             .await
             .unwrap_or_default();
@@ -219,16 +235,20 @@ impl OnDemandContextProvider {
     }
 
     /// 关键词搜索：优先系统 rg，降级内置遍历。
-    async fn search(&self, keywords: &[String]) -> Vec<PathBuf> {
-        if let Some(files) = self.rg_search(keywords).await {
+    async fn search(&self, keywords: &[String], limits: &RetrievalLimits) -> Vec<PathBuf> {
+        if let Some(files) = self.rg_search(keywords, limits).await {
             return files;
         }
-        self.fallback_search(keywords).await
+        self.fallback_search(keywords, limits).await
     }
 
     /// 调系统 ripgrep，返回匹配文件列表（相对项目根）。
     /// rg 不存在或失败时返回 None，由调用方降级。
-    async fn rg_search(&self, keywords: &[String]) -> Option<Vec<PathBuf>> {
+    async fn rg_search(
+        &self,
+        keywords: &[String],
+        limits: &RetrievalLimits,
+    ) -> Option<Vec<PathBuf>> {
         if keywords.is_empty() {
             return Some(Vec::new());
         }
@@ -237,7 +257,7 @@ impl OnDemandContextProvider {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
         let output = tokio::time::timeout(
-            std::time::Duration::from_secs(self.limits.rg_timeout_secs),
+            std::time::Duration::from_secs(limits.rg_timeout_secs),
             cmd.output(),
         )
         .await
@@ -259,17 +279,18 @@ impl OnDemandContextProvider {
                     .ok()
                     .map(|p| p.to_path_buf())
             })
-            .take(self.limits.max_search_files)
+            .take(limits.max_search_files)
             .collect();
         Some(files)
     }
 
     /// 降级搜索：内置递归遍历 + 字面量子串匹配（任一关键词命中即返回文件）。
     /// 遍历在 blocking pool 上执行。
-    async fn fallback_search(&self, keywords: &[String]) -> Vec<PathBuf> {
+    async fn fallback_search(&self, keywords: &[String], limits: &RetrievalLimits) -> Vec<PathBuf> {
         let root = self.project_root.clone();
         let keywords = keywords.to_vec();
-        let limits = self.limits;
+        // 同上：blocking 线程需拥有副本
+        let limits = *limits;
         tokio::task::spawn_blocking(move || collect_matching_files(&root, &keywords, &limits))
             .await
             .unwrap_or_default()
@@ -623,7 +644,7 @@ mod tests {
             .await
             .unwrap();
         let p = provider(root);
-        let tree = p.tree_summary().await.unwrap();
+        let tree = p.tree_summary(&p.limits()).await.unwrap();
         assert!(tree.contains("main.rs"));
         assert!(!tree.contains("junk.rs"), "应忽略 target");
     }
@@ -667,7 +688,7 @@ mod tests {
             .await
             .unwrap();
         let p = provider(root);
-        let files = p.fallback_search(&["findme".into()]).await;
+        let files = p.fallback_search(&["findme".into()], &p.limits()).await;
         assert!(files.iter().any(|f| f == Path::new("a.rs")));
         assert!(!files.iter().any(|f| f == Path::new("b.txt")));
     }
@@ -1131,7 +1152,10 @@ mod tests {
                 ..TEST_LIMITS
             },
         );
-        let summary = shallow.tree_summary().await.unwrap_or_default();
+        let summary = shallow
+            .tree_summary(&shallow.limits())
+            .await
+            .unwrap_or_default();
         assert!(
             summary.contains("top.rs"),
             "深度 1 仍应列出 src/top.rs: {summary}"
@@ -1142,7 +1166,7 @@ mod tests {
         );
 
         let full = provider(root);
-        let summary = full.tree_summary().await.unwrap_or_default();
+        let summary = full.tree_summary(&full.limits()).await.unwrap_or_default();
         assert!(
             summary.contains("deep.rs"),
             "缺省深度 4 应列出更深的文件: {summary}"
@@ -1166,7 +1190,7 @@ mod tests {
                 ..TEST_LIMITS
             },
         );
-        let summary = p.tree_summary().await.unwrap_or_default();
+        let summary = p.tree_summary(&p.limits()).await.unwrap_or_default();
         assert!(
             summary.contains("..."),
             "条目上限命中应有省略标记: {summary}"
@@ -1216,11 +1240,15 @@ mod tests {
                 ..TEST_LIMITS
             },
         );
-        let files = p.fallback_search(&["needle".to_string()]).await;
+        let files = p
+            .fallback_search(&["needle".to_string()], &p.limits())
+            .await;
         assert_eq!(files.len(), 1, "上限 1 应只返回一个文件: {files:?}");
 
         let dflt = provider(root);
-        let many = dflt.fallback_search(&["needle".to_string()]).await;
+        let many = dflt
+            .fallback_search(&["needle".to_string()], &dflt.limits())
+            .await;
         assert_eq!(many.len(), 5, "缺省上限 20 应全部返回: {many:?}");
     }
 
@@ -1244,5 +1272,111 @@ mod tests {
                 "{field} 应在遍历/搜索/取词处被读取（找 {read}）"
             );
         }
+    }
+    // ---- R3-13：检索限额走共享句柄，改完下一次检索生效 ----
+
+    /// 把 `[context] tree_max_depth` 从 4 改成 1，**下一次 retrieve** 的目录树就变浅。
+    ///
+    /// 判据走公开 trait `retrieve`（而不是直接调 tree_summary），因为要证的正是
+    /// "运行时读的是句柄当前值"：若限额在构造时被拷成字段，第二次检索仍会给深树。
+    #[tokio::test]
+    async fn retrieval_limits_written_to_shared_handle_apply_next_retrieve() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        tokio::fs::create_dir_all(root.join("src/sub"))
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("src/top.rs"), "").await.unwrap();
+        tokio::fs::write(root.join("src/sub/deep.rs"), "")
+            .await
+            .unwrap();
+
+        let limits = Arc::new(parking_lot::RwLock::new(RetrievalLimits {
+            tree_max_depth: 4,
+            ..TEST_LIMITS
+        }));
+        let p = OnDemandContextProvider::with_shared_limits(root.to_path_buf(), limits.clone());
+        let q = ContextQuery {
+            user_message: "无关关键词 zzq".into(),
+            current_file: None,
+            hints: vec![],
+            max_tokens: 2_000,
+        };
+
+        let before = p.retrieve(&q).await;
+        assert!(
+            before
+                .tree_summary
+                .clone()
+                .unwrap_or_default()
+                .contains("deep.rs"),
+            "缺省深度 4 应列出更深的文件: {:?}",
+            before.tree_summary
+        );
+
+        limits.write().tree_max_depth = 1;
+        let after = p.retrieve(&q).await;
+        let summary = after.tree_summary.clone().unwrap_or_default();
+        assert!(
+            summary.contains("top.rs"),
+            "深度 1 仍应列出 src/top.rs: {summary}"
+        );
+        assert!(
+            !summary.contains("deep.rs"),
+            "写入深度 1 后下一次检索不应再列出 src/sub/deep.rs: {summary}"
+        );
+    }
+
+    /// 共享句柄下的 `max_keywords`：收窄到 1 后，第二个关键词的文件检索不到。
+    ///
+    /// 判据取自检索结果而不是 `limits()` 的回读——后者只证明句柄可写，
+    /// 不证明检索读它。
+    #[tokio::test]
+    async fn keyword_cap_written_to_shared_handle_applies_next_retrieve() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        tokio::fs::write(root.join("alpha.txt"), "needle_alpha 内容")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("beta.txt"), "needle_beta 内容")
+            .await
+            .unwrap();
+        let limits = Arc::new(parking_lot::RwLock::new(RetrievalLimits {
+            max_keywords: 4,
+            ..TEST_LIMITS
+        }));
+        let p = OnDemandContextProvider::with_shared_limits(root.to_path_buf(), limits.clone());
+        let q = ContextQuery {
+            user_message: "needle_alpha needle_beta".into(),
+            current_file: None,
+            hints: vec![],
+            max_tokens: 2_000,
+        };
+
+        let paths = |r: &ContextResult| -> Vec<String> {
+            r.chunks
+                .iter()
+                .map(|c| c.path.display().to_string())
+                .collect()
+        };
+        let before = p.retrieve(&q).await;
+        assert!(
+            paths(&before).iter().any(|p| p.contains("beta.txt")),
+            "两个关键词都参与检索时 beta.txt 应命中: {:?}",
+            paths(&before)
+        );
+
+        limits.write().max_keywords = 1;
+        let after = p.retrieve(&q).await;
+        assert!(
+            paths(&after).iter().any(|p| p.contains("alpha.txt")),
+            "第一个关键词仍应命中 alpha.txt: {:?}",
+            paths(&after)
+        );
+        assert!(
+            !paths(&after).iter().any(|p| p.contains("beta.txt")),
+            "上限收到 1 后第二个关键词不该再参与检索: {:?}",
+            paths(&after)
+        );
     }
 }

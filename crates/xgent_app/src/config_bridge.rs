@@ -1,7 +1,7 @@
 //! 配置桥接：UI 消息 → daemon IPC 配置读写 → 刷新 ProviderInfo。
 //!
-//! - [`save_provider_config`]：读 [`SaveProviderConfigMessage`]，经 IPC `config.write`
-//!   写 daemon 全局配置（provider 各字段 + default_provider 联动）。
+//! provider 字段的写入已并入设置面板的统一保存通路（见 [`crate::settings_io`]），
+//! 本文件只负责"变更后重取权威值"：
 //! - [`drain_pending_refresh`]：每帧从异步刷新 channel 拉取结果，刷新
 //!   [`ProviderInfo`] Resource（daemon 侧权威，UI 仅缓存投影）。
 //!
@@ -15,17 +15,15 @@ use bevy::prelude::*;
 use tokio::sync::mpsc;
 use xgent_agent::ProviderInfo;
 use xgent_agent::bridge::AgentBridge;
-use xgent_core::config::{ConfigReadRequest, ConfigScope, ConfigWriteRequest};
+use xgent_core::config::{ConfigReadRequest, ConfigScope};
 use xgent_core::methods;
 use xgent_settings_core::global::{ProviderConfig, ProviderKind};
-use xgent_ui::settings_panel::{
-    FetchModelsMessage, ModelListResultMessage, SaveLanguageMessage, SaveProviderConfigMessage,
-};
+use xgent_ui::settings_panel::{FetchModelsMessage, ModelListResultMessage};
 
 use crate::fs_event_bridge::{ConfigChangedMessage, IpcClientResource};
 
 /// 刷新结果（从 async task 经 channel 传回 ECS）。
-struct RefreshResult {
+pub(crate) struct RefreshResult {
     provider_id: String,
     model: String,
     kind: Option<ProviderKind>,
@@ -40,8 +38,9 @@ pub struct PendingRefresh {
 }
 
 /// 异步刷新结果的发送端（clone 给各 spawn task）。
+/// 刷新结果发送端（`settings_io` 写完 provider 字段后也要触发一次刷新）。
 #[derive(Resource, Clone)]
-struct RefreshSender(mpsc::Sender<RefreshResult>);
+pub(crate) struct RefreshSender(pub(crate) mpsc::Sender<RefreshResult>);
 
 /// 模型列表结果（从 async task 经 channel 传回 ECS）。
 struct ModelListResult {
@@ -69,12 +68,10 @@ impl Plugin for ConfigBridgePlugin {
             .add_systems(
                 Update,
                 (
-                    save_provider_config,
                     drain_pending_refresh,
                     refresh_on_startup,
                     fetch_models,
                     drain_model_list,
-                    save_language,
                 ),
             );
     }
@@ -83,67 +80,6 @@ impl Plugin for ConfigBridgePlugin {
 /// 模型列表结果发送端。
 #[derive(Resource, Clone)]
 struct ModelListSender(mpsc::Sender<ModelListResult>);
-
-/// 处理保存 provider 配置：经 IPC 写 daemon 全局配置。
-///
-/// 写入：
-/// 1. `providers.<id>.kind` / `api_base` / `api_key` / `model_overrides`
-/// 2. `default_provider`（联动设为当前保存的 provider id，保存即生效）
-///
-/// 写完后 spawn 一次刷新 task，结果经 channel 回 ECS。
-fn save_provider_config(
-    mut reader: MessageReader<SaveProviderConfigMessage>,
-    ipc: Res<IpcClientResource>,
-    bridge: Res<AgentBridge>,
-    refresh_tx: Res<RefreshSender>,
-) {
-    for ev in reader.read() {
-        let ipc = ipc.client.clone();
-        let pid = ev.provider_id.clone();
-        let kind = ev.kind;
-        let api_base = ev.api_base.clone();
-        let api_key = ev.api_key.clone();
-        let model = ev.model.clone();
-        let tx = refresh_tx.0.clone();
-
-        bridge.runtime.handle().spawn(async move {
-            // 写 provider 各字段
-            let fields: [(&str, serde_json::Value); 4] = [
-                (
-                    "kind",
-                    serde_json::to_value(kind).unwrap_or(serde_json::Value::Null),
-                ),
-                ("api_base", serde_json::Value::String(api_base)),
-                ("api_key", serde_json::Value::String(api_key)),
-                ("model_overrides", serde_json::Value::String(model)),
-            ];
-            for (field, value) in fields {
-                let key = format!("providers.{pid}.{field}");
-                let req = ConfigWriteRequest {
-                    scope: ConfigScope::Global,
-                    key,
-                    value,
-                };
-                let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
-                if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
-                    tracing::error!("写入配置 {pid}.{field} 失败: {e}");
-                }
-            }
-            // default_provider 联动：保存即生效
-            let req = ConfigWriteRequest {
-                scope: ConfigScope::Global,
-                key: "default_provider".to_string(),
-                value: serde_json::Value::String(pid.clone()),
-            };
-            let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
-            if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
-                tracing::error!("写入 default_provider 失败: {e}");
-            }
-            // 触发刷新
-            spawn_refresh(&ipc, &tx, pid).await;
-        });
-    }
-}
 
 /// 每帧 drain 异步刷新结果 + 处理 daemon 广播的配置变更。
 fn drain_pending_refresh(
@@ -184,6 +120,7 @@ fn drain_pending_refresh(
             let read_req = ConfigReadRequest {
                 scope: ConfigScope::Global,
                 key: "default_provider".to_string(),
+                project_root: None,
             };
             let params = serde_json::to_value(&read_req).unwrap_or(serde_json::Value::Null);
             let dp = match ipc.call_ok(methods::CONFIG_READ, params).await {
@@ -244,7 +181,7 @@ fn refresh_on_startup(
 }
 
 /// 异步重读 default provider 配置，判定就绪，发 RefreshResult。
-async fn spawn_refresh(
+pub(crate) async fn spawn_refresh(
     ipc: &std::sync::Arc<crate::ipc_client::IpcClient>,
     tx: &mpsc::Sender<RefreshResult>,
     dp: String,
@@ -254,6 +191,7 @@ async fn spawn_refresh(
     let read_req = ConfigReadRequest {
         scope: ConfigScope::Global,
         key,
+        project_root: None,
     };
     let params = serde_json::to_value(&read_req).unwrap_or(serde_json::Value::Null);
     let result = match ipc.call_ok(methods::CONFIG_READ, params).await {
@@ -359,29 +297,6 @@ fn drain_model_list(
         writer.write(ModelListResultMessage {
             models: r.models,
             error: r.error,
-        });
-    }
-}
-
-/// 处理语言切换持久化：经 IPC 写 daemon 全局配置 preferences.language。
-fn save_language(
-    mut reader: MessageReader<SaveLanguageMessage>,
-    ipc: Res<IpcClientResource>,
-    bridge: Res<AgentBridge>,
-) {
-    for ev in reader.read() {
-        let ipc = ipc.client.clone();
-        let lang = ev.language.clone();
-        bridge.runtime.handle().spawn(async move {
-            let req = ConfigWriteRequest {
-                scope: ConfigScope::Global,
-                key: "preferences.language".into(),
-                value: serde_json::Value::String(lang),
-            };
-            let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
-            if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
-                tracing::error!("写入 preferences.language 失败: {e}");
-            }
         });
     }
 }

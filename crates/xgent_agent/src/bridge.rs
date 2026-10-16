@@ -214,10 +214,16 @@ pub struct AgentBridge {
     /// `None` = 不限。用 `parking_lot::RwLock` 而非裸字段，使 ECS 与异步
     /// task 都能读写而不必重建 bridge。
     pub loop_bounds: Arc<parking_lot::RwLock<LoopBounds>>,
-    /// 单帧最多处理的 agent 事件数（来自 [`AgentBridgeConfig`]，R3-17）。
+    /// 工具策略句柄（与宿主与 `ToolCtx` 共享同一 `Arc`）。
     ///
-    /// 到界即停，剩余事件留在 channel 里下帧再取——不丢事件。
-    pub max_events_per_frame: u32,
+    /// 暴露出来是为了让宿主与测试能断言"写这里就影响下一次工具调用"；执行侧
+    /// 读的是 `ToolCtx` 里那份同一个 Arc。
+    pub tool_policy: Arc<parking_lot::RwLock<ToolPolicyConfig>>,
+    /// 运行期可改的 agent 设置（与 task 与宿主共享同一句柄）。
+    ///
+    /// ECS 侧 drain 每帧读 `max_events_per_frame`；loop 每次 StartLoop 读其余值。
+    /// 用 `parking_lot::RwLock` 而非裸字段，配置改动不必重建 bridge。
+    pub run_settings: Arc<parking_lot::RwLock<RunSettings>>,
     /// 检查点存储（与 `ToolExecutor` 同一个 Arc）。UI 侧撤销动作经它执行。
     pub checkpoints: Option<Arc<xgent_tools::CheckpointStore>>,
 }
@@ -377,15 +383,25 @@ pub struct AgentBridgeConfig {
     pub context: Arc<dyn xgent_context::ContextProvider>,
     /// 项目根（工具执行上下文）
     pub project_root: std::path::PathBuf,
-    /// 工具策略配置（approved / denied 列表）
-    pub tool_policy: ToolPolicyConfig,
+    /// 工具策略配置（approved / denied 列表），**运行期可换**。
+    ///
+    /// 与 `xgent_app` 的实时配置共享同一句柄，并经 [`ToolCtx`] 直达
+    /// [`xgent_tools::ToolExecutor::execute`] 的策略解析：面板改完 `[tool_policy]`
+    /// 后下一次工具调用就按新策略判定，不需要重启。
+    pub tool_policy: Arc<parking_lot::RwLock<ToolPolicyConfig>>,
     /// 重试配置（从 ProviderConfig 派生，运行时可经
     /// [`AgentBridge::update_retry_config`] 刷新）
     pub retry_config: Arc<parking_lot::RwLock<RetryConfig>>,
     /// Compaction provider（None 则禁用压缩）。
     pub compaction: Option<Arc<dyn crate::compaction::CompactionProvider>>,
-    /// 上下文窗口大小（token，从 ModelInfo 派生），compaction 触发依据。
-    pub context_window: u32,
+    /// 运行期可改的 agent 侧设置（项目配置 `[agent]` + 解析后的上下文窗口）。
+    ///
+    /// 四个值原先是构造时拷进 bridge / move 进 loop task 的裸字段，改一次配置
+    /// 就得重启进程。收进一个共享句柄后：`retrieval_max_tokens` 与
+    /// `context_window`、`max_parallel_tools` 在每次 StartLoop 取一次快照
+    /// （= 下一条用户消息生效），`max_events_per_frame` 由 ECS drain 每帧读
+    /// （= 下一帧生效）。
+    pub run_settings: Arc<parking_lot::RwLock<RunSettings>>,
     /// Compaction 配置（阈值/reserve）。
     pub compaction_settings: crate::compaction::CompactionSettings,
     /// 单轮工具调用轮次上限（`None` = 不限，慎用）。
@@ -395,26 +411,28 @@ pub struct AgentBridgeConfig {
     pub max_tool_rounds: Option<u32>,
     /// 单轮累计 token 上限（`None` = 不限，慎用）。
     pub max_tokens_per_turn: Option<u64>,
-    /// 每轮对话向检索 provider 申请的 token 预算
-    /// （项目配置 `[agent] retrieval_max_tokens`，R3-17）。
-    pub retrieval_max_tokens: u32,
-    /// 单个 ECS 帧最多处理的 agent 事件数
-    /// （项目配置 `[agent] max_events_per_frame`，R3-17）。
-    ///
-    /// 由 ECS 侧 drain 读取（见 [`AgentBridge::max_events_per_frame`]），
-    /// 到界即停、剩余事件留在 channel 下帧再取——是止损闸，不丢事件。
-    pub max_events_per_frame: u32,
     /// 文件改动检查点存储（`None` = 不记录，agent 的写入不可撤销）。
     ///
     /// 由 `xgent_app` 与 `ToolExecutor` 共享同一 `Arc`：执行器记快照与回填写入后
     /// 校验值，本层只负责在每轮开始时标定轮号（`begin_turn`）。
     pub checkpoints: Option<Arc<xgent_tools::CheckpointStore>>,
+}
+
+/// 运行期可改的 agent 设置（项目配置 `[agent]` 的生效值 + 上下文窗口）。
+///
+/// 存的是**生效值**而非原始值：`0 = 未设置` 的哨兵解析留在
+/// `xgent_settings_core` 的 `effective_*()` 里做一次，loop 侧只读到能用直接用的数。
+/// 尤其 `max_parallel_tools`：原始 `0` 意味着缺省 4，不是「不限」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunSettings {
+    /// 每轮对话向检索 provider 申请的 token 预算
+    pub retrieval_max_tokens: u32,
+    /// 单个 ECS 帧最多处理的 agent 事件数（到界即停，剩余事件下帧再取）
+    pub max_events_per_frame: u32,
     /// 同一轮 tool_calls 里最多同时执行的工具调用数
-    /// （项目配置 `[agent] max_parallel_tools`，缺省 4）。
-    ///
-    /// 只有 `ToolExecutor::parallel_safe` 判为可并行的调用才共享这个额度；
-    /// 写、执行与待确认的调用是屏障，永远独占执行窗口（R3-15）。
     pub max_parallel_tools: usize,
+    /// 上下文窗口大小（token），compaction 触发依据
+    pub context_window: u32,
 }
 
 /// agent loop 的默认有界值。
@@ -465,7 +483,8 @@ impl AgentBridge {
         let cancel_for_task = current_cancel.clone();
         let bounds_for_task = loop_bounds.clone();
         // cfg 随后被 move 进异步 task，ECS 侧需要的字段先取出来
-        let max_events_per_frame = cfg.max_events_per_frame;
+        let run_settings_for_ecs = cfg.run_settings.clone();
+        let tool_policy_for_ecs = cfg.tool_policy.clone();
         let checkpoints_for_ui = cfg.checkpoints.clone();
         runtime.spawn(async move {
             agent_loop_task(
@@ -488,8 +507,9 @@ impl AgentBridge {
             retry_config,
             current_cancel,
             tool_schemas,
+            tool_policy: tool_policy_for_ecs,
             loop_bounds,
-            max_events_per_frame,
+            run_settings: run_settings_for_ecs,
             checkpoints: checkpoints_for_ui,
         }
     }
@@ -497,6 +517,18 @@ impl AgentBridge {
     /// 运行时刷新重试配置（下次 `StartLoop` 生效）。
     pub fn update_retry_config(&self, cfg: RetryConfig) {
         *self.retry_config.write() = cfg;
+    }
+
+    /// 当前生效的 agent 设置快照。
+    pub fn run_settings(&self) -> RunSettings {
+        *self.run_settings.read()
+    }
+
+    /// 运行时替换 agent 设置（`xgent_app` 在配置写入成功后调用）。
+    ///
+    /// 生效边界与读取点对齐：`max_events_per_frame` 下一帧，其余下一条用户消息。
+    pub fn set_run_settings(&self, settings: RunSettings) {
+        *self.run_settings.write() = settings;
     }
 
     /// 调整单轮工具调用轮次上限（`None` = 不限）。
@@ -542,6 +574,10 @@ async fn agent_loop_task(
             } => {
                 // run_agent_loop 可能在停等期收到迟到的新 StartLoop（ECS Done 置
                 // Idle 后的新用户输入）并上返回——此处循环接手，立即开新对话。
+                // 设置快照在这条边界取一次：面板改完 `[agent]` 或上下文窗口后，
+                // **下一条用户消息**用的就是新值，而本次对话内四个值保持一致
+                // （读锁守卫不跨 await，取出来的是 Copy 结构）。
+                let settings = *cfg.run_settings.read();
                 loop {
                     // 每次对话创建独立的 cancel_token——CancellationToken 是一次性的，
                     // cancel() 后无法撤销。若跨对话复用，首次 Abort 后该 token 永远
@@ -571,7 +607,7 @@ async fn agent_loop_task(
                                 _ => None,
                             }),
                             hints,
-                            max_tokens: cfg.retrieval_max_tokens,
+                            max_tokens: settings.retrieval_max_tokens,
                         };
                         let result = cfg.context.retrieve(&query).await;
                         crate::format::refresh_system_message(&mut req, &result);
@@ -587,12 +623,12 @@ async fn agent_loop_task(
                         &mut cmd_rx,
                         &cfg.retry_config,
                         cfg.compaction.as_ref(),
-                        cfg.context_window,
+                        settings.context_window,
                         &cfg.compaction_settings,
                         &loop_bounds,
                         cfg.checkpoints.as_ref(),
                         session,
-                        cfg.max_parallel_tools,
+                        settings.max_parallel_tools,
                     )
                     .await;
                     // 对话结束：清除 current_cancel，ECS Abort 不再误触发

@@ -195,7 +195,7 @@ xgent_app → 组装所有 UI 侧 crate
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP + F-11 编辑器（P1）已落地、F-19 终端（P1）设计中阶段。13 个 crate（MVP 12 + xgent_terminal 设计中），`cargo check --workspace` 通过，约 19k 行 Rust。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。插件系统设计已完成（`doc/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。13 个 crate，`cargo check --workspace` 通过，约 5 万行 Rust（`crates/**/*.rs`）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型）、R3-5（Markdown 渲染）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。插件系统设计已完成（`doc/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
 实现顺序见 `doc/plans/README.md`（step1~step12，已全部完成）+ `doc/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `doc/design/requirements.md` §4.2 的 P1/P2 项推进。
 

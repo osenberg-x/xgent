@@ -10,6 +10,8 @@ mod provider_pool;
 mod registry;
 mod server;
 mod session;
+#[cfg(test)]
+mod test_util;
 
 use std::path::PathBuf;
 use xgent_settings_core::paths::daemon_socket_path;

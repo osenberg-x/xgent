@@ -22,7 +22,7 @@
 | F-04 | 操作确认 | ✅ | `xgent_tools/src/security.rs`（`resolve_policy`）+ `executor.rs`（ConfirmRequest 流程）+ `xgent_ui/src/confirm_dialog.rs` | `plans/step7`、ADR-0007 |
 | F-05 | 项目上下文 | ✅ MVP（方案 A OnDemand）；B/C/D/E 仅 trait 占位 | `xgent_context/src/on_demand.rs`；**bridge 异步侧 StartLoop 时调 `context.retrieve` 注入项目目录树 + 相关文件**（2026-07-20 修复）；**中文问句按相邻二字组合切词、rg 走 `--fixed-strings` 字面量、`@file:` 线索直接读文件、目录遍历经 spawn_blocking、Hub 合并后复核预算**（2026-10-14，约束见 §5.10）；`repo_map.rs`/`vector.rs`/`lsp.rs`/`hybrid.rs` 均为 25 行占位 | `plans/step8`、ADR-0010、`conversation-flow-fixes-2026-07-20.md`、`docs/comet/specs/context-retrieval/spec.md` |
 | F-06 | 会话管理 | ✅ | `xgent_agent/src/session_store.rs`（JSONL append-only + `list_sessions` + `restore_session`）+ `conversation.rs`（`restore` 方法）+ `xgent_ui/src/session_history.rs`（历史面板 UI）+ `events.rs`（`ListSessionsMessage`/`SessionListMessage`/`RestoreSessionMessage`/`SessionRestoredMessage`）；**新建、列出、恢复** 均完整可用 | `plans/step9`、ADR-0008 |
-| F-07 | Provider 切换 | ✅ | `xgent_provider/src/openai_compat.rs`（完整实现）+ `anthropic.rs`（完整实现：Anthropic Messages API 流式 + 工具调用）；`response_api.rs`/`custom.rs` 仅 trait 占位；`xgent_ui/src/settings_panel.rs`（含**模型列表拉取**：`FetchModelsMessage`/`ModelListResultMessage` + ↻ 按钮触发 IPC `provider.listModels`，点击模型项填充输入框）| `plans/step5` |
+| F-07 | Provider 切换 | ✅ | `xgent_provider/src/openai_compat.rs`（完整实现）+ `anthropic.rs`（完整实现：Anthropic Messages API 流式 + 工具调用）；`response_api.rs`/`custom.rs` 仅 trait 占位；`xgent_ui/src/settings_panel.rs`（含**模型列表拉取**：`FetchModelsMessage`/`ModelListResultMessage` + ↻ 按钮触发 IPC `provider.listModels`，点击模型项填充输入框）；**设置面板从「provider 四项 + 只写不读」扩到六组配置**（provider 限额 / 工具三态策略 / agent / tools / context / 语言），打开即回填当前值、只写脏键、逐键报告失败原因（2026-10-16，缺口 R3-13，见 §4.5.2） | `plans/step5`、`docs/comet/specs/settings-panel/spec.md` |
 | F-08 | 命令面板 | ✅ | `xui/src/command_palette.rs`（通用组件）+ `xgent_ui/src/command_palette.rs`（业务命令注册） | `plans/step10`/`step11`、`design/ui-design.md` §8 |
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
@@ -68,7 +68,7 @@ xgent_context       ── ContextProvider trait + OnDemand 实现，无 Bevy
 xgent_terminal      ── PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte），无 Bevy，UI 侧进程
 xgent_agent         ── agent loop + ECS 桥接 + SessionStore
 xui                 ── 通用 Bevy UI 组件库，纯依赖 bevy + xui_i18n，可独立发布
-xgent_ui            ── XGent 业务 UI（对话/工具/文件/编辑器/设置面板等）
+xgent_ui            ── XGent 业务 UI（对话/工具/文件/编辑器/设置面板等；设置面板绑 GlobalConfigRes/ProjectConfigRes 作读模型）
 xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + IPC 客户端
 ```
 
@@ -82,9 +82,9 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_settings` | `Localizer`（impl StringSource）、`GlobalConfigRes`/`ProjectConfigRes`、`XgentSettingsPlugin` |
 | `xgent_provider` | `LlmProvider` trait、`OpenAiCompatProvider`（完整）、`ResponseApiProvider`/`AnthropicProvider`/`CustomApiProvider`（占位）、`build_provider(id, cfg)`、`ChatStream`；R3-17 后适配器经 `with_first_event_timeout_secs` / `with_max_output_tokens` 承接 `ProviderConfig`（`build_provider` 与 `CustomApiProvider::with_config` 负责取值），缺省仍等于原 `FIRST_EVENT_TIMEOUT_SECS`/`8192` 常量 |
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`（`chat` 返回 `(ErrorKind, String)`，ErrorKind 经 `ProviderError::to_error_kind` 映射，透传给 UI 避免误判 Network 重试）、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
-| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自 `with_params(&ToolParams)`）、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
+| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolCtx.tool_policy` 为 `Arc<RwLock<ToolPolicyConfig>>`（改完下一次调用生效）、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自共享句柄 `with_shared_params(Arc<RwLock<ToolParams>>)`，`with_params(&ToolParams)` 取快照）；`policy_targets()` 列出已注册工具的 id+tier、`resolved_policy(id, policy)` 给设置面板显示解析后的三态、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError` |
-| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入，缺省等于原常量）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
+| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入快照、`with_shared_limits(Arc<RwLock<RetrievalLimits>>)` 供热应用，缺省等于原常量；每次检索开头取一份限额快照）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`/`build_context_provider_shared(strategy, root, Arc<RwLock<limits>>)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`/`retrieval_max_tokens`/`max_events_per_frame`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
 | `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）、`handle_palette_triggers` 路由 `plugin.` 前缀到 `PluginCommandTriggered` |
@@ -93,7 +93,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_plugin_host` | ECS 桥接 + 适配器：`PluginTool`（→ Tool trait，完整 id `plugin.<id>.<short>`，schema.name 一致性硬约束）、`PluginCommand`（→ CommandRegistry + PluginCommandRegistry）、`PluginContextProvider`（→ ContextHub）、`PluginHostPlugin`（Bevy Plugin，注册 Message + `plugin_poll_system`）、`plugin_poll_system`（drain PluginEvent + 执行 PluginOp + 处理 PluginCommandTriggered）、`register_proxy_impls`（创建 channel + 三 proxy impl）。 |
 | `xgent_plugin_hello` | 测试插件：hello 工具（read tier），验证最小链路。cdylib → wasm32-wasip2。 |
 | `xgent_plugin_git` | Git 集成参考插件：git_diff/git_log/git_status 工具 + diff/log/status 命令，经 `host::run_command("git", ...)` 执行。cdylib → wasm32-wasip2，打包到 `xgent_app/assets/plugins/git/`。 |
-| `xgent_app` | `Args`（命令行）、组装 `XuiPlugin` + `XgentSettingsPlugin` + `XgentAgentPlugin` + `XgentContextPlugin` + `PluginHostPlugin` + `XgentUiPlugin` + `ConfigBridgePlugin` + `FsEventBridgePlugin`、`connect_or_spawn_daemon`、`IpcProviderClient`、`ToolExecutorResource`（Arc 共享 ToolExecutor）、`PluginHostResource`/`PluginEventRx`、启动时 `load_builtin_plugins` spawn 到 tokio runtime；**配置注入点**：`resolve_context_window`（窗口三级次序 + 回落 warn）+ 由 `ProjectConfig` 派生 `ToolParams`/`RetrievalLimits`/`[agent]` 两项（见 §4.5.1）。 |
+| `xgent_app` | `Args`（命令行）、组装 `XuiPlugin` + `XgentSettingsPlugin` + `XgentAgentPlugin` + `XgentContextPlugin` + `PluginHostPlugin` + `XgentUiPlugin` + `ConfigBridgePlugin` + `SettingsIoPlugin`（配置快照读取 / 逐键保存 / 热应用句柄 / 对端变更同步）+ `FsEventBridgePlugin`、`connect_or_spawn_daemon`、`IpcProviderClient`、`ToolExecutorResource`（Arc 共享 ToolExecutor）、`PluginHostResource`/`PluginEventRx`、启动时 `load_builtin_plugins` spawn 到 tokio runtime；**配置注入点**：`resolve_context_window`（窗口三级次序 + 回落 warn）+ 由 `ProjectConfig` 派生 `ToolParams`/`RetrievalLimits`/`RunSettings`（见 §4.5.1、§4.5.2）；`LiveSettings` 持四组共享句柄，`apply_snapshot` 是唯一一条把权威配置落进运行时的通路（本地写入与对端广播共用）。 |
 
 ---
 
@@ -234,14 +234,58 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `[context] max_search_files` | `20` | 检索读取的文件数 |
 | `[context] max_keywords` | `16` | 关键词上限（CJK bigram 会成倍放大，8 会截掉中文问句后半段） |
 
-**接线方式**（新增参数时照此路径，不要引全局单例）：`xgent_app` 读配置 → `AgentBridgeConfig{retrieval_max_tokens, max_events_per_frame, context_window}` / `xgent_tools::ToolParams::from_tool_config` / `xgent_context::RetrievalLimits::from_context_limits` → 构造函数注入。工具与检索 crate **不直接依赖配置节类型**，转换在 app 完成，`Tool`/`ContextProvider` 契约因此与配置层解耦。
+**接线方式**（新增参数时照此路径，不要引全局单例）：`xgent_app` 读配置 → `ToolParams::from_tool_config` / `RetrievalLimits::from_context_limits` / `AgentBridgeConfig` → 构造函数注入。工具与检索 crate **不直接依赖配置节类型**，转换在 app 完成，`Tool`/`ContextProvider` 契约因此与配置层解耦。
 
-注意 `xgent_agent` 的每帧上限是 `AgentBridge` 上的普通字段（bridge 本就是循环配置的载体，没有为单个整数新增 Resource）。
+> 2026-10-16 起这条路上多了一层共享句柄：三类值与 `RunSettings` 都包在 `Arc<RwLock<…>>` 里，由 `xgent_app::settings_io::LiveSettings` 持有，好让设置面板写完就生效（见 §4.5.2）。构造注入的形式没变——`ToolExecutor::with_shared_params` / `build_context_provider_shared` / `AgentBridgeConfig{tool_policy, run_settings}` 仍收句柄；`with_defaults()` 与 `with_params(&ToolParams)` 这类「取快照」的构造照旧可用（测试与不需要热更新的场合）。
+
+> `xgent_agent` 的每帧上限不再是 `AgentBridge` 上的普通字段，而在共享的 `RunSettings` 里（drain 每帧读一次）。
 
 **迁移注意**：会话历史从项目级 `<project>/.xgent/sessions/` 迁到全局 `~/.xgent/agent/sessions/`，`session_file_path(id)` 去除 `project_root` 参数。旧项目级会话文件不自动迁移（MVP 会话为临时性，跨项目共享更符合 D-04 演进）。
 
 ---
 
+### 4.5.2 配置可见性与热应用（R3-13，2026-10-16）
+
+§4.5.1 把 14 个限额从常量搬进了配置文件，但**搬进去≠够得着**：直到本轮之前，设置面板只有 provider 四项，`[tool_policy]`（`AGENTS.md` §5.4 的核心安全旋钮）、`[agent]`/`[tools]`/`[context]` 与 provider 的窗口/输出/首事件限额都只能手改 TOML；而项目作用域根本写不进去——daemon 对 `config scope=project` 直接回「未实现」（`session.rs`），全局白名单也不含那三个限额字段。本轮补的是这条通路，不改任何键的语义。
+
+**四处变化合起来才叫"可达"**：
+
+| 层 | 落地 |
+|:---|:---|
+| 协议 | `ConfigReadRequest`/`ConfigWriteRequest`/`ConfigChanged` 增加 `project_root: Option<String>`（`#[serde(default)]`，旧客户端发不带该字段的请求行为不变） |
+| daemon | `ConfigCoordinator` 按项目根持有权威副本（`projects: HashMap<PathBuf, ProjectConfig>`，首次访问读盘、写时"改副本 → 落盘 → 换入内存"），`scope=project` 从此真实现；全局白名单补 `context_window`/`max_output_tokens`/`first_event_timeout_secs`（`model_context_windows` **只读**——按单字段写一个数字没有确定语义） |
+| 面板 | 打开即回填（provider 四项也不例外，此前重开是四个空框）；六个分组：provider / 工具策略 / agent / tools / context / 语言；保存只发**脏键**；部分失败时状态行**逐个点名**已写入的键（`settings-written-keys`，不是"已保存 N 项"那种计数）与失败的键 + daemon 给的原因 |
+| 运行时 | 四组共享句柄（下详），改完在下一次消费点生效，不需要重启 |
+
+**项目作用域键语法**（与全局同形，点分；`project` 一次取回整份，面板打开用这一条而不是十几次往返）：
+
+| 键 | 写 | 备注 |
+|:---|:---|:---|
+| `project` | ✗ 只读 | 整份 `ProjectConfig` |
+| `tool_policy` / `agent` / `tools` / `context` | ✗ 只读 | 整段读；整段写会一次清掉该段所有设置，故拒绝 |
+| `tool_policy.approved` / `.denied` | ✓ 字符串数组 | 整表替换；面板按三态折算后写两张互斥列表 |
+| `agent.retrieval_max_tokens` / `.max_events_per_frame` / `.max_parallel_tools` | ✓ 非负整数 | |
+| `tools.confirm_timeout_secs` / `.command_timeout_secs` / `.command_max_output_bytes` | ✓ 非负整数 | |
+| `context.tree_max_depth` / `.tree_max_entries` / `.rg_timeout_secs` / `.max_search_files` / `.max_keywords` | ✓ 非负整数 | |
+
+缺 `project_root` 或该根不是已存在的目录都是**显式错误**（`INVALID_PARAMS`），绝不静默按 global 处理——两侧字段语义不同，降级会让用户以为项目配置被改了。变更通知按项目订阅者路由（`broadcast_to_project`），别的项目的窗口不会被叫醒。不要求客户端先 `fs.watch` 过该根：启动订阅是异步的，把保存压在订阅成功上会让"先保存后订阅完成"的窗口收到一条无从解释的失败。
+
+**四组句柄与生效边界**（`xgent_app::settings_io::LiveSettings`，形状沿用既有的 `retry_config`/`loop_bounds`）：
+
+| 句柄 | 消费方 | 读取点 = 生效边界 |
+|:---|:---|:---|
+| `Arc<RwLock<ToolPolicyConfig>>` | `ToolExecutor::execute` → `resolve_policy`（经 `ToolCtx`） | 下一次工具调用 |
+| `Arc<RwLock<ToolParams>>` | 执行器确认等待 + `RunCommand`（共享同一 `Arc`） | 下一次确认 / 下一次命令调用 |
+| `Arc<RwLock<RetrievalLimits>>` | `OnDemandContextProvider`（每次检索开头取一次快照） | 下一次检索 |
+| `Arc<RwLock<RunSettings>>` | bridge：检索预算/窗口/并发上限在每次 StartLoop 取快照；`max_events_per_frame` 由 drain 每帧读 | 下一条用户消息 / 下一帧 |
+
+**apply 只认整份权威快照**（`apply_snapshot(project, global, provider_id, model)`）：逐键增量应用最容易漏的就是"改了 `context_window` 却没重算窗口"这类半套更新，配置才十几项，整体重算的代价可以忽略。同一条 apply 服务"本窗口写入"与"对端广播"两种来源，因此另一个窗口改配置时本窗口的显示与运行时判据一起跟上。写失败的键**不进句柄**——句柄只按 daemon 真正接受的值更新，运行时用的永远是磁盘真值。
+
+**面板重渲染只认 `SettingsSnapshotReady.tick` 的*增量*，两边各留一道**。`xgent_ui::settings_panel::toggle_panel` 比较"上次渲染时的 tick"（`Local<u32>`），**不看 `is_changed()`**——`ResMut` 的 `deref_mut` 无条件标脏，挂在脏标记上等于"任何碰到这份资源的帧都重建一次"。`xgent_app::settings_io::drain_save` 则只在 `report.failed` 为空时才 `ready.tick += 1`，失败那一帧连这份资源都不碰。两条合起来才是 A9 要的：有键被 daemon 拒掉时，被拒的那一格连同原因留在屏幕上；下一次合法推进（对端改配置、或一次全成功的保存）照旧把显示拉回磁盘值。资源与句柄不受影响，永远跟磁盘一致。
+
+这条判据为什么必须由写 `tick` 的一方定，而不是等面板"收到失败报告后再挡"：`drain_save` 在同一帧里推进 `tick` 并写报告，bevy 的消息要到下一帧才可读，而面板的 `toggle_panel` 排在 `apply_save_report` 之前——等面板知道失败时重建早已发生（第二轮在面板侧加 `hold_rerender` 就是这么死的）。第三轮的教训则是**"两半各自单测、合起来的帧序没人验"**：`settings_io` 里现在有 `a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame`，把真实的 `drain_snapshot`/`drain_save` 与真实的 `SettingsPanelPlugin` 装进同一个 `App`，投一份带失败键的 `SaveTaskResult` 进通道，让 Bevy 自己的调度跑完再去读输入框。为此 `drain_save` 拆成两半：落值与推进 `tick`（不依赖 IPC 与 bridge，因此能被这样装进测试），与 `refresh_provider_after_save`（读报告、经 IPC 重取 `ProviderInfo`，识别判据是纯函数 `touches_provider`，另有单测）。
+
+`RunSettings` 存**生效值**而不是原始值：`0` 哨兵的解析只在 `effective_*()` 那一处，loop 侧读到的是能直接用的数（`max_parallel_tools = 0` 意味着 4，绝不是"不限"）。
 ## 5. 开发注意点
 
 ### 5.1 ECS 通信硬约束（架构 §5.2）
@@ -342,7 +386,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `PanelWidths` / `ActiveResize` | 面板宽度与拖拽态 | `handle_resize_drag` 写 / `apply_panel_widths` 读 |
 | `EditorStateSnapshot` | 编辑器状态只读快照 | `ContextProvider` 查询（见 §5.1.1.3） |
 | `AgentBridge` / `PendingRefresh` / `NotifPump` / `EditorIoRuntime` | 持有 tokio channel 端的桥接 Resource | 各自 ECS 系统每帧 drain |
-| `GlobalConfigRes` / `ProjectConfigRes` / `Localizer` | 配置与 i18n | `xgent_app` 启动注入 / `config_bridge` 刷新 |
+| `GlobalConfigRes` / `ProjectConfigRes` / `Localizer` | 配置与 i18n（两份配置资源是设置面板的读模型，快照与对端变更时刷新） | `xgent_app` 启动注入 / `config_bridge` 与 `settings_io` 刷新 |
 
 **反例（禁止）**：把"当前对话是否进行中"做成 `IsConversationActiveMessage` —— 这是状态不是动作，UI 应读 `Conversation.status` Resource。
 
@@ -629,6 +673,18 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
    - **台账点名的 13 个运行限额全部转配置**（14 个键）：见 §4.5.1。核心不变量是「缺省值逐项等于它替换掉的常量」，因此不写配置的工程行为等价——这条由 serde 测试当作数据断言，而不是靠人读 `default` 函数。
    - 加新参数请沿 `xgent_app → ToolParams / RetrievalLimits / AgentBridgeConfig → 构造函数注入` 这条路；工具与检索 crate **不 import 配置节类型**，`Tool` / `ContextProvider` 契约与配置层保持解耦（`ToolExecutor::with_defaults()` 仍可用，它取 `ToolParams::default()`）。
    - **本轮查实的一处台账低估**：R3-21 记「编辑器查找替换仅字面匹配」，实际 `xui::FindState` 在 `xgent_ui` 里**零消费者**——查找替换不是「只支持字面量」，而是产品里根本不可达。下一条变更应按"接 UI + 正则"估工作量，别按"加个开关"估。
+
+29. **设置面板与配置热应用（2026-10-16，缺口 R3-13）**——本轮踩到的都是"看起来对、其实错"的形状，逐条记：
+   - **显示的生效值不能当作用户填的值写回去**（真缺陷，由 `untouched_fields_produce_no_writes` 抓出）：未设置的数值字段要显示内置缺省（4、8000…），于是"打开面板 → 点保存"会把显示值写成配置。判据：`stored == 0 && parsed == effective` 视为未改动。脏检查的基准必须是**存储值**，不是显示值。
+   - **只写脏键顺带保住凭据**：api_key 框回填已存值，用户没碰就不发写请求——此前"面板重开是空框 + 保存发全部字段"的组合会把已存 key 清空（`empty_api_key_field_does_not_wipe_the_stored_key` 钉住）。
+   - **读锁守卫不能跨 `await`**（`ToolExecutor::execute` / `parallel_safe`）：`match resolve_policy(.., &ctx.tool_policy.read())` 的临时守卫活到整个 match 结束，里面还 `await` 确认，future 直接不 `Send`。写成 `let resolved = …;` 让守卫在语句末尾释放。`parking_lot` 的守卫不是 `Send`，这条编译期就会炸，但写法上是很容易顺手犯的错误。
+   - **任何写全局配置的 daemon 测试都必须先隔离落盘路径**（这条是本轮独立验证者抓出来的高危缺陷）。`ConfigCoordinator::write` 是真落盘到 `~/.xgent/agent/config.toml` 的：`config_store.rs` 那批既有测试用 `with_config` 构造却没有隔离，本轮新增的 `session.rs` provider 池两条测试同样漏了——于是 `cargo test -p xgent_daemon`（含 Runtime 的形式化检查）把开发机的配置改写成了测试夹具（`providers.myai / old.example.test / sk-old`），且不可恢复。现在的做法是 `src/test_util.rs::isolate_agent_dir()`（进程级临时目录 + 串行锁，幂等、不随 Drop 复原），全局写入类测试一律先调它，并由 `global_write_lands_inside_the_isolated_dir` 钉住「隔离确实生效」。教训比「记得加隔离」更硬：**测试的副作用越界到用户目录时，全绿不代表安全**；而「跑前跑后 md5 一致」这类自检必须对**最终候选**再跑一遍——我只在加完 `config_store` 隔离后验过一次，之后新加的测试又把它打破了。
+   - **headless 装配里 Bevy UI 不产出子节点坐标**：没有 `UiRoot` 时面板根量不出尺寸（实测 `ComputedNode` 全是 `0×0`，所有子节点 `border_box().min` 相同），picking 命中谁取决于 spawn 顺序。因此显示类断言一律读组件（`EditableText` / `SettingsNumInput`），键盘派发测试直接把 `InputFocus` 设到目标输入框。为免「删掉 `TabIndex(0)` 仍全绿」这种空档，新增 `every_settings_input_carries_tab_index` 锁组件契约（删 `TabIndex` 必失败，变异反证 M29 已证），点击机制本身由 `tests/interaction_model.rs` 覆盖；真机那条完整的「点一下就能打字」只能人肉验，**别把它写成已被自动测试保护**。旧的 `settings_input_focus.rs` 原本就是靠几何塌陷的巧合通过的，面板一变形它就炸——**别把 headless 布局当可用前提**。
+   - 滚动容器用 `xui::scroll_area::ScrollArea`（与对话区/终端同一套）。`ScrollArea` 自身是 `Bundle` 且含 `Node`，再补一个 `Node` 会 panic（bundle 组件重复）。
+   - `ConfigScope::Project` 现在真实现，`project_root` 走 `#[serde(default)]` 的 `Option`：**新增协议字段一律带 default**；`Option` 字段缺省时 serde 本就填 `None`（default 是写明而非前提），但加**非** `Option` 字段时不带 default 会让旧客户端整条请求反序列化失败。
+   - apply 走"整份快照重算"而不是逐键增量（见 §4.5.2）：漏算 `context_window` 这种半套更新是增量写法的固有风险，配置只有十几项，整体重算更便宜也更不容易错。
+   - **Bevy 的 `is_changed()` 不能当"数据真的变了"用**：`ResMut` 的 `deref_mut` 无条件标脏，只要某个系统拿到 `ResMut` 并写了一次，下一帧所有看 `is_changed()` 的系统都会被叫醒。面板重渲染因此改成比较 `tick` **增量**（`Local<u32>` 记住上次渲染到哪个计数），app 侧在有键被拒时连那份资源都不碰。判据：**跨系统的"该不该重画"信号要是一个可比较的单调计数，而不是变更标记**——变更标记会随着任何一次触碰误报，而且误报得完全合法。
+   - **"生产者单测 + 消费者单测"覆盖不了一次跨系统行为**：A9 连输两轮，两轮的原因都是两边各自绿、合起来的帧序没人验。最终修法是把 `drain_save` 拆到不依赖 IPC/bridge，再与真实的 `SettingsPanelPlugin` 装进同一个 `App` 端到端跑。配套的反证也必须成对：本轮 M40（面板闸门退回 `is_changed()`）只有面板侧用例抓得到，M41（app 不看 `failed` 就推进 `tick`）由集成用例与计数用例抓，少一边就漏一边。
 
 ### 5.14 文件改动检查点与撤销（R3-11）
 

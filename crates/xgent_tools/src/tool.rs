@@ -20,8 +20,22 @@ use xgent_settings_core::project::ToolPolicyConfig;
 pub struct ToolCtx {
     /// 项目根目录（绝对路径）
     pub project_root: PathBuf,
-    /// 工具策略配置（approved / denied 覆盖）
-    pub tool_policy: ToolPolicyConfig,
+    /// 工具策略配置（approved / denied 覆盖），**运行期可换**。
+    ///
+    /// 用共享句柄而非值拷贝：设置面板改完 `[tool_policy]` 后，下一次工具调用
+    /// 就要按新策略判定，而不是等到进程重启。`Default` 仍是「空覆盖」，
+    /// 因此测试与旧构造点写法不变（`tool_policy: Default::default()`）。
+    pub tool_policy: Arc<parking_lot::RwLock<ToolPolicyConfig>>,
+}
+
+impl ToolCtx {
+    /// 用一份固定策略值构造（不需要热更新时的便捷写法）。
+    pub fn with_policy(project_root: PathBuf, tool_policy: ToolPolicyConfig) -> Self {
+        Self {
+            project_root,
+            tool_policy: Arc::new(parking_lot::RwLock::new(tool_policy)),
+        }
+    }
 }
 
 /// 工具执行结果。
