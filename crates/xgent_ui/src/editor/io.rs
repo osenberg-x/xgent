@@ -1,6 +1,6 @@
 //! 文件读写（tokio task 异步）。
 //!
-//! 详见 `doc/design/editor-design.md` 第 6.1 节 / 3.3 节。
+//! 详见 `docs/design/editor-design.md` 第 6.1 节 / 3.3 节。
 //!
 //! 数据流（保存）：
 //! ```text

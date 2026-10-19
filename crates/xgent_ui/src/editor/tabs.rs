@@ -1,6 +1,6 @@
 //! 多标签页管理。
 //!
-//! 详见 `doc/design/editor-design.md` 第 6.2 节 / 2.2 节。
+//! 详见 `docs/design/editor-design.md` 第 6.2 节 / 2.2 节。
 //!
 //! 每个标签对应一个 EditorBuffer 实体。`EditorTabs` Resource 跟踪所有打开的
 //! buffer 实体与当前激活标签，提供打开/关闭/切换操作。

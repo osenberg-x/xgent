@@ -1,6 +1,6 @@
 //! 渲染系统：行号列、高亮显示层、光标条。
 //!
-//! 详见 `doc/design/editor-design.md` 2.2 节。
+//! 详见 `docs/design/editor-design.md` 2.2 节。
 //!
 //! # 架构
 //!

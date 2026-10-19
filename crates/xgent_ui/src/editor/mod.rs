@@ -1,6 +1,6 @@
 //! XGent 业务编辑器层。
 //!
-//! 详见 `doc/design/editor-design.md` 第 6 节。
+//! 详见 `docs/design/editor-design.md` 第 6 节。
 //!
 //! 依赖 `xui::TextEditor` + `xgent_core` + `xgent_agent`。
 //! 职责：

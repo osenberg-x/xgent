@@ -1,6 +1,6 @@
 //! XGent 业务终端层（F-19）。
 //!
-//! 详见 `doc/design/terminal-design.md` §2-§3、ADR-0011/0012、`CONTEXT.md`
+//! 详见 `docs/design/terminal-design.md` §2-§3、ADR-0011/0012、`CONTEXT.md`
 //! 「终端（F-19，P1）」。
 //!
 //! 职责：

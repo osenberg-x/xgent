@@ -1,0 +1,321 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "工具执行与安全确认",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      652
+    ],
+    "views": [
+      {
+        "id": "main",
+        "label": "一次工具调用",
+        "focus": [
+          "agg",
+          "card",
+          "par",
+          "grp",
+          "pol",
+          "wait",
+          "run",
+          "ord"
+        ],
+        "note": "聚合 → 发卡 → 并发判定 → 策略 → 确认 → 执行 → 按原顺序回灌。"
+      },
+      {
+        "id": "gate",
+        "label": "确认闸门与拒绝",
+        "focus": [
+          "pol",
+          "wait",
+          "dlg",
+          "den"
+        ],
+        "note": "默认全部需要确认；Denied 直接短路成 denied 结果。"
+      },
+      {
+        "id": "undo",
+        "label": "可撤销的证据",
+        "focus": [
+          "run",
+          "ck",
+          "ord"
+        ],
+        "note": "run_tool 是写文件的唯一咽喉，写前记快照、写后回填哈希。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "ui",
+      "label": "UI 与 ECS 主线程"
+    },
+    {
+      "id": "sched",
+      "label": "AgentBridge 调度（tokio）"
+    },
+    {
+      "id": "policy",
+      "label": "策略与确认",
+      "variant": "exception"
+    },
+    {
+      "id": "exec",
+      "label": "执行与证据"
+    }
+  ],
+  "phases": [
+    {
+      "id": "collect",
+      "label": "聚合与发卡",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "dispatch",
+      "label": "并发分组",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "execute",
+      "label": "执行与回灌",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "parallel_group",
+      "label": "同组只读并发",
+      "lane": "sched",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "consent",
+      "label": "人机握手",
+      "lane": "policy",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "security"
+    },
+    {
+      "id": "evidence",
+      "label": "撤销证据",
+      "lane": "exec",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "agg",
+    "card",
+    "par",
+    "grp",
+    "pol",
+    "wait",
+    "run",
+    "ord"
+  ],
+  "nodes": [
+    {
+      "id": "agg",
+      "lane": "sched",
+      "col": 0,
+      "type": "backend",
+      "label": "按 index 聚合",
+      "sublabel": "ToolCallEnd 收齐",
+      "width": 120
+    },
+    {
+      "id": "card",
+      "lane": "ui",
+      "col": 1,
+      "type": "frontend",
+      "label": "整批先发卡",
+      "sublabel": "ToolCallMessage",
+      "width": 120
+    },
+    {
+      "id": "par",
+      "lane": "sched",
+      "col": 2,
+      "type": "backend",
+      "label": "parallel_safe",
+      "sublabel": "Approved + Shared + Read",
+      "width": 120
+    },
+    {
+      "id": "grp",
+      "lane": "sched",
+      "col": 3,
+      "type": "backend",
+      "label": "取连续区间",
+      "sublabel": "join_all · 上限 4",
+      "width": 120
+    },
+    {
+      "id": "ord",
+      "lane": "sched",
+      "col": 5,
+      "type": "backend",
+      "label": "按原下标回灌",
+      "sublabel": "顺序不变",
+      "width": 120
+    },
+    {
+      "id": "pol",
+      "lane": "policy",
+      "col": 3,
+      "type": "security",
+      "label": "resolve_policy",
+      "sublabel": "denied → approved → tier",
+      "width": 120
+    },
+    {
+      "id": "wait",
+      "lane": "policy",
+      "col": 4,
+      "type": "security",
+      "label": "等待决策",
+      "sublabel": "oneshot · 300s",
+      "width": 120
+    },
+    {
+      "id": "den",
+      "lane": "policy",
+      "col": 1,
+      "type": "security",
+      "label": "Denied 短路",
+      "sublabel": "denied 结果",
+      "width": 120
+    },
+    {
+      "id": "dlg",
+      "lane": "ui",
+      "col": 4,
+      "type": "frontend",
+      "label": "确认弹窗",
+      "sublabel": "diff + 键盘守卫",
+      "width": 120
+    },
+    {
+      "id": "run",
+      "lane": "exec",
+      "col": 4,
+      "type": "messagebus",
+      "label": "run_tool 咽喉",
+      "sublabel": "三条路径都经它",
+      "width": 120
+    },
+    {
+      "id": "ck",
+      "lane": "exec",
+      "col": 5,
+      "type": "database",
+      "label": "检查点",
+      "sublabel": "写前 blob 后清单",
+      "width": 120
+    }
+  ],
+  "edges": [
+    {
+      "id": "emit-cards",
+      "from": "agg",
+      "to": "card",
+      "label": "先发事件",
+      "role": "branch"
+    },
+    {
+      "id": "to-parallel",
+      "from": "card",
+      "to": "par",
+      "label": "开始调度",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "group",
+      "from": "par",
+      "to": "grp",
+      "label": "够资格才成组",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "to-policy",
+      "from": "grp",
+      "to": "pol",
+      "label": "执行前定策略",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "to-confirm",
+      "from": "pol",
+      "to": "wait",
+      "label": "NeedsConfirmation",
+      "role": "main",
+      "variant": "security"
+    },
+    {
+      "id": "to-exec",
+      "from": "wait",
+      "to": "run",
+      "label": "放行",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "to-order",
+      "from": "run",
+      "to": "ord",
+      "label": "结果就绪",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ask-ui",
+      "from": "wait",
+      "to": "dlg",
+      "label": "ConfirmRequestMessage",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "id": "deny",
+      "from": "pol",
+      "to": "den",
+      "label": "配置拒绝",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "snapshot",
+      "from": "run",
+      "to": "ck",
+      "label": "写前快照",
+      "variant": "dashed",
+      "role": "async"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "并发判定的三条独立信号",
+      "items": [
+        "策略不需要确认（Approved，或已进本会话 AllowAll 集合）",
+        "工具自报 Concurrency::Shared，且 tier 恰好是 Read",
+        "UiOnly 被刻意排除：策略自动放行但 open_file → goto 有顺序语义"
+      ]
+    }
+  ]
+}

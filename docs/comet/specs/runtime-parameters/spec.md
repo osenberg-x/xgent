@@ -211,4 +211,4 @@ Then the resulting values equal 128000, 8000, 64, 8192, 30, 300, 60, 65536, 4, 2
 
 - The workspace compiles with the widened constructors: `xgent_app`, `xgent_daemon` and `xgent_plugin_host` build, and the existing tests of every touched crate pass.
 - Existing compaction tests keep their meaning; a test that asserted behavior against an implicit 128k window now states the window it uses.
-- `doc/dev-tutorial.md` gains the configuration keys, and `doc/notes/agent-gap-disposition.md` gains the round's result, both in Chinese.
+- `docs/dev-tutorial.md` gains the configuration keys, and `docs/notes/agent-gap-disposition.md` gains the round's result, both in Chinese.

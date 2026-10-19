@@ -1,7 +1,7 @@
 //! UI 通用小件库（v7）——依赖 Theme/UiFonts，业务层专用。
 //!
 //! 分层约定：xui 保持「纯 bevy + xui_i18n」不动，视觉组件统一落在本模块
-//! （方案 §9）。图标为白描边 PNG（导出管线 `doc/design/icons/export_png.py`），
+//! （方案 §9）。图标为白描边 PNG（导出管线 `docs/design/icons/export_png.py`），
 //! 经 `ImageNode.color` 乘法染色。hover 一律走 [`HoverTint`] 数据驱动单系统，
 //! 禁止逐组件写专用 hover 系统（方案 §7.1）。
 

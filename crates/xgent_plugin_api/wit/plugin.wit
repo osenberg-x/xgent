@@ -2,7 +2,7 @@ package xgent:plugin;
 
 /// 宿主提供给插件的能力（import 侧）。
 ///
-/// 详见 doc/design/plugin-system-design.md §5.2。
+/// 详见 docs/design/plugin-system-design.md §5.2。
 interface host {
     read-file: func(path: string) -> result<string, string>;
     write-file: func(path: string, content: string) -> result<_, string>;

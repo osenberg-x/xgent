@@ -3,7 +3,7 @@
 //! 提供 `PluginHost`（加载/卸载/索引）、`WasmHost`（wasmtime 引擎 + Store）、
 //! `PluginHostProxy`（反转依赖枢纽）与清单解析。
 //!
-//! 详见 `doc/design/plugin-system-design.md` §6 / §7 / §13 Step P2。
+//! 详见 `docs/design/plugin-system-design.md` §6 / §7 / §13 Step P2。
 
 pub mod host;
 pub mod host_state;

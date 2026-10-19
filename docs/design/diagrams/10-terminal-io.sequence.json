@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "终端：开 tab → 输出 → 输入 → 退出",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1390,
+      575
+    ],
+    "views": [
+      {
+        "id": "spawn",
+        "label": "建立会话",
+        "focus": [
+          "user",
+          "tabs",
+          "backend",
+          "pty",
+          "threads"
+        ],
+        "note": "spawn 在 bridge 的 tokio runtime 上执行，三线程为阻塞 IO 兜底。"
+      },
+      {
+        "id": "output",
+        "label": "输出回流",
+        "focus": [
+          "pty",
+          "threads",
+          "view"
+        ],
+        "note": "reader 线程 blocking_send，经两级 channel 回 ECS 后增量追加行节点。"
+      },
+      {
+        "id": "input",
+        "label": "输入与退出",
+        "focus": [
+          "user",
+          "view",
+          "backend",
+          "pty"
+        ],
+        "note": "攒够一行才发；Exited 只由 wait 线程判定。"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "用户"
+    },
+    {
+      "id": "tabs",
+      "type": "frontend",
+      "label": "terminal/tabs"
+    },
+    {
+      "id": "backend",
+      "type": "backend",
+      "label": "LocalPtyBackend"
+    },
+    {
+      "id": "threads",
+      "type": "backend",
+      "label": "reader · wait · cmd"
+    },
+    {
+      "id": "pty",
+      "type": "external",
+      "label": "PTY + shell"
+    },
+    {
+      "id": "view",
+      "type": "frontend",
+      "label": "输出区 · 行编辑"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 288,
+      "label": "建立会话"
+    },
+    {
+      "from": 292,
+      "to": 386,
+      "label": "输出与输入"
+    },
+    {
+      "from": 392,
+      "to": 505,
+      "label": "提交与退出"
+    }
+  ],
+  "messages": [
+    {
+      "id": "newtab",
+      "from": "user",
+      "to": "tabs",
+      "y": 170,
+      "label": "＋ 按钮 / Ctrl+` 新建 tab",
+      "variant": "emphasis"
+    },
+    {
+      "id": "spawn",
+      "from": "tabs",
+      "to": "backend",
+      "y": 198,
+      "label": "spawn(80×24, cwd)"
+    },
+    {
+      "id": "openpty",
+      "from": "backend",
+      "to": "pty",
+      "y": 226,
+      "label": "openpty + spawn_command"
+    },
+    {
+      "id": "thre",
+      "from": "backend",
+      "to": "threads",
+      "y": 254,
+      "label": "起三线程并交出 killer"
+    },
+    {
+      "id": "spawned",
+      "from": "threads",
+      "to": "tabs",
+      "y": 282,
+      "label": "Spawned{pty_id} 经 crossbeam 回 ECS",
+      "variant": "return"
+    },
+    {
+      "id": "bytes",
+      "from": "pty",
+      "to": "threads",
+      "y": 310,
+      "label": "输出字节 ≤4096B / DSR 探测"
+    },
+    {
+      "id": "chunk",
+      "from": "threads",
+      "to": "view",
+      "y": 338,
+      "label": "TerminalOutputChunk → vte → RenderLine"
+    },
+    {
+      "id": "type",
+      "from": "user",
+      "to": "view",
+      "y": 366,
+      "label": "逐键本地行编辑（光标分列渲染）"
+    },
+    {
+      "id": "enter",
+      "from": "view",
+      "to": "backend",
+      "y": 396,
+      "label": "write(整行 + \\r)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "echo",
+      "from": "backend",
+      "to": "pty",
+      "y": 424,
+      "label": "master 写入 → cooked shell 回显"
+    },
+    {
+      "id": "exit",
+      "from": "pty",
+      "to": "threads",
+      "y": 452,
+      "label": "child.wait() → Exited(code)"
+    },
+    {
+      "id": "uiexit",
+      "from": "threads",
+      "to": "view",
+      "y": 480,
+      "label": "灰点 + 停闪烁 + 忽略后续输入",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "tabs",
+      "from": 168,
+      "to": 286,
+      "type": "frontend"
+    },
+    {
+      "participant": "backend",
+      "from": 196,
+      "to": 428,
+      "type": "backend"
+    },
+    {
+      "participant": "threads",
+      "from": 252,
+      "to": 484,
+      "type": "backend"
+    },
+    {
+      "participant": "pty",
+      "from": 224,
+      "to": 456,
+      "type": "external"
+    },
+    {
+      "participant": "view",
+      "from": 336,
+      "to": 484,
+      "type": "frontend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "为什么必须是三线程",
+      "items": [
+        "MasterPty 不是 Sync，读/写只能在 std 线程里做，tokio 侧只发命令",
+        "孙进程占住 slave 时 reader 永不 EOF，退出码只能由独立 wait 线程权威上报",
+        "reader 必须替 shell 应答 DSR \\x1b[6n，否则 PowerShell 启动即卡死，输入无反应"
+      ]
+    }
+  ]
+}

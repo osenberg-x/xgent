@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "PreToolUse": [
+        {
+          "matcher": "Write|Edit",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "node",
+              "args": [
+                "E:\\ws\\xgent\\.zcode\\skills\\comet\\scripts\\comet-hook-router.mjs",
+                "--platform",
+                "zcode",
+                "--project-root",
+                "E:\\ws\\xgent"
+              ],
+              "timeoutMs": 60000
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

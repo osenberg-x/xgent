@@ -1,6 +1,6 @@
 //! [`LocalPtyBackend`]——基于 `portable-pty` 的本地 PTY 实现。
 //!
-//! 详见 `doc/design/terminal-design.md` §5.3、ADR-0011。
+//! 详见 `docs/design/terminal-design.md` §5.3、ADR-0011。
 //!
 //! 同步 API（`portable-pty` 是同步库）经 `tokio::task::spawn_blocking` 隔离。
 //! 所有权模型：每个 PTY 会话的 master/writer/child 在 spawn 时创建，

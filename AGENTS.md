@@ -16,12 +16,12 @@
 - 当前阶段：MVP（仅 2D GUI，3D/TUI/Web/宠物留待后续）
 
 **权威设计文档**（从零设计，不参考旧代码）：
-- `doc/design/requirements.md` — 需求设计（功能 F-xx、非功能 NF-xx、关键约束、分期路线）
-- `doc/design/architecture.md` — 架构设计（进程模型、分层、crate 划分、数据流、抽象接口、待决策点 D-xx）
-- `doc/design/plugin-system-design.md` — 插件系统设计（WASM 组件模型、扩展点契约、加载机制；参考 Zed 插件机制）
-- `doc/notes/` — 调研与评估报告（检索方案、守护进程胖瘦、i18n、bevy_ui 模式评估）
-- `doc/plans/` — MVP 分步实现计划（step1~step12，按依赖顺序）
-- `doc/dev-tutorial.md` — 开发指南（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点；**功能变化时必须同步**）
+- `docs/design/requirements.md` — 需求设计（功能 F-xx、非功能 NF-xx、关键约束、分期路线）
+- `docs/design/architecture.md` — 架构设计（进程模型、分层、crate 划分、数据流、抽象接口、待决策点 D-xx）
+- `docs/design/plugin-system-design.md` — 插件系统设计（WASM 组件模型、扩展点契约、加载机制；参考 Zed 插件机制）
+- `docs/notes/` — 调研与评估报告（检索方案、守护进程胖瘦、i18n、bevy_ui 模式评估）
+- `docs/plans/` — MVP 分步实现计划（step1~step12，按依赖顺序）
+- `docs/dev-tutorial.md` — 开发指南（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点；**功能变化时必须同步**）
 
 ---
 
@@ -34,19 +34,19 @@ xgent/
 ├── AGENTS.md                # 本文件
 ├── src/main.rs              # 遗留 Hello world，待删除（xgent_app 接管入口）
 ├── crates/                  # 所有 crate（见第 4 节）
-└── doc/                     # 文档（见下文）
+└── docs/                    # 文档（见下文）
 ```
 
-### 文档目录 `doc/`
+### 文档目录 `docs/`
 
-所有设计/计划文档统一存放于此，按类别分类（详见 `doc/README.md`）：
+所有设计/计划文档统一存放于此，按类别分类（详见 `docs/README.md`）：
 
 | 目录 | 用途 |
 |:---|:---|
-| `doc/plans/` | 分步实现计划，命名 `stepN-<crate>.md` |
-| `doc/design/` | 架构设计与需求设计 |
-| `doc/decisions/` | 技术决策记录（ADR） |
-| `doc/notes/` | 调研、评估、笔记 |
+| `docs/plans/` | 分步实现计划，命名 `stepN-<crate>.md` |
+| `docs/design/` | 架构设计与需求设计 |
+| `docs/decisions/` | 技术决策记录（ADR） |
+| `docs/notes/` | 调研、评估、笔记 |
 
 文件名统一 kebab-case，中文撰写。
 
@@ -77,7 +77,7 @@ cargo clippy --workspace          # lint
 
 ## 4. crate 划分与依赖
 
-共 13 个 crate（MVP 12 + F-19 终端引入 `xgent_terminal`），按依赖关系自底向上实现（顺序见 `doc/plans/README.md`）：
+共 13 个 crate（MVP 12 + F-19 终端引入 `xgent_terminal`），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
 
 | crate | 类型 | 依赖 | 职责 |
 |:---|:---|:---|:---|
@@ -182,28 +182,28 @@ xgent_app → 组装所有 UI 侧 crate
 
 ## 6. 工作流程
 
-1. **阅读背景**：开始任务前阅读本文件、`doc/design/`、`doc/plans/` 中相关 step 文件。编码时按需查阅 `../bevy` 源码确认 API。
+1. **阅读背景**：开始任务前阅读本文件、`docs/design/`、`docs/plans/` 中相关 step 文件。编码时按需查阅 `../bevy` 源码确认 API。
 2. **先通后优**：每个模块先实现最小可用版本，确保编译通过与基本功能，再迭代。
 3. **接口先行**：先定义 trait 与协议类型，再实现具体逻辑，保证调用方无感于实现变化。
 4. **测试驱动**：每个 crate 完成后写最小集成测试验证。
 5. **不提前引入 3D/TUI/Web/宠物**：MVP 仅 2D GUI。
-6. **产出文档放 doc/**：生成的设计/计划类文档放 `doc/` 对应分类目录（见第 2 节），不放项目根目录。
+6. **产出文档放 docs/**：生成的设计/计划类文档放 `docs/` 对应分类目录（见第 2 节），不放项目根目录。
 7. **遗留清理**：根目录 `src/main.rs` 是遗留 Hello world，按计划应删除（xgent_app 接管入口）。
-8. **同步开发指南**：后续实现新功能或功能有变化，都需要更新 `doc/dev-tutorial.md`（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点）。新增/变更功能、crate、ADR、trait 时必须同步该文档对应章节，避免文档与代码脱节。
+8. **同步开发指南**：后续实现新功能或功能有变化，都需要更新 `docs/dev-tutorial.md`（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点）。新增/变更功能、crate、ADR、trait 时必须同步该文档对应章节，避免文档与代码脱节。
 9. **UI 视觉工作用 design-md**：UI 重构、新增界面、调整视觉风格时，使用项目 skill `design-md`（`.agents/skills/design-md/`，75 套 DESIGN.md 设计系统参考库），按其映射规则落地到 `xgent_ui::theme`。
 
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。13 个 crate，`cargo check --workspace` 通过，约 5 万行 Rust（`crates/**/*.rs`）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型）、R3-5（Markdown 渲染）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`doc/dev-tutorial.md`**。插件系统设计已完成（`doc/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。13 个 crate，`cargo check --workspace` 通过，约 5 万行 Rust（`crates/**/*.rs`）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型）、R3-5（Markdown 渲染）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `doc/plans/README.md`（step1~step12，已全部完成）+ `doc/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `doc/design/requirements.md` §4.2 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
 
 ---
 
 ## 8. 待决策点（不阻塞 MVP 起步）
 
-详见 `doc/design/architecture.md` 第 13 节。摘要：
+详见 `docs/design/architecture.md` 第 13 节。摘要：
 
 - D-02 API Key 是否用 OS keychain
 - D-04 会话历史 SQLite schema（= OQ-07）
@@ -211,7 +211,7 @@ xgent_app → 组装所有 UI 侧 crate
 - D-06 tree-sitter grammar 分发（B 阶段前定）
 - D-07 宠物等级度量（P1）
 
-需求层开放问题（详见 `doc/design/requirements.md` 第 9 节）：OQ-05 宠物对话陪伴形式、OQ-07 会话持久化、OQ-10 成本统计细节。OQ↔D 映射见架构 13.1 节。
+需求层开放问题（详见 `docs/design/requirements.md` 第 9 节）：OQ-05 宠物对话陪伴形式、OQ-07 会话持久化、OQ-10 成本统计细节。OQ↔D 映射见架构 13.1 节。
 
 <comet-ambient-resume>
 <!-- Managed by Comet. Edits inside this block may be replaced by comet init/update. -->

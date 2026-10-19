@@ -1,6 +1,6 @@
 //! EditorState Resource（impl `xgent_core::EditorState` trait）。
 //!
-//! 详见 `doc/design/editor-design.md` 第 6.3 节。
+//! 详见 `docs/design/editor-design.md` 第 6.3 节。
 //!
 //! `xgent_context` 经 trait 查询编辑器状态，`xgent_ui` 实现该 trait。
 //! 反转依赖避免 `xgent_context` 依赖 `xgent_ui`（成环）。

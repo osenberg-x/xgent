@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "XGent 系统架构总览",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/osenberg-x/xgent",
+      "revision": "b0771e88840eb76d792447dc3f4094e623f44412"
+    },
+    "viewBox": [1380, 560],
+    "views": [
+      {
+        "id": "main-path",
+        "label": "一次提问的主路径",
+        "focus": ["user", "ui", "ecs", "bridge", "daemon", "pool", "llm"],
+        "note": "从键鼠输入到远端 LLM 再回流渲染，跨两个进程、两种执行上下文。"
+      },
+      {
+        "id": "capabilities",
+        "label": "Agent 的两侧能力",
+        "focus": ["bridge", "tools", "ctx", "plugin"],
+        "note": "工具与检索挂在 AgentBridge 上下；插件把能力注册进宿主容器。"
+      },
+      {
+        "id": "process-boundary",
+        "label": "两个进程的唯一通道",
+        "focus": ["ecs", "bridge", "daemon", "pool"],
+        "note": "ECS 只存在于 UI 进程内，跨进程只剩 JSON-RPC 一条通道。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "ToolExecutor",
+      "sublabel": "6 内置工具 · 安全策略",
+      "pos": [680, 60],
+      "size": [190, 72],
+      "sources": [
+        { "path": "crates/xgent_tools/src/executor.rs", "line": 36, "label": "ToolExecutor" },
+        { "path": "crates/xgent_tools/src/security.rs", "line": 24, "label": "resolve_policy" }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "远端 LLM API",
+      "sublabel": "OpenAI 兼容 · Anthropic",
+      "pos": [1170, 60],
+      "size": [170, 72],
+      "sources": [
+        { "path": "crates/xgent_provider/src/lib.rs", "label": "build_provider" }
+      ]
+    },
+    {
+      "id": "user",
+      "type": "external",
+      "label": "开发者",
+      "sublabel": "键盘 / 鼠标",
+      "pos": [40, 240],
+      "size": [150, 72]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "xgent_ui 面板",
+      "sublabel": "对话 · 工具卡 · 编辑器",
+      "pos": [240, 240],
+      "size": [170, 72],
+      "sources": [
+        { "path": "crates/xgent_ui/src/lib.rs", "line": 45, "label": "XgentUiPlugin" }
+      ]
+    },
+    {
+      "id": "ecs",
+      "type": "messagebus",
+      "label": "Bevy ECS Message",
+      "sublabel": "进程内唯一通信契约",
+      "pos": [460, 240],
+      "size": [170, 72],
+      "sources": [
+        { "path": "crates/xgent_agent/src/events.rs", "label": "24 种 Message" }
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "AgentBridge",
+      "sublabel": "tokio task · 双层循环",
+      "pos": [680, 240],
+      "size": [190, 72],
+      "tag": "每项目一实例",
+      "sources": [
+        { "path": "crates/xgent_agent/src/bridge.rs", "line": 188, "label": "AgentBridge" },
+        { "path": "crates/xgent_agent/src/bridge.rs", "line": 709, "label": "run_agent_loop" }
+      ]
+    },
+    {
+      "id": "daemon",
+      "type": "backend",
+      "label": "xgent-daemon",
+      "sublabel": "Session · 纯 tokio",
+      "pos": [940, 240],
+      "size": [180, 72],
+      "tag": "全局唯一",
+      "sources": [
+        { "path": "crates/xgent_daemon/src/session.rs", "line": 168, "label": "dispatch_request" },
+        { "path": "crates/xgent_daemon/src/server.rs", "line": 23, "label": "Shared" }
+      ]
+    },
+    {
+      "id": "pool",
+      "type": "backend",
+      "label": "ProviderPool",
+      "sublabel": "按 id 缓存 provider",
+      "pos": [1170, 240],
+      "size": [170, 72],
+      "sources": [
+        { "path": "crates/xgent_daemon/src/provider_pool.rs", "line": 31, "label": "ProviderPool" }
+      ]
+    },
+    {
+      "id": "ctx",
+      "type": "backend",
+      "label": "ContextHub",
+      "sublabel": "OnDemand 检索方案 A",
+      "pos": [680, 420],
+      "size": [190, 72],
+      "sources": [
+        { "path": "crates/xgent_context/src/on_demand.rs", "line": 105, "label": "OnDemand 检索" }
+      ]
+    },
+    {
+      "id": "plugin",
+      "type": "security",
+      "label": "WASM 插件沙箱",
+      "sublabel": "wasmtime + WIT 桥",
+      "pos": [460, 420],
+      "size": [170, 72],
+      "tag": "不碰 Bevy World",
+      "sources": [
+        { "path": "crates/xgent_plugin/src/wasm_host.rs", "line": 220, "label": "WasmPlugin" },
+        { "path": "crates/xgent_plugin/src/proxy.rs", "line": 75, "label": "PluginHostProxy" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "xgent-ui 进程（每项目一个）",
+      "wraps": ["ui", "ecs", "bridge", "tools", "ctx", "plugin"],
+      "pad": 20
+    },
+    {
+      "kind": "security-group",
+      "label": "wasmtime Store 沙箱",
+      "wraps": ["plugin"],
+      "pad": 12
+    },
+    {
+      "kind": "region",
+      "label": "xgent-daemon 进程（随用随启）",
+      "wraps": ["daemon", "pool"],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    { "id": "input", "from": "user", "to": "ui", "label": "键鼠输入", "variant": "emphasis" },
+    { "id": "ui-to-ecs", "from": "ui", "to": "ecs", "label": "UserInputMessage", "labelAt": [435, 236] },
+    { "id": "ecs-to-ui", "from": "ecs", "to": "ui", "label": "DeltaMessage", "variant": "dashed", "labelAt": [435, 326] },
+    { "id": "ecs-to-bridge", "from": "ecs", "to": "bridge", "label": "AgentCommand", "variant": "emphasis", "labelAt": [655, 236] },
+    { "id": "bridge-to-ecs", "from": "bridge", "to": "ecs", "label": "AgentEvent", "variant": "dashed", "labelAt": [655, 326] },
+    { "id": "bridge-tools", "from": "bridge", "to": "tools", "label": "Tool::execute" },
+    { "id": "bridge-ctx", "from": "bridge", "to": "ctx", "label": "retrieve()", "labelAt": [775, 352] },
+    { "id": "plugin-ctx", "from": "plugin", "to": "ctx", "label": "注册工具与检索器", "variant": "dashed", "labelAt": [655, 506] },
+    { "id": "chat-rpc", "from": "bridge", "to": "daemon", "label": "provider.chat", "variant": "emphasis", "labelAt": [905, 200] },
+    { "id": "event-notify", "from": "daemon", "to": "bridge", "label": "provider.event", "variant": "dashed", "labelAt": [905, 326] },
+    { "id": "daemon-pool", "from": "daemon", "to": "pool", "label": "复用连接" },
+    { "id": "pool-llm", "from": "pool", "to": "llm", "label": "HTTPS + SSE" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "双进程职责切分",
+      "items": [
+        "agent loop 与工具执行都在 UI 侧；daemon 只做连接池、全局配置、文件监听、多客户端同步",
+        "UI 启动先探测本地 socket，探不到就 fork daemon，再每 100ms 轮询等就绪，上限 10s",
+        "末个客户端断开后 daemon 延迟 30s 退出，期间有新连接则取消计时"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "ECS 通信硬约束",
+      "items": [
+        "跨 Plugin 只走 Bevy Message，全仓没有 Event/Observer 通信路径",
+        "名为 Event 的 ChatEvent 与 AgentEvent 其实是 tokio mpsc 上的普通枚举",
+        "ECS 主线程永不 await：异步逻辑集中在 tokio task，结果每帧非阻塞 drain 回 World",
+        "插件能力经 proxy 注入宿主容器，不直接改 World"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "信任边界",
+      "items": [
+        "工具默认全部 NeedsConfirmation，只有 UiOnly 一档自动放行",
+        "插件隔离在 wasmtime Store 内，经 WIT 调宿主 API，文件访问受项目根沙箱校验",
+        "API key 只在 daemon 侧持有，UI 进程不接触凭据"
+      ]
+    }
+  ]
+}

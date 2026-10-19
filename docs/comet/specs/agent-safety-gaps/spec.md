@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This capability closes the R1 and R2 tiers of `doc/notes/agent-gap-review.md`: the defects that can cause unbounded execution, unbounded cost, or that block acceptance of an already-confirmed MVP requirement.
+This capability closes the R1 and R2 tiers of `docs/notes/agent-gap-review.md`: the defects that can cause unbounded execution, unbounded cost, or that block acceptance of an already-confirmed MVP requirement.
 
 The gap report is the input and is not modified by this change. After this capability is delivered, every R1 and R2 entry is resolved and the report's remaining entries are R3 experience gaps and R4 roadmap items.
 

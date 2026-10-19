@@ -6,18 +6,18 @@ A single reviewable document that states, in ranked priority order, what the XGe
 
 ## Deliverable location and language
 
-- The report lives at `doc/notes/agent-gap-review.md`.
+- The report lives at `docs/notes/agent-gap-review.md`.
 - The report is written in Chinese, following AGENTS.md §2 (all design and note documents are written in Chinese).
-- The report is a new file. No existing file under `doc/` is modified by this capability.
+- The report is a new file. No existing file under `docs/` is modified by this capability.
 
 ## Gap classes
 
 Every ranked entry carries exactly one class label from this list:
 
-- `planned-not-built`: a capability named in `doc/design/requirements.md`, `doc/design/architecture.md`, or `doc/design/plugin-system-design.md` that has no code implementation.
+- `planned-not-built`: a capability named in `docs/design/requirements.md`, `docs/design/architecture.md`, or `docs/design/plugin-system-design.md` that has no code implementation.
 - `built-but-defective`: a capability that exists in code but is incomplete, unbounded, silently ignored, or contradicts its own stated contract.
 - `unwired-design`: a trait contract, extension point, or daemon-uplift duty declared in the architecture or plugin-system design that no call site actually exercises.
-- `doc-inconsistency`: a claim in an existing document under `doc/` that contradicts the current code, so readers get a wrong picture of what exists.
+- `doc-inconsistency`: a claim in an existing document under `docs/` that contradicts the current code, so readers get a wrong picture of what exists.
 
 A defect that spans both `built-but-defective` and `unwired-design` is labeled by its actual code state: if the code path exists but its declared contract is never exercised, it is `unwired-design`.
 
@@ -45,13 +45,13 @@ A defect reachable from several call sites appears as one ranked entry. The entr
 
 ## Coverage rule
 
-- Every `F-xx` and `NF-xx` item in `doc/design/requirements.md` that is described as implemented is re-checked against code. If the claim is contradicted, the report records the contradiction instead of accepting the document's claim.
+- Every `F-xx` and `NF-xx` item in `docs/design/requirements.md` that is described as implemented is re-checked against code. If the claim is contradicted, the report records the contradiction instead of accepting the document's claim.
 - Every pending decision (`D-xx`, `OQ-xx`, `D-P xx`) is recorded with the capability it blocks, so a blocked feature is not read as merely unstarted.
 - P2 items that are explicitly deferred and carry no implementation trigger are listed compactly, without the evidence depth of P0/P1 items.
 
 ## Non-modification rule
 
-The report does not edit any existing document under `doc/`. Document inconsistencies become findings in the report; fixing them is separate work.
+The report does not edit any existing document under `docs/`. Document inconsistencies become findings in the report; fixing them is separate work.
 
 ## Scenarios
 
@@ -60,7 +60,7 @@ The report does not edit any existing document under `doc/`. Document inconsiste
 Scenario: a reader opens the report and finds one ranked list
 验收：A1
 
-Given the report at `doc/notes/agent-gap-review.md`
+Given the report at `docs/notes/agent-gap-review.md`
 When the reader scans the ranked list
 Then every entry shows a rank, a title, a class label, a one-line description, and an evidence reference of `file:line` or a named document section
 
@@ -97,5 +97,5 @@ Scenario: the audit does not alter prior documentation
 验收：A5
 
 Given the report was written
-When `doc/` is inspected for changes other than the new report file
-Then no pre-existing document under `doc/` was modified, and any MVP requirement claimed implemented is either absent from the report or backed by contradicting code evidence
+When `docs/` is inspected for changes other than the new report file
+Then no pre-existing document under `docs/` was modified, and any MVP requirement claimed implemented is either absent from the report or backed by contradicting code evidence

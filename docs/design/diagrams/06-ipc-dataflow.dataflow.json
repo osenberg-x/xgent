@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "IPC 协议与配置 / 文件事件数据流",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      580
+    ],
+    "views": [
+      {
+        "id": "config-line",
+        "label": "配置写 → 就绪刷新",
+        "focus": [
+          "cfgw",
+          "sess",
+          "store",
+          "reg",
+          "bridge"
+        ],
+        "note": "改一个 provider 会连带失效连接池，并让每个窗口重算就绪状态。"
+      },
+      {
+        "id": "file-line",
+        "label": "文件变更 → 编辑器",
+        "focus": [
+          "save",
+          "watcher",
+          "subs",
+          "reg",
+          "fsb",
+          "editor"
+        ],
+        "note": "外部改动与同伴保存汇入同一个消息，再决定静默重载还是弹窗。"
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "生产者"
+    },
+    {
+      "label": "帧解析"
+    },
+    {
+      "label": "daemon 处理"
+    },
+    {
+      "label": "广播"
+    },
+    {
+      "label": "UI 投影"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "cfgw",
+      "type": "frontend",
+      "label": "设置面板",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "save",
+      "type": "frontend",
+      "label": "编辑器保存",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "sess",
+      "type": "messagebus",
+      "label": "Session 分发",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "watcher",
+      "type": "backend",
+      "label": "notify 回调",
+      "stage": 1,
+      "row": 2
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "config.toml",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "pool",
+      "type": "backend",
+      "label": "ProviderPool",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "subs",
+      "type": "backend",
+      "label": "订阅匹配",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "reg",
+      "type": "messagebus",
+      "label": "ClientRegistry",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "config_bridge",
+      "stage": 4,
+      "row": 0
+    },
+    {
+      "id": "fsb",
+      "type": "backend",
+      "label": "fs_event_bridge",
+      "stage": 4,
+      "row": 1
+    },
+    {
+      "id": "editor",
+      "type": "frontend",
+      "label": "编辑器冲突",
+      "stage": 4,
+      "row": 2
+    }
+  ],
+  "flows": [
+    {
+      "id": "write-cfg",
+      "from": "cfgw",
+      "to": "sess",
+      "label": "config.write",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "notify-peer",
+      "from": "save",
+      "to": "sess",
+      "label": "fs.notify",
+      "variant": "default"
+    },
+    {
+      "id": "persist",
+      "from": "sess",
+      "to": "store",
+      "label": "原子落盘",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "invalidate",
+      "from": "sess",
+      "to": "pool",
+      "label": "providers.* 失效",
+      "variant": "dashed",
+      "classification": "否则旧凭据一直服务到重启"
+    },
+    {
+      "id": "watch",
+      "from": "watcher",
+      "to": "subs",
+      "label": "变更路径",
+      "variant": "default",
+      "route": "straight"
+    },
+    {
+      "id": "broadcast-cfg",
+      "from": "store",
+      "to": "reg",
+      "label": "config.changed",
+      "variant": "emphasis",
+      "classification": "排除写入者"
+    },
+    {
+      "id": "broadcast-fs",
+      "from": "subs",
+      "to": "reg",
+      "label": "fs.changed",
+      "variant": "emphasis",
+      "classification": "相对路径"
+    },
+    {
+      "id": "refresh",
+      "from": "reg",
+      "to": "bridge",
+      "label": "重算就绪与重试",
+      "variant": "emphasis"
+    },
+    {
+      "id": "filemsg",
+      "from": "reg",
+      "to": "fsb",
+      "label": "fs 事件合流",
+      "variant": "default",
+      "route": "straight",
+      "labelAt": [
+        858,
+        318
+      ]
+    },
+    {
+      "id": "conflict",
+      "from": "fsb",
+      "to": "editor",
+      "label": "FileChangedMessage",
+      "variant": "dashed",
+      "route": "straight",
+      "labelAt": [
+        960,
+        428
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "协议面很小，但文档写错了",
+      "items": [
+        "方法 7 个：provider.chat / provider.cancel / provider.listModels / config.read / config.write / fs.watch / fs.notify",
+        "通知只有 4 个：provider.event / fs.changed / config.changed / peer.fileChanged",
+        "架构文档 §6.5 的 provider.delta、toolCall、done、error 在代码里不存在，全部由单个 provider.event 透传 ChatEvent JSON"
+      ]
+    }
+  ]
+}

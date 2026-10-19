@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "一次流式对话的端到端时序",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1390,
+      590
+    ],
+    "views": [
+      {
+        "id": "build",
+        "label": "请求构建",
+        "focus": [
+          "chat",
+          "task",
+          "ctx"
+        ],
+        "note": "检索只能在 tokio 侧 await，所以上下文注入发生在发请求之前。"
+      },
+      {
+        "id": "stream",
+        "label": "流式回传",
+        "focus": [
+          "task",
+          "ipc",
+          "daemon",
+          "llm",
+          "chat"
+        ],
+        "note": "SSE chunk 变成 ChatEvent，再变成 notification，最后变成 DeltaMessage。"
+      },
+      {
+        "id": "finish",
+        "label": "工具与收尾",
+        "focus": [
+          "chat",
+          "task",
+          "daemon",
+          "llm"
+        ],
+        "note": "工具调用先整批发给 UI，Done 携带 usage 后才落盘并回到 Idle。"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "chat",
+      "type": "frontend",
+      "label": "对话面板"
+    },
+    {
+      "id": "task",
+      "type": "backend",
+      "label": "agent_loop_task"
+    },
+    {
+      "id": "ctx",
+      "type": "backend",
+      "label": "ContextHub"
+    },
+    {
+      "id": "ipc",
+      "type": "messagebus",
+      "label": "IpcProviderClient"
+    },
+    {
+      "id": "daemon",
+      "type": "backend",
+      "label": "daemon · Pool"
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "远端 LLM API"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 258,
+      "label": "构建请求"
+    },
+    {
+      "from": 262,
+      "to": 456,
+      "label": "流式往返"
+    },
+    {
+      "from": 460,
+      "to": 540,
+      "label": "工具与收尾"
+    }
+  ],
+  "messages": [
+    {
+      "id": "submit",
+      "from": "chat",
+      "to": "task",
+      "y": 170,
+      "label": "StartLoop（由 UserInputMessage 转命令）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "retrieve",
+      "from": "task",
+      "to": "ctx",
+      "y": 204,
+      "label": "retrieve(ContextQuery)"
+    },
+    {
+      "id": "chunks",
+      "from": "ctx",
+      "to": "task",
+      "y": 236,
+      "label": "目录树 + 相关片段",
+      "variant": "return"
+    },
+    {
+      "id": "chatreq",
+      "from": "task",
+      "to": "ipc",
+      "y": 270,
+      "label": "chat(ChatRequest + tool_schemas)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "rpc",
+      "from": "ipc",
+      "to": "daemon",
+      "y": 302,
+      "label": "provider.chat（换行分隔 JSON）"
+    },
+    {
+      "id": "post",
+      "from": "daemon",
+      "to": "llm",
+      "y": 334,
+      "label": "POST 流式请求",
+      "variant": "emphasis"
+    },
+    {
+      "id": "notif",
+      "from": "daemon",
+      "to": "ipc",
+      "y": 366,
+      "label": "provider.event{TextDelta} 逐 chunk"
+    },
+    {
+      "id": "forward",
+      "from": "ipc",
+      "to": "task",
+      "y": 398,
+      "label": "按 stream_id 过滤转 ChatEvent"
+    },
+    {
+      "id": "render",
+      "from": "task",
+      "to": "chat",
+      "y": 430,
+      "label": "AgentEvent → DeltaMessage 渲染",
+      "variant": "dashed"
+    },
+    {
+      "id": "toolcall",
+      "from": "daemon",
+      "to": "task",
+      "y": 464,
+      "label": "provider.event{ToolCallEnd / Done}"
+    },
+    {
+      "id": "finalize",
+      "from": "task",
+      "to": "chat",
+      "y": 498,
+      "label": "ToolCall 整批发卡 · Done 落盘",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "chat",
+      "from": 165,
+      "to": 505,
+      "type": "frontend"
+    },
+    {
+      "participant": "task",
+      "from": 170,
+      "to": 502,
+      "type": "backend"
+    },
+    {
+      "participant": "ctx",
+      "from": 200,
+      "to": 240,
+      "type": "backend"
+    },
+    {
+      "participant": "ipc",
+      "from": 268,
+      "to": 468,
+      "type": "messagebus"
+    },
+    {
+      "participant": "daemon",
+      "from": 300,
+      "to": 470,
+      "type": "backend"
+    },
+    {
+      "participant": "llm",
+      "from": 332,
+      "to": 368,
+      "type": "external"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "流式通路踩过的坑",
+      "items": [
+        "subscribe 必须早于 call：daemon 推送 task 在响应返回前就已开播，broadcast 无历史缓存会丢首批 chunk",
+        "broadcast 的 Lagged 只能 continue，退出循环会静默断流并被误判成可重试错误",
+        "usage 在 finish_reason 之后才到，Done 必须延迟到流末尾发射，否则 token 统计恒为 0"
+      ]
+    }
+  ]
+}

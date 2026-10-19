@@ -362,7 +362,7 @@ mod tests {
 
     /// UiOnly tier 默认为 Approved（不走 NeedsConfirmation），
     /// 但配置 denied 仍可拒绝、approved 显式批准仍生效。
-    /// 详见 `doc/design/editor-design.md` 6.4 节。
+    /// 详见 `docs/design/editor-design.md` 6.4 节。
     #[test]
     fn uionly_tier_default_approved() {
         let tool = MockTool {

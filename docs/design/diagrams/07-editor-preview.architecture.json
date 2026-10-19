@@ -1,0 +1,386 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "编辑器与预览（SideView）原理",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/osenberg-x/xgent",
+      "revision": "b0771e88840eb76d792447dc3f4094e623f44412"
+    },
+    "viewBox": [
+      1380,
+      560
+    ],
+    "views": [
+      {
+        "id": "open-chain",
+        "label": "打开到渲染",
+        "focus": [
+          "tree",
+          "tabs",
+          "io",
+          "xui",
+          "vrender"
+        ],
+        "note": "点文件 → 建 buffer 实体 → 读盘写 rope → 全量高亮 → 只渲染可见行。"
+      },
+      {
+        "id": "conflict",
+        "label": "外部变更协调",
+        "focus": [
+          "fsb",
+          "conflict",
+          "dialog",
+          "io"
+        ],
+        "note": "干净的静默重读，脏的弹窗三选；冲突未决时禁止保存。"
+      },
+      {
+        "id": "pages",
+        "label": "页签互斥",
+        "focus": [
+          "sideview",
+          "vrender",
+          "diff"
+        ],
+        "note": "一个 Resource 枚举决定四个容器各自的 display。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "fsb",
+      "type": "messagebus",
+      "label": "fs 事件桥",
+      "sublabel": "FileChangedEvent",
+      "pos": [
+        40,
+        460
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_app/src/fs_event_bridge.rs",
+          "label": "通知转 ECS"
+        }
+      ]
+    },
+    {
+      "id": "io",
+      "type": "backend",
+      "label": "editor/io",
+      "sublabel": "生产走同步 std::fs",
+      "pos": [
+        290,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/editor/io.rs",
+          "line": 118,
+          "label": "读写请求系统"
+        }
+      ]
+    },
+    {
+      "id": "dialog",
+      "type": "frontend",
+      "label": "冲突弹窗",
+      "sublabel": "丢弃 / 保留 / 对比",
+      "pos": [
+        560,
+        460
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/editor/conflict.rs",
+          "line": 128,
+          "label": "spawn 弹窗"
+        }
+      ]
+    },
+    {
+      "id": "sideview",
+      "type": "messagebus",
+      "label": "SideViewContent",
+      "sublabel": "Editor/Preview/Diff/Terminal",
+      "pos": [
+        830,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/editor/mod.rs",
+          "line": 69,
+          "label": "互斥枚举"
+        }
+      ]
+    },
+    {
+      "id": "diff",
+      "type": "backend",
+      "label": "差异页",
+      "sublabel": "rope vs disk_content",
+      "pos": [
+        1100,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/editor/diff_view.rs",
+          "line": 147,
+          "label": "两侧文本"
+        }
+      ]
+    },
+    {
+      "id": "tree",
+      "type": "frontend",
+      "label": "文件抽屉",
+      "sublabel": "file_panel 只读树",
+      "pos": [
+        40,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/file_panel.rs",
+          "line": 496,
+          "label": "点击处理"
+        }
+      ]
+    },
+    {
+      "id": "tabs",
+      "type": "frontend",
+      "label": "标签与 buffer 实体",
+      "sublabel": "EditorTabs + EditorBuffer",
+      "pos": [
+        290,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/editor/tabs.rs",
+          "line": 164,
+          "label": "handle_open_file"
+        },
+        {
+          "path": "crates/xgent_ui/src/editor/buffer.rs",
+          "line": 27,
+          "label": "EditorBuffer"
+        }
+      ]
+    },
+    {
+      "id": "xui",
+      "type": "frontend",
+      "label": "xui::TextEditor",
+      "sublabel": "rope + spans + undo",
+      "pos": [
+        560,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xui/src/text_editor.rs",
+          "line": 58,
+          "label": "TextEditor"
+        }
+      ]
+    },
+    {
+      "id": "vrender",
+      "type": "backend",
+      "label": "虚拟化渲染",
+      "sublabel": "只生成可见行",
+      "pos": [
+        830,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xui/src/text_editor/virtual_render.rs",
+          "line": 77,
+          "label": "update_virtual_lines"
+        }
+      ]
+    },
+    {
+      "id": "conflict",
+      "type": "security",
+      "label": "冲突协调",
+      "sublabel": "净则重读 / 脏则弹窗",
+      "pos": [
+        290,
+        460
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/editor/conflict.rs",
+          "line": 71,
+          "label": "handle_file_changed"
+        }
+      ]
+    },
+    {
+      "id": "hl",
+      "type": "backend",
+      "label": "tree-sitter 高亮",
+      "sublabel": "全量重解析，仅 Rust",
+      "pos": [
+        560,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xui/src/text_editor/highlight.rs",
+          "label": "highlight"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "xui 通用裸件（不依赖 xgent）",
+      "wraps": [
+        "xui",
+        "vrender",
+        "hl"
+      ],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    {
+      "id": "open",
+      "from": "tree",
+      "to": "tabs",
+      "label": "OpenFileRequest",
+      "labelAt": [
+        265,
+        320
+      ]
+    },
+    {
+      "id": "read",
+      "from": "tabs",
+      "to": "io",
+      "label": "读写请求与结果回写"
+    },
+    {
+      "id": "mount",
+      "from": "tabs",
+      "to": "xui",
+      "label": "挂 TextEditor"
+    },
+    {
+      "id": "virtual",
+      "from": "xui",
+      "to": "vrender",
+      "label": "可见区间行节点",
+      "labelAt": [
+        795,
+        320
+      ]
+    },
+    {
+      "id": "repaint",
+      "from": "xui",
+      "to": "hl",
+      "label": "内容变化重算 spans"
+    },
+    {
+      "id": "gate",
+      "from": "vrender",
+      "to": "sideview",
+      "label": "容器显隐"
+    },
+    {
+      "id": "diffpage",
+      "from": "sideview",
+      "to": "diff",
+      "label": "差异页"
+    },
+    {
+      "id": "fsev",
+      "from": "fsb",
+      "to": "conflict",
+      "label": "FileChangedEvent",
+      "labelAt": [
+        265,
+        530
+      ]
+    },
+    {
+      "id": "reread",
+      "from": "conflict",
+      "to": "tabs",
+      "label": "净则请求重读 / 脏则置冲突态"
+    },
+    {
+      "id": "ask",
+      "from": "conflict",
+      "to": "dialog",
+      "label": "脏则弹窗"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "以代码为准的三件事",
+      "items": [
+        "buffer 实体不挂 EditableText，键盘输入不进 rope —— 产品里的「编辑器」当前是只读虚拟化视图，Cmd+S 保存的是未改动内容",
+        "EditorIoRuntime.handle 在 xgent_app 里从未注入，读写一律回退到主线程 std::fs（撤销路径也刻意避开它）",
+        "冲突弹窗的「对比合并」实际执行 keep_local，不打开差异页；差异页容器 display 从未被切换",
+        "agent 驱动编辑器走另一条路：EditorTool(UiOnly) → EditorCommandRequest channel → editor/command.rs 执行 open/goto/close"
+      ]
+    }
+  ]
+}

@@ -102,7 +102,7 @@ pub enum ToolTier {
     /// UI-only（如 editor.* 工具：仅驱动 UI 状态，不直接 IO）
     ///
     /// `resolve_policy` 对 `UiOnly` 默认返回 [`SecurityPolicy::Approved`]，
-    /// 不走 `NeedsConfirmation`。详见 `doc/design/editor-design.md` 6.4 节。
+    /// 不走 `NeedsConfirmation`。详见 `docs/design/editor-design.md` 6.4 节。
     UiOnly,
     /// 强制确认（危险输入）：工具对特定输入判定为高危时经 `approval_for` 返回。
     ///

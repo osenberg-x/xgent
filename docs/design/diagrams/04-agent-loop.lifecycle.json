@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "会话状态机 ConversationStatus",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1300,
+      680
+    ],
+    "views": [
+      {
+        "id": "rail",
+        "label": "主循环轨道",
+        "focus": [
+          "idle",
+          "thinking",
+          "streaming",
+          "toolrun",
+          "done"
+        ],
+        "note": "内层循环在 streaming 与 toolrun 之间反复，直到 tool_calls 为空。"
+      },
+      {
+        "id": "gates",
+        "label": "两处会停下来的地方",
+        "focus": [
+          "streaming",
+          "retry",
+          "toolrun",
+          "confirm"
+        ],
+        "note": "重试与确认都是等待，不是终态，都能被 Abort 打断。"
+      },
+      {
+        "id": "reopen",
+        "label": "退出与再入",
+        "focus": [
+          "retry",
+          "errored",
+          "confirm",
+          "aborted"
+        ],
+        "note": "NotConfigured 与 AuthFailed 不进重试，直接落 Error。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "会话主循环"
+    },
+    {
+      "id": "waiting",
+      "label": "中断与闸门"
+    },
+    {
+      "id": "terminal",
+      "label": "退出与再入"
+    }
+  ],
+  "states": [
+    {
+      "id": "idle",
+      "type": "start",
+      "label": "Idle",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "Error 可再入"
+    },
+    {
+      "id": "thinking",
+      "type": "active",
+      "label": "Thinking",
+      "lane": "main",
+      "col": 1,
+      "step": "02"
+    },
+    {
+      "id": "streaming",
+      "type": "active",
+      "label": "Streaming",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "可被 steering 打断"
+    },
+    {
+      "id": "toolrun",
+      "type": "active",
+      "label": "ToolRunning",
+      "lane": "main",
+      "col": 3,
+      "step": "04"
+    },
+    {
+      "id": "done",
+      "type": "success",
+      "label": "本轮完成",
+      "lane": "main",
+      "col": 4,
+      "step": "05"
+    },
+    {
+      "id": "retry",
+      "type": "waiting",
+      "label": "重试中",
+      "lane": "waiting",
+      "col": 0,
+      "tag": "退避可中断"
+    },
+    {
+      "id": "confirm",
+      "type": "waiting",
+      "label": "Confirming",
+      "lane": "waiting",
+      "col": 1,
+      "tag": "缺省 300s 超时"
+    },
+    {
+      "id": "errored",
+      "type": "failure",
+      "label": "Error",
+      "lane": "terminal",
+      "col": 0,
+      "tag": "可直接再发一句"
+    },
+    {
+      "id": "aborted",
+      "type": "failure",
+      "label": "Aborting",
+      "lane": "terminal",
+      "col": 1,
+      "tag": "取消已落盘部分"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "submit",
+      "from": "idle",
+      "to": "thinking",
+      "label": "提交",
+      "variant": "emphasis",
+      "labelAt": [
+        171,
+        202
+      ]
+    },
+    {
+      "id": "request",
+      "from": "thinking",
+      "to": "streaming",
+      "label": "构造请求",
+      "labelAt": [
+        325,
+        202
+      ]
+    },
+    {
+      "id": "has-tools",
+      "from": "streaming",
+      "to": "toolrun",
+      "label": "有 tool_calls",
+      "labelAt": [
+        455,
+        202
+      ]
+    },
+    {
+      "id": "feedback",
+      "from": "toolrun",
+      "to": "streaming",
+      "label": "结果回灌",
+      "route": "top-channel",
+      "labelAt": [
+        516,
+        104
+      ],
+      "channelY": 98
+    },
+    {
+      "id": "no-tools",
+      "from": "streaming",
+      "to": "done",
+      "label": "无 tool_calls",
+      "route": "top-channel",
+      "labelAt": [
+        470,
+        64
+      ],
+      "channelY": 58
+    },
+    {
+      "id": "retryable",
+      "from": "streaming",
+      "to": "retry",
+      "label": "可重试错误",
+      "variant": "security",
+      "route": "drop"
+    },
+    {
+      "id": "need-confirm",
+      "from": "toolrun",
+      "to": "confirm",
+      "label": "NeedsConfirmation",
+      "variant": "security",
+      "route": "drop"
+    },
+    {
+      "id": "exhaust",
+      "from": "retry",
+      "to": "errored",
+      "label": "重试耗尽",
+      "variant": "security",
+      "route": "straight",
+      "labelDy": 24
+    },
+    {
+      "id": "abort-wait",
+      "from": "confirm",
+      "to": "aborted",
+      "label": "等待期按 Abort",
+      "variant": "security",
+      "route": "straight",
+      "labelDy": 24
+    }
+  ],
+  "cards": []
+}

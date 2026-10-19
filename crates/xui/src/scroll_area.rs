@@ -2,7 +2,7 @@
 //!
 //! 集中表达 bevy 0.19 下"能正确滚动的 UI 容器"所需的全部契约，避免每个业务
 //! 模块重新调试 flex 撑破、单位混淆、时序错位等同一组问题。背景与设计详见
-//! `doc/notes/scroll-abstraction-design.md`。
+//! `docs/notes/scroll-abstraction-design.md`。
 //!
 //! # 三件套
 //!

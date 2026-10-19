@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XGent UI v8 交互原型 · 架构层重建（保留 v7 Linear 基准）</title>
+<style>html,body{margin:0;padding:0;background:#050607}</style>
+</head>
+<body>
+<div id="v8root" class="v8">
+<style>
+.v8 *,.v8 *::before,.v8 *::after{box-sizing:border-box}
+.v8{
+  --bg:#08090A;--surface:#0F1011;--elevated:#191A1B;--code-bg:#0D0E10;
+  --text:#F7F8F8;--text-dim:#D0D6E0;--text-muted:#8A8F98;--text-faint:#62666D;
+  --accent:#5E6AD2;--accent-int:#7170FF;--accent-hover:#828FFF;
+  --accent-bg:rgba(94,106,210,.14);--accent-glow:rgba(113,112,255,.16);
+  --st-pending:#FFB224;--st-ok:#30A46C;--st-fail:#E5484D;--st-info:#0091FF;
+  --st-ok-bg:rgba(48,164,108,.12);--st-pending-bg:rgba(255,178,36,.12);--st-fail-bg:rgba(229,72,77,.12);
+  --warm:#FFB224;--warm-bg:rgba(255,178,36,.15);
+  --subtle:rgba(255,255,255,.02);--input-bg:rgba(255,255,255,.02);
+  --hover:rgba(255,255,255,.05);--active:rgba(255,255,255,.08);--icon-bg:rgba(255,255,255,.06);
+  --line:rgba(255,255,255,.05);--border:rgba(255,255,255,.08);--border-hover:rgba(255,255,255,.14);
+  --tooltip-bg:#28282C;--overlay:rgba(0,0,0,.5);
+  --r-micro:2px;--r-small:4px;--r-ctrl:6px;--r-card:8px;--r-panel:12px;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s7:32px;
+  --scale:1;--fs-display:24px;--fs-h3:15px;--fs-body:14px;--fs-body-sm:13px;
+  --fs-small:12px;--fs-caption:12px;--fs-micro:11px;--fs-tiny:10px;--fs-code:12px;
+  --topbar-h:52px;--rail-w:52px;--status-h:32px;--dock-w:720px;--drawer-w:320px;
+  --resizer-w:6px;--scope-h:38px;--tabs-h:38px;--msg-max-w:820px;
+  font-family:'Inter',-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei UI',sans-serif;
+  font-feature-settings:'cv01' 1,'ss03' 1;
+  color:var(--text);background:#050607;padding:var(--s6);
+  display:flex;flex-direction:column;gap:var(--s4);
+  -webkit-font-smoothing:antialiased;
+}
+.v8.dense-compact{
+  --scale:.92;--fs-display:22px;--fs-h3:14px;--fs-body:13px;--fs-body-sm:12.5px;
+  --fs-small:11.5px;--fs-caption:11.5px;--fs-micro:10.5px;--fs-code:11px;
+  --topbar-h:48px;--rail-w:46px;--status-h:28px;--scope-h:32px;--tabs-h:32px;
+}
+.v8 .mono{font-family:'JetBrains Mono','Cascadia Mono',Consolas,Menlo,'DejaVu Sans Mono',monospace;font-feature-settings:normal}
+
+/* ===== 外壳 ===== */
+.v8-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s5);flex-wrap:wrap}
+.v8-head h1{margin:0;font-size:var(--fs-display);font-weight:590;letter-spacing:-.29px}
+.v8-head .sub{color:var(--text-muted);font-size:var(--fs-body-sm);margin-top:var(--s2);max-width:78ch;line-height:1.6}
+.v8-chips{display:flex;gap:var(--s2);flex-wrap:wrap}
+.v8-chip{font-size:var(--fs-micro);color:var(--text-muted);border:1px solid var(--line);
+  border-radius:9999px;padding:3px 10px;background:var(--subtle)}
+
+/* 控制条 */
+.ctl{display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--s3) var(--s4)}
+.ctl .lbl{font-size:var(--fs-micro);text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-right:2px}
+.tgl{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-body-sm);color:var(--text-dim);
+  background:var(--subtle);border:1px solid var(--border);border-radius:var(--r-ctrl);padding:6px 11px;cursor:pointer;user-select:none}
+.tgl:hover{background:var(--hover);border-color:var(--border-hover)}
+.tgl[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent-int);color:var(--text)}
+.tgl .dot{width:8px;height:8px;border-radius:50%;background:var(--text-faint)}
+.tgl[aria-pressed=true] .dot{background:var(--accent-int)}
+.tgl:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-int),0 0 0 5px var(--accent-glow)}
+
+/* ===== 应用外壳（真实比例 1440×780）===== */
+.stage{position:relative;overflow:auto;border:1px solid var(--border);border-radius:var(--r-panel);background:var(--bg)}
+.app{position:relative;width:1440px;height:780px;display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.app .layer{position:absolute;inset:0;pointer-events:none}
+.app .layer.on{pointer-events:auto}
+
+/* 顶栏 */
+.topbar{height:var(--topbar-h);flex:0 0 auto;display:flex;align-items:center;gap:var(--s3);
+  padding:0 var(--s4);background:var(--surface);border-bottom:1px solid var(--border)}
+.brand{width:28px;height:28px;border-radius:var(--r-ctrl);background:var(--accent);
+  display:grid;place-items:center;font-size:13px;font-weight:590;color:#fff}
+.proj{font-size:var(--fs-h3);font-weight:510}
+.vsep{width:1px;height:18px;background:var(--line)}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-small);color:var(--text-dim);
+  background:var(--subtle);border:1px solid var(--border);border-radius:9999px;padding:4px 10px;cursor:pointer}
+.pill:hover{background:var(--hover);border-color:var(--border-hover)}
+.pill .led{width:6px;height:6px;border-radius:50%;background:var(--st-ok)}
+.pill.run .led{background:var(--accent-int);animation:v8pulse 1.2s infinite}
+@keyframes v8pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.ibtn{width:34px;height:34px;border-radius:var(--r-ctrl);display:grid;place-items:center;cursor:pointer;
+  border:1px solid transparent;background:transparent;color:var(--text-muted)}
+.ibtn:hover{background:var(--hover);color:var(--text)}
+.ibtn:focus-visible{outline:none;border-color:var(--accent-int);box-shadow:0 0 0 3px var(--accent-glow)}
+
+/* 主区 */
+.main{flex:1;display:flex;min-height:0;overflow:hidden}
+.rail{width:var(--rail-w);flex:0 0 auto;display:flex;flex-direction:column;align-items:center;
+  gap:var(--s1);padding:var(--s2) 0;background:var(--surface);border-right:1px solid var(--line)}
+.rail .spacer{flex:1}
+.rbtn{width:40px;height:40px;border-radius:var(--r-ctrl);display:grid;place-items:center;cursor:pointer;
+  color:var(--text-muted);border:1px solid transparent;background:transparent;position:relative}
+.rbtn:hover{background:var(--hover);color:var(--text-dim)}
+.rbtn.act{background:var(--active);color:var(--text)}
+.rbtn.act::before{content:'';position:absolute;left:-8px;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--accent-int)}
+.rbtn:focus-visible{outline:none;border-color:var(--accent-int);box-shadow:0 0 0 3px var(--accent-glow)}
+.rbtn.new{border-style:dashed;border-color:var(--border)}
+.rbadge{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--st-pending);border:1px solid var(--surface)}
+
+/* 会话主区 */
+.chat{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.scope{height:var(--scope-h);flex:0 0 auto;display:flex;align-items:center;gap:var(--s2);
+  padding:0 var(--s4);border-bottom:1px solid var(--line);overflow:hidden}
+.scope .lbl{font-size:var(--fs-tiny);text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);flex:0 0 auto}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-caption);color:var(--text-dim);
+  background:var(--icon-bg);border:1px solid var(--line);border-radius:var(--r-small);padding:2px 7px;max-width:190px}
+.chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip .x{cursor:pointer;color:var(--text-faint);font-size:13px;line-height:1}
+.chip .x:hover{color:var(--st-fail)}
+
+.msgs{flex:1;min-height:0;overflow-y:scroll;overflow-x:hidden;padding:var(--s6) var(--s4)}
+.msgs::-webkit-scrollbar{width:10px}
+.msgs::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:3px solid var(--bg)}
+.msgs::-webkit-scrollbar-thumb:hover{background:var(--border-hover)}
+.msg{max-width:var(--msg-max-w);margin:0 auto var(--s5);display:flex;flex-direction:column;gap:var(--s2)}
+.mrole{font-size:var(--fs-micro);color:var(--text-faint);display:flex;align-items:center;gap:8px}
+.mrole .av{width:18px;height:18px;border-radius:var(--r-small);display:grid;place-items:center;font-size:9px;font-weight:590}
+.mrole .av.u{background:var(--icon-bg);color:var(--text-dim)}
+.mrole .av.a{background:var(--accent);color:#fff}
+.mtext{font-size:var(--fs-body);line-height:1.7;color:var(--text-dim)}
+.mtext p{margin:0 0 var(--s3)}
+.mtext p:last-child{margin-bottom:0}
+.mtext strong{font-weight:590;color:var(--text)}
+.mtext code.inl{font-family:'JetBrains Mono','Cascadia Mono',Consolas,Menlo,monospace;font-size:.88em;
+  background:var(--icon-bg);border:1px solid var(--line);border-radius:var(--r-micro);padding:1px 5px;color:var(--text)}
+.mtext ul,.mtext ol{margin:0 0 var(--s3);padding-left:1.35em}
+.mtext li{margin-bottom:var(--s1);line-height:1.65}
+.mtext blockquote{margin:0 0 var(--s3);padding:2px 0 2px var(--s3);border-left:2px solid var(--border-hover);color:var(--text-muted)}
+.mtext h4{margin:var(--s2) 0;font-size:var(--fs-h3);font-weight:590;color:var(--text)}
+.cb{border:1px solid var(--border);border-radius:var(--r-card);background:var(--code-bg);overflow:hidden;margin:0 0 var(--s3)}
+.cb .h{display:flex;align-items:center;justify-content:space-between;padding:6px var(--s3);
+  background:rgba(255,255,255,.02);border-bottom:1px solid var(--line)}
+.cb .lang{font-size:var(--fs-tiny);text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint)}
+.cb .cp{font-size:var(--fs-micro);color:var(--text-muted);background:transparent;border:1px solid var(--border);
+  border-radius:var(--r-micro);padding:2px 8px;cursor:pointer}
+.cb .cp:hover{color:var(--text);border-color:var(--border-hover);background:var(--hover)}
+.cb pre{margin:0;padding:var(--s3);overflow-x:auto;font-family:'JetBrains Mono','Cascadia Mono',Consolas,Menlo,monospace;
+  font-size:var(--fs-code);line-height:1.55;color:var(--text-dim);white-space:pre}
+.k{color:#B3A5FF}.f{color:#7FB3FF}.s{color:#56C08D}.n{color:#E2A35C}.t{color:#6FD3C7}.c{color:#62666D}
+
+/* 工具卡 */
+.tool{max-width:var(--msg-max-w);margin:0 auto var(--s5);border:1px solid var(--border);border-radius:var(--r-card);
+  background:var(--subtle);overflow:hidden}
+.tool .h{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3)}
+.tool .st{font-size:var(--fs-micro);padding:2px 8px;border-radius:9999px;font-weight:510}
+.tool .st.ok{color:var(--st-ok);background:var(--st-ok-bg)}
+.tool .st.run{color:var(--accent-int);background:var(--accent-bg)}
+.tool .st.pd{color:var(--st-pending);background:var(--st-pending-bg)}
+.tool .st.fa{color:var(--st-fail);background:var(--st-fail-bg)}
+.tool .nm2{font-size:var(--fs-small);color:var(--text)}
+.tool .arg{font-size:var(--fs-caption);color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.tool .bd{border-top:1px solid var(--line);padding:var(--s2) var(--s3);font-size:var(--fs-caption);
+  color:var(--text-muted);max-height:96px;overflow-y:scroll}
+.tool .tm{font-size:var(--fs-tiny);color:var(--text-faint);margin-left:auto}
+
+/* 输入区 */
+.inwrap{flex:0 0 auto;padding:0 var(--s4) var(--s6);background:linear-gradient(180deg,transparent,var(--bg) 35%)}
+.inbox{max-width:var(--msg-max-w);margin:0 auto;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-panel);padding:var(--s2) var(--s3);position:relative}
+.inbox:focus-within{border-color:var(--border-hover);box-shadow:0 0 0 3px var(--accent-glow)}
+.qa{display:flex;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s2)}
+.qa .q{font-size:var(--fs-caption);color:var(--text-muted);background:var(--subtle);border:1px solid var(--line);
+  border-radius:9999px;padding:4px 10px;cursor:pointer}
+.qa .q:hover{color:var(--text);background:var(--hover);border-color:var(--border-hover)}
+.inrow{display:flex;gap:var(--s2);align-items:flex-end}
+textarea.ta{flex:1;min-height:calc(38px * var(--scale));max-height:calc(200px * var(--scale));resize:none;
+  background:var(--input-bg);border:1px solid var(--border);border-radius:var(--r-ctrl);
+  color:var(--text);font-family:inherit;font-size:var(--fs-body);line-height:1.5;padding:9px 11px;overflow-y:scroll}
+textarea.ta:focus{outline:none;border-color:var(--accent-int);box-shadow:0 0 0 3px var(--accent-glow)}
+.send{height:calc(38px * var(--scale));padding:0 var(--s4);border-radius:var(--r-ctrl);border:none;cursor:pointer;
+  background:var(--accent);color:#fff;font-family:inherit;font-size:var(--fs-body-sm);font-weight:510;
+  display:inline-flex;align-items:center;gap:7px}
+.send:hover:not(:disabled){background:var(--accent-hover)}
+.send:disabled{opacity:.4;cursor:not-allowed}
+.send.stop{background:var(--st-fail-bg);color:var(--st-fail);border:1px solid rgba(229,72,77,.4)}
+.foot{display:flex;align-items:center;gap:var(--s4);margin-top:var(--s2);font-size:var(--fs-micro);color:var(--text-faint)}
+.foot kbd{font-family:'JetBrains Mono',monospace;background:var(--icon-bg);border:1px solid var(--line);
+  border-radius:var(--r-micro);padding:1px 5px;font-size:var(--fs-tiny);color:var(--text-muted)}
+
+/* 手柄 + 侧区 */
+.resizer{width:var(--resizer-w);flex:0 0 auto;cursor:col-resize;background:transparent;position:relative}
+.resizer::after{content:'';position:absolute;inset:0 2px;background:var(--line)}
+.resizer:hover::after,.resizer.drag::after{background:var(--accent-glow);inset:0 1px}
+.dock{width:var(--dock-w);flex:0 0 auto;display:flex;flex-direction:column;background:var(--surface);
+  border-left:1px solid var(--line);min-height:0;overflow:hidden}
+.tabs{height:var(--tabs-h);flex:0 0 auto;display:flex;align-items:stretch;gap:2px;padding:0 var(--s2);
+  border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden}
+.tabs::-webkit-scrollbar{height:0}
+/* #pages 必须是 flex 子项且 min-height:0 —— 这正是 v8 的 region_fill 契约（修 D2） */
+#pages{flex:1;min-height:0;display:flex;flex-direction:column}
+.tab{display:inline-flex;align-items:center;gap:7px;padding:0 var(--s3);cursor:pointer;white-space:nowrap;
+  font-size:var(--fs-small);color:var(--text-muted);border-bottom:2px solid transparent;max-width:190px}
+.tab .tn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab:hover{color:var(--text-dim);background:var(--hover)}
+.tab.act{color:var(--text);border-bottom-color:var(--accent-int);background:var(--subtle)}
+.tab .reg{font-size:var(--fs-tiny);color:var(--text-faint);background:var(--icon-bg);border-radius:var(--r-micro);padding:0 4px}
+.page{flex:1;min-height:0;display:none;flex-direction:column}
+.page.act{display:flex}.phead{flex:0 0 auto;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);border-bottom:1px solid var(--line)}
+.pbody{flex:1;min-height:0;overflow-y:scroll;padding:var(--s3)}
+.pbody::-webkit-scrollbar{width:10px}
+.pbody::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:3px solid var(--surface)}
+
+/* 文件树 */
+.tree{list-style:none;margin:0;padding:0;font-size:var(--fs-body-sm)}
+.tree li{display:flex;align-items:center;gap:7px;padding:3px var(--s2);border-radius:var(--r-small);cursor:pointer;min-width:0}
+.tree li:hover{background:var(--hover)}
+.tree .ic{flex:0 0 auto;opacity:.65}
+.tree .lb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;color:var(--text-dim)}
+.tree .lb.bad{overflow:visible;text-overflow:clip;white-space:nowrap;color:var(--text-muted)}
+.tree .mut{color:var(--text-faint);font-size:var(--fs-micro);margin-left:auto;flex:0 0 auto}
+.git{font-size:var(--fs-tiny);font-weight:590;padding:0 5px;border-radius:var(--r-micro);flex:0 0 auto}
+.git.M{color:var(--st-pending);background:var(--st-pending-bg)}
+.git.A,.git.U{color:var(--st-ok);background:var(--st-ok-bg)}
+.git.D{color:var(--st-fail);background:var(--st-fail-bg)}
+
+/* 假滚动模式 */
+.v8.bad .fake{overflow:hidden!important;max-height:220px;position:relative}
+.v8.bad .fake::after{content:'⚠ 溢出被 clip —— 滚轮无效（缺陷 C1）';position:absolute;left:0;right:0;bottom:0;
+  text-align:center;font-size:var(--fs-tiny);color:var(--st-fail);background:var(--st-fail-bg);padding:3px 0}
+
+/* D2 演示：页签列里 height:100% + 兄弟条 → 底条被裁出视口（D2 警告条固定呈现） */
+.v8.bad .termwrap{position:relative}
+.v8.bad .term{flex:0 0 auto;height:100%}
+.v8.bad .termwrap::after{content:'⚠ height:100% + 兄弟条 → 底条被永久裁出视口（缺陷 D2）';position:absolute;left:0;right:0;bottom:0;
+  text-align:center;font-size:var(--fs-tiny);color:var(--st-fail);background:var(--st-fail-bg);padding:3px 0}
+
+/* 编辑器 */
+.ed{display:flex;height:100%;font-family:'JetBrains Mono','Cascadia Mono',Consolas,Menlo,monospace;font-size:var(--fs-code);line-height:1.55}
+.ed .gutter{flex:0 0 auto;padding:var(--s2) var(--s2) var(--s2) var(--s3);color:var(--text-faint);text-align:right;user-select:none;border-right:1px solid var(--line);white-space:pre;font-variant-numeric:tabular-nums}
+.ed .code{flex:1;min-width:0;padding:var(--s2) var(--s3);white-space:pre;overflow:auto;color:var(--text-dim)}
+
+/* 终端 */
+.term{flex:1;min-height:0;background:var(--code-bg);padding:var(--s3);font-family:'JetBrains Mono','Cascadia Mono',Consolas,Menlo,monospace;font-size:var(--fs-code);line-height:1.6;overflow-y:scroll}
+.term .row{white-space:pre;color:var(--text-dim)}
+.term .pr{color:var(--st-ok)}
+.term-foot{flex:0 0 auto;display:flex;align-items:center;gap:var(--s3);padding:0 var(--s3);height:32px;
+  border-top:1px solid var(--line);background:var(--surface);font-size:var(--fs-micro);color:var(--text-muted)}
+
+/* 源代码控制 */
+.srcline{display:flex;align-items:center;gap:var(--s2);padding:5px var(--s2);border-radius:var(--r-small);font-size:var(--fs-body-sm);min-width:0}
+.srcline:hover{background:var(--hover)}
+.srcline .lb2{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-dim)}
+.srcline .sub{color:var(--text-faint);font-size:var(--fs-micro);white-space:nowrap}
+.srcline .box{width:13px;height:13px;border:1px solid var(--border-hover);border-radius:var(--r-micro);flex:0 0 auto;cursor:pointer;display:grid;place-items:center;font-size:9px;color:var(--bg)}
+.srcline .box.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn{font-family:inherit;font-size:var(--fs-body-sm);border-radius:var(--r-ctrl);padding:6px var(--s3);cursor:pointer;
+  border:1px solid var(--border);background:var(--subtle);color:var(--text-dim)}
+.btn:hover{background:var(--hover);border-color:var(--border-hover);color:var(--text)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:510}
+.btn.pri:hover{background:var(--accent-hover)}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-int),0 0 0 5px var(--accent-glow)}
+input.fi,textarea.fi{width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:var(--r-ctrl);
+  color:var(--text);font-family:inherit;font-size:var(--fs-body-sm);padding:7px 10px}
+input.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent-int);box-shadow:0 0 0 3px var(--accent-glow)}
+.sect{font-size:var(--fs-tiny);text-transform:uppercase;letter-spacing:.07em;color:var(--text-faint);margin:var(--s4) 0 var(--s2)}
+
+/* 状态栏 */
+.status{height:var(--status-h);flex:0 0 auto;display:flex;align-items:center;gap:var(--s4);
+  padding:0 var(--s4);background:var(--surface);border-top:1px solid var(--border);font-size:var(--fs-micro);color:var(--text-muted)}
+.status .seg{display:inline-flex;align-items:center;gap:6px;height:20px;min-width:0}
+.status .seg .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.status .warn{color:var(--st-pending)}
+
+/* ===== 浮层 ===== */
+.scrim{position:absolute;inset:0;background:var(--overlay);opacity:0;transition:opacity .16s ease}
+.scrim.show{opacity:1}
+.drawer{position:absolute;top:calc(var(--topbar-h));bottom:var(--status-h);left:var(--rail-w);width:var(--drawer-w);
+  background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;
+  transform:translateX(-104%);transition:transform .18s ease}
+.drawer.show{transform:none}
+.drawer .dh{display:flex;align-items:center;justify-content:space-between;padding:var(--s2) var(--s3);border-bottom:1px solid var(--line)}
+.drawer .dt{font-size:var(--fs-h3);font-weight:510}
+.dresizer{position:absolute;top:0;bottom:0;right:-3px;width:6px;cursor:col-resize}
+.modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-46%);background:var(--elevated);
+  border:1px solid var(--border-hover);border-radius:var(--r-panel);opacity:0;transition:opacity .16s,transform .16s;
+  box-shadow:none}
+.modal.show{opacity:1;transform:translate(-50%,-50%)}
+.settings{width:640px;height:82%;display:flex;flex-direction:column;overflow:hidden}
+.settings .sh{padding:var(--s3) var(--s4);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+.settings .sb{flex:1;min-height:0;display:flex}
+.snab{width:160px;flex:0 0 auto;border-right:1px solid var(--line);padding:var(--s2);display:flex;flex-direction:column;gap:2px}
+.snab .it{font-size:var(--fs-body-sm);padding:6px var(--s2);border-radius:var(--r-small);cursor:pointer;color:var(--text-muted)}
+.snab .it:hover{background:var(--hover);color:var(--text-dim)}
+.snab .it.act{background:var(--active);color:var(--text)}
+.sform{flex:1;min-width:0;overflow-y:scroll;padding:var(--s4)}
+.field{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);padding:var(--s2) 0;border-bottom:1px solid var(--line)}
+.field .k2{font-size:var(--fs-body-sm);color:var(--text-dim)}
+.field .d{font-size:var(--fs-micro);color:var(--text-faint);margin-top:2px}
+.mlist{max-height:150px;overflow-y:scroll;border:1px solid var(--line);border-radius:var(--r-ctrl);padding:var(--s1)}
+.mlist.bad2{overflow:hidden;position:relative}
+.mlist.bad2::after{content:'⚠ max_height 但无滚动（缺陷 C2）';position:absolute;left:0;right:0;bottom:0;
+  text-align:center;font-size:var(--fs-tiny);color:var(--st-fail);background:var(--st-fail-bg)}
+.mlist .mr{font-size:var(--fs-caption);padding:4px var(--s2);border-radius:var(--r-small);color:var(--text-dim)}
+.mlist .mr:hover{background:var(--hover)}
+
+.confirm{width:560px;display:flex;flex-direction:column;overflow:hidden}
+.confirm .ch{padding:var(--s4) var(--s4) var(--s2);font-size:var(--fs-h3);font-weight:590}
+.confirm .cbd{padding:0 var(--s4) var(--s3);font-size:var(--fs-body-sm);color:var(--text-dim);line-height:1.65}
+.diff{border:1px solid var(--line);border-radius:var(--r-card);background:var(--code-bg);max-height:150px;
+  overflow-y:scroll;font-family:'JetBrains Mono',monospace;font-size:var(--fs-caption);line-height:1.5;margin-top:var(--s3)}
+.diff .dl{padding:1px var(--s3);white-space:pre}
+.diff .ad{background:rgba(48,164,108,.12);color:#7CCFA0}
+.diff .rm{background:rgba(229,72,77,.12);color:#F09AA0}
+.confirm .cf{display:flex;justify-content:flex-end;gap:var(--s2);padding:var(--s3) var(--s4);border-top:1px solid var(--line)}
+
+.palette{width:560px;max-height:440px;background:var(--elevated);border:1px solid var(--border-hover);
+  border-radius:var(--r-panel);overflow:hidden;display:flex;flex-direction:column}
+.palette .ph{padding:var(--s3)}
+.palette .pl{flex:1;min-height:0;overflow-y:scroll;padding:0 var(--s2) var(--s2)}
+.pitem{display:flex;align-items:center;gap:var(--s3);padding:8px var(--s2);border-radius:var(--r-ctrl);font-size:var(--fs-body-sm);cursor:pointer;min-width:0}
+.pitem .lb3{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pitem .grp{font-size:var(--fs-tiny);color:var(--text-faint)}
+.pitem .kb{font-family:'JetBrains Mono',monospace;font-size:var(--fs-tiny);color:var(--text-muted);
+  background:var(--icon-bg);border:1px solid var(--line);border-radius:var(--r-micro);padding:1px 6px;flex:0 0 auto}
+.pitem.sel{background:var(--active)}
+.pitem.dead .lb3{color:var(--text-faint);text-decoration:line-through}
+.pitem .flag{font-size:var(--fs-tiny);color:var(--st-fail)}
+
+.compmenu{position:absolute;background:var(--elevated);border:1px solid var(--border-hover);border-radius:var(--r-card);
+  padding:var(--s1);min-width:320px;max-height:180px;overflow-y:scroll;display:none}
+.compmenu.show{display:block}
+.compmenu .ci{display:flex;align-items:center;gap:var(--s2);padding:5px var(--s2);border-radius:var(--r-small);font-size:var(--fs-caption);cursor:pointer;min-width:0}
+.compmenu .ci .p{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-dim)}
+.compmenu .ci.sel{background:var(--active);color:var(--text)}
+
+/* 模型选择 pill + popover（composer 右下角，参照 Claude/Zed/Cursor 的信息架构、沿用 v7-Linear Tokens） */
+.foot{position:relative}
+.mplslot{flex:0 0 auto;width:186px}
+.mpl{position:absolute;right:0;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-tiny);color:var(--text-muted);
+  background:var(--icon-bg);border:1px solid var(--line);border-radius:9999px;padding:0 10px 0 9px;cursor:pointer;
+  white-space:nowrap;max-width:280px;font-family:inherit}
+.mpl:hover{color:var(--text-dim);background:var(--hover);border-color:var(--border-hover)}
+.mpl.on{border-color:var(--accent-int);box-shadow:0 0 0 2px var(--accent-glow)}
+.mpl .mn{max-width:170px;overflow:hidden;text-overflow:ellipsis}
+.mpl .sep{width:1px;height:10px;background:var(--line)}
+.mpl .lv{font-weight:510;color:var(--accent-int)}
+.mpl .lv.off{color:var(--text-faint)}
+.mpl .cv{color:var(--text-faint);font-size:9px}
+.mpop{position:absolute;right:0;bottom:calc(100% + 6px);width:348px;background:var(--elevated);
+  border:1px solid var(--border-hover);border-radius:var(--r-card);overflow:hidden;display:none}
+.mpop.show{display:block}
+.mpop .msearch{padding:10px 10px 6px}
+.mdrop{max-height:236px;overflow-y:scroll;padding:2px 6px 6px}
+.mpop .mgrp{font-size:var(--fs-tiny);color:var(--text-faint);padding:6px 8px 2px;letter-spacing:.04em}
+.mpit{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r-ctrl);font-size:var(--fs-caption);cursor:pointer;color:var(--text-dim);min-width:0}
+.mpit .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mpit .pr{font-size:var(--fs-tiny);color:var(--text-faint);flex:0 0 auto}
+.mpit:hover{background:var(--hover)}
+.mpit.sel{background:var(--active);color:var(--text)}
+.mpit .ck{color:var(--accent-int);font-weight:590;flex:0 0 auto}
+.mpit.dead{color:var(--text-faint);cursor:default}
+.mpop .mlv{padding:8px 10px 10px;border-top:1px solid var(--line)}
+.mpop .mkl{font-size:var(--fs-tiny);color:var(--text-faint);margin-bottom:6px}
+.mseg{display:flex;gap:2px;background:var(--subtle);border:1px solid var(--line);border-radius:var(--r-ctrl);padding:2px}
+.mseg button{flex:1;border:none;background:transparent;color:var(--text-muted);font-family:inherit;font-size:var(--fs-caption);padding:5px 0;border-radius:calc(var(--r-ctrl) - 2px);cursor:pointer}
+.mseg button:hover{color:var(--text-dim);background:var(--hover)}
+.mseg button.on{background:var(--active);color:var(--text);font-weight:510}
+.mpop .m3d{padding:10px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;
+  background:linear-gradient(180deg,var(--elevated),var(--subtle))}
+.mpop .orb{width:34px;height:34px;border-radius:50%;flex:0 0 auto;
+  background:radial-gradient(circle at 30% 30%,var(--accent-hover),var(--accent) 62%,var(--accent-int));
+  box-shadow:0 0 12px var(--accent-glow);position:relative}
+.mpop .orb::after{content:'';position:absolute;right:4px;top:7px;width:10px;height:14px;border-radius:50%;background:rgba(255,255,255,.28)}
+.mpop .m3d .tx{font-size:var(--fs-caption);color:var(--text-muted);line-height:1.5;min-width:0}
+.mpop .m3d .tx b{color:var(--text);font-weight:510}
+
+.v8-tip{position:absolute;background:var(--tooltip-bg);color:#F7F8F8;font-size:var(--fs-micro);
+  padding:5px 9px;border-radius:var(--r-ctrl);pointer-events:none;opacity:0;transition:opacity .12s;white-space:nowrap;z-index:500}
+.v8-tip.show{opacity:1}
+.toast{position:absolute;right:var(--s5);bottom:calc(var(--status-h) + var(--s4));background:var(--tooltip-bg);
+  border-radius:var(--r-ctrl);padding:var(--s2) var(--s3);font-size:var(--fs-body-sm);color:#F7F8F8;
+  display:flex;align-items:center;gap:var(--s2);opacity:0;transform:translateY(8px);transition:.18s}
+.toast.show{opacity:1;transform:none}
+
+/* 图层检查器 */
+.insp{position:absolute;inset:0;pointer-events:none;display:none}
+.v8.inspect .insp{display:block}
+.band{position:absolute;left:8px;right:8px;border:1px dashed;border-radius:var(--r-small);
+  font-size:var(--fs-tiny);letter-spacing:.06em;padding:2px 8px}
+.legend{display:none;gap:var(--s2);flex-wrap:wrap}
+.v8.inspect .legend{display:flex}
+.legend .li{font-size:var(--fs-tiny);display:inline-flex;align-items:center;gap:6px;color:var(--text-muted)}
+.legend .sw{width:10px;height:10px;border-radius:2px}
+
+/* 说明面板 */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+@media (max-width:1080px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--s4)}
+.card h3{margin:0 0 var(--s3);font-size:var(--fs-h3);font-weight:590}
+.card .note{font-size:var(--fs-micro);color:var(--text-faint);margin-top:var(--s3);line-height:1.6}
+.cmp{display:flex;flex-direction:column;gap:var(--s2)}
+.cmp .r{display:flex;align-items:flex-start;gap:var(--s2);font-size:var(--fs-body-sm);line-height:1.55;color:var(--text-dim)}
+.cmp .tag{flex:0 0 auto;font-size:var(--fs-tiny);padding:2px 7px;border-radius:9999px;margin-top:1px;font-weight:510}
+.cmp .tag.b{color:var(--st-fail);background:var(--st-fail-bg)}
+.cmp .tag.a{color:var(--st-ok);background:var(--st-ok-bg)}
+.cmp code{font-family:'JetBrains Mono',monospace;font-size:.86em;color:var(--text);background:var(--icon-bg);padding:1px 4px;border-radius:2px}
+.ledger{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:var(--s2)}
+.lg{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-caption);padding:6px var(--s2);
+  border:1px solid var(--line);border-radius:var(--r-small);background:var(--subtle)}
+.lg .id{font-family:'JetBrains Mono',monospace;color:var(--text-faint);flex:0 0 auto}
+.lg .ds{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-muted)}
+.lg .ok{flex:0 0 auto;font-size:var(--fs-tiny);padding:1px 7px;border-radius:9999px;color:var(--st-ok);background:var(--st-ok-bg)}
+.lg .warn{color:var(--st-pending);background:var(--st-pending-bg)}
+.slider{display:flex;align-items:center;gap:var(--s3);font-size:var(--fs-micro);color:var(--text-muted)}
+input[type=range]{accent-color:var(--accent-int)}
+</style>
+
+<div class="v8-head">
+  <div>
+    <h1>XGent UI v8 · 交互原型</h1>
+    <div class="sub">保留 v7（Linear / ADR-0014）视觉基准，重建交互架构层。下方是可点击的真实布局；「缺陷复现」开关会让界面退回 as-built 行为，与 v8 修复逐一对照。所有色值、尺寸、字号取自 <span class="mono">crates/xgent_ui/src/theme.rs</span>。</div>
+  </div>
+  <div class="v8-chips">
+    <span class="v8-chip">顶栏 52 · 图标轨 52 · 状态栏 32</span>
+    <span class="v8-chip">靛紫 #5E6AD2 单一强调</span>
+    <span class="v8-chip">明度阶梯代替投影</span>
+    <span class="v8-chip">三平台一阶</span>
+  </div>
+</div>
+
+<div class="ctl">
+  <span class="lbl">演示开关</span>
+  <button class="tgl" id="tBad" aria-pressed="false"><span class="dot"></span>缺陷复现（v7 as-built）</button>
+  <button class="tgl" id="tInsp" aria-pressed="false"><span class="dot"></span>图层检查器</button>
+  <button class="tgl" id="tDense" aria-pressed="false"><span class="dot"></span>紧凑密度</button>
+  <span class="lbl" style="margin-left:8px">浮层</span>
+  <button class="tgl" id="bSettings"><span class="dot"></span>设置面板</button>
+  <button class="tgl" id="bPalette"><span class="dot"></span>命令面板</button>
+  <button class="tgl" id="bConfirm"><span class="dot"></span>工具确认弹窗</button>
+  <button class="tgl" id="bDrawer"><span class="dot"></span>文件抽屉</button>
+  <div class="slider" style="margin-left:auto">
+    <span>侧区宽度</span><input type="range" id="rDock" min="380" max="900" value="720" step="2">
+    <span class="mono" id="rDockV">720</span>
+  </div>
+</div>
+
+<div class="stage">
+<div class="app" id="app">
+
+  <div class="topbar">
+    <div class="brand">X</div>
+    <div class="proj">xgent</div>
+    <div class="vsep"></div>
+    <div class="pill" id="newSess">＋ 新会话</div>
+    <div class="spacer"></div>
+    <div class="pill" id="agentPill"><span class="led"></span><span id="agentTxt">空闲</span></div>
+    <div class="pill" id="provPill">claude-opus-4-1</div>
+    <button class="ibtn" id="cmdBtn" aria-label="命令面板">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.5 6.5h5M5.5 9.5h3"/></svg>
+    </button>
+    <button class="ibtn" id="gearBtn" aria-label="设置">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M14.2 8h-1.6M3.4 8H1.8M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1M12.4 12.4l-1.1-1.1M4.7 4.7L3.6 3.6"/></svg>
+    </button>
+  </div>
+
+  <div class="main">
+    <div class="rail" id="rail">
+      <button class="rbtn act" data-act="chat" aria-label="对话">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h9A2.5 2.5 0 0 1 17 5.5v6A2.5 2.5 0 0 1 14.5 14H8l-5 3.5V14a2 2 0 0 1 0-4z"/></svg>
+      </button>
+      <button class="rbtn" data-act="files" aria-label="文件">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h3.2l1.6 2H15a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </button>
+      <button class="rbtn" data-act="history" aria-label="历史会话">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="6.6"/><path d="M10 6.2V10l2.6 1.6"/></svg>
+      </button>
+      <button class="rbtn" data-act="terminal" aria-label="终端">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.6" y="3.6" width="14.8" height="12.8" rx="2.2"/><path d="M5.6 8l2.2 2-2.2 2M9.6 12.4h4"/></svg>
+      </button>
+      <!-- 注册表驱动的新槽位（M8-T1 探针） -->
+      <button class="rbtn new" data-act="git" id="railGit" style="display:none" aria-label="源代码管理">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="14.5" r="2"/><circle cx="14" cy="8" r="2"/><path d="M6 7.5v5M8 5.5h2.5A1.5 1.5 0 0 1 12 7v1"/></svg>
+        <span class="rbadge"></span>
+      </button>
+      <button class="rbtn new" data-act="mcp" id="railMcp" style="display:none" aria-label="MCP">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2.8l6.2 3.6v7.2L10 17.2 3.8 13.6V6.4z"/><circle cx="10" cy="10" r="2.2"/></svg>
+      </button>
+      <div class="spacer"></div>
+    </div>
+
+    <div class="chat">
+      <div class="scope">
+        <span class="lbl">上下文</span>
+        <span class="chip"><span class="nm">crates/xgent_ui/src/theme.rs</span><span class="x" data-chip="theme">×</span></span>
+        <span class="chip"><span class="nm">crates/xgent_ui/src/layout.rs</span><span class="x" data-chip="layout">×</span></span>
+        <span class="chip" style="max-width:260px"><span class="nm">crates/xgent_app/src/startup.rs</span><span class="x" data-chip="startup">×</span></span>
+        <span class="chip" id="addChip" style="color:var(--text-muted)">＋ 添加</span>
+        <div class="spacer"></div>
+        <span class="lbl mono" id="tokHint">8.2k / 200k</span>
+      </div>
+
+      <div class="msgs" id="msgs">
+        <div class="msg">
+          <div class="mrole"><span class="av u">你</span> 用户</div>
+          <div class="mtext"><p>把 <code class="inl">Theme</code> 改成可由配置热驱动，并说明会不会影响 <code class="inl">diff_view</code> 里现场构造主题的地方。</p></div>
+        </div>
+
+        <div class="msg">
+          <div class="mrole"><span class="av a">A</span> 助手 <span style="color:var(--text-faint)">14:02</span></div>
+          <div class="mtext">
+            <p>会。有 <strong>两处</strong>需要一并处理，我按影响面排序：</p>
+            <h4>1. 主题权威改成可替换句柄</h4>
+            <p>现在 <code class="inl">Theme</code> 在 Startup 烘焙一次（<span class="mono">layout.rs:60</span>），spawn 时把色值取走就不再更新。改为 <code class="inl">ThemeHandle { theme, generation }</code>，节点带 <code class="inl">Themed { role, gen }</code>，重涂是<strong>属性写回</strong>而非重建节点。</p>
+            <div class="cb">
+              <div class="h"><span class="lang">rust</span><button class="cp" data-copy>复制</button></div>
+              <pre><span class="c">// crates/xgent_ui/src/theme.rs</span>
+<span class="k">#[derive</span>(<span class="t">Resource</span>)]
+<span class="k">pub struct</span> <span class="t">ThemeHandle</span> {
+    <span class="k">pub</span> theme: <span class="t">Theme</span>,
+    <span class="k">pub</span> generation: <span class="t">u32</span>,  <span class="c">// 每次热应用自增</span>
+}
+
+<span class="k">#[derive</span>(<span class="t">Component</span>)]
+<span class="k">pub struct</span> <span class="t">Themed</span> { <span class="k">pub</span> role: <span class="t">ThemeRole</span>, <span class="k">pub</span> gen: <span class="t">u32</span> }
+
+<span class="k">fn</span> <span class="f">repaint_on_theme_change</span>(
+    handle: <span class="t">Res</span>&lt;<span class="t">ThemeHandle</span>&gt;,
+    <span class="k">mut</span> q: <span class="t">Query</span>&lt;(<span class="k">&amp;</span><span class="t">Themed</span>, <span class="k">&amp;mut</span> <span class="t">BackgroundColor</span>)&gt;,
+) {
+    <span class="k">if</span> handle.<span class="f">is_changed</span>() { <span class="c">// gen 落后才写，避免逐帧</span>
+        <span class="k">for</span> (th, <span class="k">mut</span> bg) <span class="k">in</span> q.<span class="f">iter_mut</span>() {
+            <span class="k">if</span> th.gen != handle.generation {
+                bg.0 = handle.theme.<span class="f">resolve</span>(th.role);
+            }
+        }
+    }
+}</pre>
+            </div>
+            <ul>
+              <li><strong>必须</strong>：全部色值收敛到语义令牌，面板只消费 <code class="inl">ThemeRole</code>。</li>
+              <li><strong>顺带</strong>：亮色主题只需换 raw 色板，不动面板代码。</li>
+              <li><span class="mono">diff_view.rs:217</span> 现场 <code class="inl">Theme::dark()</code> → 改为读活句柄。</li>
+            </ul>
+            <blockquote>依据 ADR-0014 的裁剪 5：亮色交互面用半透黑，明度阶梯反向递减。</blockquote>
+          </div>
+        </div>
+
+        <div class="tool">
+          <div class="h">
+            <span class="st ok">成功</span>
+            <span class="nm2">edit_file</span>
+            <span class="arg mono" id="toolArg">crates/xgent_ui/src/theme.rs — Theme::dark() 可见性降为 pub(crate)，新增 ThemeHandle / Themed / repaint_on_theme_change</span>
+            <span class="tm">1.8s</span>
+          </div>
+          <div class="bd mono">+ #[derive(Resource)] pub struct ThemeHandle {{ theme: Theme, generation: u32 }}
++ #[derive(Component)] pub struct Themed {{ role: ThemeRole, gen: u32 }}
++ fn repaint_on_theme_change(...) — 14 行
+- pub fn dark() -&gt; Self  (可见性 pub → pub(crate))
+… 另有 6 处调用点改为 Res&lt;ThemeHandle&gt;</div>
+        </div>
+
+        <div id="streamSlot"></div>
+      </div>
+
+      <div class="inwrap">
+        <div class="inbox">
+          <div class="qa">
+            <span class="q">解释这个文件</span><span class="q">补单元测试</span><span class="q">修 lint 警告</span>
+            <span class="q">重构为 trait</span><span class="q">检查中文分词</span>
+          </div>
+          <div class="inrow">
+            <textarea class="ta" id="input" placeholder="描述你要做的事，@ 引用文件…"></textarea>
+            <button class="send" id="sendBtn">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 11.5v-9M3 6.5 7 2.5l4 4"/></svg>
+              发送
+            </button>
+          </div>
+          <div class="foot">
+            <span><kbd>Enter</kbd> 发送</span><span><kbd>Shift Enter</kbd> 换行</span><span><kbd>@</kbd> 引用文件</span>
+            <span><kbd>Esc</kbd> 停止</span>
+            <div class="spacer" style="flex:1"></div>
+            <span class="mono" id="charHint">0 字符</span>
+            <span class="mplslot"></span>
+            <button class="mpl" id="mpill" title="模型与思考等级（composer 右下角常驻入口）"><span class="mn">claude-opus-4-1</span><span class="sep"></span><span class="lv">思考 low</span><span class="cv">▾</span></button>
+          </div>
+          <div class="compmenu" id="comp"></div>
+          <div class="mpop" id="mpop"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="resizer" id="resizer"></div>
+
+    <div class="dock" id="dock">
+      <div class="tabs" id="tabs"></div>
+      <div id="pages"></div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="seg"><span class="mono" style="color:var(--accent-int)">⎇ main</span></span>
+    <span class="seg"><span id="gitCount">3 变更</span></span>
+    <div class="spacer" style="flex:1"></div>
+    <span class="seg" id="provSeg"><span class="t">provider: anthropic · claude-opus-4-1</span></span>
+    <span class="seg"><span class="t mono" id="tokSeg">8.2k tok</span></span>
+    <span class="seg"><span class="t mono" id="costSeg">$0.00</span></span>
+    <span class="seg warn" id="badSeg" style="display:none"><span class="t">⚠ 状态栏段与浮层无层级策略</span></span>
+  </div>
+
+  <!-- ===== 浮层层（BASE 之上）===== -->
+  <div class="layer" id="layerDrawer">
+    <div class="scrim" id="drawerScrim"></div>
+    <div class="drawer" id="drawer">
+      <div class="dh"><span class="dt">资源管理器</span><button class="ibtn" data-close-drawer style="width:24px;height:24px">✕</button></div>
+      <div class="pbody fake" id="treeBody" style="padding:var(--s2)"></div>
+      <div class="dresizer" id="drawerRes"></div>
+    </div>
+  </div>
+
+  <div class="layer" id="layerModal">
+    <div class="scrim" id="scrim"></div>
+    <div class="modal settings" id="mSettings">
+      <div class="sh"><span style="font-size:var(--fs-h3);font-weight:590">设置</span><button class="ibtn" data-pop="settings">✕</button></div>
+      <div class="sb">
+        <div class="snab">
+          <div class="it act">模型与服务商</div><div class="it">工具与安全</div><div class="it">检索</div>
+          <div class="it">编辑器</div><div class="it">外观</div><div class="it">快捷键</div>
+          <div class="it" id="mcpSect" style="display:none">MCP</div>
+          <div class="it" id="plugSect" style="display:none">插件</div>
+        </div>
+        <div class="sform">
+          <div class="sect">外观 · 主题</div>
+          <div class="field"><div><div class="k2">密度</div><div class="d">作用于尺寸令牌，字号走整档阶梯</div></div>
+            <div style="display:flex;gap:6px"><button class="btn" data-dens="comfort">舒适</button><button class="btn" data-dens="compact">紧凑</button></div></div>
+          <div class="field"><div><div class="k2">主题预设</div><div class="d" id="themeNote">改设置即时生效，无需重启（修 G1）</div></div>
+            <select class="fi" style="width:150px"><option>Linear 暗色（v7）</option><option>Linear 亮色</option></select></div>
+          <div class="sect">模型 · 服务商</div>
+          <div class="field"><div class="k2">服务商</div><select class="fi" style="width:180px"><option>anthropic</option><option>openai</option></select></div>
+          <div class="field"><div class="k2">API Key</div><input class="fi" style="width:180px" type="password" value="sk-ant"></div>
+          <div class="d" style="margin:var(--s3) 0 var(--s2)">可用模型（200 条，验证滚动契约）</div>
+          <div class="mlist" id="mlist"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal confirm" id="mConfirm">
+      <div class="ch">允许执行 <span class="mono" style="color:var(--accent-int)">write_file</span>？</div>
+      <div class="cbd">
+        将修改 <span class="mono">crates/xgent_ui/src/theme.rs</span>。默认所有工具调用均需确认（AGENTS.md §5.4），可按工具 id 调整为自动允许或拒绝。
+        <div class="diff fake">
+          <div class="dl rm">- pub fn dark() -&gt; Self {</div>
+          <div class="dl ad">+ pub(crate) fn dark() -&gt; Self {</div>
+          <div class="dl ad">+ #[derive(Resource)] pub struct ThemeHandle { theme: Theme, generation: u32 }</div>
+          <div class="dl ad">+ #[derive(Component)] pub struct Themed { role: ThemeRole, gen: u32 }</div>
+          <div class="dl ad">+ fn repaint_on_theme_change(handle: Res&lt;ThemeHandle&gt;, mut q: Query&lt;(&amp;Themed, &amp;mut BackgroundColor)&gt;) {</div>
+          <div class="dl ad">+     if handle.is_changed() { for (th, mut bg) in q.iter_mut() { if th.gen != handle.generation { bg.0 = handle.theme.resolve(th.role); } } }</div>
+          <div class="dl ad">+ }</div>
+          <div class="dl">  … 另有 6 处调用点改为 Res&lt;ThemeHandle&gt;</div>
+        </div>
+      </div>
+      <div class="cf"><button class="btn" data-pop="confirm">拒绝</button><button class="btn pri" data-pop="confirm">允许</button></div>
+    </div>
+
+    <div class="modal palette" id="mPalette" style="width:560px">
+      <div class="ph"><input class="fi" id="pq" placeholder="输入命令或 @ 引用文件…"></div>
+      <div class="pl" id="plist"></div>
+    </div>
+  </div>
+
+  <div class="layer" id="layerTip"><div class="v8-tip" id="tip"></div></div>
+  <div class="layer" id="layerToast"><div class="toast" id="toast"><span id="toastTxt"></span></div></div>
+
+  <div class="insp" id="insp"></div>
+</div>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<div class="grid2">
+  <div class="card">
+    <h3>缺陷 → 修复 对照</h3>
+    <div class="cmp">
+      <div class="r"><span class="tag b">C1</span><span>假滚动 <code>Overflow::clip_y()</code> + <code>ScrollPosition</code>，全仓 9 处，clip 轴不响应滚轮 → 列表实际滚不动</span></div>
+      <div class="r"><span class="tag a">M3</span><span><code>ScrollFrame</code> 唯一入口，overflow 由构造器决定、不可外部覆盖；文件树 / 模型列表 / diff 均真实可滚</span></div>
+      <div class="r"><span class="tag b">B1</span><span>z 值散落：仅 8 处 <code>GlobalZIndex</code>，设置面板/命令面板/冲突弹窗<strong>无 z</strong> → 抽屉盖住设置并吞点击</span></div>
+      <div class="r"><span class="tag a">M1</span><span>六静态层根 + <code>ModalStack</code>；<code>require_markers=true</code> 让空容器对拾取惰性（bevy 0.20 默认 false 即吞点击的机制来源）</span></div>
+      <div class="r"><span class="tag b">C3</span><span>长文本无省略（bevy 0.20 <strong>根本没有</strong> <code>TextTruncate</code>，<code>TextBounds</code> 只按字符硬裁）</span></div>
+      <div class="r"><span class="tag a">M3</span><span>自建 <code>xui::Ellipsis</code>：measure → 二分前缀 → 追加 <code>…</code>，带缓存与迟滞；路径用中段省略</span></div>
+      <div class="r"><span class="tag b">D1</span><span><code>SideViewContent</code> 是 closed 5 变体枚举 → Git / MCP / 插件面板无处注册</span></div>
+      <div class="r"><span class="tag a">M5</span><span>注册表驱动：点下方「注册 Git 面板」即新增页签 + rail 项，<strong>不改任何布局文件</strong>（M8-T1 北极星探针）</span></div>
+      <div class="r"><span class="tag b">E1</span><span>助手回复是一坨扁平 <code>Text</code>（R3-5 遗留，最大单块缺口）</span></div>
+      <div class="r"><span class="tag a">M6</span><span>块模型 + 单节点多 <code>TextSection</code> 承载行内样式；代码块带语言标签与复制</span></div>
+      <div class="r"><span class="tag b">A1</span><span>等宽字体只在 macOS 解析成功，其余平台落回 Inter（比例字体）→ 编辑器/终端/diff 对齐整体失效</span></div>
+      <div class="r"><span class="tag a">M4</span><span>三平台候选栈 + 内嵌 JetBrains Mono 兜底，永不回退比例字体；<code>display_width()</code> 让中文占 2 格</span></div>
+      <div class="r"><span class="tag b">F1</span><span><code>palette.open_files</code> 注册了却全仓零消费者；<code>input.focus =&gt; {}</code> 是空实现</span></div>
+      <div class="r"><span class="tag a">M7</span><span><code>HotkeyAction.handler</code> 为必填函数指针，注册即生效；启动期断言注册表 ≡ 分发表</span></div>
+    </div>
+    <div class="note">打开「缺陷复现」开关可看到 C1（假滚动滚轮无效）、C2（模型列表溢出隐藏）、C3（长文本溢出无省略）、D2（终端底部被裁 38px）在界面上的真实表现；触发一次流式演示可看到 E2 —— bad 模式下工具卡压在流式文本之前的顺序对照。</div>
+  </div>
+
+  <div class="card">
+    <h3>注册表探针（M8-T1 验收）</h3>
+    <div style="display:flex;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s3)">
+      <button class="btn pri" id="regGit">＋ 注册「源代码管理」面板</button>
+      <button class="btn" id="regMcp">＋ 注册「MCP」面板</button>
+      <button class="btn" id="regCost">＋ 注册「成本统计」分区</button>
+    </div>
+    <div class="ledger" id="regLog"></div>
+    <div class="note">每个按钮只向 <span class="mono">PanelRegistry</span> 追加一条 <span class="mono">PanelDescriptor</span>（id / slot / title_key / icon / order）。页签条、rail、显隐、键盘可达、滚动、截断、i18n 全部自动获得 —— 这就是「下一个界面不用再改布局」的可检验承诺。</div>
+
+    <h3 style="margin-top:var(--s5)">P0 闭合台账</h3>
+    <div class="ledger" id="ledger"></div>
+
+    <h3 style="margin-top:var(--s5)">终端双宽（A3，本审计新增）</h3>
+    <div style="display:flex;gap:var(--s2);margin-bottom:var(--s3)">
+      <button class="tgl" id="tWc" aria-pressed="true"><span class="dot"></span>实测网格 + wcwidth</button>
+      <button class="tgl" id="tEst" aria-pressed="false"><span class="dot"></span>font × 0.6 估算</button>
+    </div>
+    <div class="mono" id="wcDemo" style="background:var(--code-bg);border:1px solid var(--line);border-radius:var(--r-card);padding:var(--s3);font-size:12px;line-height:1.6;white-space:pre;overflow-x:auto"></div>
+    <div class="note">A3：中文输出占约 2 格却按 1 格排版。即使 A1 修好字体，中文表格仍会错位 —— 必须按格数手工定位，不依赖跨字体连续排版（拉丁走 JetBrains Mono、中文走 Sarasa/Noto，无共享度量）。</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>图层检查器（B1 的分层常量）</h3>
+  <div style="font-size:var(--fs-body-sm);color:var(--text-dim);line-height:1.7">
+    开启检查器可在界面上看到六个静态层根的位置与 <span class="mono">z</span> 段。要点：<strong>业务代码禁止裸写 <span class="mono">GlobalZIndex(&lt;数字&gt;)</span></strong>；静态类走常量，模态类由 <span class="mono">ModalStack</span> 按栈深分配 <span class="mono">400 + depth × 8</span>（预留 8 容纳模态内部下拉）。抽屉与下拉<strong>不带遮罩</strong>（非阻塞语义），只有模态带遮罩并独占键盘。
+  </div>
+  <div style="display:flex;gap:var(--s2);flex-wrap:wrap;margin-top:var(--s3)">
+    <span class="v8-chip mono">BASE 0</span><span class="v8-chip mono">DOCK 100</span>
+    <span class="v8-chip mono">DRAWER 200</span><span class="v8-chip mono">DROPDOWN 300</span>
+    <span class="v8-chip mono">MODAL 400 + depth</span><span class="v8-chip mono">TOOLTIP 500</span>
+    <span class="v8-chip mono">TOAST 600</span>
+  </div>
+</div>
+</div>
+
+<script>
+(function(){
+const R=document.getElementById('v8root');
+const $=s=>R.querySelector(s), $$=s=>Array.from(R.querySelectorAll(s));
+const app=$('#app');
+
+/* ===== 状态 ===== */
+const S={bad:false,inspect:false,dense:false,modalStack:[],drawer:false,pages:new Set(),active:'editor',
+         registered:[],streaming:false,wc:true,pick:{mid:'opus',lv:'low'},mpop:false};
+
+/* ===== 面板注册表（PanelRegistry 的可视化） ===== */
+let DESC=[
+ {id:'editor',slot:'side',title_key:'panel.editor',title:'编辑器',icon:'▤',order:10,closable:false},
+ {id:'preview',slot:'side',title_key:'panel.preview',title:'文件预览',icon:'◫',order:20,closable:true},
+ {id:'diff',slot:'side',title_key:'panel.diff',title:'差异',icon:'⇄',order:30,closable:true},
+ {id:'terminal',slot:'side',title_key:'panel.terminal',title:'终端',icon:'▸_',order:40,closable:true},
+];
+function regExtra(d){ if(DESC.some(x=>x.id===d.id))return false; DESC.push(d); S.registered.push(d.id); return true; }
+
+/* ===== 页签条（单一所有者，修 D3） ===== */
+function renderTabs(){
+  const t=$('#tabs'); t.innerHTML='';
+  DESC.filter(d=>d.slot==='side').sort((a,b)=>a.order-b.order).forEach(d=>{
+    const e=document.createElement('div');
+    e.className='tab'+(S.active===d.id?' act':'');
+    e.innerHTML=`<span>${d.icon}</span><span class="tn" title="${d.title} · i18n key ${d.title_key}">${d.title}</span>`+
+      (S.registered.includes(d.id)?'<span class="reg">注册表</span>':'')+
+      (d.closable?'<span style="color:var(--text-faint);font-size:12px" data-close="'+d.id+'">✕</span>':'');
+    e.onclick=ev=>{ const closed=ev.target.dataset.close;
+      if(closed){ DESC=DESC.filter(x=>x.id!==closed); S.registered=S.registered.filter(id=>id!==closed);
+        $$('.rbtn').forEach(x=>{ if(x.dataset.act===closed){ x.classList.remove('act'); if(x.id==='railGit'||x.id==='railMcp') x.style.display='none'; } });
+        if(S.active===closed) S.active=DESC.filter(d=>d.slot==='side').sort((a,b)=>a.order-b.order)[0].id;
+        renderTabs(); renderPages(); return;} S.active=d.id; renderTabs(); renderPages(); };
+    t.appendChild(e);
+  });
+}
+function renderPages(){
+  const p=$('#pages'); p.innerHTML='';
+  DESC.filter(d=>d.slot==='side').forEach(d=>{
+    const el=document.createElement('div');
+    el.className='page'+(S.active===d.id?' act':'');
+    el.style.flex='1 1 auto'; el.style.minHeight='0';
+    el.innerHTML=PAGE[d.id]||'<div class="pbody" style="color:var(--text-faint)">该面板由插件注册，宿主只提供槽位。</div>';
+    p.appendChild(el);
+  });
+  bindTree();
+}
+
+/* 各页签内容 */
+const PAGE={};
+PAGE.editor=`<div class="ed"><div class="gutter">${Array.from({length:26},(_,i)=>i+1).join('\n')}</div><div class="code"><span class="c">// crates/xgent_ui/src/theme.rs —— 等宽消费正确：列对齐在 Windows 上成立</span>
+<span class="k">#[derive</span>(<span class="t">Resource</span>, <span class="t">Debug</span>, <span class="t">Clone</span>, <span class="t">Copy</span>)]
+<span class="k">pub struct</span> <span class="t">Theme</span> {
+    <span class="k">pub</span> bg: <span class="t">Color</span>,
+    <span class="k">pub</span> surface: <span class="t">Color</span>,
+    <span class="k">pub</span> elevated: <span class="t">Color</span>,
+    <span class="k">pub</span> accent: <span class="t">Color</span>,
+}
+
+<span class="k">#[derive</span>(<span class="t">Resource</span>)]
+<span class="k">pub struct</span> <span class="t">ThemeHandle</span> {
+    <span class="k">pub</span> theme: <span class="t">Theme</span>,
+    <span class="k">pub</span> generation: <span class="t">u32</span>,
+}
+
+<span class="k">pub fn</span> <span class="f">resolve</span>(&amp;<span class="k">self</span>, role: <span class="t">ThemeRole</span>) -&gt; <span class="t">Color</span> {
+    <span class="k">match</span> role {
+        <span class="t">ThemeRole</span>::SurfaceBase =&gt; <span class="k">self</span>.bg,
+        <span class="k">_</span> =&gt; <span class="k">self</span>.surface,
+    }
+}</div></div>`;
+
+PAGE.preview=`<div class="pbody" style="font-size:var(--fs-body-sm);color:var(--text-dim);line-height:1.7">
+  <div class="sect">crates/xgent_ui/src/fonts.rs</div>
+  <p>非 <span class="mono">macOS</span> 平台当前拿到 <span class="mono">Handle::default()</span>，而默认槽位已被 Inter 占据 —— 这就是 A1 的病灶。v8 删除该分支，改由候选栈 + 内嵌资产保证。</p>
+  <div class="sect">影响面</div>
+  <ul style="margin:0;padding-left:1.3em"><li>编辑器行号（<span class="mono">tabs.rs:210-212</span> 用 LineHeight::Px）</li><li>终端格子（<span class="mono">output.rs:380</span> 按 font × 0.6 估宽）</li><li>diff 行对齐</li><li>代码块与 chips 中的代码</li></ul>
+</div>`;
+
+PAGE.diff=`<div class="pbody"><div class="diff" style="max-height:none">
+<div class="dl rm">-    } else {</div>
+<div class="dl rm">-        Handle::default()</div>
+<div class="dl rm">-    }</div>
+<div class="dl ad">+    } else if let Some(fb) = load_embedded_mono() {</div>
+<div class="dl ad">+        // 内嵌 JetBrains Mono（OFL）兜底：永不回退比例字体</div>
+<div class="dl ad">+        fb</div>
+<div class="dl ad">+    } else {</div>
+<div class="dl ad">+        tracing::error!("等宽字体装配失败：mono 槽位为空");</div>
+<div class="dl ad">+        return;</div>
+<div class="dl ad">+    }</div>
+</div><div class="note" style="font-size:var(--fs-micro);color:var(--text-faint);margin-top:8px">R3-12（diff 无 LCS/Myers）保持独立账，本轮只修展示层。</div></div>`;
+
+PAGE.terminal=`<div class="termwrap" style="flex:1;min-height:0;display:flex;flex-direction:column">
+  <div class="term mono" id="termBody"></div>
+  <div class="term-foot"><span>bash</span><span>·</span><span>cols 96 × rows 28</span><span style="margin-left:auto;color:var(--text-faint)">cell_w 实测 7.2px</span></div>
+</div>`;
+
+PAGE.git=`<div class="pbody">
+  <div style="display:flex;gap:var(--s2);margin-bottom:var(--s3)">
+    <input class="fi" placeholder="提交信息（Ctrl+Enter 提交）">
+    <button class="btn pri" style="flex:0 0 auto">提交 ⎇ main</button>
+  </div>
+  <div class="sect">变更文件 · 7</div>
+  <div id="gitList"></div>
+  <div class="sect">分支</div>
+  <div class="srcline"><span class="box on">✓</span><span class="lb2">main ← origin/main · 同步</span><span class="sub">↑2 ↓0</span></div>
+  <div class="srcline"><span class="box"></span><span class="lb2">feat/ui-v8-layering</span><span class="sub">↑0 ↓3</span></div>
+</div>`;
+
+PAGE.mcp=`<div class="pbody">
+  <div class="sect">已连接服务器 · 2</div>
+  <div class="srcline"><span class="box on">✓</span><span class="lb2">filesystem</span><span class="sub" style="color:var(--st-ok)">已连接 · 6 工具</span></div>
+  <div class="srcline"><span class="box on">✓</span><span class="lb2">github</span><span class="sub" style="color:var(--st-ok)">已连接 · 14 工具</span></div>
+  <div class="srcline"><span class="box"></span><span class="lb2">internal-wiki</span><span class="sub" style="color:var(--st-fail)">鉴权失败</span></div>
+  <div class="sect">工具策略（默认均需确认）</div>
+  <div class="srcline"><span class="lb2">github.create_issue</span><span class="sub">NeedsConfirmation</span></div>
+  <div class="srcline"><span class="lb2">filesystem.read_file</span><span class="sub">Approved（可配置提升）</span></div>
+  <div class="note" style="font-size:var(--fs-micro);color:var(--text-faint);margin-top:12px">F-13 目前仅 trait 占位；此面板证明 MCP 只需注册一条描述符 + 一个设置分区。</div>
+</div>`;
+
+PAGE.cost=`<div class="pbody">
+  <div class="sect">本会话</div>
+  <div class="srcline"><span class="lb2">输入 token</span><span class="sub mono">8,240</span></div>
+  <div class="srcline"><span class="lb2">输出 token</span><span class="sub mono">1,913</span></div>
+  <div class="srcline"><span class="lb2">缓存命中</span><span class="sub mono">61%</span></div>
+  <div class="srcline"><span class="lb2">成本</span><span class="sub mono" style="color:var(--st-ok)">$0.42</span></div>
+  <div class="sect">按模型</div>
+  <div class="srcline"><span class="lb2">claude-opus-4-1</span><span class="sub mono">$0.38</span></div>
+  <div class="srcline"><span class="lb2">claude-haiku-4-5</span><span class="sub mono">$0.04</span></div>
+  <div class="note" style="font-size:var(--fs-micro);color:var(--text-faint);margin-top:12px">F-12 / R4-1 今天只有状态栏 <span class="mono">"$0.00"</span> 占位，展示形态未定（OQ-10）。此分区为注册项。</div>
+</div>`;
+
+/* ===== 文件树（200 条，验证 C1 滚动与 C3 截断） ===== */
+function bindTree(){
+  const b=$('#treeBody'); if(!b) return;
+  let h='<ul class="tree">';
+  const mods=['xgent_core','xui_i18n','xgent_settings_core','xgent_settings','xgent_provider','xgent_daemon','xgent_tools','xgent_context','xgent_agent','xgent_terminal','xui','xgent_ui','xgent_app'];
+  mods.forEach(m=>{ h+=`<li><span class="ic">▾</span><span class="lb">crates/${m}</span></li>`;
+    for(let i=0;i<15;i++) h+=`<li style="padding-left:20px"><span class="ic">·</span><span class="lb ${S.bad?'bad':''}">${m==='xgent_ui'?'a_very_deeply_nested_module_directory_for_truncation_check_'+i+'.rs':'src_'+i+'.rs'}</span><span class="mut">${12+i} KB</span></li>`;
+  });
+  for(let i=0;i<40;i++) h+=`<li><span class="ic">·</span><span class="lb ${S.bad?'bad':''} mono">${'crates/xgent_ui/src/editor/submodule_'+i+'/a_really_long_file_name_to_check_middle_ellipsis_'+i+'.rs'}</span></li>`;
+  h+='</ul>';
+  b.innerHTML=h;
+  // 中段省略（真实实现走 xui::Ellipsis；此处用 CSS + JS 近似）
+  if(!S.bad) $$('.lb.mono').forEach(el=>{ const t=el.textContent; if(el.scrollWidth>el.clientWidth){ el.textContent=t.slice(0,20)+'…'+t.slice(-26); } });
+}
+
+/* ===== 模态栈 ===== */
+function pushModal(id){
+  if(S.modalStack.includes(id)) return;
+  S.modalStack.push(id);
+  applyModal();
+}
+function popModal(id){
+  const i=id?S.modalStack.indexOf(id):S.modalStack.length-1;
+  if(i<0) return; S.modalStack.splice(i,1); applyModal();
+}
+function applyModal(){
+  const st=S.modalStack;
+  $('#scrim').classList.toggle('show',st.length>0);
+  $('#layerModal').classList.toggle('on',st.length>0);
+  const map={settings:$('#mSettings'),confirm:$('#mConfirm'),palette:$('#mPalette')};
+  Object.entries(map).forEach(([k,el])=>{
+    const idx=st.indexOf(k);
+    el.classList.toggle('show',idx>=0);
+    el.style.zIndex=idx>=0?(400+idx*8):'';
+    if(idx===st.length-1&&idx>=0){ const f=el.querySelector('input,textarea,button'); if(f) setTimeout(()=>f.focus(),120); }
+  });
+  syncToggles();
+}
+function closeDrawer(){ S.drawer=false; applyLayers(); }
+function applyLayers(){
+  $('#drawer').classList.toggle('show',S.drawer);
+  $('#drawerScrim').classList.toggle('show',S.drawer);
+  $('#layerDrawer').classList.toggle('on',S.drawer);
+  // B1 关键：抽屉永远低于模态 —— 设置面板打开时抽屉不可盖住它
+  $('#layerDrawer').style.zIndex=S.modalStack.length?100:200;
+  $('#layerModal').style.zIndex=S.modalStack.length?400:100;
+  $('#layerTip').style.zIndex=500; $('#layerToast').style.zIndex=600;
+  syncToggles();
+}
+function syncToggles(){
+  $('#bSettings').setAttribute('aria-pressed',S.modalStack.includes('settings'));
+  $('#bConfirm').setAttribute('aria-pressed',S.modalStack.includes('confirm'));
+  $('#bPalette').setAttribute('aria-pressed',S.modalStack.includes('palette'));
+  $('#bDrawer').setAttribute('aria-pressed',S.drawer);
+  $('#badSeg').style.display=S.bad?'':'none';
+  $('#mlist')?.classList.toggle('bad2',S.bad);
+}
+
+/* ===== 图层检查器 ===== */
+const BANDS=[['BASE 0 · 主布局','rgba(138,143,152,.5)',52,32],['DRAWER 200 · 抽屉（无遮罩语义）','rgba(255,178,36,.6)',null,null],
+ ['DROPDOWN 300 · 补全/菜单（无遮罩）','rgba(0,145,255,.6)',null,null],['MODAL 400 + depth · 模态独占键盘','rgba(113,112,255,.7)',null,null],
+ ['TOOLTIP 500 · 不受祖先裁剪','rgba(48,164,108,.6)',null,null],['TOAST 600','rgba(229,72,77,.6)',null,null]];
+function renderInsp(){
+  const i=$('#insp'); i.innerHTML='';
+  const box=(l,t,r,b,c,txt)=>{const d=document.createElement('div');d.className='band';
+    d.style.cssText=`left:${l};top:${t};right:${r};bottom:${b};border-color:${c};color:${c};background:${c.replace(/[\d.]+\)$/,'0.08)')}`;d.textContent=txt;i.appendChild(d);};
+  box('8px','52px','8px','32px','rgba(138,143,152,.45)','BASE 0');
+  box('8px','60px','auto','360px','rgba(255,178,36,.7)','DRAWER 200');
+  box('600px','520px','400px','120px','rgba(0,145,255,.7)','DROPDOWN 300');
+  box('360px','140px','360px','140px','rgba(113,112,255,.7)','MODAL 400 + depth');
+  box('8px','8px','600px','700px','rgba(48,164,108,.6)','TOOLTIP 500');
+  box('auto','auto','16px','44px','rgba(229,72,77,.6)','TOAST 600');
+  const lg=$('#legend'); lg.innerHTML=BANDS.map(b=>`<span class="li"><span class="sw" style="background:${b[1]}"></span>${b[0]}</span>`).join('');
+}
+
+/* ===== 命令面板（含死键演示） ===== */
+const CMDS=[
+ {t:'对话：发送',g:'对话',k:'Enter'},{t:'对话：停止（abort）',g:'对话',k:'Esc'},{t:'对话：聚焦输入',g:'对话',k:'Ctrl I',dead:!1},
+ {t:'命令面板：打开',g:'窗口',k:'Ctrl Shift P'},{t:'命令面板：打开并定位文件',g:'窗口',k:'Ctrl Shift E',fix:1},
+ {t:'文件：打开抽屉',g:'文件',k:'Ctrl B'},{t:'视图：切换侧区',g:'视图',k:'Ctrl B'},{t:'设置：打开',g:'窗口',k:'Ctrl ,'},
+ {t:'会话：新建',g:'会话',k:'Ctrl N'},{t:'会话：重命名',g:'会话'},{t:'工具：全部允许本会话',g:'工具'},
+ {t:'插件：重新加载',g:'插件',dead:1},{t:'MCP：列出服务器',g:'MCP',dead:1},
+];
+function renderPalette(q){
+  const l=$('#plist'); l.innerHTML='';
+  CMDS.filter(c=>!q||c.t.toLowerCase().includes(q.toLowerCase())).forEach((c,i)=>{
+    const e=document.createElement('div');
+    const bad=S.bad&&c.dead;
+    e.className='pitem'+(i===0?' sel':'')+(bad?' dead':'');
+    e.innerHTML=`<span class="lb3">${c.t}</span>${bad
+      ? '<span class="flag">已注册但无 handler（F1）</span>'
+      : (c.dead ? '<span class="flag" style="color:var(--st-ok)">M7 补齐 handler</span>' : '')}<span class="grp">${c.g}</span>${c.k?`<span class="kb">${c.k}</span>`:''}`;
+    e.onclick=()=>{ if(c.t.includes('设置'))pushModal('settings'); else if(c.t.includes('抽屉')){S.drawer=true;applyLayers();} else popModal('palette'); };
+    l.appendChild(e);
+  });
+}
+
+/* ===== Git 变更列表（含省略与状态徽标） ===== */
+function renderGit(){
+  const g=$('#gitList'); if(!g) return;
+  const files=[['M','crates/xgent_ui/src/editor/a_very_long_module_path_that_should_ellipsis.rs'],['A','crates/xgent_ui/src/layer.rs'],
+   ['A','crates/xgent_ui/src/modal_stack.rs'],['M','crates/xgent_ui/src/theme.rs'],['M','crates/xgent_app/src/startup.rs'],
+   ['D','crates/xgent_ui/src/legacy_side_view.rs'],['U','crates/xui/src/ellipsis.rs']];
+  g.innerHTML=files.map(([s,f])=>`<div class="srcline"><span class="box on">✓</span><span class="git ${s}">${s}</span><span class="lb2" title="${f}">${f}</span></div>`).join('');
+}
+
+/* ===== 终端（双宽演示） ===== */
+const TERM_LINES=['$ ls -l target/debug/','total 2048','-rwxr-xrwx  1 osem  staff   412K  10月 16 14:02 xgent_app',
+ '-rwxr-xrwx  1 osem  staff   388K  10月 16 14:02 xgent_daemon','drwxr-xrwx  7 osem  staff   224B  10月 16 13:58 incremental',
+ '$ cargo test --workspace   # 三平台一阶','测试 运行中… crates/xgent_ui/src/theme.rs 令牌断言',
+ 'test theme::tests::dark_tokens_match_v8_spec ... ok','test layer::tests::空层根不吞点击 ... ok',
+ 'test ellipsis::tests::中段省略保留末两段 ... ok','\x1b[完成]\x1b 总计 214 通过 · 0 失败'];
+function renderTerm(){
+  const t=$('#termBody'); if(!t) return;
+  if(S.wc){ t.innerHTML=TERM_LINES.map(l=>`<div class="row">${l.replace(/\x1b/g,'')}</div>`).join(''); }
+  else { t.innerHTML=TERM_LINES.map(l=>`<div class="row" style="letter-spacing:-0.6px">${l.replace(/\x1b/g,'')}</div>`).join(''); }
+}
+
+/* ===== wcwidth 演示 ===== */
+function renderWc(){
+  const w=$('#wcDemo');
+  const rows=[['xgent_app','412K','10月16日'],['xgent_daemon','388K','10月16日'],['incremental','224B','目录'],['a_really_long_name.rs','1.2M','10月16日']];
+  let out='';
+  if(S.wc){
+    const CJK=ch=>/[\u3000-\u9fff\uff00-\uff60]/.test(ch);
+    rows.forEach(r=>{ let line=''; ['name','size','date'].forEach((_,i)=>{
+      const cell=r[i]; let width=0; for(const ch of cell) width+=CJK(ch)?2:1;
+      line+=cell+' '.repeat(Math.max(0,22-width)); }); out+=line+'\n'; });
+    out+='\n每格 = 实测 latin_advance（7.2px）· 中文占 2 格 · 按格数定位';
+  }else{
+    rows.forEach(r=>{ out+=(r[0]+'                    ').slice(0,22)+(r[1]+'        ').slice(0,10)+(r[2]+'            ').slice(0,14)+'\n'; });
+    out+='\n⚠ font × 0.6 估算 + 按字符数切片 → 中文列整体右移，表格错位';
+  }
+  w.textContent=out;
+}
+
+/* ===== 流式（有序消息树演示） ===== */
+const STREAM=['我把',' `fonts.rs','` 的等宽兜底','改成内嵌资产','优先，','并在启动期','实测 `latin_advance`','。'];
+function stopStream(){
+  if(S.streamIv){ clearInterval(S.streamIv); S.streamIv=null; }
+  S.streaming=false; $('#agentPill').classList.remove('run'); $('#agentTxt').textContent='空闲'; updSend();
+}
+function startStream(){
+  if(S.streaming) return;
+  S.streaming=true; $('#agentPill').classList.add('run'); $('#agentTxt').textContent='流式响应中';
+  updSend();
+  const slot=$('#streamSlot');
+  slot.innerHTML=S.bad
+    ? `<div class="tool"><div class="h"><span class="st pd">待确认</span><span class="nm2">read_file</span><span class="arg mono">crates/xgent_app/src/startup.rs</span></div></div><div class="msg"><div class="mrole"><span class="av a">A</span> 助手（顺序错误）</div><div class="mtext"><p id="sp">…</p></div></div>`
+    : `<div class="msg"><div class="mrole"><span class="av a">A</span> 助手</div><div class="mtext"><p id="sp"></p></div></div><div class="tool" id="stTool" style="display:none"><div class="h"><span class="st run">执行中</span><span class="nm2">edit_file</span><span class="arg mono">crates/xgent_app/src/startup.rs — 删除 else { Handle::default() } 分支</span></div></div>`;
+  let i=0;
+  const iv=setInterval(()=>{
+    const p=$('#sp'); if(!p){clearInterval(iv);return;}
+    p.textContent=(p.textContent||'')+STREAM[i]; i++;
+    if(i===3&&!S.bad){ const t=$('#stTool'); if(t){t.style.display=''; t.querySelector('.st').className='st run';} }
+    if(i>=STREAM.length){ clearInterval(iv);
+      if(!S.bad){ const t=$('#stTool'); if(t) t.querySelector('.st').className='st ok'; }
+      stopStream();
+      toast(S.bad?'注意：工具卡排在了它自己的流式文本之上（缺陷 E2）':'已按 Transcript 顺序键落位，工具卡在文本之后（修 E2）');
+    }
+  },420);
+  S.streamIv=iv;
+}
+
+/* ===== toast / tooltip ===== */
+let tt;
+function toast(txt){ const el=$('#toastTxt'); el.textContent=txt; $('#toast').classList.add('show'); clearTimeout(tt); tt=setTimeout(()=>$('#toast').classList.remove('show'),2600); }
+function showTip(host,txt){
+  const tip=$('#tip'), ar=app.getBoundingClientRect(), hr=host.getBoundingClientRect();
+  tip.textContent=txt; tip.classList.add('show');
+  const x=hr.left-ar.left+hr.width/2, y=hr.top-ar.top-30;
+  tip.style.left=Math.max(6,Math.min(ar.width-tip.offsetWidth-6,x-tip.offsetWidth/2))+'px';
+  tip.style.top=Math.max(4,y)+'px';
+}
+function hideTip(){ $('#tip').classList.remove('show'); }
+$$('[aria-label]').forEach(el=>{ el.addEventListener('mouseenter',()=>showTip(el,el.getAttribute('aria-label'))); el.addEventListener('mouseleave',hideTip); });
+
+function updSend(){
+  const b=$('#sendBtn'), v=$('#input').value.trim();
+  if(S.streaming){ b.className='send stop'; b.innerHTML='<svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1.5"/></svg> 停止'; }
+  else { b.className='send'; b.innerHTML='<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 11.5v-9M3 6.5 7 2.5l4 4"/></svg> 发送'; }
+  b.disabled=!S.streaming&&!v;
+}
+
+/* ===== 事件绑定 ===== */
+$('#tBad').onclick=e=>{ S.bad=!S.bad; e.currentTarget.setAttribute('aria-pressed',S.bad);
+  R.classList.toggle('bad',S.bad); bindTree(); renderTerm(); renderPalette($('#pq').value); syncToggles();
+  toast(S.bad?'已切回 v7 as-built 行为：C1/C2 列表滚不动、C3 文本不省略、D2 终端底部被裁 38px；触发一次流式演示可看 E2 工具卡压在流式文本之前':'v8 修复生效：真滚动、省略号、填满契约、模态栈'); };
+$('#tInsp').onclick=e=>{ S.inspect=!S.inspect; e.currentTarget.setAttribute('aria-pressed',S.inspect);
+  R.classList.toggle('inspect',S.inspect); renderInsp(); };
+$('#tDense').onclick=e=>{ S.dense=!S.dense; e.currentTarget.setAttribute('aria-pressed',S.dense);
+  R.classList.toggle('dense-compact',S.dense); };
+$$('[data-dens]').forEach(b=>b.onclick=()=>{ S.dense=b.dataset.dens==='compact';
+  R.classList.toggle('dense-compact',S.dense); $('#tDense').setAttribute('aria-pressed',S.dense); toast('密度即时生效（修 G1，无需重启）'); });
+
+$('#gearBtn').onclick=$('#provPill').onclick=()=>pushModal('settings');
+$('#cmdBtn').onclick=()=>pushModal('palette');
+$('#newSess').onclick=()=>toast('会话已新建（Ctrl N）');
+$$('[data-pop]').forEach(b=>b.onclick=()=>popModal(b.dataset.pop));
+$('#scrim').onclick=()=>{ if(S.modalStack.length) popModal(S.modalStack[S.modalStack.length-1]); };
+$('#bSettings').onclick=()=>S.modalStack.includes('settings')?popModal('settings'):pushModal('settings');
+$('#bConfirm').onclick=()=>S.modalStack.includes('confirm')?popModal('confirm'):pushModal('confirm');
+$('#bPalette').onclick=()=>S.modalStack.includes('palette')?popModal('palette'):pushModal('palette');
+$('#bDrawer').onclick=()=>{ S.drawer=!S.drawer; applyLayers(); };
+$('#addChip').onclick=()=>{ S.drawer=true; applyLayers(); };
+$$('[data-close-drawer]').forEach(b=>b.onclick=closeDrawer);
+
+$$('.rbtn').forEach(b=>b.onclick=()=>{
+  const a=b.dataset.act;
+  if(a==='files'){ S.drawer=!S.drawer; applyLayers(); }
+  else if(a==='history'){
+    if(!DESC.find(d=>d.id==='history')) DESC.push({id:'history',slot:'side',title_key:'panel.history',title:'历史会话',icon:'◷',order:35,closable:true});
+    S.active='history';
+  }
+  else if(a==='chat'){ closeDrawer(); }
+  else { S.active=a; }
+  $$('.rbtn').forEach(x=>x.classList.toggle('act', a==='files' ? (x===b&&S.drawer) : x.dataset.act===a));
+  renderTabs(); renderPages();
+});
+$$('.chip .x').forEach(x=>x.onclick=()=>{ x.parentElement.remove(); toast('该上下文已移出 ContextSet（修 E5：此前只是打开 tab 的只读镜像）'); });
+
+$('#pq').oninput=e=>renderPalette(e.target.value);
+$('#pq').onkeydown=e=>{
+  if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='Enter') return;
+  const items=$$('#plist .pitem'); if(!items.length) return;
+  e.preventDefault();
+  if(e.key==='Enter'){ const sel=items.find(x=>x.classList.contains('sel'))||items[0]; sel.click(); return; }
+  const i=items.findIndex(x=>x.classList.contains('sel'));
+  if(i>=0) items[i].classList.remove('sel');
+  const n=i<0?0:(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;
+  items[n].classList.add('sel'); items[n].scrollIntoView({block:'nearest'});
+};
+$('#input').oninput=e=>{ $('#charHint').textContent=e.target.value.length+' 字符'; updSend(); compCheck(e); };
+$('#input').onkeydown=e=>{
+  if(S.mpop&&['ArrowDown','ArrowUp','Enter'].includes(e.key)){ e.preventDefault(); mpMove(e.key); return; }
+  if($('#comp').classList.contains('show')&&['ArrowDown','ArrowUp','Enter','Escape'].includes(e.key)){
+    e.preventDefault();
+    if(e.key==='Enter') acceptComp();
+    else if(e.key==='Escape'){ $('#comp').classList.remove('show'); e.stopPropagation(); }
+    else moveComp(e.key);
+    return;
+  }
+  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); if(!S.streaming&&$('#input').value.trim()){ $('#input').value=''; updSend(); startStream(); } }
+};
+function acceptComp(){
+  const c=$('#comp'), sel=c.querySelector('.ci.sel'), span=sel&&sel.querySelector('.p');
+  const path=span?span.textContent.trim():'';
+  if(!path||path==='无匹配'){ c.classList.remove('show'); return; }
+  const ta=$('#input'), q='@'+(c.dataset.query||''), pos=ta.value.lastIndexOf(q);
+  if(pos>=0) ta.value=ta.value.slice(0,pos)+'@'+path+ta.value.slice(pos+q.length);
+  $('#charHint').textContent=ta.value.length+' 字符';
+  $('#comp').classList.remove('show'); updSend();
+}
+function moveComp(k){ const it=$$('.ci'); let i=it.findIndex(x=>x.classList.contains('sel'));
+  if(k==='Escape'){ $('#comp').classList.remove('show'); return; }
+  it[i]?.classList.remove('sel'); i=(i+(k==='ArrowDown'?1:-1)+it.length)%it.length; it[i].classList.add('sel'); it[i].scrollIntoView({block:'nearest'}); }
+function compCheck(e){
+  const v=e.target.value, m=/@([\w/\-]*)$/.exec(v.slice(0,e.target.selectionStart));
+  const c=$('#comp');
+  if(!m){ c.dataset.query=''; c.classList.remove('show'); return; }
+  c.dataset.query=m[1];
+  const files=['crates/xgent_ui/src/theme.rs','crates/xgent_ui/src/layout.rs','crates/xgent_ui/src/fonts.rs','crates/xgent_app/src/startup.rs','crates/xgent_ui/src/layer.rs','crates/xgent_ui/src/modal_stack.rs','crates/xui/src/ellipsis.rs'].filter(f=>f.toLowerCase().includes(m[1].toLowerCase()));
+  c.innerHTML=files.slice(0,6).map((f,i)=>`<div class="ci${i===0?' sel':''}"><span style="color:var(--text-faint)">@</span><span class="p">${f}</span><span style="color:var(--text-faint);font-size:10px">文件</span></div>`).join('')||'<div class="ci"><span class="p" style="color:var(--text-faint)">无匹配</span></div>';
+  c.classList.add('show');
+  const ar=app.getBoundingClientRect(), br=e.target.getBoundingClientRect();
+  c.style.left=(br.left-ar.left)+'px'; c.style.top=(br.top-ar.top-186)+'px';
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('.inbox')) $('#comp').classList.remove('show');
+  if(!e.target.closest('#mpop')&&!e.target.closest('#mpill')) mpClose(false); });
+
+$('#sendBtn').onclick=()=>{ if(S.streaming){ stopStream(); toast('已发送 chat.abort（跨 IPC 取消由守护进程升级承接）'); } else { $('#input').value=''; updSend(); startStream(); } };
+$$('[data-copy]').forEach(b=>b.onclick=()=>{ navigator.clipboard?.writeText(b.closest('.cb').querySelector('pre').textContent); b.textContent='已复制'; setTimeout(()=>b.textContent='复制',1400); });
+
+/* 侧区宽度（SplitTree 的可拖分割） */
+let dragging=null;
+$('#resizer').addEventListener('mousedown',()=>dragging='dock');
+$('#drawerRes')?.addEventListener('mousedown',()=>dragging='drawer');
+window.addEventListener('mousemove',ev=>{ if(!dragging) return;
+  const ar=app.getBoundingClientRect();
+  if(dragging==='dock'){ const w=Math.max(380,Math.min(900,ar.right-ev.clientX)); $('#dock').style.width=w+'px'; $('#rDock').value=w; $('#rDockV').textContent=Math.round(w); }
+  else { const w=Math.max(240,Math.min(480,ev.clientX-ar.left-52)); $('#drawer').style.width=w+'px'; }
+});
+window.addEventListener('mouseup',()=>dragging=null);
+$('#rDock').oninput=e=>{ $('#dock').style.width=e.target.value+'px'; $('#rDockV').textContent=e.target.value; };
+
+/* 键盘：Esc 走模态栈（修 B4） */
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  if(S.modalStack.length){ e.preventDefault(); const top=S.modalStack[S.modalStack.length-1]; popModal(top);
+    toast('Esc 关闭栈顶「'+({settings:'设置面板',confirm:'确认弹窗',palette:'命令面板'})[top]+'」，对话未被中断（修 B4）'); }
+  else if(S.mpop){ e.preventDefault(); mpClose(true); }
+  else if($('#comp').classList.contains('show')) $('#comp').classList.remove('show');
+  else if(S.drawer){ closeDrawer(); toast('Esc 关闭抽屉'); }
+  else if(S.streaming){ stopStream(); toast('Esc → chat.abort'); }
+});
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='p'){ e.preventDefault(); pushModal('palette'); }
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='i'){ e.preventDefault(); $('#input').focus(); toast('input.focus 已生效（修 F2：今天它是一条空 match 分支）'); }
+});
+
+/* 注册表探针 */
+function logReg(txt,ok){ const l=$('#regLog'); const d=document.createElement('div'); d.className='lg';
+  d.innerHTML=`<span class="id">${ok?'M8':'—'}</span><span class="ds">${txt}</span><span class="${ok?'ok':'ok warn'}">${ok?'注册成功':'已存在'}</span>`;
+  l.prepend(d); }
+$('#regGit').onclick=()=>{ if(regExtra({id:'git',slot:'side',title_key:'panel.git',title:'源代码管理',icon:'⎇',order:50,closable:true})){
+  $('#railGit').style.display=''; S.active='git'; renderTabs(); renderPages(); renderGit();
+  logReg('PanelDescriptor{ id:"git", slot:SideDock, order:50 } → 页签 + rail + 键盘 + 滚动 + i18n 自动获得',1);
+  toast('Git 面板落地：新增 1 条描述符 + 1 个视图模块，未改 layout.rs / SideViewContent'); } else logReg('git 已注册',0); };
+$('#regMcp').onclick=()=>{ if(regExtra({id:'mcp',slot:'side',title_key:'panel.mcp',title:'MCP',icon:'⬡',order:60,closable:true})){
+  $('#railMcp').style.display=''; $('#mcpSect').style.display=''; S.active='mcp'; renderTabs(); renderPages();
+  logReg('PanelDescriptor{ id:"mcp", slot:SideDock + SettingsSection }',1); } else logReg('mcp 已注册',0); };
+$('#regCost').onclick=()=>{ if(regExtra({id:'cost',slot:'side',title_key:'panel.cost',title:'成本统计',icon:'$',order:70,closable:true})){
+  S.active='cost'; renderTabs(); renderPages(); $('#costSeg').textContent='$0.42'; $('#costSeg').style.color='var(--st-ok)';
+  logReg('PanelDescriptor{ id:"cost", slot:SideDock + StatusSegment }（状态栏 $0.00 占位被真数据替换）',1); } else logReg('cost 已注册',0); };
+$('#railGit').onclick=()=>{ S.active='git'; renderTabs(); renderPages(); renderGit(); $$('.rbtn').forEach(x=>x.classList.toggle('act',x.dataset.act==='git')); };
+$('#railMcp').onclick=()=>{ S.active='mcp'; renderTabs(); renderPages(); $$('.rbtn').forEach(x=>x.classList.toggle('act',x.dataset.act==='mcp')); };
+
+/* 双宽演示 */
+$('#tWc').onclick=e=>{ S.wc=true; S.bad=false; R.classList.remove('bad'); $('#tBad').setAttribute('aria-pressed','false');
+  $('#tWc').setAttribute('aria-pressed','true'); $('#tEst').setAttribute('aria-pressed','false'); renderWc(); renderTerm(); bindTree(); };
+$('#tEst').onclick=e=>{ S.wc=false; $('#tEst').setAttribute('aria-pressed','true'); $('#tWc').setAttribute('aria-pressed','false'); renderWc(); renderTerm(); };
+
+/* 模型对话框（composer 右下角）：单一数据源供 pill、popover 与设置面板列表共用 */
+const MPICK=[
+ {id:'opus',   nm:'claude-opus-4-1',   gp:'常用', pr:'anthropic'},
+ {id:'sonnet', nm:'claude-sonnet-4-6', gp:'常用', pr:'anthropic'},
+ {id:'gpt5',   nm:'gpt-5.3-turbo',     gp:'常用', pr:'openai'},
+ {id:'gpt5m',  nm:'gpt-5.3-mini',      gp:'常用', pr:'openai'},
+ {id:'glm',    nm:'glm-5.3-flash',     gp:'常用', pr:'zhipu'},
+ {id:'deep',   nm:'deepseek-v4.1',     gp:'常用', pr:'deepseek'},
+ {id:'qwen',   nm:'qwen3.5-max',       gp:'其他', pr:'qwen'},
+ {id:'llama',  nm:'llama-4.1-405b',    gp:'其他', pr:'meta'},
+ {id:'mist',   nm:'mistral-large-3',   gp:'其他', pr:'mistral'},
+ {id:'kimi',   nm:'kimi-k3-think',     gp:'其他', pr:'moonshot'},
+ {id:'gem',    nm:'gemini-3.1-pro',    gp:'其他', pr:'google'},
+ {id:'local',  nm:'qwen3.5-coder-32b · 本地', gp:'其他', pr:'本地'},
+];
+const MPICK_LV=['off','low','medium','high'];
+const MODEL_BASE=MPICK.map(m=>m.nm.split(' · ')[0]);
+
+/* 设置面板模型列表 200 条（与模型对话框共用 MODEL_BASE 数据源） */
+$('#mlist').innerHTML=Array.from({length:200},(_,i)=>{const nm=MODEL_BASE[i%MODEL_BASE.length];return `<div class="mr">${nm} · variant_${String(i).padStart(3,'0')} · context 128k · pricing tier ${i%4}</div>`;}).join('');
+
+/* ===== 模型对话框：pill 渲染 / popover 开合与导航 ===== */
+function currentModel(){ return MPICK.find(m=>m.id===S.pick.mid)||MPICK[0]; }
+function renderMpill(){
+  const m=currentModel();
+  $('#mpill').innerHTML=`<span class="mn">${m.nm}</span><span class="sep"></span>`+
+    `<span class="lv${S.pick.lv==='off'?' off':''}">思考 ${S.pick.lv}</span><span class="cv">▾</span>`;
+}
+function renderMpopList(q){
+  const d=$('#mdrop'); d.innerHTML='';
+  const items=MPICK.filter(m=>m.nm.toLowerCase().includes((q||'').toLowerCase()));
+  if(!items.length){ d.innerHTML='<div class="mpit dead"><span class="nm">无匹配模型</span></div>'; return; }
+  let g='';
+  items.forEach((m,i)=>{
+    if(m.gp!==g){ g=m.gp; d.insertAdjacentHTML('beforeend',`<div class="mgrp">${g}</div>`); }
+    d.insertAdjacentHTML('beforeend',
+      `<div class="mpit${i===0?' sel':''}" data-i="${i}" data-mid="${m.id}"><span class="nm">${m.nm}</span><span class="pr">${m.pr}</span>${m.id===S.pick.mid?'<span class="ck">✓</span>':''}</div>`);
+  });
+  $$('#mdrop .mpit').forEach(el=>el.onclick=()=>mpSelect(el.dataset.mid));
+}
+function mpMove(key){
+  const items=$$('#mdrop .mpit'); if(!items.length||!items[0].dataset.mid) return;
+  const cur=items.findIndex(x=>x.classList.contains('sel'));
+  if(key!=='Enter'){
+    if(cur>=0) items[cur].classList.remove('sel');
+    const i=cur>=0?cur:0;
+    const n=(i+(key==='ArrowDown'?1:-1)+items.length)%items.length;
+    items[n].classList.add('sel'); items[n].scrollIntoView({block:'nearest'}); return; }
+  const sel=items.find(x=>x.classList.contains('sel'))||items[0]; mpSelect(sel.dataset.mid);
+}
+function mpSelect(mid){
+  if(!MPICK.some(m=>m.id===mid)) return;
+  S.pick.mid=mid; renderMpill(); mpClose(false);
+  toast('模型 → '+currentModel().nm+'（思考等级保持 '+S.pick.lv+'）');
+}
+function mpOpen(){
+  if(S.modalStack.length){ toast('有模态在顶层，先关闭设置/面板再打开模型对话框'); return; }
+  if(S.mpop) return;
+  S.mpop=true; $('#mpill').classList.add('on');
+  const p=$('#mpop'); p.innerHTML='';
+  p.innerHTML=`<div class="msearch"><input class="fi" id="mpq" placeholder="搜索模型…" spellcheck="false"></div>`+
+    `<div class="mdrop" id="mdrop"></div>`+
+    `<div class="mlv"><div class="mkl">思考等级（reasoning effort，off = 直接生成）</div>`+
+    `<div class="mseg" id="mseg">${MPICK_LV.map(l=>`<button data-lv="${l}" class="${l===S.pick.lv?'on':''}">${l}</button>`).join('')}</div></div>`+
+    `<div class="m3d"><div class="orb"></div><div class="tx"><b>XGent 3D 陪伴</b><br>当前模型与思考等级将同步作用于 3D 陪伴演示（P1 预留）</div></div>`;
+  renderMpopList('');
+  const q=$('#mpq');
+  q.oninput=e=>renderMpopList(e.target.value);
+  q.onkeydown=e=>{
+    if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); mpClose(true); }
+    else if(e.key==='ArrowDown'||e.key==='ArrowUp'){ e.preventDefault(); mpMove(e.key); }
+    else if(e.key==='Enter'){ e.preventDefault(); mpMove('Enter'); }
+  };
+  $$('#mseg button').forEach(b=>b.onclick=()=>{
+    S.pick.lv=b.dataset.lv; renderMpill();
+    $$('#mseg button').forEach(x=>x.classList.toggle('on',x===b));
+    toast(S.pick.lv==='off'?'思考等级 → off（不启用推理扩展）':'思考等级 → '+S.pick.lv);
+  });
+  p.classList.add('show');
+  setTimeout(()=>q.focus(),20);
+}
+function mpClose(say){
+  if(!S.mpop) return;
+  S.mpop=false; $('#mpop').classList.remove('show'); $('#mpill').classList.remove('on');
+  if(say) toast('Esc 关闭模型对话框');
+}
+$('#mpill').onclick=mpToggle;
+function mpToggle(){ S.mpop?mpClose(false):mpOpen(); }
+
+/* 台账 */
+const LED=[['A1','等宽字体平台失效'],['A3','终端 CJK 双倍宽'],['B1','分层与模态'],['C1','滚动契约'],['C3','省略原语'],
+ ['D1','槽位注册表'],['E1','Markdown 渲染'],['E2','有序消息树'],['F1','死快捷键']];
+$('#ledger').innerHTML=LED.map(([id,t])=>`<div class="lg"><span class="id">${id}</span><span class="ds">${t}</span><span class="ok">本原型演示</span></div>`).join('');
+
+renderInsp(); renderTabs(); renderPages(); renderPalette(''); renderWc(); renderTerm(); applyLayers(); renderMpill();
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "XGent crate 编译期分层",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/osenberg-x/xgent",
+      "revision": "b0771e88840eb76d792447dc3f4094e623f44412"
+    },
+    "viewBox": [1060, 560],
+    "views": [
+      {
+        "id": "chain",
+        "label": "主依赖链",
+        "focus": ["l0", "l1", "l2", "l3", "ui", "app"],
+        "note": "自底向上六个分层：共享类型 → 纯配置 → 能力 → Bevy 包装 → 业务 UI → 入口装配。"
+      },
+      {
+        "id": "isolation",
+        "label": "三条隔离约束",
+        "focus": ["bevy", "xui", "ui", "daemon", "l2"],
+        "note": "xui 不认识任何 xgent crate，daemon 不碰 Bevy，插件宿主经 proxy 反转依赖。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "l0",
+      "type": "backend",
+      "label": "地基 crate",
+      "sublabel": "xgent_core · xui_i18n",
+      "tag": "零内部依赖",
+      "pos": [430, 30],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_core/Cargo.toml", "label": "core 依赖" },
+        { "path": "crates/xui_i18n/Cargo.toml", "label": "i18n 无依赖" }
+      ]
+    },
+    {
+      "id": "l1",
+      "type": "backend",
+      "label": "纯类型配置",
+      "sublabel": "xgent_settings_core",
+      "pos": [430, 114],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_settings_core/Cargo.toml", "label": "Cargo 依赖" }
+      ]
+    },
+    {
+      "id": "l2",
+      "type": "backend",
+      "label": "能力 crate",
+      "sublabel": "provider · tools · context · terminal",
+      "pos": [430, 198],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_provider/Cargo.toml", "label": "provider 依赖" },
+        { "path": "crates/xgent_tools/Cargo.toml", "label": "tools 含 bevy" }
+      ]
+    },
+    {
+      "id": "daemon",
+      "type": "backend",
+      "label": "xgent_daemon（bin）",
+      "sublabel": "纯 tokio，无 Bevy",
+      "pos": [760, 198],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_daemon/Cargo.toml", "label": "无 bevy 依赖" }
+      ]
+    },
+    {
+      "id": "l3",
+      "type": "backend",
+      "label": "Bevy 包装 + 编排",
+      "sublabel": "xgent_settings · xgent_agent",
+      "pos": [430, 282],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_agent/Cargo.toml", "label": "agent 依赖" }
+      ]
+    },
+    {
+      "id": "plugin",
+      "type": "security",
+      "label": "插件三 crate",
+      "sublabel": "plugin_api · plugin · plugin_host",
+      "pos": [760, 282],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_plugin/Cargo.toml", "label": "只依赖 core" },
+        { "path": "crates/xgent_plugin_host/Cargo.toml", "label": "host 依赖业务" }
+      ]
+    },
+    {
+      "id": "bevy",
+      "type": "external",
+      "label": "Bevy 0.20",
+      "sublabel": "path 依赖 ../bevy",
+      "pos": [150, 282],
+      "size": [220, 56]
+    },
+    {
+      "id": "xui",
+      "type": "frontend",
+      "label": "xui 组件库",
+      "sublabel": "bevy + xui_i18n",
+      "tag": "可独立发布",
+      "pos": [150, 366],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xui/Cargo.toml", "label": "无 xgent_* 依赖" }
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "xgent_ui",
+      "sublabel": "24 模块 · 最大 crate",
+      "pos": [430, 366],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_ui/Cargo.toml", "label": "Cargo 依赖" }
+      ]
+    },
+    {
+      "id": "app",
+      "type": "backend",
+      "label": "xgent_app（bin）",
+      "sublabel": "组装插件 + 拉起 daemon",
+      "pos": [430, 450],
+      "size": [220, 56],
+      "sources": [
+        { "path": "crates/xgent_app/src/main.rs", "line": 250, "label": "add_plugins 装配" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "两个进程都编译进来",
+      "wraps": ["l0", "l1", "l2"],
+      "pad": 16
+    },
+    {
+      "kind": "region",
+      "label": "UI 进程侧",
+      "wraps": ["l3", "plugin", "bevy", "xui", "ui", "app"],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    { "id": "l1-l0", "from": "l1", "to": "l0", "label": "配置类型建在其上" },
+    { "id": "l2-l1", "from": "l2", "to": "l1", "label": "读限额与策略" },
+    { "id": "l3-l2", "from": "l3", "to": "l2", "label": "编排三者" },
+    { "id": "ui-l3", "from": "ui", "to": "l3", "label": "订阅 agent Message" },
+    { "id": "app-ui", "from": "app", "to": "ui", "label": "唯一入口 bin" },
+    { "id": "ui-xui", "from": "ui", "to": "xui", "label": "通用组件" },
+    { "id": "xui-bevy", "from": "xui", "to": "bevy", "label": "引擎" },
+    { "id": "daemon-l2", "from": "daemon", "to": "l2", "label": "provider + 配置" },
+    { "id": "plugin-l3", "from": "plugin", "to": "l3", "label": "仅 host 依赖业务" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "读图约定与三条约束",
+      "items": [
+        "箭头指向被依赖方；只画揭示架构的关键边，「所有 crate 都依赖 core」这类边未逐条画出",
+        "xui_i18n 只放 StringSource trait：xui 用 trait、xgent_settings 实现它，于是 xui 零 xgent 依赖",
+        "xgent_tools 与 xgent_context 的 Cargo.toml 确有 bevy；xgent_terminal 反而不依赖任何内部 crate",
+        "xgent_app 与 xgent_daemon 之间没有 cargo 依赖，只有运行时进程派生"
+      ]
+    }
+  ]
+}

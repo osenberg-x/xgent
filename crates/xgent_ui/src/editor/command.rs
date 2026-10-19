@@ -1,6 +1,6 @@
 //! 编辑器命令订阅与执行。
 //!
-//! 详见 `doc/design/editor-design.md` 第 3.2 节 / 3.4 节。
+//! 详见 `docs/design/editor-design.md` 第 3.2 节 / 3.4 节。
 //!
 //! `EditorCommandRequestMessage` 由 `xgent_agent` 桥接层从 `EditorTool`
 //! （UI-only Tier，默认 Approved）的请求经 channel 转发到 ECS。

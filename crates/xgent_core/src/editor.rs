@@ -5,7 +5,7 @@
 //!
 //! 对齐 `xui_i18n::StringSource` 的反转依赖模式。
 //!
-//! 详见 `doc/design/editor-design.md` 第 6.3 节。
+//! 详见 `docs/design/editor-design.md` 第 6.3 节。
 
 use std::path::{Path, PathBuf};
 

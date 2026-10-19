@@ -1,6 +1,6 @@
 //! PTY IO 桥接（ECS Messages ↔ async [`TerminalBackend`]）。
 //!
-//! 详见 `doc/design/terminal-design.md` §3.2-§3.4、ADR-0011。
+//! 详见 `docs/design/terminal-design.md` §3.2-§3.4、ADR-0011。
 //!
 //! 数据流（UI → backend）：
 //! ```text

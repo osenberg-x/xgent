@@ -1,6 +1,6 @@
 //! tree-sitter 语法高亮。
 //!
-//! 详见 `doc/design/editor-design.md` 第 5.3 节。
+//! 详见 `docs/design/editor-design.md` 第 5.3 节。
 //!
 //! MVP 策略：全量解析（每次文本变化重解析全文）。
 //! 大文件增量解析留待后续（设计文档 5.3 节性能要求 O(改动量)）。

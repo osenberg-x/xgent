@@ -4,7 +4,7 @@
 //! 插件 crate 以 `crate-type = ["cdylib"]` 编译为 WASM Component，
 //! 入口导出函数 `init-extension` 由宿主加载后调用初始化插件实例。
 //!
-//! 详见 `doc/design/plugin-system-design.md` §5.2 / §13 Step P1。
+//! 详见 `docs/design/plugin-system-design.md` §5.2 / §13 Step P1。
 //! 对标 `zed_extension_api`（Zed `crates/extension_api/src/extension_api.rs`）。
 
 // 生成代码（wit-bindgen 0.22）内部 unsafe fn 中直接调 unsafe，edition 2024 下

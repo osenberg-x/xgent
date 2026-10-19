@@ -1,6 +1,6 @@
 //! 终端输出历史渲染：PTY 字节流 → vte 解析 → `RenderHistory` → UI。
 //!
-//! 详见 `doc/design/terminal-design.md` §3.4、§6。
+//! 详见 `docs/design/terminal-design.md` §3.4、§6。
 //!
 //! 行模型（非屏幕字符网格）：每个 tab 持一个 [`RenderHistory`]（`Vec<RenderLine>`），
 //! PTY 字节经 `TerminalParser` 增量解析累积成行。MVP 渲染策略：把每行作为独立

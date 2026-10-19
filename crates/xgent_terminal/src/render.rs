@@ -1,6 +1,6 @@
 //! 终端输出渲染模型——ANSI 转义序列解析为 [`RenderLine`]。
 //!
-//! 详见 `doc/design/terminal-design.md` §3.4、§6。
+//! 详见 `docs/design/terminal-design.md` §3.4、§6。
 //!
 //! MVP 行模型（非屏幕字符网格）：PTY 字节流经 [`TerminalParser`] 增量解析，
 //! 累积成 `Vec<RenderLine>`，每行是 `Vec<StyledSpan>`（带颜色的文本段）。

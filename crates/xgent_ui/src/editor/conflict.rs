@@ -1,6 +1,6 @@
 //! 外部修改冲突协调 + 弹窗。
 //!
-//! 详见 `doc/design/editor-design.md` 第 3.6 节 / 4.1 节 / 2.4 节。
+//! 详见 `docs/design/editor-design.md` 第 3.6 节 / 4.1 节 / 2.4 节。
 //!
 //! 流程：
 //! ```text
@@ -23,7 +23,7 @@ use crate::editor::buffer::{BufferState, EditorBuffer};
 use crate::editor::io::FileReadRequest;
 use crate::editor::tabs::EditorTabs;
 
-/// 外部文件变更事件（由 daemon 桥接转发，见 `doc/design/editor-design.md` 3.2）。
+/// 外部文件变更事件（由 daemon 桥接转发，见 `docs/design/editor-design.md` 3.2）。
 #[derive(Message, Debug, Clone)]
 pub struct FileChangedEvent {
     /// 变更文件绝对路径

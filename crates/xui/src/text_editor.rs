@@ -2,7 +2,7 @@
 //!
 //! 纯依赖 `bevy` + `xui_i18n` + `tree-sitter` + `tree-sitter-rust`，**不依赖任何 `xgent_*`**。
 //!
-//! 详见 `doc/design/editor-design.md` 第 5 节。
+//! 详见 `docs/design/editor-design.md` 第 5 节。
 //!
 //! 能力边界（中等）：
 //! - 多行文本编辑（基于官方 `EditableText`，复用 IME/光标/选区）

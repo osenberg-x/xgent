@@ -1,0 +1,233 @@
+schema: comet.native.v4
+name: ui-v8-model-dialog-redesign
+language: en
+phase: verify
+status: active
+state_version: 5
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 8aab2cfe8e804881c5a8b84eb890e620b4adf172e36238802be7989c441a42c4
+spec_changes: []
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: verify-ready
+  goal_cycle: 1
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: await-verifier-result
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: composer 右下角出现常驻选择器 pill（显示当前模型名 + 思考等级徽标）；发送按钮、字符计数、@
+      补全等既有行为完全不受影响；pill 用 absolute 定位锚定 composer 右下角，窗口缩放不遮挡输入区。"
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: "A2: 点击 pill 打开模型对话框：上半部为可搜索的模型列表（新列表为 12 个典型模型的最小演示集：搜索即过滤、当前模型 ✓ 标记、「常用
+      / 其他」分组）；↑/↓ 移动高亮、Enter 采纳、点击采纳均可。"
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: "A3: 思考等级为 segmented control（off/low/medium/high）：选中即改，pill
+      徽标与对话框内选中态同步；退出重开保持选择（页内状态）。"
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: "A4: 全部关闭路径成立：Esc（栈顶优先）、点击 scrim、点选模型后自动收合；其余模态（settings/palette/drawer）与新
+      popover 的 z 顺序不冲突（沿用 400+depth×8 分层）。"
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: "A5: 对话框底部有 XGent 特色区：3D 陪伴身份 mini 呈现（陪伴形象占位 + 「模型/思考等级将作用于 3D
+      陪伴演示」类文案），仅用既有 Tokens，无新功能面。"
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: "A6: 静态断言全绿：新组件的关键选择器/DOM 模式的存在性断言 + 死代码/失配模式零命中；内联 `<script>` `node
+      --check` 通过；控制台零新报错。"
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: "A7: `docs/plans/ui-v8-tasks.md` 文末新增「附：模型对话框重设计（2026-10-16，已完成）」段：动机 +
+      结构描述 + 参照对象 + 复测口径；原有三段内容不动。"
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: "A8: 旧入口并存无冲突：provPill/gearBtn 打开 settings 面板且其中 `#mlist` 列表 + C2
+      复现照旧；两处模型数据源一致（同一 JS 数据/常量）。"
+    result: pending
+    reason: null
+builder_handoff:
+  candidate_id: 243d9098-5020-4356-bdb8-6cad79090d52
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:dc5a914d-46c2-48cc-ac8a-ccc308f577f2
+  iteration: 1
+  summary:
+    text: "模型对话框重设计按 brief A1-A8 全部实现（原型重设计后 1282 行）。composer 右下角新增模型 pill（.mpl
+      absolute 锚定 .foot 右缘，.mplslot 占位不遮挡既有 charHint/发送/IME），点开 .mpop（.inbox 内
+      absolute、bottom:calc(100% + 6px) 向上展开，与 #comp 同构）：可搜索 12 模型列表（MPICK
+      常量、常用/其他分组、当前 ✓、↑/↓/Enter/点击，scrollIntoView nearest，选择后自动收合）+ 思考等级
+      segmented control（off/low/medium/high，t层级选择即改即显、pill 与段内 .on 同步、重开保持）+
+      XGent 3D 陪伴身份区（radial-gradient 占位球 + 联动文案，无新功能面）。关闭路径：Esc（document
+      分支优先级在模态栈之后）、点外关闭（closest #mpop/#mpill 判断）、选择后收合；模态栈非空时拒绝打开（z 分层永冲突=0，沿用
+      MODAL 400+depth×8）。数据源统一：MPICK/MODEL_BASE 单一常量，设置面板 200 条 #mlist 改由
+      MODEL_BASE 轮转（A8 同源验证），provPill/gearBtn 与 C2 复现原样。范围仅
+      docs/design/ui-prototype-v8.html + docs/plans/ui-v8-tasks.md
+      新增附段；crates/** 零改动，documentation-only
+      无产品行为变更。验证：c1（prototype-static-patterns，EncodedCommand）18 组必现 + 5
+      组台账识别命中、18 组失配零命中（含旧写死串 gpt-4o-mini-2024-07-18 与死字段
+      S.mpSel/mpItems）；c2（prototype-js-syntax）node --check exit
+      0。行为项（开合联动、键盘导航、模态互斥、双入口并存）为浏览器走查边界，交 Verifier 对照 brief 复核。决策沿用 brief
+      D-1..D-4 无偏离。"
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - pill HTML 落在 composer .foot 行最右（id="mpill"），显示「当前模型名 · 分隔线 · 思考 lv 徽标
+          · ▾」
+        - .mpl position:absolute;right:0;top:50% 锚定 .foot 右缘（.foot 已补
+          position:relative），.mplslot 占位 186px 使 charHint 不被遮挡
+        - 发送按钮/字符计数/@ 补全/停止流式代码路径零改动；c1 断言 .mpl{ / id="mpill" / bottom:calc(100%
+          + 6px) 存在
+      note: pill 常驻 composer 右下角；行为不回归由 Verifier 浏览器走查复核。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - .mpop 内 .mdrop 列表由 MPICK（12 模型）经 renderMpopList(q) 渲染：搜索即过滤、「常用/其他」分组头
+          .mgrp、当前模型 .ck ✓ 标记
+        - "键盘 ↑/↓/Enter（#mpq 与 #input 两路径接 mpMove，scrollIntoView block
+          nearest）与点击（.mpit onclick=mpSelect）均可采纳"
+        - c1 断言 .mpop{ / function renderMpopList / function mpMove( / function
+          mpSelect( / const MPICK_LV= 存在
+      note: 列表为最小演示集，非 200 行；搜索为大小写不敏感 includes。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - .mlv > .mseg segmented control 四档 off/low/medium/high，#mseg button
+          data-lv 点击即改 S.pick.lv 并 renderMpill()（pill 徽标同步）
+        - $$('#mseg button') 的 .on 状态仅由选中按钮持有；重开（mpOpen 重渲染）保持 S.pick.mit 当前选择
+        - c1 断言 .mseg button.on{ 与 思考 ${S.pick.lv} 模板模式存在
+      note: off = 直接生成；切级不收合 popover，选模型才收合。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - Esc：document keydown 段新增 else if(S.mpop)
+          分支（优先级位于模态栈之后、补全/抽屉/流式之前，模态栈非空时 elif 链不可达 → 栈顶语义无损）；#mpq 内 Esc 复制
+          preventDefault+stopPropagation 双保险
+        - "点击外区域：document click 扩展
+          if(!e.target.closest('#mpop')&&!e.target.closest('#mpill'))
+          mpClose(false)（与 #comp 外点关闭同款）"
+        - 点选模型自动收合（mpSelect → mpClose）；模态互斥：mpOpen 时 if(S.modalStack.length)
+          拒绝打开（toast），故与 MODAL 400+depth×8 / DRAWER 200 分层永冲突=0
+      note: popover 不进模态栈、不显示 scrim（DROPDOWN 300 语境，与 B1 分层语言一致）。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - .mpop .m3d 底部身份区：radial-gradient 陪伴形象占位球（.orb，高光 ::after，全 accent 变量）+
+          文案「XGent 3D 陪伴 / 当前模型与思考等级将同步作用于 3D 陪伴演示（P1 预留）」
+        - 纯呈现元素：无事件、无数据、无开关；配色仅用既有
+          --accent/--accent-hover/--accent-int/--accent-glow/--subtle，未新增色值
+        - c1 断言 .mpop .m3d{ 与 XGent 3D 陪伴 文案模式存在
+      note: 特色 = 身份承载（D-3），参照流行 agent 的信息架构不复制视觉（D-4）。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - c1（prototype-static-patterns）实测 exit 0：18 组必现模式（组件 CSS/JS/模板）+ 5
+          组台账识别全命中；18 组失配模式零命中（上一轮 15 组禁项全保留 + gpt-4o-mini-2024-07-18 旧写死串 + 死字段
+          S.mpSel/mpItems）
+        - c2（prototype-js-syntax）提取内联 script 后 node --check 实测 exit 0
+        - 重复定义扫描：mpToggle/mpOpen/mpClose/mpMove/mpSelect/currentModel/renderMpill/renderMpopList
+          各恰好 1 次；无新 hex 色值（颜色全用既有变量）
+      note: 静态断言与语法检查可重复执行（EncodedCommand 载体）。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - docs/plans/ui-v8-tasks.md 文末新增「##
+          附：模型对话框重设计（2026-10-16，已完成）」段：动机与参照/结构定型/复测口径三小节
+        - 原三段（逐条验证、缺陷复审、模型对话框前身说明）零改动；新段明确与上两段不重叠
+        - c1 断言 附：模型对话框重设计 / ui-v8-model-dialog-redesign / 2026-10-16 / MPICK /
+          mseg 全命中
+      note: 文档同步满足 AGENTS.md §6.8。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - 数据源统一：const MPICK + MODEL_BASE=MPICK.map(...) 单一常量；#mlist 200 条由
+          MODEL_BASE[i%MODEL_BASE.length] 轮转生成
+        - provPill/gearBtn 打开 settings、.mlist.bad2 C2 复现、applyModal/syncToggles
+          逻辑零改动（c1 forbid 含全部旧禁项零命中佐证）
+        - c1 断言 const MODEL_BASE= 与 MODEL_BASE[i%MODEL_BASE.length]
+          存在、gpt-4o-mini-2024-07-18 旧写死串零命中
+      note: 两处模型数据同源；设置面板行为原样。
+  checks:
+    - name:
+        text: prototype-static-patterns
+        truncated: false
+      result: passed
+      note:
+        text: PowerShell 模式断言（EncodedCommand）：18 组必现 + 5 组台账识别命中，18 组失配零命中，exit 0
+        truncated: false
+    - name:
+        text: prototype-js-syntax
+        truncated: false
+      result: passed
+      note:
+        text: 提取内联 script 写临时文件，node --check，exit 0
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 行为验收项（pill 开合、搜索/键盘导航、思考等级联动、模态互斥、双入口并存、C2 复现照旧）为浏览器走查边界，未脚本化，由 Verifier
+        手动/语义复核
+      truncated: false
+    - text: MPICK 为 12 模型演示集（纯静态演示数据，不接 runtime）；思考等级为页内状态（不持久化）
+      truncated: false
+    - text: 静态断言经 EncodedCommand（UTF-16LE）载体执行；PowerShell 控制台对 CJK 显示乱码仅为 codepage 问题
+      truncated: false
+    - text: UX 参照（Claude/Zed/Cursor）仅取信息架构（brief D-4），视觉全部沿用 v7-Linear
+        Tokens（ADR-0014）
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-16T10:51:33.806Z
+blockers: []
+verification: null
+history: []
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-10-16T10:31:57.897Z

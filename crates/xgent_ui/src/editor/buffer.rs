@@ -1,6 +1,6 @@
 //! EditorBuffer 组件与状态机。
 //!
-//! 详见 `doc/design/editor-design.md` 第 4.1 节。
+//! 详见 `docs/design/editor-design.md` 第 4.1 节。
 //!
 //! # 状态机
 //!

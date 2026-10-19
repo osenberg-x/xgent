@@ -6,7 +6,7 @@
 //! 走 JSON-RPC，调用方（`xgent_ui::terminal` ECS 系统）不改——
 //! 对齐 AGENTS.md §5.1 "可上移职责用 trait 抽象，切换不破坏调用方"。
 //!
-//! 详见 `doc/design/terminal-design.md` §3.1、§5、ADR-0011/0012。
+//! 详见 `docs/design/terminal-design.md` §3.1、§5、ADR-0011/0012。
 
 use std::path::PathBuf;
 

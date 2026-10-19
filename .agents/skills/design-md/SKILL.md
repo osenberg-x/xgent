@@ -15,7 +15,7 @@ description: XGent 的 UI 视觉风格参考库。在做 UI 重构、新增面�
 1. **确定目标气质**。用户已指定风格则直接进入下一步；未指定时，结合 XGent 定位（桌面端 AI 编码工具、深色、开发者向）从下方索引推荐 2~3 个候选（可用「本项目适配建议」），让用户选定。
 2. **完整阅读选中的** `library/<风格>/DESIGN.md`。重点是第 1（视觉气质）、2（语义色）、3（排版层级）、4（组件样式）、5（间距）、6（阴影/层级）、7（Do's and Don'ts）节；第 8 节响应式按桌面窗口场景取舍；第 9 节示例提示词是 Web 语境，只作意图参考。
 3. **按下方映射规则落地到 Bevy UI**，不逐字照搬 Web 细节。
-4. **若该风格被确定为项目长期视觉语言**：更新 `crates/xgent_ui/src/theme.rs` 为新主题，把该 DESIGN.md 复制到 `doc/design/DESIGN.md` 作为项目视觉蓝本（注明对原版的裁剪与调整），并在 `doc/decisions/` 记一条简短 ADR。临时参考则不动这些文件。
+4. **若该风格被确定为项目长期视觉语言**：更新 `crates/xgent_ui/src/theme.rs` 为新主题，把该 DESIGN.md 复制到 `docs/design/DESIGN.md` 作为项目视觉蓝本（注明对原版的裁剪与调整），并在 `docs/decisions/` 记一条简短 ADR。临时参考则不动这些文件。
 
 ## Web → Bevy UI 映射要点
 

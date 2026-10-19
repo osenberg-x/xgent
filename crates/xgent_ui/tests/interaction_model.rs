@@ -1,6 +1,6 @@
 //! Bevy 0.20 交互模型契约测试（headless 全链路）。
 //!
-//! 验证 0.20 适配（`doc/notes/bevy-0.20-migration.md` §3.1）所依赖的承重语义，
+//! 验证 0.20 适配（`docs/notes/bevy-0.20-migration.md` §3.1）所依赖的承重语义，
 //! 全部经真实调度（First 输入 → PreUpdate picking → Update 处理）端到端驱动：
 //!
 //! 1. **后代悬停**：指针悬停在交互根的子节点上，根的 `Hovered` 为 true

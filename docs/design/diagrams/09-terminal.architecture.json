@@ -1,0 +1,362 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "终端原理（PTY 桥与行模型）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/osenberg-x/xgent",
+      "revision": "b0771e88840eb76d792447dc3f4094e623f44412"
+    },
+    "viewBox": [
+      1380,
+      560
+    ],
+    "views": [
+      {
+        "id": "out",
+        "label": "输出通路",
+        "focus": [
+          "pty",
+          "threads",
+          "bridge",
+          "parser",
+          "output"
+        ],
+        "note": "reader 线程 blocking_send → tokio mpsc → crossbeam → ECS → vte → 行节点。"
+      },
+      {
+        "id": "in",
+        "label": "输入通路",
+        "focus": [
+          "user",
+          "input",
+          "backend",
+          "pty"
+        ],
+        "note": "本地行编辑攒字符，Enter 提交整行加 \\r；Ctrl+C/D 即时单字节。"
+      },
+      {
+        "id": "isolation",
+        "label": "与 agent 工具路径零交集",
+        "focus": [
+          "backend",
+          "runtool",
+          "sideview"
+        ],
+        "note": "终端不经 ToolExecutor 与 resolve_policy，进程归用户，输出不在工具卡。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "bridge",
+      "type": "messagebus",
+      "label": "PtyBridge",
+      "sublabel": "crossbeam 无界通道",
+      "pos": [
+        560,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/terminal/io.rs",
+          "line": 48,
+          "label": "PtyBridge"
+        }
+      ]
+    },
+    {
+      "id": "parser",
+      "type": "backend",
+      "label": "vte 解析",
+      "sublabel": "RenderLine + StyledSpan",
+      "pos": [
+        830,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_terminal/src/render.rs",
+          "line": 95,
+          "label": "TerminalParser"
+        }
+      ]
+    },
+    {
+      "id": "output",
+      "type": "frontend",
+      "label": "输出区渲染",
+      "sublabel": "增量追加 + 当前行",
+      "pos": [
+        1100,
+        40
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/terminal/output.rs",
+          "line": 159,
+          "label": "可见性更新"
+        }
+      ]
+    },
+    {
+      "id": "user",
+      "type": "external",
+      "label": "用户",
+      "sublabel": "键盘",
+      "pos": [
+        40,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ]
+    },
+    {
+      "id": "input",
+      "type": "frontend",
+      "label": "input.rs 行编辑",
+      "sublabel": "TerminalLineBuf",
+      "pos": [
+        290,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/terminal/input.rs",
+          "line": 72,
+          "label": "键盘捕获"
+        }
+      ]
+    },
+    {
+      "id": "backend",
+      "type": "backend",
+      "label": "LocalPtyBackend",
+      "sublabel": "TerminalBackend 实现",
+      "pos": [
+        560,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_terminal/src/local_pty.rs",
+          "line": 53,
+          "label": "sessions map"
+        }
+      ]
+    },
+    {
+      "id": "pty",
+      "type": "external",
+      "label": "PTY + shell",
+      "sublabel": "portable-pty，cooked 模式",
+      "pos": [
+        830,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_terminal/src/local_pty.rs",
+          "line": 112,
+          "label": "openpty"
+        }
+      ]
+    },
+    {
+      "id": "threads",
+      "type": "backend",
+      "label": "三线程",
+      "sublabel": "reader / wait / cmd",
+      "pos": [
+        1100,
+        250
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_terminal/src/local_pty.rs",
+          "line": 161,
+          "label": "reader"
+        },
+        {
+          "path": "crates/xgent_terminal/src/local_pty.rs",
+          "line": 218,
+          "label": "wait"
+        }
+      ]
+    },
+    {
+      "id": "tabsys",
+      "type": "frontend",
+      "label": "terminal/tabs",
+      "sublabel": "多 tab 与 spawn",
+      "pos": [
+        560,
+        460
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/terminal/tabs.rs",
+          "line": 55,
+          "label": "spawn 请求"
+        }
+      ]
+    },
+    {
+      "id": "sideview",
+      "type": "messagebus",
+      "label": "SideViewContent",
+      "sublabel": "Terminal 页才抢键盘",
+      "pos": [
+        290,
+        460
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_ui/src/terminal/mod.rs",
+          "line": 476,
+          "label": "显隐与清焦点"
+        }
+      ]
+    },
+    {
+      "id": "runtool",
+      "type": "security",
+      "label": "RunCommand 工具",
+      "sublabel": "另一条路：无 TTY 走确认",
+      "pos": [
+        830,
+        460
+      ],
+      "size": [
+        200,
+        56
+      ],
+      "sources": [
+        {
+          "path": "crates/xgent_tools/src/builtins/run_command.rs",
+          "line": 95,
+          "label": "工具执行"
+        }
+      ]
+    }
+  ],
+  "boundaries": [],
+  "connections": [
+    {
+      "id": "type",
+      "from": "user",
+      "to": "input",
+      "label": "逐键攒行"
+    },
+    {
+      "id": "submit",
+      "from": "input",
+      "to": "backend",
+      "label": "write(整行 + \\r)",
+      "labelAt": [
+        525,
+        224
+      ]
+    },
+    {
+      "id": "master",
+      "from": "backend",
+      "to": "pty",
+      "label": "master 写入"
+    },
+    {
+      "id": "fd",
+      "from": "pty",
+      "to": "threads",
+      "label": "读端 / 退出码"
+    },
+    {
+      "id": "evt",
+      "from": "backend",
+      "to": "bridge",
+      "label": "TerminalEvent"
+    },
+    {
+      "id": "toparser",
+      "from": "bridge",
+      "to": "parser",
+      "label": "字节流喂 vte"
+    },
+    {
+      "id": "tolines",
+      "from": "parser",
+      "to": "output",
+      "label": "RenderLine"
+    },
+    {
+      "id": "reader",
+      "from": "threads",
+      "to": "output",
+      "label": "blocking_send"
+    },
+    {
+      "id": "spawn",
+      "from": "tabsys",
+      "to": "backend",
+      "label": "spawn(80×24)"
+    },
+    {
+      "id": "focus",
+      "from": "sideview",
+      "to": "input",
+      "label": "键盘归属"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "crate 归属与三条硬事实",
+      "items": [
+        "xgent_terminal 只有 backend.rs / local_pty.rs / render.rs；PtyBridge、行编辑、输出区渲染、多 tab 全在 xgent_ui/src/terminal",
+        "Exited 只由 wait 线程上报：孙进程占住 slave 时 reader 永不 EOF，只靠 EOF 会漏报退出",
+        "reader 线程识别 DSR 探测 \\x1b[6n 并回 \\x1b[1;1R，否则 PowerShell 启动即卡在探测上",
+        "输出是行模型不是屏幕网格：不支持 vim/top 这类全屏 TUI，也没有虚拟滚动，切 tab 即全量重建"
+      ]
+    }
+  ]
+}

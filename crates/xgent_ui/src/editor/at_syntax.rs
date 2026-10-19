@@ -1,6 +1,6 @@
 //! @ 引用解析（输入预处理）。
 //!
-//! 详见 `doc/design/editor-design.md` 第 3.5 节 / 6.5 节。
+//! 详见 `docs/design/editor-design.md` 第 3.5 节 / 6.5 节。
 //!
 //! MVP 两种 @ 引用：
 //! - `@file:src/main.rs` — 拉取该文件内容作为上下文。

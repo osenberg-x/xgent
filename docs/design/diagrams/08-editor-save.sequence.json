@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "编辑器：打开 → 渲染 → 保存 → 外部变更冲突",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1390, 575],
+    "views": [
+      {
+        "id": "open",
+        "label": "打开与首屏",
+        "focus": ["user", "panel", "ecs", "disk", "xui"],
+        "note": "读盘发生在 ECS 主线程的同步回退路径上，异步 runtime 从未注入。"
+      },
+      {
+        "id": "save",
+        "label": "保存与广播",
+        "focus": ["ecs", "disk", "daemon"],
+        "note": "保存绕过 WriteFile 工具与检查点，落盘后主动通知 daemon 广播给同伴窗口。"
+      },
+      {
+        "id": "conflict",
+        "label": "外部变更",
+        "focus": ["daemon", "ecs", "user", "disk"],
+        "note": "干净的静默重读，脏的弹窗三选，冲突未决期间禁止保存。"
+      }
+    ]
+  },
+  "participants": [
+    { "id": "user", "type": "external", "label": "用户" },
+    { "id": "panel", "type": "frontend", "label": "文件抽屉 · 标签" },
+    { "id": "ecs", "type": "backend", "label": "editor 系统群" },
+    { "id": "xui", "type": "frontend", "label": "TextEditor 渲染" },
+    { "id": "disk", "type": "database", "label": "磁盘" },
+    { "id": "daemon", "type": "backend", "label": "daemon" }
+  ],
+  "segments": [
+    { "from": 150, "to": 328, "label": "打开与首屏" },
+    { "from": 332, "to": 442, "label": "保存" },
+    { "from": 446, "to": 520, "label": "外部变更" }
+  ],
+  "messages": [
+    { "id": "click", "from": "user", "to": "panel", "y": 170, "label": "点击文件节点", "variant": "emphasis" },
+    { "id": "openreq", "from": "panel", "to": "ecs", "y": 200, "label": "OpenFileRequest → 建 buffer 实体" },
+    { "id": "read", "from": "ecs", "to": "disk", "y": 230, "label": "同步 read_to_string（异步 handle 未注入）" },
+    { "id": "content", "from": "disk", "to": "ecs", "y": 258, "label": "内容 + disk_content 基线", "variant": "return" },
+    { "id": "rope", "from": "ecs", "to": "xui", "y": 286, "label": "写 rope / 清 spans / 置 Clean" },
+    { "id": "paint", "from": "xui", "to": "user", "y": 314, "label": "只读虚拟化渲染（键入不进 rope）", "variant": "dashed" },
+    { "id": "savekey", "from": "user", "to": "ecs", "y": 346, "label": "Cmd+S", "variant": "emphasis" },
+    { "id": "write", "from": "ecs", "to": "disk", "y": 374, "label": "临时文件 + rename 原子写（不经 WriteFile 工具）" },
+    { "id": "saved", "from": "disk", "to": "ecs", "y": 402, "label": "写成功 → mark_saved", "variant": "return" },
+    { "id": "notify", "from": "ecs", "to": "daemon", "y": 432, "label": "fs.notify{path}" },
+    { "id": "peer", "from": "daemon", "to": "ecs", "y": 462, "label": "peer.fileChanged（同伴窗口）", "variant": "dashed" },
+    { "id": "ask", "from": "ecs", "to": "user", "y": 492, "label": "脏则三选弹窗（对比合并 = 保留本地）", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "panel", "from": 168, "to": 204, "type": "frontend" },
+    { "participant": "ecs", "from": 200, "to": 496, "type": "backend" },
+    { "participant": "xui", "from": 284, "to": 318, "type": "frontend" },
+    { "participant": "disk", "from": 228, "to": 406, "type": "database" },
+    { "participant": "daemon", "from": 430, "to": 466, "type": "backend" }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "与「编辑器」直觉不符之处",
+      "items": [
+        "buffer 实体不挂 EditableText：敲字符不进 rope，因此保存的其实是刚读进来的内容",
+        "tree-sitter 每次内容变化全量重解析，只有 Rust 一种 grammar，且高亮层在业务 buffer 上被设为 None",
+        "查找替换只有 FindState.active 开关，没有渲染查找条，find_all / replace_all 无调用方"
+      ]
+    }
+  ]
+}

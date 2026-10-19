@@ -1,6 +1,6 @@
 //! editor 工具：agent 驱动编辑器动作（UI-only Tier，默认 Approved）。
 //!
-//! 详见 `doc/design/editor-design.md` 6.4 节。
+//! 详见 `docs/design/editor-design.md` 6.4 节。
 //!
 //! 设计要点：
 //! - `EditorTool` 不直接执行 IO，只把请求经 [`EditorCommandSink`] 转发给 UI 侧

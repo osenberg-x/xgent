@@ -3,7 +3,7 @@
 //! 把插件能力桥接进现有 ECS 体系：`PluginTool`（→ Tool trait）、
 //! `PluginCommand`（→ CommandRegistry）、`PluginContextProvider`（→ ContextProvider）。
 //!
-//! 详见 `doc/design/plugin-system-design.md` §5.3-§5.5 / §13 Step P3。
+//! 详见 `docs/design/plugin-system-design.md` §5.3-§5.5 / §13 Step P3。
 
 pub mod command;
 pub mod context;

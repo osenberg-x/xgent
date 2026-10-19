@@ -1,6 +1,6 @@
 //! 终端多 tab 管理：spawn/close/switch/clear + tab 条 UI。
 //!
-//! 详见 `doc/design/terminal-design.md` §3.2、§3.5、§4.1。
+//! 详见 `docs/design/terminal-design.md` §3.2、§3.5、§4.1。
 //!
 //! spawn 流程（[`handle_spawn_tab_requests`]）：
 //! 1. spawn `TerminalTab` 实体（pty_id 占位 0，status=Running）+ `RenderHistory`

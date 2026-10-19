@@ -3,7 +3,7 @@
 //! MVP 实现：存储查找串、替换串、匹配列表，提供 `find_all` / `replace_next` / `replace_all` API。
 //! UI overlay（查找框）由调用方渲染，或由 `xui::TextEditor` 的简易渲染系统提供。
 //!
-//! 详见 `doc/design/editor-design.md` 2.3 节快捷键表（Cmd+F / Cmd+H）。
+//! 详见 `docs/design/editor-design.md` 2.3 节快捷键表（Cmd+F / Cmd+H）。
 
 /// 单个匹配（字节区间，半开 [start, end)）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
