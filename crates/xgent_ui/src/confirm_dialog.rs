@@ -368,7 +368,13 @@ fn hide_on_decision(
     };
     let mut close = |decision: ConfirmDecision| {
         writer.write(ConfirmDecisionMessage { decision });
-        close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
+        close_dialog(
+            &mut commands,
+            dialog,
+            &mut focus,
+            &chat_entities,
+            &mut modal_pop,
+        );
     };
     for _ in q_allow.iter() {
         close(ConfirmDecision::Allow);
@@ -425,7 +431,13 @@ fn close_on_settled(
     let Ok(dialog) = q_dialog.single() else {
         return;
     };
-    close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
+    close_dialog(
+        &mut commands,
+        dialog,
+        &mut focus,
+        &chat_entities,
+        &mut modal_pop,
+    );
 }
 
 /// 弹窗激活时的键盘决策：Esc→拒绝、Enter→允许。
@@ -478,7 +490,13 @@ fn handle_confirm_keyboard(
                 writer.write(ConfirmDecisionMessage {
                     decision: ConfirmDecision::Deny,
                 });
-                close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
+                close_dialog(
+                    &mut commands,
+                    dialog,
+                    &mut focus,
+                    &chat_entities,
+                    &mut modal_pop,
+                );
                 return;
             }
             K::Enter => {
@@ -491,7 +509,13 @@ fn handle_confirm_keyboard(
                 writer.write(ConfirmDecisionMessage {
                     decision: ConfirmDecision::Allow,
                 });
-                close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
+                close_dialog(
+                    &mut commands,
+                    dialog,
+                    &mut focus,
+                    &chat_entities,
+                    &mut modal_pop,
+                );
                 return;
             }
             _ => {}

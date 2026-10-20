@@ -25,13 +25,7 @@ impl Plugin for PickablePlugin {
 /// 查询范围内，因此保持惰性。
 fn attach_pickable_to_interactive(
     mut commands: Commands,
-    q: Query<
-        Entity,
-        (
-            Or<(With<Button>, With<EditableText>)>,
-            Without<Pickable>,
-        ),
-    >,
+    q: Query<Entity, (Or<(With<Button>, With<EditableText>)>, Without<Pickable>)>,
 ) {
     for entity in &q {
         commands.entity(entity).insert(Pickable::default());

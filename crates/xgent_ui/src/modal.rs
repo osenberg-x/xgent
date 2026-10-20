@@ -162,7 +162,11 @@ fn apply_modal_push(
             continue;
         }
         if stack.len() >= z::MODAL_MAX_DEPTH {
-            tracing::warn!("模态栈已达上限 {}，拒绝入栈 {}", z::MODAL_MAX_DEPTH, push.id);
+            tracing::warn!(
+                "模态栈已达上限 {}，拒绝入栈 {}",
+                z::MODAL_MAX_DEPTH,
+                push.id
+            );
             continue;
         }
         let depth = stack.len() as i32;
@@ -175,9 +179,7 @@ fn apply_modal_push(
             dismiss: push.dismiss,
             opener_focus: push.opener_focus,
         });
-        top_changed.write(ModalTopChanged {
-            top: Some(push.id),
-        });
+        top_changed.write(ModalTopChanged { top: Some(push.id) });
     }
 }
 

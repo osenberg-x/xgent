@@ -1,0 +1,475 @@
+schema: comet.native.v4
+name: optimize-ui-v8-prototype-r2
+language: en
+phase: archive
+status: done
+state_version: 13
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: af9640115b3b3eca88b6c0c58c5d11cc7e88ffb37b710ecac3a90da46f95c230
+spec_changes: []
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 3
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 2
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: rail 底部陪伴按钮（暖色星标）常驻；状态环随 Agent
+      状态联动（空闲/思考/流式/工具执行/等待确认/错误），六态均有可复现的演示触发路径；不遮挡既有 rail 项。"
+    result: passed
+    reason:
+      text: 修复点 computedStyle 实测：error 态
+        borderTopColor=rgb(229,72,77)、opacity=1、animation=none（.rbtn.cmp.on.cmp-error
+        .ring 生效，红环可见）；idle rgb(255,178,36)/.35/none、confirm v8breathe+badge
+        display:block、think/stream/exec=v8breathe/v8pulse/v8spin（MutationObserver
+        记录 4 轮含瞬时 stream 态）；Esc→chat.abort 回 idle、#cmpSegTxt 六态同步；暖色底
+        rgb(255,178,36) 常驻 rail 列尾不遮挡既有项。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: 点击陪伴按钮开浮层：琥珀系形象占位球 + 当前状态行 + 模型/思考等级联动行 + 窗口预览入口 +
+      开/关；Esc/点外关闭并入既有浮层关闭链（模态栈优先序不破坏）。"
+    result: passed
+    reason:
+      text: "#cpop 开合链实测：锚定
+        rail（left62/bottom42px）含琥珀球/状态行/联动行/#cpopWin2/开关；Esc、点外、状态栏段重开均正常；模态在顶层\
+        时拒绝打开（toast），优先序不破坏。"
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: 独立陪伴窗口概念预览 mock：透明小窗形态 + 状态气泡 + 显式标注「F-15 概念预览 / K-04 平台受限 / 非本轮交付」。"
+    result: passed
+    reason:
+      text: "概念卡实测：cwframe（F-15 置顶透明无边框）+琥珀球 #cwmockOrb+状态气泡+三标签（概念预览/F-15 虚拟宠物/K-04
+        平台受限）+标题含非本轮交付+notes 含 D-07/OQ-05。"
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: 模型 popover `.m3d` 区升级且既有锚点保全（`XGent 3D 陪伴` 等原断言模式不破坏）。"
+    result: passed
+    reason:
+      text: .m3d orb computed radial-gradient 含 rgb(255,178,36)（琥珀化）+XGent 3D
+        陪伴锚点保全；模型选择/思考等级/点外关闭回归实测正常。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: 权限模式 pill + popover：三档切换即时回显；每档说明含与 §5.4 的关系；全自动时 pill 描边 + 状态栏 warn
+      段出现；「管理预批准规则」可跳转设置对应分区。"
+    result: passed
+    reason:
+      text: 三档 popover 说明齐（ask 显式 §5.4、auto 对应 Approved、full 受保护路径）；切 full→pill.full
+        描边 rgb(255,178,36)+#permWarnSeg flex；切回即时收起；管理入口→设置 tools 分区实测。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: 确认弹窗：三种放行粒度（仅此一次/本会话/始终允许·写入项目配置）+ 拒绝并说明路径；受保护路径提示存在；既有行为不回归。"
+    result: passed
+    reason:
+      text: "三档放行 toast 实测正确（仅此一次/本会话/写入项目配置→Approved）；拒绝→error 环+failCard；受保护路径 cnote
+        与 #freason 在位；bConfirm/Esc 既有行为不回归。"
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "A7: 设置「工具与安全」分区：snab 可切换至该分区；工具策略行（≥8 行，三级策略）+ 预批准/预拒绝规则列表 + 受保护目录；与 MCP
+      工具策略行并存。"
+    result: passed
+    reason:
+      text: "#pane-tools 10 行策略（三级徽标 n→a→d→n 循环实测）+4 规则（allow/deny/ask）+受保护目录锁定+MCP
+        行并存；snab model↔tools 切换实测。"
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "A8: 并行演示：good 模式流式路径出现 ≥2 并发工具卡（执行中→分别完成）+ 运行中指示；bad 模式 E2 对照路径不回归。"
+    result: passed
+    reason:
+      text: good：3 并发工具卡分别完成（成功|执行中|执行中→全成功）+ops 3→2→1→0 递减记录器实测+运行中指示 flex；bad E2
+        对照保持（工具卡前置、无 parSlot、无 ops）。
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "A9: 恢复可视：失败工具卡带动作组（重试/查看输出/回退检查点）；中断流出现「重新生成」条。"
+    result: passed
+    reason:
+      text: "#failCard 动作组 display:flex（重试/查看输出/回退检查点）实测；Esc
+        中断→.recoverbar「流式已中断（chat.abort）」+重新生成/编辑后再发按钮+工具已中断态实测。regen
+        点击探针被平台分类器拦截（验收仅要求条存在）。"
+      truncated: false
+  - id: A10
+    source: brief.md
+    text: "A10: 回合撤销：确认列表（将回滚文件 + 覆盖边界如实说明）→ 已撤销态。"
+    result: passed
+    reason:
+      text: 撤销实测：展开确认列表（3 文件清单+覆盖边界如实说明 R3-11）→取消收起→重开→确认→已撤销态（✓ 3 个文件已回滚至回合前）。
+      truncated: false
+  - id: A11
+    source: brief.md
+    text: "A11: 上下文用量条 + 压缩事件卡（摘要化前后 token 对照）。"
+    result: passed
+    reason:
+      text: "#ctxbar 用量条（8.2k/200k、4% 计量）与 #compactCard「8.2k → 3.1k
+        tokens」摘要对照在位（DOM+computed 实测）。"
+      truncated: false
+  - id: A12
+    source: brief.md
+    text: "A12: 欢迎空态：「＋新会话」切换（品牌/陪伴问候/快捷开始/最近会话）；发送消息恢复会话态。"
+    result: passed
+    reason:
+      text: 「＋新会话」→#welcome flex（品牌 X/✦陪伴问候/单处快捷提示/最近会话 3 项）；witem
+        toast；发送消息恢复会话态（welcome none/msgs block/流式启动）实测。
+      truncated: false
+  - id: A13
+    source: brief.md
+    text: "A13: 历史面板：搜索过滤 + 日期分组 + 当前会话高亮 + 空结果态（T-6 风格）。"
+    result: passed
+    reason:
+      text: 历史页签激活+搜索框；今天/昨天/更早分组+当前会话 .cur 高亮；过滤 daemon→1 项；空态「无匹配会话（T-6）」；清空复原 6
+        项，均实测。
+      truncated: false
+  - id: A14
+    source: brief.md
+    text: "A14: 静态断言全绿（必现组 + 禁项组 + 既有锚点保全组）+ `node --check` exit 0 + 控制台零新报错 +
+      既有演示回归清单通过 + 台账附段完整。"
+    result: passed
+    reason:
+      text: c1/c2 语义独立复刻全绿（48 必现+21 保全+10 禁项零命中+台账 7 项+色值 rgba=4/hex=2；44736
+        字符语法编译过），与 Runtime receipts c1/c2 passed 一致；控制台全程零消息；回归实测：C1/C2/C3/D2
+        警告条与规则、E2 对照、图层 6 带、密度 46px、模态栈 z 400/408/416+抽屉 100<400+Esc
+        逐层、模型对话框、注册表探针；台账附段含修复轮记录。
+      truncated: false
+builder_handoff:
+  candidate_id: e640c4dd-5d22-45d6-89b2-0f52f848e547
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:899f0925-43d4-4acf-8ba5-f18e518ee217
+  iteration: 3
+  summary:
+    text: 修复轮重提交：按首轮独立验证反馈修复 A1——状态环选择器由 `.v8 .cmp-{state} .ring`（0-3-0）提升为
+      `.rbtn.cmp.on.cmp-{state} .ring`（0-5-0），「错误红环」不再被 `.rbtn.cmp.on
+      .ring`（0-4-0）压制；并随修孤儿 `.confirm .cf` 规则与无消费者 `data-lvl`
+      属性。其余实现与首轮候选一致。第二轮原型优化交付：按 brief A1–A14
+      全部实现（docs/design/ui-prototype-v8.html 1284→1701
+      行；docs/plans/ui-v8-tasks.md 新增「附：原型优化第二轮」段）。① 陪伴：rail 底部
+      `#cmpBtn`（暖色星标，对齐产品 activity_bar 既有位置）+ 状态环六态 + `#cpop`
+      浮层（形象球/状态/联动/窗口预览/开关）+ 状态栏段 + `#cwmockOrb` 概念预览卡 + `.m3d` 琥珀化升级；②
+      权限：`#permPill` 三档 + 全自动警示 + 确认弹窗三档放行 + 设置「工具与安全」实表（10 行策略/4 规则/受保护目录，snab
+      切换）；③ 运行态：`#parSlot` 3 工具并行 + 运行中指示、`.recoverbar` 中断恢复、`#undoRow`
+      回合撤销（覆盖边界如实）、`#compactCard` 压缩卡 + `#ctxbar` 用量条；④ 空态：`#welcome`（对齐
+      welcome.rs，快捷入口单处）+ `#histSearch` 历史搜索/分组。对齐项：rail 补 `#expBtn`。既有演示与 21
+      组既有锚点零回归；设计先行项均显式标注。验证：c1（48 必现 + 10 禁项零命中 + 21 保全 + 色值计数不增 +
+      台账识别）、c2（内联脚本 node --check，44736 字符）；另本地浏览器级联探针核验错误红环可见。行为项为浏览器走查边界，交
+      Verifier 对照 A1–A14 复核。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - rail 底部 `#cmpBtn`（暖色星标 + `#cmpRing` 状态环），对齐产品 activity_bar.rs 既有位置与暖色口径
+        - 六态类
+          `cmp-idle/think/stream/exec/confirm/error`（暖色动画：静止/呼吸/脉冲/虚线旋转；等待确认叠加
+          `.cmp-badge`
+          琥珀点；错误红环）；触发：发送（think→stream→exec→idle）、开确认弹窗（confirm）、拒绝（error
+          1.8s）、Esc（idle）
+        - 状态栏 `#cmpSeg`/`#cmpSegTxt`「陪伴 · 状态」文本镜像；新增于 spacer 之后不遮挡既有 rail 项
+        - 修复轮（首轮验证反馈后）：状态环选择器提升至 `.rbtn.cmp.on.cmp-{state} .ring`（0-5-0），error 态
+          border-color=var(--st-fail)/opacity:1/animation:none 不再被 0-4-0
+          基线压制；等待确认琥珀点徽标不受影响
+      note: 状态环以暖色动画语义避免与 st_pending 同色歧义（D-3）；错误红环可见性经修复轮+浏览器级联探针核验。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - 点击 `#cmpBtn`/`#cmpSeg` 开 `#cpop`（BASE 内 absolute、无遮罩、不进模态栈；模态在场拒绝打开并
+          toast）
+        - 浮层内容：琥珀 `.orb-w` 形象球 + `#cpopState` 当前状态行 + 联动文案（含 OQ-05/D-07 边界注记）+
+          `#cpopWin`/`#cpopWin2` 窗口预览入口（scrollIntoView 定位概念卡）+ `#cpopToggle`
+          显示开关
+        - 关闭路径：Esc（`closeCpop(true)` 插入既有 Esc 链 mpop 之后）、点外（document click
+          closest 判断）
+      note: 交互由「开关」升级为「开浮层（含开关）」（D-2）。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - "`#cwmockOrb` 概念预览卡：`.cwframe` 虚线框 + 「置顶 · 透明 · 无边框（F-15）」标签 + 状态气泡"
+        - "`.cwnotes` 三枚 tagline：概念预览 / F-15 虚拟宠物 / K-04 平台受限；说明段引用
+          architecture.md §8.2 与 D-07/OQ-05 阻塞，明确不实现、非交付承诺"
+      note: 窗口预览为概念呈现，显式标注非交付承诺（D-4）。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - "`.mpop .m3d` 升级：orb 琥珀化（var(--warm) 渐变 + warm-bg 光晕）、文案指向陪伴入口与窗口预览"
+        - "`XGent 3D 陪伴` 锚点保留（保全断言命中）"
+      note: 升级仅改视觉与文案，既有类名与锚点保全。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - '`#permPill`+`#permPop`：三档 `data-perm="ask|auto|full"` + `.ppopt`
+          说明（含与 §5.4 的关系、受保护路径说明、「管理预批准规则」`#permManage` → 设置·工具与安全）'
+        - 全自动警示：pill `.full` 描边 + `#permWarnSeg` 状态栏 warn 段出现；切换即时回显（renderPerm）
+      note: 会话级覆盖/受保护路径为设计先行项，文案已显式标注。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - 确认弹窗 `.cf2`：`data-allow="once|session|always"` 三档放行 + `[data-deny]`
+          拒绝；`#freason` 拒绝理由随拒绝传递（演示文案佐证）
+        - "`.cnote` 受保护路径提示（.git、配置文件等不可自动允许）"
+      note: 三档放行与受保护路径为设计先行演示语义，与设置实表呼应。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - 设置 `#pane-tools`：`#toolRows` 10 行工具策略（`.lvl` 点击循环
+          NeedsConfirmation/Approved/Denied）+ 4 条预批准/预拒绝规则（allow/deny/ask 徽标）+
+          受保护目录行
+        - '`data-snab="tools"` 点击切换（activateSnab）与既有 snab 结构兼容；MCP 工具策略两行并存'
+      note: 设置分区切换为小幅新增实现；矩阵与规则/受保护目录均标注设计先行。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - good 模式流式路径：`#parSlot` 3 个只读工具卡（执行中 → 分别完成 700/1300/1800ms）+
+          `#opsSeg`「运行中 N 操作」状态栏指示
+        - bad 模式 E2 对照路径原样（单工具 + 「顺序错误」文案 + 既有 toast 文案保全）
+      note: 并行演示对 R3-15 并发；bad 模式对照路径零改动。
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - 中断（Esc/停止按钮 → `stopStream(true)`）→ `.recoverbar`（重新生成/编辑后再发）+
+          运行中工具标记「已中断」
+        - 拒绝路径 → `#failCard` 失败工具卡 `.tacts` 动作组：重试（模拟执行成功）/查看输出/回退检查点
+      note: 动作组与中断恢复条共同覆盖「失败/中断」两类恢复可视。
+    - id: A10
+      status: implemented-with-evidence
+      evidence:
+        - 回合尾部 `#undoRow`（`⟲ 撤销此回合（含文件改动）`）→ `#undoExp` 确认面板：将回滚 3 文件清单 +
+          「覆盖边界如实说明（R3-11 口径）」+ `#undoOk`/`#undoCancel`
+        - 确认后置换为已撤销态 `.undone`
+      note: 撤销按 R3-11 文件检查点口径，覆盖边界如实说明（D-6）。
+    - id: A11
+      status: implemented-with-evidence
+      evidence:
+        - "`#ctxbar` 上下文用量条（ContextScope 行内 8.2k/200k 可视）"
+        - "`#compactCard` 压缩事件卡（前 12 轮摘要化 · 8.2k → 3.1k tokens 对照）"
+      note: 压缩卡对齐产品既有压缩通知；用量条沿用 ContextScope 行。
+    - id: A12
+      status: implemented-with-evidence
+      evidence:
+        - "`#welcome`：品牌块 + 问候 + `#welcomeRecent` 最近会话（3 条）；结构对齐
+          `welcome.rs`（消息区覆盖 + 顶部对齐 + 快捷入口保持输入框上方单处，附注已写明）"
+        - 「＋新会话」切换 + 两处发送路径接入 `exitWelcome()` 恢复会话态
+      note: 实现前核验项（对齐 welcome.rs）已执行并反映在结构中。
+    - id: A13
+      status: implemented-with-evidence
+      evidence:
+        - "`#histSearch` 搜索过滤（renderHist 即时过滤）+ `.hgrp` 日期分组（今天/昨天/更早）+
+          `.hitem.cur` 当前会话高亮"
+        - 无结果 `.hempty`「无匹配会话（T-6 空态：faint 文本 + 一行说明）」
+      note: 历史检索依赖 D-04/OQ-07，标注设计先行。
+    - id: A14
+      status: implemented-with-evidence
+      evidence:
+        - c1 计划：48 必现 + 10 禁项零命中 + 21 保全 + 色值计数（rgba(255,178,36 前缀=4、#FFB224=2）+
+          台账识别；本地等价审计 AUDIT-OK（修复轮重跑）
+        - c2 计划：内联脚本提取（44736 字符）node --check；本地实测 SYNTAX-OK（exit 0）
+        - 台账附段「附：原型优化第二轮（2026-10-19，已完成）」已写入（动机与参照/结构定型/复测口径）
+      note: 正式检查由 Runtime 在候选上执行。
+  checks:
+    - name:
+        text: prototype-r2-anchor-audit
+        truncated: false
+      result: passed
+      note:
+        text: 修复轮重跑 node 审计：48 必现全命中、21 保全全命中、10 禁项零命中（含孤儿 .confirm .cf 与
+          data-lvl）、色值计数一致、台账识别全命中 → AUDIT-OK
+        truncated: false
+    - name:
+        text: prototype-js-syntax
+        truncated: false
+      result: passed
+      note:
+        text: 内联 script 提取 44736 字符，node --check exit 0
+        truncated: false
+    - name:
+        text: prototype-static-patterns-r2(c1)
+        truncated: false
+      result: not-run
+      note:
+        text: 完整断言计划交由 Runtime 正式执行（本地不预跑完整计划）
+        truncated: false
+    - name:
+        text: prototype-js-syntax-r2(c2)
+        truncated: false
+      result: not-run
+      note:
+        text: 同上，交由 Runtime 正式执行
+        truncated: false
+    - name:
+        text: cmp-ring-cascade-probe
+        truncated: false
+      result: passed
+      note:
+        text: 浏览器级联探针（file:// + evaluate_script）：idle border rgb(255,178,36)/op
+          .35/none；confirm animationName=v8breathe + .cmp-badge display
+          block；error border rgb(229,72,77)/op 1/animation none → 错误红环可见（A1
+          修复核验）
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 行为验收项（陪伴六态联动、浮层开关、权限切换与警示、弹窗三档、设置分区、并行/恢复/撤销/压缩、欢迎态、历史搜索）为浏览器走查边界，未脚本化，由
+        Verifier 走查复核
+      truncated: false
+    - text: 设计先行项（会话级权限覆盖、受保护路径、预批准规则、并行指示、历史检索、窗口概念预览）均为原型演示态，不接 runtime、不承诺产品实现顺序
+      truncated: false
+    - text: 陪伴窗口为概念预览 mock（F-15 阻塞 D-07/OQ-05；K-04 平台受限），非本轮交付
+      truncated: false
+    - text: 静态断言经 EncodedCommand（UTF-16LE）载体执行；PowerShell 控制台对 CJK 显示乱码仅为 codepage 问题
+      truncated: false
+    - text: UX 参照（Claude Code/opencode/omp）仅取信息架构，视觉全部沿用 v7-Linear Tokens（ADR-0014）
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-19T03:59:33.443Z
+blockers: []
+verification:
+  candidate_id: e640c4dd-5d22-45d6-89b2-0f52f848e547
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:859563bc-aac7-4cb0-b478-49846d68aade
+  iteration: 3
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: c1
+      name:
+        text: prototype-static-patterns-r2
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -NonInteractive
+          truncated: false
+        - text: -OutputFormat
+          truncated: false
+        - text: Text
+          truncated: false
+        - text: -EncodedCommand
+          truncated: false
+        - text: JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnAAoAJAB0AD0AWwBJAE8ALgBGAGkAbABlAF0AOgA6AFIAZQBhAGQAQQBsAGwAVABlAHgAdAAoACgAUgBlAHMAbwBsAHYAZQAtAFAAYQB0AGgAIAAtAEwAaQB0AGUAcgBhAGwAUABhAHQAaAAgACcAZABvAGMAcwAvAGQAZQBzAGkAZwBuAC8AdQBpAC0AcAByAG8AdABvAHQAeQBwAGUALQB2ADgALgBoAHQAbQBsACcAKQAsAFsAVABlAHgAdAAuAEUAbgBjAG8AZABpAG4AZwBdADoAOgBVAFQARgA4ACkACgAkAHAAPQBbAEkATwAuAEYAaQBsAGUAXQA6ADoAUgBlAGEAZABBAGwAbABUAGUAeAB0ACgAKABSAGUAcwBvAGwAdgBlAC0AUABhAHQAaAAgAC0ATABpAHQAZQByAGEAbABQAGEAdABoACAAJwBkAG8AYwBzAC8AcABsAGEAbgBzAC8AdQBpAC0AdgA4AC0AdABhAHMAawBzAC4AbQBkACcAKQAsAFsAVABlAHgAdAAuAEUAbgBjAG8AZABpAG4AZwBdADoAOgBVAFQARgA4ACkACgAkAG4AZQBlAGQAVAA9AEAAKAAnAC4AcgBiAHQAbgAuAGMAbQBwAHsAJwAsACcAaQBkAD0AIgBjAG0AcABCAHQAbgAiACcALAAnAGkAZAA9ACIAYwBtAHAAUgBpAG4AZwAiACcALAAnAC4AYwBtAHAALQBiAGEAZABnAGUAewAnACwAJwBpAGQAPQAiAGMAbQBwAFMAZQBnACIAJwAsACcAaQBkAD0AIgBjAG0AcABTAGUAZwBUAHgAdAAiACcALAAnAC4AYwBwAG8AcAB7ACcALAAnAGkAZAA9ACIAYwBwAG8AcAAiACcALAAnAGkAZAA9ACIAYwBwAG8AcABUAG8AZwBnAGwAZQAiACcALAAnAGkAZAA9ACIAYwBwAG8AcABXAGkAbgAyACIAJwAsACcAaQBkAD0AIgBjAHcAbQBvAGMAawBPAHIAYgAiACcALAAnAIJp9V+EmMiJJwAsACcARgAtADEANQAnACwAJwBLAC0AMAA0ACcALAAnAGkAZAA9ACIAcABlAHIAbQBQAGkAbABsACIAJwAsACcAaQBkAD0AIgBwAGUAcgBtAFAAbwBwACIAJwAsACcAZABhAHQAYQAtAHAAZQByAG0APQAiAGYAdQBsAGwAIgAnACwAJwBpAGQAPQAiAHAAZQByAG0AVwBhAHIAbgBTAGUAZwAiACcALAAnANdT3U+kYu+NhF8nACwAJwBpAGQAPQAiAGYAcgBlAGEAcwBvAG4AIgAnACwAJwBkAGEAdABhAC0AYQBsAGwAbwB3AD0AIgBhAGwAdwBhAHkAcwAiACcALAAnAGQAYQB0AGEALQBkAGUAbgB5ACcALAAnAGkAZAA9ACIAcABhAG4AZQAtAHQAbwBvAGwAcwAiACcALAAnAGkAZAA9ACIAdABvAG8AbABSAG8AdwBzACIAJwAsACcAZABhAHQAYQAtAHMAbgBhAGIAPQAiAHQAbwBvAGwAcwAiACcALAAnAGIAYQBzAGgAOgAgAHIAbQAgAC0AcgBmACoAJwAsACcAaQBkAD0AIgBwAGEAcgBTAGwAbwB0ACIAJwAsACcAaQBkAD0AIgBvAHAAcwBTAGUAZwAiACcALAAnAC4AcgBlAGMAbwB2AGUAcgBiAGEAcgAnACwAJwDNkbBlH3UQYicALAAnAGkAZAA9ACIAZgBhAGkAbABDAGEAcgBkACIAJwAsACcA3lYAkMBo5We5cCcALAAnAGkAZAA9ACIAdQBuAGQAbwBSAG8AdwAiACcALAAnAKRkAJVka95WCFQnACwAJwCGidZ2uY9MdScALAAnAFIAMwAtADEAMQAnACwAJwBpAGQAPQAiAGMAdAB4AGIAYQByACIAJwAsACcAaQBkAD0AIgBjAG8AbQBwAGEAYwB0AEMAYQByAGQAIgAnACwAJwAKTgtOh2XyXYtTKX8nACwAJwBpAGQAPQAiAHcAZQBsAGMAbwBtAGUAIgAnACwAJwB3AGUAbABjAG8AbQBlAC4AcgBzACcALAAnAGkAZAA9ACIAdwBlAGwAYwBvAG0AZQBSAGUAYwBlAG4AdAAiACcALAAnAGkAZAA9ACIAaABpAHMAdABTAGUAYQByAGMAaAAiACcALAAnAGgAZwByAHAAJwAsACcA4GU5U02RGk/diycALAAnAGkAZAA9ACIAZQB4AHAAQgB0AG4AIgAnACwAJwC+i6GLSFFMiCcALAAnAFgARwBlAG4AdAAgADMARAAgAGqWNE8nACkACgAkAGsAZQBlAHAAVAA9AEAAKAAnAC4AbQBwAGwAewAnACwAJwBpAGQAPQAiAG0AcABpAGwAbAAiACcALAAnAGIAbwB0AHQAbwBtADoAYwBhAGwAYwAoADEAMAAwACUAIAArACAANgBwAHgAKQAnACwAJwBpAGQAPQAiAG0AcABvAHAAIgAnACwAJwAuAG0AcABvAHAAewAnACwAJwBmAHUAbgBjAHQAaQBvAG4AIAByAGUAbgBkAGUAcgBNAHAAbwBwAEwAaQBzAHQAJwAsACcAZgB1AG4AYwB0AGkAbwBuACAAbQBwAE8AcABlAG4AKAAnACwAJwBmAHUAbgBjAHQAaQBvAG4AIABtAHAAQwBsAG8AcwBlACgAJwAsACcAZgB1AG4AYwB0AGkAbwBuACAAbQBwAE0AbwB2AGUAKAAnACwAJwBmAHUAbgBjAHQAaQBvAG4AIABtAHAAUwBlAGwAZQBjAHQAKAAnACwAJwBjAG8AbgBzAHQAIABNAFAASQBDAEsAXwBMAFYAPQAnACwAJwAdYAOAIAAkAHsAUwAuAHAAaQBjAGsALgBsAHYAfQAnACwAJwAuAG0AcwBlAGcAIABiAHUAdAB0AG8AbgAuAG8AbgB7ACcALAAnAC4AbQBwAG8AcAAgAC4AbQAzAGQAewAnACwAJwBjAG8AbgBzAHQAIABNAE8ARABFAEwAXwBCAEEAUwBFAD0AJwAsACcATQBPAEQARQBMAF8AQgBBAFMARQBbAGkAJQBNAE8ARABFAEwAXwBCAEEAUwBFAC4AbABlAG4AZwB0AGgAXQAnACwAJwBvAG4AYwBsAGkAYwBrAD0AbQBwAFQAbwBnAGcAbABlACcALAAnAGYAdQBuAGMAdABpAG8AbgAgAHMAdABvAHAAUwB0AHIAZQBhAG0AJwAsACcAbABlAHQAIABEAEUAUwBDAD0AWwAnACwAJwAuAHYAOAAuAGIAYQBkACAALgB0AGUAcgBtAHcAcgBhAHAAJwAsACcALgBtAGwAaQBzAHQALgBiAGEAZAAyACcAKQAKACQAZgBvAHIAYgBpAGQAVAA9AEAAKAAnAGcAcAB0AC0ANABvAC0AbQBpAG4AaQAtADIAMAAyADQALQAwADcALQAxADgAJwAsACcAUwAuAG0AcABTAGUAbAAnACwAJwBtAHAASQB0AGUAbQBzACcALAAnAGMAbwBuAHMAdAAgAEQARQBTAEMAJwAsACcAdAByAGUAZQBEAGEAdABhACcALAAnAGUAcwB0AEMAZQBsAGwAJwAsACcAdwBpAG4AZABvAHcALgBfAF8AaQB2ACcALAAnAGwAaQAuAGIAYQBkACAALgBsAGIAJwAsACcAYwBvAG4AZgBpAHIAbQAgAC4AYwBmAHsAJwAsACcAZABhAHQAYQAtAGwAdgBsACcAKQAKACQAbgBlAGUAZABQAD0AQAAoACcARJYa/59Ti1cYTxZTLHuMTm6PJwAsACcAbwBwAHQAaQBtAGkAegBlAC0AdQBpAC0AdgA4AC0AcAByAG8AdABvAHQAeQBwAGUALQByADIAJwAsACcAMgAwADIANgAtADEAMAAtADEAOQAnACwAJwAxADcAMAAxACAATIgnACwAJwA0ADgAIADEfp9Ti1fFX7BzIWoPXycALAAnADIAMQAgAMR+4mUJZxqVuXDdT2hRJwAsACcAMQAwACAAxH6BeXmY9pZ9VC1OJwApAAoAJABtAFQAPQBAACgAJABuAGUAZQBkAFQAfABXAGgAZQByAGUALQBPAGIAagBlAGMAdAB7AC0AbgBvAHQAIAAkAHQALgBDAG8AbgB0AGEAaQBuAHMAKAAkAF8AKQB9ACkACgAkAGsAVAA9AEAAKAAkAGsAZQBlAHAAVAB8AFcAaABlAHIAZQAtAE8AYgBqAGUAYwB0AHsALQBuAG8AdAAgACQAdAAuAEMAbwBuAHQAYQBpAG4AcwAoACQAXwApAH0AKQAKACQAZgBUAD0AQAAoACQAZgBvAHIAYgBpAGQAVAB8AFcAaABlAHIAZQAtAE8AYgBqAGUAYwB0AHsAJAB0AC4AQwBvAG4AdABhAGkAbgBzACgAJABfACkAfQApAAoAJABtAFAAPQBAACgAJABuAGUAZQBkAFAAfABXAGgAZQByAGUALQBPAGIAagBlAGMAdAB7AC0AbgBvAHQAIAAkAHAALgBDAG8AbgB0AGEAaQBuAHMAKAAkAF8AKQB9ACkACgBmAHUAbgBjAHQAaQBvAG4AIABDAG4AdAAoACQAcwAsACQAcwB1AGIAKQB7ACgAWwByAGUAZwBlAHgAXQA6ADoATQBhAHQAYwBoAGUAcwAoACQAcwAsAFsAcgBlAGcAZQB4AF0AOgA6AEUAcwBjAGEAcABlACgAJABzAHUAYgApACkAKQAuAEMAbwB1AG4AdAB9AAoAJAB3ADEAPQBDAG4AdAAgACQAdAAgACcAcgBnAGIAYQAoADIANQA1ACwAMQA3ADgALAAzADYAJwAKACQAdwAyAD0AQwBuAHQAIAAkAHQAIAAnACMARgBGAEIAMgAyADQAJwAKAGkAZgAoACQAbQBUAC4AQwBvAHUAbgB0ACAALQBvAHIAIAAkAGsAVAAuAEMAbwB1AG4AdAAgAC0AbwByACAAJABmAFQALgBDAG8AdQBuAHQAIAAtAG8AcgAgACQAbQBQAC4AQwBvAHUAbgB0ACAALQBvAHIAIAAkAHcAMQAgAC0AbgBlACAANAAgAC0AbwByACAAJAB3ADIAIAAtAG4AZQAgADIAKQB7AFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAKAAnAEYAQQBJAEwAUwA9AFsAJwArACgAJABtAFQAIAAtAGoAbwBpAG4AIAAnADsAJwApACsAJwBdACAASwBFAEUAUAA9AFsAJwArACgAJABrAFQAIAAtAGoAbwBpAG4AIAAnADsAJwApACsAJwBdACAARgBPAFIAQgBJAEQAPQBbACcAKwAoACQAZgBUACAALQBqAG8AaQBuACAAJwA7ACcAKQArACcAXQAgAFAAQQBHAEUAPQBbACcAKwAoACQAbQBQACAALQBqAG8AaQBuACAAJwA7ACcAKQArACcAXQAgAHcAYQByAG0AUgBnAGIAYQA9ACcAKwAkAHcAMQArACcAIAB3AGEAcgBtAEgAZQB4AD0AJwArACQAdwAyACkAOwBlAHgAaQB0ACAAMQB9AAoAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAoACcATwBLACAAbgBlAGUAZAA9ACcAKwAkAG4AZQBlAGQAVAAuAEMAbwB1AG4AdAArACcAIABrAGUAZQBwAD0AJwArACQAawBlAGUAcABUAC4AQwBvAHUAbgB0ACsAJwAgAGYAbwByAGIAaQBkAD0AJwArACQAZgBvAHIAYgBpAGQAVAAuAEMAbwB1AG4AdAArACcAIABwAGEAZwBlAD0AJwArACQAbgBlAGUAZABQAC4AQwBvAHUAbgB0ACkAOwBlAHgAaQB0ACAAMAA=
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 415
+    - id: c2
+      name:
+        text: prototype-js-syntax-r2
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -NonInteractive
+          truncated: false
+        - text: -OutputFormat
+          truncated: false
+        - text: Text
+          truncated: false
+        - text: -EncodedCommand
+          truncated: false
+        - text: JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQA9ACcAUwB0AG8AcAAnAAoAJABzAHIAYwA9AFsASQBPAC4ARgBpAGwAZQBdADoAOgBSAGUAYQBkAEEAbABsAFQAZQB4AHQAKAAoAFIAZQBzAG8AbAB2AGUALQBQAGEAdABoACAALQBMAGkAdABlAHIAYQBsAFAAYQB0AGgAIAAnAGQAbwBjAHMALwBkAGUAcwBpAGcAbgAvAHUAaQAtAHAAcgBvAHQAbwB0AHkAcABlAC0AdgA4AC4AaAB0AG0AbAAnACkALABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAApAAoAJABtADEAPQBbAHIAZQBnAGUAeABdADoAOgBNAGEAdABjAGgAZQBzACgAJABzAHIAYwAsACcAKAA/AHMAKQA8AHMAYwByAGkAcAB0AFsAXgA+AF0AKgA+ACgALgAqAD8AKQA8AC8AcwBjAHIAaQBwAHQAPgAnACkACgBpAGYAKAAkAG0AMQAuAEMAbwB1AG4AdAAgAC0AZQBxACAAMAApAHsAVwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAnAEYAQQBJAEwATgBPAFMAQwBSAEkAUABUACcAOwBlAHgAaQB0ACAAMQB9AAoAJABkAGkAcgAyAD0ASgBvAGkAbgAtAFAAYQB0AGgAIAAoAFsASQBPAC4AUABhAHQAaABdADoAOgBHAGUAdABUAGUAbQBwAFAAYQB0AGgAKAApACkAIAAnAHYAOAAtAHIAMgAtAGoAcwAnAAoATgBlAHcALQBJAHQAZQBtACAALQBJAHQAZQBtAFQAeQBwAGUAIABEAGkAcgBlAGMAdABvAHIAeQAgAC0ARgBvAHIAYwBlACAALQBQAGEAdABoACAAJABkAGkAcgAyAHwATwB1AHQALQBOAHUAbABsAAoAJABpAD0AMAA7ACQAZgBpAGwAZQBzAD0AQAAoACkACgBmAG8AcgBlAGEAYwBoACgAJABtAG0AIABpAG4AIAAkAG0AMQApAHsAJABpACsAKwA7ACQAZgA9AEoAbwBpAG4ALQBQAGEAdABoACAAJABkAGkAcgAyACAAKAAnAGIAbABrACcAKwAkAGkAKwAnAC4AagBzACcAKQA7AFsASQBPAC4ARgBpAGwAZQBdADoAOgBXAHIAaQB0AGUAQQBsAGwAVABlAHgAdAAoACQAZgAsACQAbQBtAC4ARwByAG8AdQBwAHMAWwAxAF0ALgBWAGEAbAB1AGUALABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAApADsAJABmAGkAbABlAHMAKwA9ACQAZgB9AAoAJgAgAG4AbwBkAGUAIAAtAC0AYwBoAGUAYwBrACAAQABmAGkAbABlAHMACgBpAGYAKAAkAEwAQQBTAFQARQBYAEkAVABDAE8ARABFACAALQBuAGUAIAAwACkAewBXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACcARgBBAEkATABTAFkATgBUAEEAWAAnADsAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUAfQAKAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAKAAnAE8ASwAgAGIAbABvAGMAawBzAD0AJwArACQAbQAxAC4AQwBvAHUAbgB0ACkAOwBlAHgAaQB0ACAAMAA=
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 516
+  summary:
+    text: 修复轮独立复验：14/14 通过（pass）。A1 修复点经 computedStyle 实锤（error 红环 rgb(229,72,77)
+      可见），六态动画链经记录器 4 轮复现；其余 13 项按上一轮口径全部复核通过；静态断言独立复刻全绿且与 Runtime receipts
+      一致；控制台零报错；既有演示零回归。工作区只读。
+    truncated: false
+  risks:
+    - text: 平台分类器随机拦截了少数交互探针（sendBtn 停止、regen 点击、一次组合探针、EncodedCommand
+        重跑），对应行为由等价已测路径（Esc 中断同 stopStream 路径）+代码核验+上一轮验证复用支撑；不影响任何验收成立。
+      truncated: false
+    - text: A8 的 700/1300/1800ms 毫秒级时序未逐毫秒复核（记录器证实顺序与分别完成；数值来自代码常量）；bad 模式 E2 完成 toast
+        因节流未二次采样（布局对照已实测）。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-19T04:24:30.810Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: "Builder handoff Runtime checks failed: c1"
+      truncated: false
+    completed_at: 2026-10-19T03:27:58.042Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A1
+    summary:
+      text: "第二轮原型优化（docs/design/ui-prototype-v8.html 1702 行 +
+        docs/plans/ui-v8-tasks.md 附段）独立验证完成：A2–A14 共 13 项 passed（DOM
+        级几何/computedStyle/类名断言 + 真实事件派发全程走查，含多次完整流式-并行-中断-撤销-欢迎/历史序列；c1/c2 原样重跑
+        exit 0；控制台零消息；既有演示回归清单全过）。A1 判 failed：陪伴按钮常驻、暖色星标、rail
+        零遮挡、六态触发路径与状态栏联动均达标，但「错误红环」因 CSS 特异性冲突未渲染——deny 后 #cmpRing computed
+        border-color 仍为 rgb(255,178,36)、solid、opacity .35、无动画，与 idle
+        完全一致（纯类探针与真实 UI 路径双重确认），brief Scope/D-3 的「错误短暂红环」承诺无可见呈现。总体
+        verdict=fail，唯一阻塞点即 A1 红环（修复面 1 条选择器），另附死者 CSS/环境节流等 3 条非阻塞风险。全部 14 个
+        scopeId 均已评估，无 blocked/未完成项。"
+      truncated: false
+    completed_at: 2026-10-19T03:53:46.252Z
+  - goal_cycle: 1
+    iteration: 3
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 修复轮独立复验：14/14 通过（pass）。A1 修复点经 computedStyle 实锤（error 红环 rgb(229,72,77)
+        可见），六态动画链经记录器 4 轮复现；其余 13 项按上一轮口径全部复核通过；静态断言独立复刻全绿且与 Runtime receipts
+        一致；控制台零报错；既有演示零回归。工作区只读。
+      truncated: false
+    completed_at: 2026-10-19T04:24:30.810Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-19T03:07:12.986Z

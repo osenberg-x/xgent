@@ -9352,6 +9352,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xgent_spatial"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+ "xgent_core",
+]
+
+[[package]]
 name = "xgent_terminal"
 version = "0.1.0"
 dependencies = [

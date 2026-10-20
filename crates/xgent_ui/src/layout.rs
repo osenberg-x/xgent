@@ -127,7 +127,10 @@ pub(crate) fn spawn_layout(
                 },
                 GlobalZIndex(z::BASE),
                 BackgroundColor(theme.bg),
-                Themed { role: ThemeRole::Canvas, generation },
+                Themed {
+                    role: ThemeRole::Canvas,
+                    generation,
+                },
                 LayerRoot(z::BASE),
                 BaseLayer,
             ))
@@ -147,7 +150,10 @@ pub(crate) fn spawn_layout(
                     },
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.border),
-                    Themed { role: ThemeRole::Surface, generation },
+                    Themed {
+                        role: ThemeRole::Surface,
+                        generation,
+                    },
                     TopBarMarker,
                 ));
 
@@ -179,7 +185,10 @@ pub(crate) fn spawn_layout(
                         },
                         BackgroundColor(theme.surface),
                         BorderColor::all(theme.line),
-                        Themed { role: ThemeRole::Surface, generation },
+                        Themed {
+                            role: ThemeRole::Surface,
+                            generation,
+                        },
                         ActivityBarMarker,
                     ));
 
@@ -195,7 +204,10 @@ pub(crate) fn spawn_layout(
                             ..default()
                         },
                         BackgroundColor(theme.bg),
-                        Themed { role: ThemeRole::Canvas, generation },
+                        Themed {
+                            role: ThemeRole::Canvas,
+                            generation,
+                        },
                         ChatPanelMarker,
                     ));
 
@@ -217,7 +229,10 @@ pub(crate) fn spawn_layout(
                         },
                         BackgroundColor(theme.surface),
                         BorderColor::all(theme.line),
-                        Themed { role: ThemeRole::Surface, generation },
+                        Themed {
+                            role: ThemeRole::Surface,
+                            generation,
+                        },
                         SideViewMarker,
                     ));
                 });
@@ -237,7 +252,10 @@ pub(crate) fn spawn_layout(
                     },
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.border),
-                    Themed { role: ThemeRole::Surface, generation },
+                    Themed {
+                        role: ThemeRole::Surface,
+                        generation,
+                    },
                     StatusBarMarker,
                 ));
             });

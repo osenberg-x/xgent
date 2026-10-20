@@ -123,7 +123,7 @@ pub enum Dismiss { EscOnly, EscAndScrim, NotDismissable }
 
 ```rust
 /// 可注册目标。与插件系统 ui_panel 扩展点对齐（plugin-system-design.md:954-955）
-pub enum Slot { Rail, SideDock, BottomDock, SettingsSection, StatusSegment, Palette, Overlay }
+pub enum Slot { Rail, Center, SideDock, BottomDock, SettingsSection, StatusSegment, Palette, Overlay }
 
 #[derive(Clone)]
 pub struct PanelDescriptor {
@@ -143,6 +143,8 @@ pub struct PanelRegistry { entries: Vec<(PanelDescriptor, PanelRuntime)> }
 
 pub struct PanelRuntime { entity: Option<Entity>, visible: bool, focused: bool }
 ```
+
+**`Center`（2026-10-19 增补）**：中央列同一时刻**只有一个**活跃面板，默认是「对话」。`Center` 与 `SideDock` 的差别是**互斥**而非并列——同槽任意时刻至多一个 `visible`，切换由 `PanelActivate` 表达，旧面板自动失活，业务侧不写 `display`。首个消费者是 3D 空间视图（[ui-v8-3d-viewport.md](ui-v8-3d-viewport.md) §1.2）：它证明「换主视图」不需要新增 closed enum，也把「对话 / 空间 / 未来的任务看板」统一到同一条规则上。
 
 注册经 ECS 消息（P-5）：
 

@@ -5,8 +5,8 @@
 mod common;
 
 use bevy::input::ButtonState;
-use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::input::keyboard::{Key, KeyCode, KeyboardInput};
+use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::ui::GlobalZIndex;
 
@@ -67,7 +67,9 @@ fn esc_closes_settings_through_modal_stack() {
         "关闭后焦点应回到打开前的实体"
     );
 
-    let messages = app.world().resource::<Messages<xgent_agent::AbortMessage>>();
+    let messages = app
+        .world()
+        .resource::<Messages<xgent_agent::AbortMessage>>();
     let mut cursor = messages.get_cursor();
     assert_eq!(
         cursor.read(messages).count(),
@@ -99,9 +101,7 @@ fn rerender_keeps_settings_registered_in_modal_stack() {
     assert_eq!(panel_count(&mut app), 1);
 
     // settings_io 每次快照响应都会 tick += 1，面板随之 despawn + respawn。
-    app.world_mut()
-        .resource_mut::<SettingsSnapshotReady>()
-        .tick += 1;
+    app.world_mut().resource_mut::<SettingsSnapshotReady>().tick += 1;
     for _ in 0..3 {
         app.update();
     }
@@ -111,7 +111,9 @@ fn rerender_keeps_settings_registered_in_modal_stack() {
     let top = stack.top().expect("重建后仍在模态栈内");
     assert_eq!(top.id, "settings");
     assert_eq!(
-        app.world().get::<GlobalZIndex>(top.entity).map(|index| index.0),
+        app.world()
+            .get::<GlobalZIndex>(top.entity)
+            .map(|index| index.0),
         Some(z::MODAL_BASE),
         "重建后的面板应重新拿到模态 z"
     );

@@ -1,0 +1,296 @@
+schema: comet.native.v4
+name: add-spatial-s0
+language: zh-CN
+phase: archive
+status: done
+state_version: 10
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: c94d6bd5f268d62bc4d4b8700e1d57839620fc797c5d7b3275b69b620dcc40a7
+spec_changes:
+  - capability: spatial-s0
+    operation: create
+    source: specs/spatial-s0/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 2
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: 对同一张图连续两次执行全量布局，所有节点坐标的 `f32::to_bits()` 逐位相同（同一构建、同一机器）。
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择：接受只有自动检查的结果。4 项 Runtime 检查（debug 测试、release 10k
+        性能、clippy、workspace check）全部通过；因平台 429 无法启动独立
+        Verifier，本次无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: 10,000 节点、约 20,000 条边的合成图，release 构建下全量布局耗时小于 300ms。
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择：接受只有自动检查的结果。4 项 Runtime 检查（debug 测试、release 10k
+        性能、clippy、workspace check）全部通过；因平台 429 无法启动独立
+        Verifier，本次无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: 500 节点完成布局后追加 100 节点做增量布局，原有 500 个节点的坐标逐位不变。
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择：接受只有自动检查的结果。4 项 Runtime 检查（debug 测试、release 10k
+        性能、clippy、workspace check）全部通过；因平台 429 无法启动独立
+        Verifier，本次无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+builder_handoff:
+  candidate_id: 04e93211-7348-4174-9f53-52cc3770ec4a
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:86cba7d3-1ef4-4aae-91f3-6b4153e9577d
+  iteration: 1
+  summary:
+    text: 新增 xgent_spatial（S0 内核）：xgent_core::spatial 纯类型 + manifest 解析 + 工作区扫描 +
+      确定性/增量布局；无 Bevy，不改现有 crate 行为。debug 12 项测试通过，release 10k 布局 18.25ms。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_spatial/tests/layout.rs::full_layout_is_bitwise_deterministic
+        - crates/xgent_spatial/tests/layout.rs::workspace_layout_is_bitwise_deterministic
+        - crates/xgent_spatial/src/layout.rs（hash_str/SplitMix64、固定 Vec
+          迭代顺序、无时间/随机）
+        - 实测：cargo test -p xgent_spatial → 12 passed / 0 failed / 1 ignored
+      note: 两个测试分别对 300 节点合成图与本仓真实 crate 图连续布局两次，比较每个节点与簇 anchor 的
+        f32::to_bits()；初始位置仅由稳定键哈希与固定种子决定，迭代顺序为 Vec 顺序，未使用 HashMap 迭代或时间。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_spatial/tests/layout.rs::ten_thousand_nodes_layout_under_300ms
+        - crates/xgent_spatial/src/layout.rs（簇数 >256 走均匀网格；节点级仅簇内有限轮松弛）
+        - 实测：cargo test -p xgent_spatial --release -- --ignored --nocapture →
+          10000 节点 / 20000 边 / 60 轮 / 18.2501ms
+      note: 10k 合成图在 release 下全量布局 18.25ms，低于 300ms；所有节点均获得 anchor。debug 只跑正确性，性能断言标记
+        ignored 并要求 release。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_spatial/tests/layout.rs::incremental_layout_keeps_existing_positions
+        - crates/xgent_spatial/src/layout.rs（layout_incremental：anchor=Some
+          的簇/节点不累加力、不写坐标）
+        - 实测：500 节点布局后追加 100 节点，原 500 节点坐标逐位不变，新节点全部获得 anchor
+      note: 增量路径对已锚定节点直接跳过力累加与坐标写入；新增节点在所属簇内做局部松弛，既有节点坐标保持 bitwise 相同。
+  checks:
+    - name:
+        text: cargo test -p xgent_spatial
+        truncated: false
+      result: passed
+      note:
+        text: 12 passed / 0 failed / 1 ignored（8 个 manifest+workspace 单测，4 个布局集成测试）
+        truncated: false
+    - name:
+        text: cargo test -p xgent_spatial --release -- --ignored --nocapture
+        truncated: false
+      result: passed
+      note:
+        text: 10k 布局 18.2501ms < 300ms
+        truncated: false
+    - name:
+        text: cargo clippy -p xgent_spatial --all-targets -- -D warnings
+        truncated: false
+      result: passed
+      note:
+        text: 无警告
+        truncated: false
+    - name:
+        text: cargo check --workspace
+        truncated: false
+      result: passed
+      note:
+        text: 通过；xgent_tools 有 1 条既有 unused_must_use 警告，与本 change 无关
+        truncated: false
+    - name:
+        text: cargo fmt -p xgent_spatial -p xgent_core
+        truncated: false
+      result: passed
+      note:
+        text: 已格式化
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: A1 的逐位一致限定同一构建、同一平台；不同平台 libm 的 f32 差异未纳入本验收。
+      truncated: false
+    - text: 工作区扫描不解析 [target.*.dependencies]，不展开 [workspace.dependencies]；纯版本依赖视为外部依赖。
+      truncated: false
+    - text: 节点与簇的 weight 固定 1.0，LOC 统计留给 S1 的文件索引。
+      truncated: false
+    - text: 只实现 L0（crate 级）；L1/L2 的模块、文件、符号图不在本 change 范围。
+      truncated: false
+    - text: 增量布局对新增簇不做全局重排，新簇与既有簇可能重叠；S1 接入时如有需要再补。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-19T07:50:37.385Z
+blockers: []
+verification:
+  candidate_id: 04e93211-7348-4174-9f53-52cc3770ec4a
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:a23967b1-1c5a-49fd-a816-966ba2cbbd03
+  iteration: 1
+  attempt: 2
+  assurance: user-confirmed-degraded
+  verdict: pass
+  checks:
+    - id: spatial-tests-debug
+      name:
+        text: S0 单元与集成测试（debug）
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 2489
+    - id: spatial-perf-release
+      name:
+        text: 10k 布局性能验收（release）
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --release
+          truncated: false
+        - text: --
+          truncated: false
+        - text: --ignored
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 5583
+    - id: spatial-clippy
+      name:
+        text: 新 crate clippy（-D warnings）
+        truncated: false
+      argv_display:
+        - text: clippy
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --all-targets
+          truncated: false
+        - text: --
+          truncated: false
+        - text: -D
+          truncated: false
+        - text: warnings
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1917
+    - id: workspace-check
+      name:
+        text: 全工作区编译检查
+        truncated: false
+      argv_display:
+        - text: check
+          truncated: false
+        - text: --workspace
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 2728
+  summary:
+    text: 用户明确选择：接受只有自动检查的结果。4 项 Runtime 检查（debug 测试、release 10k 性能、clippy、workspace
+      check）全部通过；因平台 429 无法启动独立 Verifier，本次无独立语义评审，验证报告需如实记录该边界。
+    truncated: false
+  risks:
+    - text: No independent semantic Verifier execution was available; Runtime checks
+        alone do not cover acceptance semantics.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-19T08:22:06.211Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: execution-error
+    unresolved_ids: []
+    summary:
+      text: 独立 Verifier 子代理两次启动均被平台以 429 too many requests 拒绝（任务未开始）；Runtime 检查计划 4
+        项已全部通过。
+      truncated: false
+    completed_at: 2026-10-19T07:59:24.740Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 2
+    outcome: blocked
+    unresolved_ids:
+      - A1
+      - A2
+      - A3
+    summary:
+      text: 独立 Verifier 子代理连续三次启动均被平台以 429 too many requests 拒绝（任务均未开始）；Runtime 检查计划 4
+        项（debug 测试、release 10k 性能、clippy、全工作区 check）全部通过，但当前无法进行独立语义评审。
+      truncated: false
+    completed_at: 2026-10-19T08:20:25.361Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 2
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 用户明确选择：接受只有自动检查的结果。4 项 Runtime 检查（debug 测试、release 10k 性能、clippy、workspace
+        check）全部通过；因平台 429 无法启动独立 Verifier，本次无独立语义评审，验证报告需如实记录该边界。
+      truncated: false
+    completed_at: 2026-10-19T08:22:06.211Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-19T07:33:13.102Z

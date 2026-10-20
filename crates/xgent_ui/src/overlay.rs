@@ -79,18 +79,21 @@ mod tests {
             .init_resource::<SessionHistoryState>()
             .add_plugins(OverlayPlugin);
 
-        app.world_mut().write_message(DrawerToggle(OverlayId::HistoryDrawer));
+        app.world_mut()
+            .write_message(DrawerToggle(OverlayId::HistoryDrawer));
         app.update();
         assert!(app.world().resource::<SessionHistoryState>().open);
         assert!(!app.world().resource::<FileDrawerOpen>().0);
 
-        app.world_mut().write_message(DrawerToggle(OverlayId::FileDrawer));
+        app.world_mut()
+            .write_message(DrawerToggle(OverlayId::FileDrawer));
         app.update();
         assert!(app.world().resource::<FileDrawerOpen>().0);
         assert!(!app.world().resource::<SessionHistoryState>().open);
 
         // 再次切换同一个 → 关闭
-        app.world_mut().write_message(DrawerToggle(OverlayId::FileDrawer));
+        app.world_mut()
+            .write_message(DrawerToggle(OverlayId::FileDrawer));
         app.update();
         assert!(!app.world().resource::<FileDrawerOpen>().0);
     }

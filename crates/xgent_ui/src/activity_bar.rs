@@ -203,10 +203,7 @@ fn spawn_activity_bar(
                 BorderColor::all(theme.warm),
                 CompanionRingMarker,
             ));
-            companion_star = Some(
-                b.spawn(icon(&icons, "star", 20.0, theme.star))
-                    .id(),
-            );
+            companion_star = Some(b.spawn(icon(&icons, "star", 20.0, theme.star)).id());
         });
     });
     if let Some(star) = companion_star {
@@ -419,10 +416,9 @@ mod tests {
             .init_resource::<crate::session_history::SessionHistoryState>()
             .add_plugins(crate::overlay::OverlayPlugin);
 
-        app.world_mut()
-            .write_message(crate::overlay::DrawerToggle(
-                crate::overlay::OverlayId::HistoryDrawer,
-            ));
+        app.world_mut().write_message(crate::overlay::DrawerToggle(
+            crate::overlay::OverlayId::HistoryDrawer,
+        ));
         app.update();
         assert!(
             app.world()
@@ -430,10 +426,9 @@ mod tests {
                 .open
         );
 
-        app.world_mut()
-            .write_message(crate::overlay::DrawerToggle(
-                crate::overlay::OverlayId::FileDrawer,
-            ));
+        app.world_mut().write_message(crate::overlay::DrawerToggle(
+            crate::overlay::OverlayId::FileDrawer,
+        ));
         app.update();
         assert!(app.world().resource::<crate::layout::FileDrawerOpen>().0);
         assert!(

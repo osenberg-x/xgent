@@ -10,6 +10,7 @@ pub mod methods;
 pub mod notifications;
 pub mod proto;
 pub mod session;
+pub mod spatial;
 
 pub use editor::{BufferStatus, EditorQuery, EditorState};
 pub use error::{XgentError, XgentResult};
