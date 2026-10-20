@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**未开工**。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b 已交付并归档，M3 起未开工**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；下表的勾选在 M1/M2 段落有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -77,6 +77,8 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## M1 分层与模态（修 B1/B2/B3/B4，解 I1 的拾取根因）
 
+> 状态：**已交付**（change `v8-m1-layering`，归档 `f5fdb87` / 实现 `e7834fe`）。下列复选框是开工前的任务草稿、未逐条回勾，**不要据此判断未做**。
+
 ### M1-T1 六个静态层根
 - [ ] `theme.rs` 新增 `z` 模块（`BASE/DOCK/DRAWER/DROPDOWN/MODAL_BASE/TOOLTIP/TOAST/MODAL_STRIDE/MODAL_MAX_DEPTH`），值见架构 §2.2。
 - [ ] `layout.rs` 在 `UiRoot` 下并列 spawn 六个层根（全屏 Absolute、`BackgroundColor::NONE`、**不带 `Pickable`**）。
@@ -115,6 +117,8 @@ M1 与 M2 相互独立，可并行分头推进。
 ---
 
 ## M2 令牌收敛与主题热驱动（修 G1–G6，铺 A2）
+
+> 状态：**已交付**（change `v8-m2-tokens` + `v8-m2b-density-hover`，归档 `7f67dc1` / `9bb29c9`，实现 `141d05c` / `6d83d18`）。M2-T1 的密度部分与 M2-T7 已在 M2b 勾选，其余条目的勾选滞后于实现。
 
 ### M2-T1 主题成为可替换权威
 - [x] `ThemeHandle { theme, generation }` + `Themed { role, gen }` 组件 + `repaint_on_theme_change` 系统（架构 §8.1）。（v8-m2a-tokens）
