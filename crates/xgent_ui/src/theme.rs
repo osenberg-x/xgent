@@ -7,6 +7,9 @@
 
 use bevy::prelude::*;
 
+/// 密度档位（定义在 `xgent_settings_core`，此处重导出供 UI 侧直接引用）。
+pub use xgent_settings_core::global::Density;
+
 /// 暗色主题（v7，Linear 基准）。
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
@@ -369,7 +372,6 @@ pub fn px(v: f32) -> Val {
     Val::Px(v)
 }
 
-
 /// 主题语义角色（`Themed` 用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeRole {
@@ -388,12 +390,18 @@ pub enum ThemeRole {
 }
 
 /// 主题权威：`generation` 变化即触发全量重绘。
+///
+/// v8 M2b 起 `generation` 同时表示「主题或密度发生了变化」——两者都是显示偏好，
+/// 都要求全界面按新值重写一遍；密度切换时颜色重绘会多跑一次，但写入的是同一份
+/// 主题值，视觉无差异（`docs/plans/ui-v8-tasks.md` §10 勘误）。
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ThemeHandle {
     /// 当前主题。
     pub theme: Theme,
-    /// 代数；每次替换主题递增。
+    /// 代数；每次替换主题或密度递增。
     pub generation: u64,
+    /// 当前密度档位（只影响间距）。
+    pub density: Density,
 }
 
 /// 随主题重绘的节点。
@@ -412,12 +420,18 @@ impl Plugin for ThemePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ThemeHandle>()
             .init_resource::<Theme>()
-            .add_systems(Update, (sync_theme_from_config, repaint_on_theme_change).chain());
+            .add_systems(
+                Update,
+                (sync_theme_from_config, repaint_on_theme_change).chain(),
+            );
     }
 }
 
-/// `preferences.theme` 变化时更新权威（当前只有 dark，未知值回落 dark）。
-fn sync_theme_from_config(
+/// `preferences.{theme, density}` 变化时更新权威。
+///
+/// 主题目前只有 dark，未知值一律回落；密度未知值回落 `comfortable`。
+/// 任一实际变化都让 `generation` 前进一格（颜色重绘与密度重排都认这一个信号）。
+pub(crate) fn sync_theme_from_config(
     config: Option<Res<xgent_settings::GlobalConfigRes>>,
     mut handle: ResMut<ThemeHandle>,
 ) {
@@ -429,8 +443,17 @@ fn sync_theme_from_config(
     }
     // 目前只有 dark；未知值/空值一律回落。
     let theme = Theme::dark();
+    let density = config.preferences.density;
+    let mut changed = false;
     if theme != handle.theme {
         handle.theme = theme;
+        changed = true;
+    }
+    if density != handle.density {
+        handle.density = density;
+        changed = true;
+    }
+    if changed {
         handle.generation = handle.generation.wrapping_add(1);
     }
 }
@@ -526,10 +549,7 @@ mod tests {
             app.world().get::<BackgroundColor>(entity).unwrap().0,
             Color::srgb(1.0, 0.0, 0.0)
         );
-        assert_eq!(
-            app.world().get::<Themed>(entity).unwrap().generation,
-            1
-        );
+        assert_eq!(app.world().get::<Themed>(entity).unwrap().generation, 1);
         assert_eq!(
             app.world().resource::<Theme>().surface,
             Color::srgb(1.0, 0.0, 0.0)

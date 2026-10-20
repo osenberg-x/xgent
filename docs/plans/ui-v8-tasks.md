@@ -117,9 +117,9 @@ M1 与 M2 相互独立，可并行分头推进。
 ## M2 令牌收敛与主题热驱动（修 G1–G6，铺 A2）
 
 ### M2-T1 主题成为可替换权威
-- [ ] `ThemeHandle { theme, generation }` + `Themed { role, gen }` 组件 + `repaint_on_theme_change` 系统（架构 §8.1）。
-- [ ] `preferences.theme`/`density` 接现有配置热应用通路（R3-13 已闭合）。
-- **验收**：设置里切密度档位，全界面即时重排、无需重启。
+- [x] `ThemeHandle { theme, generation }` + `Themed { role, gen }` 组件 + `repaint_on_theme_change` 系统（架构 §8.1）。（v8-m2a-tokens）
+- [x] `preferences.theme`/`density` 接现有配置热应用通路（R3-13 已闭合）。（v8-m2b-density-hover：密度经 `ThemeHandle.density` + `density.rs` 的间距基线写回；主题沿用 m2a 通路）
+- **验收**：设置里切密度档位，全界面即时重排、无需重启。（`xgent_ui/tests/density.rs` 断言 rail/对话区/设置卡片三处像素）
 
 ### M2-T2 消灭现场构造与影子定义
 - [ ] `Theme::dark()` 可见性降 `pub(crate)`；修 `diff_view.rs:217`。
@@ -146,8 +146,8 @@ M1 与 M2 相互独立，可并行分头推进。
 - **验收**：首帧尺寸确定，HiDPI 下不异常。
 
 ### M2-T7 hover 全量化（修 G6）
-- [ ] 以 `Interaction` + 焦点态数据驱动单系统替换 `kit.rs:125-157` 的每帧轮询。
-- **验收**：无 `Interaction` 的节点不进入每帧查询；帧内该开销可测量下降。
+- [x] 以 `Hovered` + `Pressed`（0.20 的 `Interaction` 已废弃）数据驱动单系统替换 `kit.rs:125-157` 的每帧轮询；松手帧用 `RemovedComponents<Pressed>` 补。（v8-m2b-density-hover）
+- **验收**：无状态变化的节点不进入查询；空闲帧 `HoverTintPollStats.visits == 0`（单测），帧内该开销可测量下降。
 
 ---
 
@@ -365,7 +365,9 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## 10. 实施勘误（随实施追加）
 
-（暂无。开工后在此记录「文档与代码不符、以代码为准」的事实。）
+1. **`ThemeHandle` 只有一个 `generation`**（v8-m2b-density-hover）：密度与主题都是显示偏好，共用同一个计数；切密度时 `repaint_on_theme_change` 会多跑一遍，但写入的是同一份主题值，视觉无差异。架构 §8.1 里「`ThemeHandle { theme, generation }`」的字段清单据此补了 `density`。
+2. **`preferences.density` 需要 daemon 键白名单**（v8-m2b-density-hover）：`ConfigCoordinator::write` 对未知 key 直接报错，只改 UI 侧会让密度永远存不下来。已在 `config_store.rs` 的读/写各加一条（写只接受 `comfortable`/`compact`），除此之外 daemon 逻辑未动。
+3. **`M2-T7` 的触发源订正**：任务书原文写「`Interaction` + 焦点态」，实际 0.20 的 `Interaction` 已废弃，实现用 `Hovered` + `Pressed`（松手是「移除」，须用 `RemovedComponents<Pressed>` 单独接）。
 
 ## 附：文档树变更（2026-10-16，已完成）
 
@@ -427,3 +429,64 @@ M1 与 M2 相互独立，可并行分头推进。
 - 静态断言（Runtime check `c1`）：**18 组原型必现模式**命中（`.mpl{`/`.mpop{`/`.mseg button.on{`/`.mpop .m3d{` CSS、`id="mpill"`/`id="mpop"`、`function renderMpopList/mpOpen(/mpClose(/mpMove(/mpSelect(`、`const MODEL_BASE=`、pill 锚定 `bottom:calc(100% + 6px)`、`$('#mpill').onclick=mpToggle`、`const MPICK_LV=`、pill 模板 `思考 ${S.pick.lv}`、`XGent 3D 陪伴`、`MODEL_BASE[i%MODEL_BASE.length]`）+ **18 组失配模式零命中**（上一轮全部 15 组禁项 + `gpt-4o-mini-2024-07-18` 旧写死串 + 死字段 `S.mpSel`/`mpItems`）+ **5 组台账识别**（附段标题 / 变更名 / 日期 / `MPICK` / `mseg`）。
 - 静态脚本 `node --check`：内联 `<script>` 语法检查（本轮 1282 行实测 exit 0）。
 - 行为项（pill 开合、键盘导航、思考等级切换联动、模态互斥、与 settings 并存、C2 复现照旧）为浏览器走查边界，由 Verifier 对照 brief A1-A8 逐项复核。
+
+## 附：原型优化第二轮（2026-10-19，已完成）
+
+> 范围：`docs/design/ui-prototype-v8.html`（优化后 1701 行）。本段为独立变更 `optimize-ui-v8-prototype-r2`（Comet Native）的交付记录，与上方三段不重叠：既有演示（缺陷复现 / 图层检查器 / 密度 / 模态栈 / 模型对话框）与全部既有锚点原样保留。
+
+### 动机与参照
+
+用户需求：继续优化 v8 原型、参照当前成熟 agent 的 UI 与功能设计、并保留 XGent 特色（3D 陪伴）。参照对象（**仅取信息架构，不复制视觉**）：Claude Code 权限模式（default / acceptEdits / plan / dontAsk / bypassPermissions / auto 与 `/permissions` 预批准规则、受保护目录）、opencode 的 allow/ask/deny 规则集、检查点恢复的业界实践、项目内 `docs/notes/oh-my-pi-borrowing-analysis.md`（ApprovalMode 矩阵 P1）。全部组件沿用 v7-Linear Tokens（ADR-0014），未新增色值（`rgba(255,178,36)`=4、`#FFB224`=2 与基线一致）。
+
+### 结构（交付后定型）
+
+- **陪伴（补齐产品既有两处占位并升级）**：rail 底部星标按钮（暖色身份，对齐 `activity_bar.rs` 既有位置；激活环升级为**状态环**——暖色动画语义：空闲静止 / 思考呼吸 / 流式持续 / 工具执行虚线旋转 / 等待确认叠加琥珀点徽标 / 错误红环）；点击开**陪伴浮层**（琥珀形象球 + 当前状态 + 模型·思考等级联动 + 窗口预览入口 + 显示开关）；状态栏补齐「陪伴 · 状态」段（对齐 `status_bar.rs` 口径）；独立陪伴窗口概念预览卡（显式标注 F-15 / K-04 / 概念预览，非交付承诺）；模型 popover `.m3d` 区琥珀化升级（保留 `XGent 3D 陪伴` 锚点）。
+- **权限**：顶栏权限模式 pill（询问 / 自动 / 全自动，含与 §5.4 的关系说明、受保护路径说明、「管理预批准规则」入口）；全自动警示（pill 描边 + 状态栏 warn 段）；确认弹窗三档放行（仅此一次 / 本会话允许 / 始终允许·写入配置）+ 拒绝并说明（理由随拒绝传递）+ 受保护路径提示；设置「工具与安全」实表（10 行工具策略可循环切换 + 4 条预批准/预拒绝规则 + 受保护目录），snab 分区切换。
+- **运行态与恢复**：good 模式流式路径并入 3 个只读工具**并行**（状态栏「运行中 N 操作」指示）；中断恢复条（重新生成 / 编辑后再发）；回合尾部**撤销入口**（回退本回合文件检查点，含覆盖边界如实说明与已撤销态）；压缩事件卡；上下文用量条。
+- **空态与历史**：欢迎空态（品牌 / 问候 / 最近会话；结构对齐 `welcome.rs`——快捷入口保持输入框上方单处，不重复摆放）；历史面板（搜索过滤 + 日期分组 + 当前会话高亮 + T-6 空态文案）。
+- **对齐**：rail 补「展开面板」按钮（对齐产品结构）；设计先行项（权限模式会话级覆盖、受保护路径、并行指示、历史检索）均在文案显式标注。
+
+### 复测口径
+
+- 静态断言（Runtime check `c1`）：**48 组原型必现模式**命中（陪伴：`.rbtn.cmp{`/`id="cmpBtn"`/`id="cmpRing"`/`.cmp-badge{`/`id="cmpSeg"`/`id="cmpSegTxt"`/`.cpop{`/`id="cpop"`/`id="cpopToggle"`/`id="cpopWin2"`/`id="cwmockOrb"`/`概念预览`/`F-15`/`K-04`；权限：`id="permPill"`/`id="permPop"`/`data-perm="full"`/`id="permWarnSeg"`/`受保护路径`/`id="freason"`/`data-allow="always"`/`data-deny`/`id="pane-tools"`/`id="toolRows"`/`data-snab="tools"`/`bash: rm -rf*`；运行态：`id="parSlot"`/`id="opsSeg"`/`.recoverbar`/`重新生成`/`id="failCard"`/`回退检查点`/`id="undoRow"`/`撤销此回合`/`覆盖边界`/`R3-11`/`id="ctxbar"`/`id="compactCard"`/`上下文已压缩`；空态：`id="welcome"`/`welcome.rs`/`id="welcomeRecent"`/`id="histSearch"`/`hgrp`/`无匹配会话`；对齐与标记：`id="expBtn"`/`设计先行`/`XGent 3D 陪伴`）+ **21 组既有锚点保全**（round 1 必现组 + 复现开关锚点不回归）+ **10 组禁项零命中**（旧写死串、死字段、死代码、旧选择器 + 孤儿 `.confirm .cf` 规则与无消费者 `data-lvl` 属性）+ 色值计数不增（`rgba(255,178,36` 前缀=4、`#FFB224`=2）；台账识别（本附段标题 / 变更名 / 日期）。
+- 静态脚本 `node --check`：内联 `<script>` 语法检查（本轮 1701 行、内联脚本 44736 字符实测 exit 0）。
+- 行为项（陪伴六态联动、浮层开关路径、权限切换与全自动警示、弹窗三档放行、设置分区切换、并行 / 恢复 / 撤销 / 压缩、欢迎空态、历史搜索；以及既有演示回归）为浏览器走查边界，由 Verifier 对照 brief A1-A14 逐项复核。
+
+**修复轮记录**：首轮独立验证发现 A1 的「错误红环」被 `.rbtn.cmp.on .ring`（0-4-0）特异性压过（`.v8 .cmp-error .ring` 为 0-3-0，红环不可见）；已把状态环选择器提升为 `.rbtn.cmp.on.cmp-{state} .ring`（0-5-0，错误红环/等待确认点可见），并随修孤儿 `.confirm .cf` 规则与无消费者 `data-lvl` 属性；其余实现未改动，重新走完整验证。
+
+## 附：3D 视口设计探针（2026-10-19，设计先行）
+
+> 范围：新增 `docs/design/ui-v8-3d-viewport.md`；`ui-v8-design-system.md` 增补 §9（3D 令牌边界）与 §10（动效令牌）；`ui-v8-layout-architecture.md` §3.1 增补 `Slot::Center`；`ui-prototype-v8.html` 新增「空间视图」聚焦态。本段不改变 M1–M8 的进度口径：**v8 主体仍未开工**。
+
+### 结论（回答「3D 能否启动」）
+
+| 事项 | 判定 |
+|:---|:---|
+| 空间语法 / 交互契约 / 视觉规范 | ✅ 已完成（本文档 + 原型） |
+| 数据契约 + 确定性布局内核（S0） | ✅ 可立即开工：不依赖 Bevy、不碰 UI、可 headless 测 |
+| 视口渲染（S1） | ⏸ 等 M1（层根/拾取）+ M2（主题热驱动）+ G7 性能 spike |
+| 交互接入（S2） | ⏸ 等 M5（`Slot::Center` + 同槽单活跃） |
+| 时空回溯（S3） | ⏸ 等 S2 + D-3D-07（时间轴数据源） |
+
+已核实前提：bevy 0.20 的 `3d` 是默认特性，`bevy_pbr`/`bevy_core_pipeline` 已在 `Cargo.lock` → **3D 不新增依赖**；全仓 `PanelRegistry`/`ModalStack`/`ScrollFrame`/`MonoMetrics` grep = 0 → 闸门按未通过计。
+
+### 原型结构（交付后定型）
+
+- **入口**：rail 底部组上方的星图按钮（无 `data-act`，不进入页签枚举）；点击进入空间视图，`Esc` 逐级回退（L2→L1→L0→退出）。
+- **层**：`#layerSpace`（z 120，位于 DOCK 100 之上、DRAWER 200 之下），内部 `.spwrap` 从顶栏下沿铺到状态栏上沿；聚焦态以 `.v8.space-mode .main{visibility:hidden}` 隐藏主区，**不新建层根**。
+- **空间语法**：13 个 crate 星团（半径 ∝ 代码量）+ 85 个文件星体（确定性伪随机分布）；crate 依赖边（亮度渐变表方向）、L1 星团内 `use` 细线；改动文件白环、运行中靛紫脉冲、选中 `accent` 描边；地面仅 L0 三圈参照环。
+- **LOD**：`dist > 760` → L0 星系；`> 420` → L1 星团（只保留聚焦星团文件，其余星团降权 45%）；否则 L2 星体。双击星团飞行穿越（320ms cubic），双击星体交棒 2D 编辑器。
+- **HUD**：面包屑 + 节点统计；右上 LOD/帧预算/历史视图 chips；选中详情卡（LOC/依赖边/状态 + 打开编辑器/定位对话）；底部时间轴（T-4…T-0，拖动只回放状态、相机不自动移动）；左下「回到对话」；中下操作提示。
+- **键盘**：`Tab/Shift+Tab` 遍历当前层节点、`/` 搜索并飞行、`Enter` 默认动作、`+/-` 缩放、`Esc` 逐级回退；画布 `tabindex=0` 接管焦点（否则打开后按 Enter 会重新触发 rail 按钮）。
+- **标签**：独立一遍近→远绘制，矩形避让 + 同屏上限 24，全部走 2D 叠加（不建 3D 文本）。
+
+### 同轮修复的既有缺陷
+
+- **抽屉关闭残留 39px**：`.drawer{left:var(--rail-w); transform:translateX(-104%)}` 中 `-104%` 只按自身宽 320 计算（−332.8px），右缘停在 `52−332.8+320 = 39.2px`，关闭态在 base 层左缘露出一条文件树。改为 `translateX(calc(-100% - var(--rail-w)))`，右缘归零。该缺陷在 3D 聚焦态下最显眼（露出一列「2 KB/3 KB…」），普通态下被 rail 掩盖。
+
+### 复测口径
+
+- 静态：内联脚本 `node --check` 通过（本轮 2200+ 行、脚本 62KB+）。
+- 行为（Playwright headless Chromium，`target/smoke/smoke.js`，不随仓库提交）：进入空间视图 → canvas 有绘制（非零像素）→ `Tab` 选中星团并出卡 → `Enter` 飞行至 LOD 1 → 时间轴 T-2 出现历史视图徽标与「改动 3 文件」→ 拖拽旋转 → `/` 搜索 `theme.rs` 命中 → `Esc` 逐级退出 → 退出后设置面板仍可打开；**控制台零 error / 零 pageerror**。
+- 截图：`target/smoke/space-app.png`（L0）、`space-l1.png`（L1 + 详情卡）。
+- 边界：原型用 Canvas 2D 伪 3D 表达契约，**不演示**真实索引、tree-sitter 耦合边、2k 节点性能与离屏纹理；这些属于 S0/S1 验收，不得据原型判定性能达标。

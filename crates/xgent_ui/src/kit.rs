@@ -120,11 +120,20 @@ impl HoverTint {
     }
 }
 
-/// hover/按下换色（单系统遍历全部 `HoverTint` 节点；无过滤全量轮询，
-/// 写入前比较避免无谓的组件变更——对齐官方 widgets 示例的每帧刷新模式）。
+/// hover/按下换色：**只处理状态发生变化的节点**（v8 M2b）。
+///
+/// 触发源有两个半：
+/// - `Changed<Hovered>`：指针进出（`Hovered` 是 immutable 组件，只在真正翻转时被重写，
+///   天生适合变更检测，见 `bevy_picking/src/hover.rs:404-417`）；
+/// - `Changed<Pressed>`：包含「新增」这一帧（按下）；
+/// - `RemovedComponents<Pressed>`：松手是**移除**组件，`Changed` 看不到，必须单独接
+///   ——否则按钮松手后永远停在按下色。
+///
+/// 空闲帧这两个查询都为空，系统不做任何扫描（`HoverTintPollStats` 可观测）。
 fn hover_tint_system(
     theme: Res<Theme>,
-    mut q: Query<
+    mut stats: ResMut<HoverTintPollStats>,
+    mut changed: Query<
         (
             &Hovered,
             Has<Pressed>,
@@ -132,28 +141,81 @@ fn hover_tint_system(
             &mut BackgroundColor,
             &mut BorderColor,
         ),
-        With<HoverTint>,
+        Or<(Changed<Hovered>, Changed<Pressed>)>,
     >,
 ) {
-    for (hovered, pressed, tint, mut bg, mut border) in q.iter_mut() {
-        let (bg_want, line_want) = if pressed {
-            (theme.active, tint.hover_border)
-        } else if hovered.get() {
-            (tint.hover_bg, tint.hover_border)
-        } else {
-            (tint.base_bg, tint.base_border)
-        };
-        if bg.0 != bg_want {
-            bg.0 = bg_want;
-        }
-        if (border.top != line_want)
-            || (border.right != line_want)
-            || (border.bottom != line_want)
-            || (border.left != line_want)
-        {
-            border.set_all(line_want);
-        }
+    stats.visits = 0;
+    stats.releases = 0;
+
+    for (hovered, pressed, tint, mut bg, mut border) in changed.iter_mut() {
+        stats.visits += 1;
+        apply_tint(&theme, hovered.get(), pressed, tint, &mut bg, &mut border);
     }
+}
+
+/// 松手回调：`Pressed` 是被**移除**的组件，`Changed` 感知不到，必须单独接。
+///
+/// 不接这一段的话，按钮松手后会停在按下色，直到下一次指针进出才恢复。
+fn hover_tint_release_system(
+    theme: Res<Theme>,
+    mut stats: ResMut<HoverTintPollStats>,
+    mut nodes: Query<(
+        &Hovered,
+        Has<Pressed>,
+        &HoverTint,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+    mut removed: RemovedComponents<Pressed>,
+) {
+    for entity in removed.read() {
+        let Ok((hovered, pressed, tint, mut bg, mut border)) = nodes.get_mut(entity) else {
+            continue; // 没有 HoverTint 的按钮，或已 despawn
+        };
+        stats.releases += 1;
+        stats.visits += 1;
+        apply_tint(&theme, hovered.get(), pressed, tint, &mut bg, &mut border);
+    }
+}
+
+/// 按当前状态写入背景与边框（值不同才写，避免无谓的组件变更）。
+fn apply_tint(
+    theme: &Theme,
+    hovered: bool,
+    pressed: bool,
+    tint: &HoverTint,
+    bg: &mut BackgroundColor,
+    border: &mut BorderColor,
+) {
+    let (bg_want, line_want) = if pressed {
+        (theme.active, tint.hover_border)
+    } else if hovered {
+        (tint.hover_bg, tint.hover_border)
+    } else {
+        (tint.base_bg, tint.base_border)
+    };
+    if bg.0 != bg_want {
+        bg.0 = bg_want;
+    }
+    if (border.top != line_want)
+        || (border.right != line_want)
+        || (border.bottom != line_want)
+        || (border.left != line_want)
+    {
+        border.set_all(line_want);
+    }
+}
+
+/// hover 换色系统的观测量（最近一帧处理过的节点数与松手事件数）。
+///
+/// 只给测试与排障读：`visits == 0` 即「这一帧没有任何节点需要换色」，
+/// 也就是「空闲帧不做全量扫描」这条验收的可观测证据。
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct HoverTintPollStats {
+    /// 本帧实际处理的节点数。
+    pub visits: u32,
+    /// 本帧读到的 `Pressed` 移除事件数。
+    pub releases: u32,
 }
 
 // ===== 面板按压防护 =====
@@ -636,44 +698,44 @@ pub fn show_toast(
     }
     // 原型 .toast：bottom 50px、水平居中；tooltip_bg 恒暗底 + border + 圆角 8
     let mut toast = commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: px(crate::theme::size::TOAST_BOTTOM),
-                left: Val::Percent(50.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                padding: UiRect {
-                    left: px(space::LG),
-                    right: px(space::LG),
-                    top: px(space::SM),
-                    bottom: px(space::SM),
-                },
-                border_radius: BorderRadius::all(px(radius::CARD)),
-                border: UiRect::all(px(1.0)),
-                flex_shrink: 0.0,
-                ..default()
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(crate::theme::size::TOAST_BOTTOM),
+            left: Val::Percent(50.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            padding: UiRect {
+                left: px(space::LG),
+                right: px(space::LG),
+                top: px(space::SM),
+                bottom: px(space::SM),
             },
-            BackgroundColor(theme.tooltip_bg),
-            BorderColor::all(theme.border),
-            GlobalZIndex(crate::theme::z::TOAST),
-            ToastMarker,
-            ToastTtl(TOAST_TTL_SECS),
-        ));
+            border_radius: BorderRadius::all(px(radius::CARD)),
+            border: UiRect::all(px(1.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme.tooltip_bg),
+        BorderColor::all(theme.border),
+        GlobalZIndex(crate::theme::z::TOAST),
+        ToastMarker,
+        ToastTtl(TOAST_TTL_SECS),
+    ));
     if let Ok(layer) = toast_layer.single() {
         toast.insert(ChildOf(layer));
     }
     toast.with_children(|t| {
-            t.spawn((
-                ui_text(
-                    latest.text.clone(),
-                    type_scale::BODY_SM,
-                    510,
-                    theme.tooltip_text,
-                    type_scale::line_height::UI,
-                ),
-                ToastTextMarker,
-            ));
-        });
+        t.spawn((
+            ui_text(
+                latest.text.clone(),
+                type_scale::BODY_SM,
+                510,
+                theme.tooltip_text,
+                type_scale::line_height::UI,
+            ),
+            ToastTextMarker,
+        ));
+    });
 }
 
 /// toast 计时消隐。
@@ -704,24 +766,111 @@ impl Plugin for KitPlugin {
                 // 双写 ToastTtl，chain 消除调度歧义
                 (show_toast, toast_ttl_system).chain(),
             )
-            .add_systems(Update, (hover_tint_system, tooltip_system, position_tooltips));
+            // 两个换色系统串联：前者每帧重置统计，后者只补松手那一帧
+            .add_systems(
+                Update,
+                (hover_tint_system, hover_tint_release_system).chain(),
+            )
+            .add_systems(Update, (tooltip_system, position_tooltips))
+            .init_resource::<HoverTintPollStats>();
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::theme::Theme;
+
     /// A5：tooltip 右缘不足时翻转到左侧；空间足够时贴右侧。
     #[test]
     fn tooltip_flips_at_viewport_edge() {
         let gap = 8.0;
-        assert_eq!(
-            super::tooltip_left(100.0, 140.0, 120.0, 800.0, gap),
-            148.0
-        );
-        assert_eq!(
-            super::tooltip_left(700.0, 740.0, 120.0, 800.0, gap),
-            572.0
-        );
+        assert_eq!(super::tooltip_left(100.0, 140.0, 120.0, 800.0, gap), 148.0);
+        assert_eq!(super::tooltip_left(700.0, 740.0, 120.0, 800.0, gap), 572.0);
         assert_eq!(super::tooltip_left(10.0, 40.0, 120.0, 100.0, gap), 0.0);
+    }
+
+    /// 最小 hover 环境：只装两个换色系统与主题/统计资源。
+    fn hover_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Theme>()
+            .init_resource::<HoverTintPollStats>()
+            .add_systems(
+                Update,
+                (hover_tint_system, hover_tint_release_system).chain(),
+            );
+        app
+    }
+
+    fn spawn_tinted(app: &mut App) -> Entity {
+        let theme = *app.world().resource::<Theme>();
+        app.world_mut()
+            .spawn((
+                Hovered::default(),
+                HoverTint::standard(&theme),
+                BackgroundColor(theme.subtle),
+                BorderColor::all(theme.border),
+            ))
+            .id()
+    }
+
+    fn bg(app: &App, entity: Entity) -> Color {
+        app.world().get::<BackgroundColor>(entity).unwrap().0
+    }
+
+    /// A5：空闲帧不扫描——统计里 `visits` 为 0。
+    #[test]
+    fn idle_frames_do_not_visit_any_node() {
+        let mut app = hover_app();
+        for _ in 0..3 {
+            spawn_tinted(&mut app);
+        }
+        // 首帧组件刚新增，`Changed` 会命中一次；第二帧起应完全空转
+        app.update();
+        let first = app.world().resource::<HoverTintPollStats>().visits;
+        assert_eq!(first, 3, "首帧应处理刚新增的三个节点");
+
+        for _ in 0..3 {
+            app.update();
+            let stats = *app.world().resource::<HoverTintPollStats>();
+            assert_eq!(stats.visits, 0, "空闲帧不应访问任何节点");
+            assert_eq!(stats.releases, 0);
+        }
+    }
+
+    /// A6：悬停 → 按下 → 松手 三段颜色都正确，且松手不停在按下色。
+    #[test]
+    fn hover_press_release_sequence_restores_hover_color() {
+        let mut app = hover_app();
+        let entity = spawn_tinted(&mut app);
+        app.update();
+        let theme = *app.world().resource::<Theme>();
+        assert_eq!(bg(&app, entity), theme.subtle, "初始为基础色");
+
+        // 悬停
+        app.world_mut().entity_mut(entity).insert(Hovered(true));
+        app.update();
+        assert_eq!(bg(&app, entity), theme.hover, "悬停应为 hover 色");
+        assert!(app.world().resource::<HoverTintPollStats>().visits > 0);
+
+        // 按下
+        app.world_mut().entity_mut(entity).insert(Pressed);
+        app.update();
+        assert_eq!(bg(&app, entity), theme.active, "按下应为 active 色");
+        assert!(app.world().resource::<HoverTintPollStats>().visits > 0);
+
+        // 松手（移除 Pressed，仍悬停）
+        app.world_mut().entity_mut(entity).remove::<Pressed>();
+        app.update();
+        let stats = *app.world().resource::<HoverTintPollStats>();
+        assert_eq!(bg(&app, entity), theme.hover, "松手应回到 hover 色");
+        assert_eq!(stats.releases, 1, "应读到一次松手");
+        assert!(stats.visits > 0);
+
+        // 指针离开
+        app.world_mut().entity_mut(entity).insert(Hovered(false));
+        app.update();
+        assert_eq!(bg(&app, entity), theme.subtle, "离开应回到基础色");
     }
 }

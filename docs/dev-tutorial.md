@@ -738,7 +738,25 @@ v8 M1 把「浮层放在哪、谁吃点击、Esc 关谁」从散落实现收敛�
 - **最小宽度单源**：`resize.rs` 引用 `size::CONTEXT_W_MIN/CHAT_MIN/HANDLE_W`。
 - **色板**：星形与 `Color::WHITE` 已入 `theme.star/on_accent`；ANSI 表是显式白名单（终端协议色，不参与主题）。
 - **窗口**：主窗口 `WindowResolution::new(1280, 800)`（逻辑像素）。
-- M2b 待做：密度档位（`preferences.density` + 设置入口 + 全界面重排）与 hover 全量化（用 `Hovered`/`Pressed` 取代已废弃的 `Interaction`）。
+- M2b 已闭合（密度档位与 hover 量化见 §5.19）。
+
+### 5.19 密度档位与 hover 量化（v8 M2b）
+
+**密度档位**（`preferences.density` = `comfortable` 缺省 / `compact`）：
+
+- **权威链**：`GlobalConfigRes.preferences.density` → `sync_theme_from_config` → `ThemeHandle.density`（与主题共用一个 `generation`）。偏好一变，下一帧全界面按新档重排，不重建节点、不重启。
+- **实现是「间距属性写回」而非改调用点**（`density.rs`）：`DensityBase` 记下每个 `Node` 的基线 `padding/margin/row_gap/column_gap`；`capture_density_bases` 对新节点记基线并立即按当前档写回，`apply_density_on_change` 在 `ThemeHandle` 变化时按「基线 × 系数」重写。写入始终以基线为源，所以**重复应用不累乘**，切回舒适即逐像素还原。
+- **只缩间距**：`Val::Px` 参与换算，`Percent`/`Auto`/0 原样；字号、图标、`Node.width/height`、边框宽度都不动。系数 0.75 是刻意挑的——4px 网格 4→3、8→6、12→9、16→12、20→15、24→18、32→24 全部落在整数像素，不出半像素模糊。
+- **入口**：设置面板「语言」下方新增「密度」分段按钮（与语言同一枚 `segment_button`），点击即生效并发 `SaveDensityMessage`，**不进「保存」通路**；`xgent_app::settings_io::save_density` 经 `CONFIG_WRITE` 写 `preferences.density` 后重读快照。daemon 侧 `config_store` 的键白名单各加一条，写只接受 `comfortable`/`compact`（非法值报错，不静默回落）。
+- **启动即生效**：`request_preferences_on_startup` 在 Startup 读一次全局配置，只回填 `preferences`（`SnapshotResult.preferences_only`）。**别改成走面板快照**——面板快照会连带回填项目配置并重写 `LiveSettings`，而开机 `ProviderInfo` 还没就绪（provider id 为空），`resolve_context_window` 会回落内置缺省，把用户配的上下文窗口冲掉。
+
+**hover 量化**（`kit.rs`）：
+
+- `hover_tint_system` 只处理 `Or<(Changed<Hovered>, Changed<Pressed>)>` 的节点——`Hovered` 是 immutable 组件，只在指针进出时被重写，天生适合变更检测；空闲帧查询为空，不做全量扫描。
+- **松手要单独接**：`Pressed` 是「插入/移除」的标记，移除这一帧 `Changed` 看不到（`hover_tint_release_system` + `RemovedComponents<Pressed>`）。漏了它，按钮松手后停在按下色，直到指针下次进出才恢复。
+- `HoverTintPollStats { visits, releases }` 是这条验收的可观测证据（不是面向用户的功能）：空闲帧 `visits == 0`。
+
+**测试注意**：密度集成测试（`tests/density.rs`）要用真实插件产出节点——对话面板需要 `UiFonts`、`MeshPlugin` 与 agent 的一批消息类型，否则 system 参数校验会以 "Resource does not exist" 直接 panic（看不到系统名，因为 bevy 的 `debug` feature 未开）。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

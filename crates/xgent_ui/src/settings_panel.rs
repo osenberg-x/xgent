@@ -21,8 +21,8 @@
 //!
 //! 输入框使用官方 `EditableText`（光标/删除/IME 全交官方 text_input 系统）。
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::InputFocus;
+use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::Pickable;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
@@ -39,7 +39,7 @@ use xgent_tools::{SecurityPolicy, ToolExecutor, ToolExecutorResource};
 
 use crate::fonts::ui_text;
 use crate::i18n::tr;
-use crate::theme::{Theme, px, space, type_scale};
+use crate::theme::{Density, Theme, px, space, type_scale};
 
 /// 设置面板根节点标记。
 #[derive(Component, Default)]
@@ -203,6 +203,13 @@ pub struct ModelListContainerMarker;
 pub struct LanguageButton {
     /// 该按钮代表的语言代码
     pub lang: String,
+}
+
+/// 密度档位按钮标记（v8 M2b）。
+#[derive(Component, Clone, Copy)]
+pub struct DensityButton {
+    /// 该按钮代表的档位
+    pub density: Density,
 }
 
 /// 数值设置输入框标记。
@@ -574,6 +581,7 @@ impl Plugin for SettingsPanelPlugin {
             .add_message::<FetchModelsMessage>()
             .add_message::<ModelListResultMessage>()
             .add_message::<SaveLanguageMessage>()
+            .add_message::<SaveDensityMessage>()
             .insert_resource(SettingsPanelState::default())
             .insert_resource(KindSelector::default())
             .insert_resource(ModelListState::default())
@@ -588,6 +596,7 @@ impl Plugin for SettingsPanelPlugin {
                     close_on_scrim_click,
                     handle_kind_button,
                     handle_panel_dismiss,
+                    handle_density_choice,
                     handle_policy_button,
                     handle_save_button,
                     handle_fetch_models,
@@ -605,6 +614,16 @@ impl Plugin for SettingsPanelPlugin {
 pub struct SaveLanguageMessage {
     /// 语言代码，如 "zh-CN" / "en-US"
     pub language: String,
+}
+
+/// 保存密度偏好消息（UI → `xgent_app`，v8 M2b）。
+///
+/// 与语言同形态：点击即生效、不进「保存」通路，写盘失败时由
+/// [`SettingsSaveReportMessage`] 如实报告。
+#[derive(Message, Debug, Clone)]
+pub struct SaveDensityMessage {
+    /// 目标档位
+    pub density: Density,
 }
 
 /// 根据开关状态 spawn/despawn 面板，并在快照更新时重渲染。
@@ -879,37 +898,40 @@ fn spawn_panel(
                     .with_children(|row| {
                         for lang in ["zh-CN", "en-US"] {
                             let selected = global.preferences.language == lang;
-                            row.spawn((
-                                Button,
-                                Hovered::default(),
-                                Node {
-                                    padding: UiRect {
-                                        left: px(space::MD),
-                                        right: px(space::MD),
-                                        top: px(2.0),
-                                        bottom: px(2.0),
-                                    },
-                                    border_radius: BorderRadius::all(px(
-                                        crate::theme::radius::CTRL,
-                                    )),
-                                    ..default()
-                                },
-                                BackgroundColor(if selected { theme.accent } else { theme.subtle }),
-                                ui_text(
-                                    tr(loc, &format!("settings-lang-{lang}")),
-                                    type_scale::BODY_SM,
-                                    if selected { 600 } else { 400 },
-                                    if selected {
-                                        theme.accent_text
-                                    } else {
-                                        theme.text_dim
-                                    },
-                                    type_scale::line_height::CTRL,
-                                ),
+                            segment_button(
+                                row,
+                                theme,
+                                loc,
+                                &format!("settings-lang-{lang}"),
+                                selected,
                                 LanguageButton {
                                     lang: lang.to_string(),
                                 },
-                            ));
+                            );
+                        }
+                    });
+
+                // ── 密度（v8 M2b）───────────────────────────
+                section(card, theme, loc, "settings-section-density");
+                card.spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::SM),
+                    ..default()
+                },))
+                    .with_children(|row| {
+                        for (density, key) in [
+                            (Density::Comfortable, "settings-density-comfortable"),
+                            (Density::Compact, "settings-density-compact"),
+                        ] {
+                            let selected = global.preferences.density == density;
+                            segment_button(
+                                row,
+                                theme,
+                                loc,
+                                key,
+                                selected,
+                                DensityButton { density },
+                            );
                         }
                     });
 
@@ -989,6 +1011,47 @@ fn spawn_button_row(
                 SettingsCloseButtonMarker,
             ));
         });
+}
+
+/// 一枚分段按钮（语言 / 密度共用）：选中态 `accent` 底 + 白字 + 600 字重。
+///
+/// `extra` 是各分段自己的标记组件（[`LanguageButton`] / [`DensityButton`]），
+/// 点击处理按标记分派。
+fn segment_button(
+    row: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    theme: &Theme,
+    loc: &Localizer,
+    label_key: &str,
+    selected: bool,
+    extra: impl Bundle,
+) {
+    row.spawn((
+        Button,
+        Hovered::default(),
+        Node {
+            padding: UiRect {
+                left: px(space::MD),
+                right: px(space::MD),
+                top: px(2.0),
+                bottom: px(2.0),
+            },
+            border_radius: BorderRadius::all(px(crate::theme::radius::CTRL)),
+            ..default()
+        },
+        BackgroundColor(if selected { theme.accent } else { theme.subtle }),
+        ui_text(
+            tr(loc, label_key),
+            type_scale::BODY_SM,
+            if selected { 600 } else { 400 },
+            if selected {
+                theme.accent_text
+            } else {
+                theme.text_dim
+            },
+            type_scale::line_height::CTRL,
+        ),
+        extra,
+    ));
 }
 
 /// provider kind 选择行（MVP 暴露 4 个变体，`Custom` 不给按钮）。
@@ -1395,6 +1458,26 @@ fn handle_panel_dismiss(
         if global.preferences.language != hit.lang {
             lang_writer.write(SaveLanguageMessage {
                 language: hit.lang.clone(),
+            });
+        }
+    }
+}
+
+/// 密度选择（v8 M2b）：点击即改显示并发写入消息，与语言同形态、不进「保存」通路。
+///
+/// 就地写 `GlobalConfigRes.preferences.density` 是**有意**的：`sync_theme_from_config`
+/// 会在下一次 Update 把它带到 `ThemeHandle`，于是本帧或下一帧就重排，不必等 IPC 往返；
+/// 落盘结果仍由 `xgent_app` 经配置通路确认，失败会写进面板状态行。
+fn handle_density_choice(
+    q: Query<&DensityButton, Added<Pressed>>,
+    mut global: ResMut<GlobalConfigRes>,
+    mut writer: MessageWriter<SaveDensityMessage>,
+) {
+    for hit in q.iter() {
+        if global.preferences.density != hit.density {
+            global.preferences.density = hit.density;
+            writer.write(SaveDensityMessage {
+                density: hit.density,
             });
         }
     }

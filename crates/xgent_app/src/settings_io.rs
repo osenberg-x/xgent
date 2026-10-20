@@ -31,9 +31,9 @@ use xgent_agent::bridge::{AgentBridge, RunSettings};
 use xgent_core::config::{ConfigReadRequest, ConfigScope, ConfigWriteRequest};
 use xgent_core::methods;
 use xgent_settings::{GlobalConfigRes, Localizer, ProjectConfigRes};
-use xgent_settings_core::{GlobalConfig, ProjectConfig};
+use xgent_settings_core::{Density, GlobalConfig, ProjectConfig};
 use xgent_ui::settings_panel::{
-    RequestSettingsSnapshotMessage, SaveLanguageMessage, SaveSettingsMessage,
+    RequestSettingsSnapshotMessage, SaveDensityMessage, SaveLanguageMessage, SaveSettingsMessage,
     SettingsSaveReportMessage, SettingsSnapshotReady,
 };
 
@@ -116,6 +116,8 @@ struct SnapshotResult {
     project: Option<ProjectConfig>,
     /// 失败原因（写进面板顶部，不把"读不到"演成"全是默认值"）
     error: String,
+    /// 只回填显示偏好（启动那次读取）：不碰项目配置、不动运行时句柄、不推进面板计数
+    preferences_only: bool,
 }
 
 /// 保存结果（异步 task → ECS）。
@@ -153,6 +155,7 @@ impl Plugin for SettingsIoPlugin {
             .insert_resource(SnapshotRx { rx: s_rx })
             .insert_resource(SaveTx(w_tx))
             .insert_resource(SaveRx { rx: w_rx })
+            .add_systems(Startup, request_preferences_on_startup)
             .add_systems(
                 Update,
                 (
@@ -163,6 +166,7 @@ impl Plugin for SettingsIoPlugin {
                     refresh_provider_after_save,
                     apply_peer_change,
                     save_language,
+                    save_density,
                 ),
             );
     }
@@ -187,10 +191,39 @@ fn request_snapshot(
                     global,
                     project,
                     error,
+                    preferences_only: false,
                 })
                 .await;
         });
     }
+}
+
+/// 启动时读一次显示偏好（v8 M2b）：磁盘上的密度 / 主题 / 语言在首帧就该生效。
+///
+/// 只读全局配置、只回填 `preferences`——**不**走面板快照那条路。面板快照会连带
+/// 回填项目配置并重写 `LiveSettings`，而开机时 `ProviderInfo` 还没就绪（provider id
+/// 为空），`resolve_context_window` 会回落内置缺省，把用户配的窗口冲掉。
+fn request_preferences_on_startup(
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+    tx: Res<SnapshotTx>,
+) {
+    let ipc = ipc.client.clone();
+    let tx = tx.0.clone();
+    bridge.runtime.handle().spawn(async move {
+        let (global, error) = match read_global(&ipc).await {
+            Ok(g) => (Some(g), String::new()),
+            Err(e) => (None, e),
+        };
+        let _ = tx
+            .send(SnapshotResult {
+                global,
+                project: None,
+                error,
+                preferences_only: true,
+            })
+            .await;
+    });
 }
 
 /// 读全局与项目两份配置；任一失败都带原因回来（另一个仍可用）。
@@ -225,6 +258,7 @@ async fn read_global(ipc: &Arc<crate::ipc_client::IpcClient>) -> Result<GlobalCo
         "default_model",
         "preferences.language",
         "preferences.theme",
+        "preferences.density",
     ] {
         let v = ipc
             .call_ok(
@@ -238,6 +272,7 @@ async fn read_global(ipc: &Arc<crate::ipc_client::IpcClient>) -> Result<GlobalCo
             "default_provider" => cfg.default_provider = s,
             "default_model" => cfg.default_model = s,
             "preferences.language" => cfg.preferences.language = s,
+            "preferences.density" => cfg.preferences.density = Density::parse(&s),
             _ => cfg.preferences.theme = s,
         }
     }
@@ -284,15 +319,22 @@ fn drain_snapshot(
     mut loc: ResMut<Localizer>,
 ) {
     while let Ok(r) = rx.rx.try_recv() {
+        // 启动那次「只读显示偏好」的往返：不碰项目配置、不动运行时句柄、
+        // 不推进面板计数（面板还没开，推进计数只会让首次打开被多重建一次）。
+        if r.preferences_only {
+            if let Some(g) = r.global.as_ref() {
+                apply_preferences(&mut global, &mut loc, g);
+            } else if !r.error.is_empty() {
+                tracing::warn!("启动读取显示偏好失败: {}", r.error);
+            }
+            continue;
+        }
         if let Some(g) = r.global.as_ref() {
-            let switched = apply_language(&mut loc, &g.preferences.language);
+            apply_preferences(&mut global, &mut loc, g);
             // 保留插件表等面板不读、也不该被 IPC 视图抹掉的字段
             global.0.providers = g.providers.clone();
             global.0.default_provider = g.default_provider.clone();
             global.0.default_model = g.default_model.clone();
-            global.0.preferences.language = g.preferences.language.clone();
-            global.0.preferences.theme = g.preferences.theme.clone();
-            let _ = switched;
         }
         if let Some(p) = r.project.as_ref() {
             project.0 = p.clone();
@@ -314,6 +356,17 @@ fn drain_snapshot(
         }
         ready.tick += 1;
     }
+}
+
+/// 把显示偏好（语言 / 主题 / 密度）写进资源并就地切语言。
+///
+/// 主题与密度由 `xgent_ui::theme::sync_theme_from_config` 从这里派生到 `ThemeHandle`，
+/// 所以只要这份资源变脏，界面就会在下一帧跟上。
+fn apply_preferences(global: &mut GlobalConfigRes, loc: &mut Localizer, src: &GlobalConfig) {
+    global.0.preferences.language = src.preferences.language.clone();
+    global.0.preferences.theme = src.preferences.theme.clone();
+    global.0.preferences.density = src.preferences.density;
+    apply_language(loc, &src.preferences.language);
 }
 
 /// 面板保存 → 逐键写 → 重读权威值。
@@ -364,6 +417,7 @@ fn save_settings(
                         global,
                         project,
                         error,
+                        preferences_only: false,
                     }),
                 })
                 .await;
@@ -481,9 +535,7 @@ fn apply_save_result(
         global.0.providers = g.providers.clone();
         global.0.default_provider = g.default_provider.clone();
         global.0.default_model = g.default_model.clone();
-        global.0.preferences.language = g.preferences.language.clone();
-        global.0.preferences.theme = g.preferences.theme.clone();
-        apply_language(loc, &g.preferences.language);
+        apply_preferences(global, loc, g);
     }
     if let Some(p) = snap.project.as_ref() {
         project.0 = p.clone();
@@ -526,6 +578,7 @@ fn apply_peer_change(
                     global,
                     project,
                     error,
+                    preferences_only: false,
                 })
                 .await;
         });
@@ -567,6 +620,46 @@ fn save_language(
                     global,
                     project,
                     error,
+                    preferences_only: false,
+                })
+                .await;
+        });
+    }
+}
+
+/// 密度档位（v8 M2b）：与语言同一条写入通路，只写 `preferences.density`。
+///
+/// 就地生效由 UI 侧完成（面板先改 `GlobalConfigRes`，`ThemeHandle` 随之同步），
+/// 这里只负责落盘与回报；写失败时记 warn，并把权威快照重读回来（面板状态行会显示原因）。
+fn save_density(
+    mut reader: MessageReader<SaveDensityMessage>,
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+    tx: Res<SnapshotTx>,
+) {
+    for ev in reader.read() {
+        let ipc = ipc.client.clone();
+        let tx = tx.0.clone();
+        let value = ev.density.as_str().to_string();
+        let root = bridge.project_root.clone();
+        bridge.runtime.handle().spawn(async move {
+            let req = ConfigWriteRequest {
+                scope: ConfigScope::Global,
+                key: "preferences.density".into(),
+                value: serde_json::Value::String(value),
+                project_root: None,
+            };
+            let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
+            if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
+                tracing::warn!("写入 preferences.density 失败: {e}");
+            }
+            let (global, project, error) = read_both(&ipc, &root).await;
+            let _ = tx
+                .send(SnapshotResult {
+                    global,
+                    project,
+                    error,
+                    preferences_only: false,
                 })
                 .await;
         });
@@ -846,6 +939,7 @@ mod tests {
                 global: None,
                 project: None,
                 error: "第一次的原因".to_string(),
+                preferences_only: false,
             }),
         });
         for _ in 0..3 {
@@ -870,6 +964,7 @@ mod tests {
                 global: None,
                 project: None,
                 error: "解析 /proj/.xgent/config.toml 失败".to_string(),
+                preferences_only: false,
             }),
         });
         for _ in 0..3 {
@@ -894,6 +989,7 @@ mod tests {
                 global: None,
                 project: None,
                 error: String::new(),
+                preferences_only: false,
             }),
         });
         for _ in 0..3 {
@@ -999,6 +1095,7 @@ mod tests {
             global: None,
             project: Some(project),
             error: String::new(),
+            preferences_only: false,
         });
         for _ in 0..4 {
             app.update();
@@ -1019,6 +1116,7 @@ mod tests {
                 global: None,
                 project,
                 error: String::new(),
+                preferences_only: false,
             }),
         });
         for _ in 0..4 {

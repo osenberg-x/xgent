@@ -274,6 +274,9 @@ pub struct Preferences {
     /// 主题（MVP 仅 `"dark"`）
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// 界面密度档位（v8 M2b）
+    #[serde(default)]
+    pub density: Density,
 }
 
 impl Default for Preferences {
@@ -281,6 +284,61 @@ impl Default for Preferences {
         Self {
             language: default_language(),
             theme: default_theme(),
+            density: Density::default(),
+        }
+    }
+}
+
+/// 界面密度档位（v8 M2b）。
+///
+/// 只影响**间距**（padding / margin / gap），不影响字号与固定尺寸——
+/// 见 `docs/comet/changes/v8-m2b-density-hover/brief.md` 决策 D-2。
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Density {
+    /// 舒适（缺省）：间距取令牌原值。
+    #[default]
+    Comfortable,
+    /// 紧凑：间距按 [`Density::scaling`] 缩放。
+    Compact,
+}
+
+impl Density {
+    /// 间距缩放系数。
+    ///
+    /// `0.75` 是刻意挑的：4px 网格上 4→3、8→6、12→9、16→12、20→15、24→18、
+    /// 32→24 全部落在整数像素上，不会出现半像素导致的文字模糊。
+    pub const fn scaling(self) -> f32 {
+        match self {
+            Self::Comfortable => 1.0,
+            Self::Compact => 0.75,
+        }
+    }
+
+    /// 配置里的字符串写法（与 serde 的 snake_case 一致）。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Comfortable => "comfortable",
+            Self::Compact => "compact",
+        }
+    }
+
+    /// 解析配置字符串；未知值回落 [`Density::Comfortable`]（与 `theme` 的回落策略一致）。
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim() {
+            "compact" => Self::Compact,
+            _ => Self::Comfortable,
+        }
+    }
+
+    /// 把基线间距换算成当前档位的像素值。
+    ///
+    /// 舒适档原值返回（不经过 `round`，避免浮点往返带来的漂移）；
+    /// 紧凑档按系数缩放后取整到整像素。
+    pub fn scale(self, base: f32) -> f32 {
+        match self {
+            Self::Comfortable => base,
+            Self::Compact => (base * self.scaling()).round(),
         }
     }
 }
@@ -304,6 +362,59 @@ mod tests {
         assert!(cfg.default_provider.is_empty());
         assert_eq!(cfg.preferences.language, "zh-CN");
         assert_eq!(cfg.preferences.theme, "dark");
+        assert_eq!(cfg.preferences.density, Density::Comfortable);
+    }
+
+    /// A1：密度档位的缺省、解析与老配置兼容（缺键不报错、取缺省）。
+    #[test]
+    fn density_defaults_and_parses() {
+        assert_eq!(Preferences::default().density, Density::Comfortable);
+        assert_eq!(Density::parse("compact"), Density::Compact);
+        assert_eq!(Density::parse(" compact "), Density::Compact);
+        // 未知值/空串回落舒适
+        assert_eq!(Density::parse("dense"), Density::Comfortable);
+        assert_eq!(Density::parse(""), Density::Comfortable);
+
+        // 老配置没有 density 键 → 舒适
+        let old: GlobalConfig = toml::from_str("[providers.openai]\nkind = \"open_ai_compat\"\n")
+            .expect("老配置应能反序列化");
+        assert_eq!(old.preferences.density, Density::Comfortable);
+
+        // 显式写 compact → 紧凑，且往返保持
+        let cfg: GlobalConfig = toml::from_str("[preferences]\ndensity = \"compact\"\n").unwrap();
+        assert_eq!(cfg.preferences.density, Density::Compact);
+        let roundtrip: GlobalConfig = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(roundtrip.preferences.density, Density::Compact);
+
+        // 字符串写法与 serde 一致
+        assert_eq!(Density::as_str(Density::Compact), "compact");
+        assert_eq!(Density::as_str(Density::Comfortable), "comfortable");
+        assert_eq!(
+            serde_json::to_string(&Density::Compact).unwrap(),
+            r#""compact""#
+        );
+    }
+
+    /// A2/A3 的换算依据：0.75 系数把 4px 网格全部落在整数像素上。
+    #[test]
+    fn compact_scaling_lands_on_integer_pixels() {
+        assert_eq!(Density::Comfortable.scaling(), 1.0);
+        assert_eq!(Density::Compact.scaling(), 0.75);
+        // 舒适档原值返回，不经过 round
+        assert_eq!(Density::Comfortable.scale(12.5), 12.5);
+        for (base, want) in [
+            (4.0, 3.0),
+            (8.0, 6.0),
+            (12.0, 9.0),
+            (16.0, 12.0),
+            (20.0, 15.0),
+            (24.0, 18.0),
+            (32.0, 24.0),
+        ] {
+            let got = Density::Compact.scale(base);
+            assert_eq!(got, want, "{base} 应缩放到 {want}");
+            assert_eq!(got.fract(), 0.0, "{base} 缩放后不应有半像素");
+        }
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod command_palette;
 pub mod confirm_dialog;
 pub mod context_scope;
 pub mod cursor;
+pub mod density;
 pub mod diff;
 pub mod editor;
 pub mod file_panel;
@@ -48,6 +49,8 @@ pub struct XgentUiPlugin;
 impl Plugin for XgentUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            theme::ThemePlugin,
+            density::DensityPlugin,
             layout::LayoutPlugin,
             modal::ModalPlugin,
             overlay::OverlayPlugin,

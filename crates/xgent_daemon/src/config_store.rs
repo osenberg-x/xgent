@@ -7,6 +7,7 @@
 //! 全局（`scope = global`）支持的 key：
 //! - `default_provider` / `default_model` — 字符串
 //! - `preferences.language` / `preferences.theme` — 字符串
+//! - `preferences.density` — 字符串，只接受 `comfortable` / `compact`（v8 M2b）
 //! - `providers` — 整个 providers map（读：JSON 对象；写：替换整个 map）
 //! - `providers.<id>` — 单个 provider 配置（读：JSON 对象；写：插入/替换）
 //! - `providers.<id>.api_base` / `api_key` / `kind` / `model_overrides` /
@@ -37,7 +38,9 @@ use std::path::{Path, PathBuf};
 use xgent_core::config::{ConfigChanged, ConfigScope};
 use xgent_core::error::{XgentError, XgentResult};
 use xgent_settings_core::global::ProviderConfig;
-use xgent_settings_core::{GlobalConfig, GlobalConfigStore, ProjectConfig, ProjectConfigStore};
+use xgent_settings_core::{
+    Density, GlobalConfig, GlobalConfigStore, ProjectConfig, ProjectConfigStore,
+};
 
 /// 配置权威副本（全局一份 + 按项目根缓存的项目配置）。
 pub struct ConfigCoordinator {
@@ -81,6 +84,7 @@ impl ConfigCoordinator {
             "default_model" => json!(self.config.default_model),
             "preferences.language" => json!(self.config.preferences.language),
             "preferences.theme" => json!(self.config.preferences.theme),
+            "preferences.density" => json!(self.config.preferences.density.as_str()),
             "providers" => json!(self.config.providers),
             other if other.starts_with("providers.") => {
                 let parts: Vec<&str> = other.split('.').collect();
@@ -118,6 +122,17 @@ impl ConfigCoordinator {
             }
             "preferences.theme" => {
                 self.config.preferences.theme = parse_string(key, &value)?;
+            }
+            // v8 M2b：界面密度档位。只接受 `comfortable` / `compact`——
+            // 未知值回落缺省会让「切了档但没保存上」这件事变得不可见，所以直接拒。
+            "preferences.density" => {
+                let raw = parse_string(key, &value)?;
+                if raw != "comfortable" && raw != "compact" {
+                    return Err(XgentError::Config(format!(
+                        "{key} 只接受 comfortable / compact，收到 {raw}"
+                    )));
+                }
+                self.config.preferences.density = Density::parse(&raw);
             }
             "providers" => {
                 // 整体替换 providers map
@@ -448,6 +463,31 @@ mod tests {
         assert_eq!(c.config().default_model, "gpt-5");
         c.write("preferences.language", json!("en-US")).unwrap();
         assert_eq!(c.config().preferences.language, "en-US");
+    }
+
+    /// A4（v8 M2b）：`preferences.density` 在白名单内，写入后可读回；
+    /// 非法值必须报错而不是静默回落（回落会让「没保存上」变得不可见）。
+    #[test]
+    fn density_key_is_writable_and_readable() {
+        isolate_agent_dir();
+        let mut c = ConfigCoordinator::with_config(empty_config());
+        assert_eq!(c.read("preferences.density"), json!("comfortable"));
+
+        c.write("preferences.density", json!("compact")).unwrap();
+        assert_eq!(c.config().preferences.density, Density::Compact);
+        assert_eq!(c.read("preferences.density"), json!("compact"));
+
+        c.write("preferences.density", json!("comfortable"))
+            .unwrap();
+        assert_eq!(c.config().preferences.density, Density::Comfortable);
+
+        let err = c.write("preferences.density", json!("tight")).unwrap_err();
+        assert!(matches!(err, XgentError::Config(_)), "非法档位应被拒绝");
+        assert_eq!(
+            c.config().preferences.density,
+            Density::Comfortable,
+            "被拒绝的写入不应改动权威副本"
+        );
     }
 
     /// 全局写入的落盘点必须跟着 `XGENT_AGENT_DIR` 走。
