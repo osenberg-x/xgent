@@ -22,8 +22,6 @@ use crate::theme::{Theme, space, type_scale};
 /// 抽屉/浮层 z 基准：历史抽屉占用 40，文件抽屉（M5-T6）同层共享。
 ///
 /// 文件抽屉=40 遮罩 /41 面板；确认弹窗=50（最高，见 confirm_dialog）。
-pub const DRAWER_Z: i32 = 40;
-
 /// 会话历史面板状态（open/close）。
 #[derive(Resource, Default)]
 pub struct SessionHistoryState {
@@ -144,7 +142,7 @@ fn spawn_overlay(
                 ..default()
             },
             BackgroundColor(theme.overlay),
-            GlobalZIndex(DRAWER_Z),
+            crate::kit::drawer_z(),
             Button,
             Hovered::default(),
             SessionHistoryOverlayMarker,
@@ -166,6 +164,8 @@ fn spawn_overlay(
                     // 0.20 指针事件会冒泡到 Button 祖先：面板消费 PointerPress，
                     // 点面板不会误触遮罩关闭（等价旧 FocusPolicy::Block）
                     crate::kit::block_press_bubbling(),
+                    // 同上：面板需 Pickable 才能接住点击，避免穿透到遮罩。
+                    bevy::picking::Pickable::default(),
                 ))
                 .with_children(|panel| {
                     // 标题栏

@@ -50,7 +50,7 @@ use crate::diff::{DiffKind, line_diff};
 
 /// 收到 ConfirmRequestMessage 时弹出确认窗口。
 ///
-/// 弹窗为模态（GlobalZIndex 50 全屏遮罩），spawn 时把 `InputFocus` 移到
+/// 弹窗为模态（z 由 `ModalStack` 按栈深派生），spawn 时把 `InputFocus` 移到
 /// 弹窗、决策后还原到 chat 输入框：否则焦点滞留在聊天输入框（AutoFocus），
 /// handle_confirm_keyboard 的 EditableText 守卫会让 Enter 永远无法确认
 /// （Esc 有独立放行路径，见该函数文档）。
@@ -62,6 +62,9 @@ fn show_on_request(
     loc: Res<Localizer>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
+    chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    mut modal_push: Option<MessageWriter<crate::modal::ModalPush>>,
+    mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     let Some(req) = reader.read().next() else {
         return;
@@ -69,6 +72,11 @@ fn show_on_request(
     let req = &req.0;
     // 已存在弹窗则先移除（MVP 同时只有一个确认请求，重建即可）
     if let Ok(existing) = q_dialog.single() {
+        if let Some(modal_pop) = modal_pop.as_mut() {
+            modal_pop.write(crate::modal::ModalPop {
+                id: Some("confirm"),
+            });
+        }
         commands.entity(existing).despawn();
     }
     let path = req.input["path"].as_str().unwrap_or(&req.tool_id);
@@ -84,14 +92,22 @@ fn show_on_request(
                 height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                // z_index: ZIndex::Arbitrary(50),  // 用 GlobalZIndex 组件替代
                 ..default()
             },
             BackgroundColor(theme.overlay),
-            GlobalZIndex(50),
+            // require_markers 下遮罩必须自带 Pickable，否则点击会穿透到下层。
+            bevy::picking::Pickable::default(),
             ConfirmDialogMarker,
         ))
         .id();
+    if let Some(modal_push) = modal_push.as_mut() {
+        modal_push.write(crate::modal::ModalPush {
+            id: "confirm",
+            entity: dialog_focus,
+            dismiss: crate::modal::Dismiss::NotDismissable,
+            opener_focus: chat_entities.input,
+        });
+    }
     focus.set(dialog_focus, bevy::input_focus::FocusCause::Navigated);
     commands.entity(dialog_focus).with_children(|overlay| {
         // modal 容器
@@ -350,13 +366,14 @@ fn hide_on_decision(
     mut writer: MessageWriter<ConfirmDecisionMessage>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
     chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     let Ok(dialog) = q_dialog.single() else {
         return;
     };
     let mut close = |decision: ConfirmDecision| {
         writer.write(ConfirmDecisionMessage { decision });
-        close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
+        close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
     };
     for _ in q_allow.iter() {
         close(ConfirmDecision::Allow);
@@ -376,7 +393,13 @@ fn close_dialog(
     dialog: Entity,
     focus: &mut bevy::input_focus::InputFocus,
     chat_entities: &crate::chat_panel::ChatPanelEntities,
+    modal_pop: &mut Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
+    if let Some(modal_pop) = modal_pop.as_mut() {
+        modal_pop.write(crate::modal::ModalPop {
+            id: Some("confirm"),
+        });
+    }
     if let Some(input) = chat_entities.input {
         focus.set(input, bevy::input_focus::FocusCause::Navigated);
     } else {
@@ -399,6 +422,7 @@ fn close_on_settled(
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
     chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     if reader.read().next().is_none() {
         return;
@@ -406,14 +430,14 @@ fn close_on_settled(
     let Ok(dialog) = q_dialog.single() else {
         return;
     };
-    close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
+    close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
 }
 
 /// 弹窗激活时的键盘决策：Esc→拒绝、Enter→允许。
 ///
 /// 对齐原型 modal-foot 按钮标注 (Esc)/(Enter)。弹窗 overlay 为全局遮罩
-/// （GlobalZIndex 50），激活时独占键盘。Esc 的 chat.abort 冲突由
-/// [`shortcuts::handle_hotkey_triggers`] 查弹窗存在性跳过解决。
+/// （`Dismiss::NotDismissable`），激活时独占键盘；`shortcuts` 在模态栈非空时
+/// 整体让位，Esc 不会穿透成 `chat.abort`。
 ///
 /// 守卫只约束 Enter（KeyboardInput 是全局消息，弹窗存在时输入框/终端的
 /// Enter 也会到达，不拦截会把"回车发消息/提交命令"静默变成"允许工具
@@ -435,10 +459,20 @@ fn handle_confirm_keyboard(
     // InputFocus 的唯一访问（读 get / 写 set 同参数；Res + ResMut 同资源是 B0002 冲突）
     mut focus: ResMut<bevy::input_focus::InputFocus>,
     chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    modal: Option<Res<crate::modal::ModalStack>>,
+    mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     let Ok(dialog) = q_dialog.single() else {
         return;
     };
+    // 只有确认弹窗在栈顶时才处理键盘（v8 M1：栈是唯一权威）。
+    let on_top = modal
+        .as_deref()
+        .and_then(|stack| stack.top())
+        .is_some_and(|layer| layer.id == "confirm");
+    if !on_top {
+        return;
+    }
     for ev in reader.read() {
         if ev.state != bevy::input::ButtonState::Pressed {
             continue;
@@ -449,7 +483,7 @@ fn handle_confirm_keyboard(
                 writer.write(ConfirmDecisionMessage {
                     decision: ConfirmDecision::Deny,
                 });
-                close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
+                close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
                 return;
             }
             K::Enter => {
@@ -462,7 +496,7 @@ fn handle_confirm_keyboard(
                 writer.write(ConfirmDecisionMessage {
                     decision: ConfirmDecision::Allow,
                 });
-                close_dialog(&mut commands, dialog, &mut focus, &chat_entities);
+                close_dialog(&mut commands, dialog, &mut focus, &chat_entities, &mut modal_pop);
                 return;
             }
             _ => {}

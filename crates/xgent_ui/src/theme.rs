@@ -296,6 +296,28 @@ pub mod radius {
     pub const PANEL: f32 = 12.0;
 }
 
+/// 层级常量（v8 M1）。业务代码禁止裸写 `GlobalZIndex` 数字，只能引用本模块或模态栈派生值。
+pub mod z {
+    /// 主布局：顶栏 / 主区 / 状态栏。
+    pub const BASE: i32 = 0;
+    /// 侧区内联浮层（页签内下拉）。
+    pub const DOCK: i32 = 100;
+    /// 抽屉（文件、历史）：非阻塞、无遮罩。
+    pub const DRAWER: i32 = 200;
+    /// 补全、菜单、查找条：非阻塞、无遮罩。
+    pub const DROPDOWN: i32 = 300;
+    /// 模态层起点；实际 z 由模态栈按深度派生。
+    pub const MODAL_BASE: i32 = 400;
+    /// tooltip。
+    pub const TOOLTIP: i32 = 500;
+    /// toast / 通知。
+    pub const TOAST: i32 = 600;
+    /// 每个模态层占用的 z 跨度（容纳其内部下拉）。
+    pub const MODAL_STRIDE: i32 = 8;
+    /// 模态栈最大深度。
+    pub const MODAL_MAX_DEPTH: usize = 8;
+}
+
 /// 便捷：f32 → Val::Px（跨模块共享，避免重复定义）。
 pub fn px(v: f32) -> Val {
     Val::Px(v)

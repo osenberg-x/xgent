@@ -3,8 +3,8 @@
 > 本文档梳理 XGent 截至 2026-07-22 已实现的功能、对应的代码与文档、以及开发注意点。
 > **维护规则**：后续实现新功能或功能有变化，都需要更新这个文档（见 `AGENTS.md` 第 6 节）。
 >
-> 代码现状：13 个 crate 已实现（含 `xgent_terminal`），`cargo check --workspace` 通过，约 22k 行 Rust。
-> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）已全部落地。
+> 代码现状：19 个 crate 已实现（含 `xgent_terminal` / `xgent_spatial`），`cargo check --workspace` 通过，约 22k 行 Rust。
+> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）+ UI v8 M1 分层与模态已落地。
 
 ---
 
@@ -27,6 +27,7 @@
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
 | F-19 | 内置终端（P1） | ✅ | `xgent_terminal/`（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty + vte，不依赖 Bevy）+ `xgent_ui/src/terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）+ `xgent_app` 注入 `TerminalIoRuntime` | `design/terminal-design.md`、ADR-0011/0012 |
+| UI v8 M1 | 分层与模态 | ✅ | `xgent_ui/src/{layout,modal,overlay,picking,kit}.rs`：六静态层根 + `ModalStack` + `require_markers` 拾取白名单 + 抽屉统一裁决 + tooltip 顶层化；`xgent_app` 装配 `UiPickingSettings` | `design/ui-v8-layout-architecture.md`、`docs/comet/specs/ui-m1-layering/spec.md`、§5.17 |
 | 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.13 |
 
 ### 1.2 非功能需求
@@ -66,6 +67,7 @@ xgent_daemon        ── 独立 bin，纯 tokio：provider 池 + 配置协调 
 xgent_tools         ── Tool trait + 安全策略 + 执行器 + 4 内置工具，无 Bevy
 xgent_context       ── ContextProvider trait + OnDemand 实现，无 Bevy
 xgent_terminal      ── PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte），无 Bevy，UI 侧进程
+xgent_spatial       ── 3D 空间图 S0：Cargo.toml 依赖投影 + 确定性/增量布局，无 Bevy（F-16，与 UI 解耦）
 xgent_agent         ── agent loop + ECS 桥接 + SessionStore
 xui                 ── 通用 Bevy UI 组件库，纯依赖 bevy + xui_i18n，可独立发布
 xgent_ui            ── XGent 业务 UI（对话/工具/文件/编辑器/设置面板等；设置面板绑 GlobalConfigRes/ProjectConfigRes 作读模型）
@@ -84,6 +86,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`（`chat` 返回 `(ErrorKind, String)`，ErrorKind 经 `ProviderError::to_error_kind` 映射，透传给 UI 避免误判 Network 重试）、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
 | `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolCtx.tool_policy` 为 `Arc<RwLock<ToolPolicyConfig>>`（改完下一次调用生效）、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自共享句柄 `with_shared_params(Arc<RwLock<ToolParams>>)`，`with_params(&ToolParams)` 取快照）；`policy_targets()` 列出已注册工具的 id+tier、`resolved_policy(id, policy)` 给设置面板显示解析后的三态、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError` |
+| `xgent_spatial` | `parse_manifest`/`ManifestInfo`、`scan(root)`（crate 图 + `DependsOn` 边 + cluster）、`layout`/`layout_incremental`、`LayoutConfig`/`LayoutReport`；类型在 `xgent_core::spatial`（`SpatialGraph`/`SpatialNode`/`SpatialEdge`/`SpatialCluster`） |
 | `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入快照、`with_shared_limits(Arc<RwLock<RetrievalLimits>>)` 供热应用，缺省等于原常量；每次检索开头取一份限额快照）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`/`build_context_provider_shared(strategy, root, Arc<RwLock<limits>>)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`/`retrieval_max_tokens`/`max_events_per_frame`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
@@ -715,6 +718,17 @@ agent 写过的文件此前**无法退回**：编辑器内的 `UndoStack` 只管
 **默认配置下这条能力是惰性的**：多数工具默认 `NeedsConfirmation`（`AGENTS.md` §5.4），待确认即不够资格；`UiOnly` 是策略自动放行的例外，靠的正是上面③把它排除。于是不改配置就与串行时代逐字相同，用户把只读工具提进 `approved`（或点了 AllowAll）之后并发才出现。
 
 测试判据（照做别退回耗时断言）：并发用**在跑数**（`AtomicUsize` 进入 +1、退出 −1、记历史最大）+ **有界等待**观测——探针要求"至少看到 N 个同时在跑"，串行调度下必然超时、观测值停在 1，于是"调度器退回串行"会被直接抓到。总耗时判据既 flake 又能被"串行但很快"骗过，别用。`bridge_tests.rs` 的 `ProbeTool` 是这套观测的实现。
+
+### 5.17 UI 分层与模态（v8 M1）
+
+v8 M1 把「浮层放在哪、谁吃点击、Esc 关谁」从散落实现收敛为四个原语：
+
+- **六静态层根**（`layout.rs`）：`BASE 0 / DOCK 100 / DRAWER 200 / DROPDOWN 300 / TOOLTIP 500 / TOAST 600`，常量在 `theme::z`。业务浮层只往层根挂，`MainArea`/`ChatPanel` 的 `Overflow::clip()` 不再裁到 tooltip。`GlobalZIndex(` 只允许出现在 `layout.rs`（BASE）、`kit.rs`（`layer_root`/`drawer_z`/toast）与 `modal.rs`（栈深派生）。
+- **拾取白名单**（`picking.rs` + `xgent_app`）：`UiPickingSettings { require_markers: true }` 后，没有 `Pickable` 的节点对拾取完全惰性——层根与布局容器不再吞点击。可交互叶子（`Button`/`EditableText`）由 `attach_pickable_to_interactive` 自动补 `Pickable`；**新增自定义可点组件时必须自己带 `Pickable`，否则点不动**。
+- **模态栈**（`modal.rs`）：`ModalPush`/`ModalPop` + `Dismiss{EscOnly,EscAndScrim,NotDismissable}`；z = `400 + depth*8`；出栈还原 `InputFocus`。`shortcuts.rs` 在栈非空（或本帧 Esc 被消费）时整体让位，`chat.abort` 不再穿透。设置面板监听 `ModalDismissRequested{id:"settings"}` 自行关；确认弹窗是 `NotDismissable`，Esc=拒绝由它自己处理。
+- **抽屉统一裁决**（`overlay.rs`）：rail 文件钮、「+ 添加」、`filepanel.toggle` 都只发 `DrawerToggle`，由 `OverlayRegistry` 单一系统决定开谁关谁，`FileDrawerOpen`/`SessionHistoryState` 降为派生视图。
+
+测试注意：模态相关 Message 用 `Option<MessageWriter<...>>` 取用——不装 `ModalPlugin` 的 headless 测试不会 panic，也不会重复注册消息。Esc 不能直接 `ButtonInput::press`（PreUpdate 会清掉 `just_pressed`），测试应写 `KeyboardInput` 消息。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

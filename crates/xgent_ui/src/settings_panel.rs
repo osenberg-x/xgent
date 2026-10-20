@@ -22,6 +22,8 @@
 //! 输入框使用官方 `EditableText`（光标/删除/IME 全交官方 text_input 系统）。
 
 use bevy::input_focus::tab_navigation::TabIndex;
+use bevy::input_focus::InputFocus;
+use bevy::picking::Pickable;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -42,6 +44,10 @@ use crate::theme::{Theme, space, type_scale};
 /// 设置面板根节点标记。
 #[derive(Component, Default)]
 pub struct SettingsPanelMarker;
+
+/// 设置面板遮罩（点击关闭；v8 M1）。
+#[derive(Component, Default)]
+pub struct SettingsScrimMarker;
 
 /// Provider ID 输入框标记。
 #[derive(Component, Default)]
@@ -577,6 +583,9 @@ impl Plugin for SettingsPanelPlugin {
                 Update,
                 (
                     toggle_panel,
+                    push_settings_modal_on_spawn,
+                    dismiss_on_modal_request,
+                    close_on_scrim_click,
                     handle_kind_button,
                     handle_panel_dismiss,
                     handle_policy_button,
@@ -617,6 +626,7 @@ fn toggle_panel(
     provider_info: Res<xgent_agent::ProviderInfo>,
     draft: Res<PolicyDraft>,
     mut writer: MessageWriter<RequestSettingsSnapshotMessage>,
+    mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
     mut last_rendered: Local<u32>,
 ) {
     let panel_exists = q_panel.single().is_ok();
@@ -639,6 +649,11 @@ fn toggle_panel(
         // 权威快照真的推进了：重渲染，让显示跟上磁盘
         *last_rendered = snapshot.tick;
         if let Ok(entity) = q_panel.single() {
+            if let Some(modal_pop) = modal_pop.as_mut() {
+                modal_pop.write(crate::modal::ModalPop {
+                    id: Some("settings"),
+                });
+            }
             commands.entity(entity).despawn();
         }
         spawn_panel(
@@ -652,8 +667,16 @@ fn toggle_panel(
             &provider_info,
             &draft,
         );
-    } else if !state.open && panel_exists {
-        if let Ok(entity) = q_panel.single() {
+    } else if !state.open
+        && panel_exists
+        && let Ok(entity) = q_panel.single()
+    {
+        {
+            if let Some(modal_pop) = modal_pop.as_mut() {
+                modal_pop.write(crate::modal::ModalPop {
+                    id: Some("settings"),
+                });
+            }
             commands.entity(entity).despawn();
         }
     }
@@ -696,6 +719,20 @@ fn spawn_panel(
             SettingsPanelMarker,
         ))
         .with_children(|p| {
+            // 遮罩点击层：铺满 overlay、透明、位于卡片之下。
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(0.0),
+                    left: px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                Button,
+                SettingsScrimMarker,
+            ));
             // 卡片本身是可滚动容器：设置项一多就超过视口高度，
             // 用 xui 的 ScrollArea（与对话区/终端同一套）而不是裸 Overflow——
             // 裸 Overflow 在根节点无 UiRoot 时量不出尺寸，子节点会全部叠在原点。
@@ -709,6 +746,8 @@ fn spawn_panel(
                 area,
                 BackgroundColor(theme.elevated),
                 BorderColor::all(theme.border),
+                // 卡片挡住遮罩：点卡片空白处不触发「点外关闭」。
+                Pickable::default(),
             ))
             .with_children(|card| {
                 card.spawn(ui_text(
@@ -1242,7 +1281,7 @@ fn text_input_node(theme: &Theme, font: f32, value: &str, marker: impl Bundle) -
         // 0.20 起点击聚焦只认 TabIndex（PointerFocusPlugin 的 AcquireFocus 解析器）：
         // 缺它则点击输入框会把焦点清到窗口，键盘事件无处投递 → 无法输入
         TabIndex(0),
-        EditableText::new(value.to_string()),
+        EditableText::new(value),
         TextInput,
     )
 }
@@ -1299,12 +1338,51 @@ fn handle_policy_button(
     }
 }
 
-/// 处理保存/关闭按钮点击。
-///
-/// 保存只发脏键，且：
-/// - 任一数值字段非法 → 一条也不写，报出是哪个字段；
-/// - provider id 为空 → 不写、不关面板（此前会静默关面板，让用户以为已存）。
-/// 处理关闭与语言选择：两者都不经"保存"通路（语言有既有的持久化消息）。
+/// 面板实体一出现就入模态栈（z 与 Esc 交给 ModalStack 统一裁决）。
+fn push_settings_modal_on_spawn(
+    q: Query<Entity, Added<SettingsPanelMarker>>,
+    push: Option<MessageWriter<crate::modal::ModalPush>>,
+    focus: Option<Res<InputFocus>>,
+) {
+    let Some(mut push) = push else {
+        return;
+    };
+    for entity in &q {
+        push.write(crate::modal::ModalPush {
+            id: "settings",
+            entity,
+            dismiss: crate::modal::Dismiss::EscAndScrim,
+            opener_focus: focus.as_deref().and_then(|focus| focus.get()),
+        });
+    }
+}
+
+/// 通用 dismiss 请求（Esc）→ 关闭面板；真正的出栈由 `toggle_panel` 的 despawn 路径完成。
+fn dismiss_on_modal_request(
+    reader: Option<MessageReader<crate::modal::ModalDismissRequested>>,
+    mut state: ResMut<SettingsPanelState>,
+) {
+    let Some(mut reader) = reader else {
+        return;
+    };
+    for request in reader.read() {
+        if request.id == "settings" {
+            state.open = false;
+        }
+    }
+}
+
+/// 点击遮罩关闭（L-2：只有模态带 scrim）。
+fn close_on_scrim_click(
+    q: Query<(), (With<SettingsScrimMarker>, Added<Pressed>)>,
+    mut state: ResMut<SettingsPanelState>,
+) {
+    for _ in q.iter() {
+        state.open = false;
+    }
+}
+
+/// 处理关闭与语言选择：两者都不经「保存」通路（语言有既有的持久化消息）。
 fn handle_panel_dismiss(
     q_close: Query<(), (With<SettingsCloseButtonMarker>, Added<Pressed>)>,
     q_lang: Query<&LanguageButton, Added<Pressed>>,
@@ -1326,6 +1404,12 @@ fn handle_panel_dismiss(
     }
 }
 
+/// 处理保存按钮点击。
+///
+/// 保存只发脏键，且：
+///
+/// - 任一数值字段非法 → 一条也不写，报出是哪个字段；
+/// - provider id 为空 → 不写、不关面板（此前会静默关面板，让用户以为已存）。
 fn handle_save_button(
     q_save: Query<(), (With<SettingsSaveButtonMarker>, Added<Pressed>)>,
     q_id: Query<&EditableText, With<ProviderIdInput>>,
@@ -1537,7 +1621,7 @@ fn trim_text<F: bevy::ecs::query::QueryFilter>(q: &Query<&EditableText, F>) -> S
 fn field_label_text(loc: &Localizer, key: &str) -> String {
     match num_spec(key) {
         Some(f) => tr(loc, f.label_key),
-        None => format!("{key}"),
+        None => key.to_string(),
     }
 }
 

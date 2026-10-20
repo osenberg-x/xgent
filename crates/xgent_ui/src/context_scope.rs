@@ -201,9 +201,12 @@ fn rebuild_context_chips(
 /// 「添加上下文」点击 → 打开文件抽屉（M5-T6 抽屉化）。
 fn handle_add_click(
     q: Query<(), (With<ContextAddMarker>, Added<Pressed>)>,
-    mut drawer: ResMut<crate::layout::FileDrawerOpen>,
+    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
 ) {
     for _ in q.iter() {
-        drawer.0 = true;
+        // v8 M1：与 rail / 快捷键走同一条消息，互斥由 OverlayRegistry 裁决。
+        drawer_toggle.write(crate::overlay::DrawerToggle(
+            crate::overlay::OverlayId::FileDrawer,
+        ));
     }
 }

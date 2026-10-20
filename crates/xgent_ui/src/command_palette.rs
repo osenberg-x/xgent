@@ -142,6 +142,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                 ..default()
             },
             BackgroundColor(theme.overlay),
+            // require_markers 下遮罩必须自带 Pickable，否则点击会穿透到下层。
+            bevy::picking::Pickable::default(),
             CommandPaletteOverlayMarker,
         ))
         .with_children(|overlay| {
@@ -159,6 +161,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                     },
                     BackgroundColor(theme.elevated),
                     BorderColor::all(theme.border),
+                    // 面板本身挡住遮罩，点面板空白不落到遮罩。
+                    bevy::picking::Pickable::default(),
                 ))
                 .with_children(|panel| {
                     // 输入框（M6-T2：底线 border 分隔）
@@ -386,7 +390,7 @@ pub(crate) fn handle_palette_triggers(
     mut state: ResMut<CommandPaletteState>,
     mut loc: ResMut<Localizer>,
     mut settings_state: ResMut<crate::settings_panel::SettingsPanelState>,
-    mut history_state: ResMut<crate::session_history::SessionHistoryState>,
+    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
     mut new_session: MessageWriter<NewSessionMessage>,
     mut plugin_command: MessageWriter<xgent_agent::PluginCommandTriggered>,
     mut undo_writer: MessageWriter<crate::undo::UndoChangesMessage>,
@@ -411,8 +415,10 @@ pub(crate) fn handle_palette_triggers(
                 new_session.write(NewSessionMessage);
             }
             "session.history" => {
-                // 打开会话历史面板
-                history_state.open = true;
+                // v8 M1：与 rail 同一入口，互斥由 OverlayRegistry 裁决。
+                drawer_toggle.write(crate::overlay::DrawerToggle(
+                    crate::overlay::OverlayId::HistoryDrawer,
+                ));
             }
             "settings.open" => {
                 settings_state.open = true;

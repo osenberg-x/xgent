@@ -22,6 +22,9 @@ pub mod fonts;
 pub mod i18n;
 pub mod kit;
 pub mod layout;
+pub mod modal;
+pub mod overlay;
+pub mod picking;
 pub mod resize;
 pub mod session_history;
 pub mod settings_panel;
@@ -46,6 +49,9 @@ impl Plugin for XgentUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             layout::LayoutPlugin,
+            modal::ModalPlugin,
+            overlay::OverlayPlugin,
+            picking::PickablePlugin,
             activity_bar::ActivityBarPlugin,
             top_bar::TopBarPlugin,
             chat_panel::ChatPanelPlugin,

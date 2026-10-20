@@ -124,7 +124,7 @@ fn spawn_file_panel(
                 ..default()
             },
             BackgroundColor(theme.overlay),
-            GlobalZIndex(crate::session_history::DRAWER_Z),
+            crate::kit::drawer_z(),
             Button,
             Hovered::default(),
             FileDrawerOverlayMarker,
@@ -145,10 +145,13 @@ fn spawn_file_panel(
             },
             BackgroundColor(theme.surface),
             BorderColor::all(theme.line),
-            GlobalZIndex(crate::session_history::DRAWER_Z + 1),
+            crate::kit::drawer_z_offset(1),
             // 0.20 指针事件会冒泡到 Button 祖先：面板消费 PointerPress，
             // 点面板不会误触遮罩关闭（等价旧 FocusPolicy::Block）
             crate::kit::block_press_bubbling(),
+            // require_markers 下没有 Pickable 就收不到指针事件：面板必须自带，
+            // 否则点面板空白处会穿透到遮罩、误触「点外关闭」。
+            bevy::picking::Pickable::default(),
             FilePanelMarker,
         ))
         .with_children(|p| {
@@ -216,10 +219,13 @@ fn handle_drawer_visibility(
 /// 遮罩点击关闭抽屉。
 fn handle_drawer_overlay_click(
     q: Query<(), (With<FileDrawerOverlayMarker>, Added<Pressed>)>,
-    mut open: ResMut<FileDrawerOpen>,
+    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
 ) {
     for _ in q.iter() {
-        open.0 = false;
+        // v8 M1：关闭也走统一消息，OverlayRegistry 才能同步。
+        drawer_toggle.write(crate::overlay::DrawerToggle(
+            crate::overlay::OverlayId::FileDrawer,
+        ));
     }
 }
 
@@ -497,7 +503,7 @@ fn handle_file_click(
     q_files: Query<(Entity, &FileEntry), Added<Pressed>>,
     q_selected: Query<Entity, With<FileSelectedMarker>>,
     mut selected_file: ResMut<SelectedFilePath>,
-    mut drawer: ResMut<FileDrawerOpen>,
+    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
     mut open_writer: MessageWriter<crate::editor::tabs::OpenFileRequest>,
     mut commands: Commands,
 ) {
@@ -514,7 +520,9 @@ fn handle_file_click(
             line: None,
         });
         // 关闭抽屉，露出上下文面板预览页
-        drawer.0 = false;
+        drawer_toggle.write(crate::overlay::DrawerToggle(
+            crate::overlay::OverlayId::FileDrawer,
+        ));
     }
 }
 /// 处理目录条目点击：展开/折叠切换，在子项容器 spawn/despawn 子条目。

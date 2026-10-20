@@ -257,6 +257,11 @@ fn main() {
         crate::settings_io::SettingsIoPlugin,
         crate::fs_event_bridge::FsEventBridgePlugin,
     ))
+    .insert_resource(bevy::ui::picking_backend::UiPickingSettings {
+        // v8 M1：没有 Pickable 的节点对拾取完全惰性——层根不再吞点击。
+        require_markers: true,
+        ..default()
+    })
     .insert_resource(args)
     .insert_resource(xgent_ui::file_panel::ProjectRoot {
         path: project_root.clone(),

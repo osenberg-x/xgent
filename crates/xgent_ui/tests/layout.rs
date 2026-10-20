@@ -45,6 +45,7 @@ fn file_drawer_panel_spawns_with_plugin() {
             mono: Handle::default(),
         })
         .add_plugins(LayoutPlugin)
+        .add_plugins(xgent_ui::overlay::OverlayPlugin)
         .add_plugins(xgent_ui::file_panel::FilePanelPlugin)
         .add_plugins(xgent_ui::kit::KitPlugin)
         .add_message::<xgent_ui::editor::conflict::FileChangedEvent>()

@@ -11,11 +11,9 @@ use xui::command_palette::CommandPaletteState;
 use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
-use crate::confirm_dialog::ConfirmDialogMarker;
 use crate::editor::tabs::{CloseTabRequest, CycleTabRequest};
 use crate::editor::{EditorView, SideViewContent};
 use crate::i18n::tr;
-use crate::layout::FileDrawerOpen;
 
 /// 快捷键插件。
 pub struct ShortcutsPlugin;
@@ -125,8 +123,7 @@ pub(crate) fn handle_hotkey_triggers(
     mut reader: MessageReader<HotkeyTriggered>,
     mut palette: ResMut<CommandPaletteState>,
     mut abort_writer: MessageWriter<AbortMessage>,
-    mut file_drawer: ResMut<FileDrawerOpen>,
-    mut history_drawer: ResMut<crate::session_history::SessionHistoryState>,
+    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
     mut side_view: ResMut<crate::layout::SideViewCollapsed>,
     mut view: ResMut<EditorView>,
     mut content: ResMut<SideViewContent>,
@@ -135,16 +132,21 @@ pub(crate) fn handle_hotkey_triggers(
     editor_tabs: Res<crate::editor::tabs::EditorTabs>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
-    q_confirm: Query<(), With<ConfirmDialogMarker>>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
+    modal: Option<Res<crate::modal::ModalStack>>,
+    modal_esc: Option<Res<crate::modal::ModalEscConsumed>>,
 ) {
+    // v8 M1：模态栈非空（或本帧 Esc 已被模态栈消费）时，全局快捷键整体让位。
+    // 必须先排空 reader，否则消息会在模态关闭后被重放。
+    let modal_open = modal.as_deref().is_some_and(|stack| !stack.is_empty());
+    let esc_consumed = modal_esc.as_deref().is_some_and(|consumed| consumed.0);
+    if modal_open || esc_consumed {
+        for _ in reader.read() {}
+        return;
+    }
     for ev in reader.read() {
         match ev.id.as_str() {
             "chat.abort" => {
-                // 确认弹窗激活时 Esc 交给 confirm_dialog 处理（拒绝），不中断对话
-                if q_confirm.single().is_ok() {
-                    continue;
-                }
                 // 终端视图激活时，Esc 退出终端视图（不中断对话）
                 if *content == SideViewContent::Terminal {
                     *content = SideViewContent::None;
@@ -177,11 +179,10 @@ pub(crate) fn handle_hotkey_triggers(
                 palette.query = "settings".into();
             }
             "filepanel.toggle" => {
-                file_drawer.0 = !file_drawer.0;
-                // R2 修复：双抽屉互斥（对齐 rail 入口行为）
-                if file_drawer.0 {
-                    history_drawer.open = false;
-                }
+                // v8 M1：与 rail / 「+ 添加」走同一条消息，互斥由 OverlayRegistry 裁决。
+                drawer_toggle.write(crate::overlay::DrawerToggle(
+                    crate::overlay::OverlayId::FileDrawer,
+                ));
             }
             "sideview.toggle" => {
                 // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）

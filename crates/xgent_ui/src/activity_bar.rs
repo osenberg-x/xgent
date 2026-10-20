@@ -11,7 +11,7 @@ use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
-use crate::layout::{ActivityBarMarker, FileDrawerOpen, SideViewCollapsed};
+use crate::layout::{ActivityBarMarker, SideViewCollapsed};
 use crate::status_bar::CompanionOn;
 use crate::theme::{Theme, space};
 
@@ -253,37 +253,34 @@ fn handle_rail_click(
     q_expand: Query<(), (With<ExpandPanelButtonMarker>, Added<Pressed>)>,
     q_companion: Query<(), (With<CompanionButtonMarker>, Added<Pressed>)>,
     mut active: ResMut<ActiveActivity>,
-    mut drawer_open: ResMut<FileDrawerOpen>,
+    overlay: Res<crate::overlay::OverlayRegistry>,
+    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
     mut side_collapsed: ResMut<SideViewCollapsed>,
     mut content: ResMut<crate::editor::SideViewContent>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
-    mut history_state: ResMut<crate::session_history::SessionHistoryState>,
     mut companion: ResMut<CompanionOn>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     for item in q_items.iter() {
         match item.kind {
             ActivityKind::Chat => {
-                // 对话为默认视图：关闭文件抽屉
-                drawer_open.0 = false;
+                // 对话为默认视图：关闭当前打开的可覆盖层（若有）。
+                if let Some(open) = overlay.open() {
+                    drawer_toggle.write(crate::overlay::DrawerToggle(open));
+                }
                 active.0 = ActivityKind::Chat;
             }
             ActivityKind::Files => {
-                drawer_open.0 = !drawer_open.0;
-                // R2 修复：双抽屉互斥——文件抽屉打开时关历史抽屉（z 层 41>40，
-                // 同开会遮挡历史抽屉内容并吞点击）
-                if drawer_open.0 {
-                    history_state.open = false;
-                }
+                drawer_toggle.write(crate::overlay::DrawerToggle(
+                    crate::overlay::OverlayId::FileDrawer,
+                ));
                 active.0 = ActivityKind::Files;
             }
             ActivityKind::History => {
-                history_state.open = !history_state.open;
-                // R2 修复：历史抽屉打开时关文件抽屉（互斥，见上）
-                if history_state.open {
-                    drawer_open.0 = false;
-                }
+                drawer_toggle.write(crate::overlay::DrawerToggle(
+                    crate::overlay::OverlayId::HistoryDrawer,
+                ));
                 active.0 = ActivityKind::History;
             }
             ActivityKind::Terminal => {
@@ -416,37 +413,38 @@ fn update_companion_visual(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::SideViewContent;
 
-    /// R2 回归：双抽屉互斥——rail 打开文件抽屉时历史抽屉应关闭（反向亦然）。
-    /// 互斥缺失时两 overlay 同开，文件抽屉 z=41 遮挡历史抽屉 z=40 并吞点击。
+    /// v8 M1 回归：抽屉互斥由 `OverlayRegistry` 单一裁决——打开文件抽屉会关闭历史抽屉。
     #[test]
-    fn drawers_are_mutually_exclusive_via_rail() {
-        let mut world = World::new();
-        world.insert_resource(ActiveActivity::default());
-        world.insert_resource(FileDrawerOpen(false));
-        world.insert_resource(SideViewCollapsed(false));
-        world.insert_resource(SideViewContent::None);
-        world.insert_resource(crate::terminal::TerminalTabs::default());
-        world.insert_resource(crate::status_bar::CompanionOn(false));
-        world.insert_resource(crate::session_history::SessionHistoryState { open: true });
+    fn drawers_are_mutually_exclusive_via_overlay() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::layout::FileDrawerOpen>()
+            .init_resource::<crate::session_history::SessionHistoryState>()
+            .add_plugins(crate::overlay::OverlayPlugin);
 
-        // 打开文件抽屉并应用互斥（与 handle_rail_click Files 分支同逻辑）：
-        // 先关历史、再开文件——逐段取 resource_mut 避免借用冲突
-        {
-            let mut history = world.resource_mut::<crate::session_history::SessionHistoryState>();
-            history.open = false;
-        }
-        {
-            let mut drawer = world.resource_mut::<FileDrawerOpen>();
-            drawer.0 = true;
-        }
-        assert!(world.resource::<FileDrawerOpen>().0, "文件抽屉应打开");
+        app.world_mut()
+            .write_message(crate::overlay::DrawerToggle(
+                crate::overlay::OverlayId::HistoryDrawer,
+            ));
+        app.update();
         assert!(
-            !world
+            app.world()
+                .resource::<crate::session_history::SessionHistoryState>()
+                .open
+        );
+
+        app.world_mut()
+            .write_message(crate::overlay::DrawerToggle(
+                crate::overlay::OverlayId::FileDrawer,
+            ));
+        app.update();
+        assert!(app.world().resource::<crate::layout::FileDrawerOpen>().0);
+        assert!(
+            !app.world()
                 .resource::<crate::session_history::SessionHistoryState>()
                 .open,
-            "文件抽屉打开时历史抽屉应被关闭（R2 互斥）"
+            "文件抽屉打开时历史抽屉应被关闭"
         );
     }
 }

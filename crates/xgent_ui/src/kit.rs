@@ -175,9 +175,37 @@ pub fn block_press_bubbling() -> impl Bundle {
     })
 }
 
+// ===== 层根 =====
+
+/// 静态层根 bundle：全屏绝对定位、透明、**不带 `Pickable`**（`require_markers = true`
+/// 下对拾取完全惰性）。业务模块只向对应层根挂子树。
+pub fn layer_root(band: i32) -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        GlobalZIndex(band),
+        BackgroundColor(Color::NONE),
+        crate::layout::LayerRoot(band),
+    )
+}
+
+/// 抽屉层 z。数值只在 `theme::z` 定义；抽屉模块经此挂载，不裸写数字。
+pub fn drawer_z() -> GlobalZIndex {
+    GlobalZIndex(crate::theme::z::DRAWER)
+}
+
+/// 抽屉层内的相对 z（例如面板压在遮罩之上）。
+pub fn drawer_z_offset(offset: i32) -> GlobalZIndex {
+    GlobalZIndex(crate::theme::z::DRAWER + offset)
+}
+
 // ===== tooltip =====
 
-/// tooltip 内容（挂在带 `Button` 的节点上；持续悬停 500ms 后浮现子面板）。
+/// tooltip 内容（挂在带 `Button` 的节点上；持续悬停 500ms 后浮现）。
 #[derive(Component, Debug, Clone)]
 pub struct Tooltip {
     pub text: String,
@@ -189,73 +217,54 @@ struct TooltipPending {
     elapsed: f32,
 }
 
-/// 已浮现的 tooltip 子面板标记。
+/// 已浮现的 tooltip 面板（挂在 `TOOLTIP` 层根下，记录宿主以便定位与清理）。
 #[derive(Component, Debug, Clone, Copy)]
-struct TooltipPanel;
+pub struct TooltipPanel {
+    /// 宿主实体。
+    pub host: Entity,
+}
 
-/// tooltip 系统：悬停计时 500ms → spawn 子面板（宿主右侧）；离开/移出即清。
+/// tooltip 系统：悬停计时 500ms → 在 `TOOLTIP` 层根下 spawn 面板；离开即清。
+///
+/// v8 M1：面板不再作为宿主子节点，因此不会被 `MainArea`/`ChatPanel` 的
+/// `Overflow::clip()` 裁掉（审计 B3）。
 fn tooltip_system(
     mut commands: Commands,
     time: Res<Time>,
     theme: Res<Theme>,
     fonts: Res<UiFonts>,
-    mut q: Query<
-        (
-            Entity,
-            &Hovered,
-            &Tooltip,
-            Option<&mut TooltipPending>,
-            Option<&Children>,
-        ),
-        With<Button>,
-    >,
-    panels: Query<(), With<TooltipPanel>>,
+    mut q: Query<(Entity, &Hovered, &Tooltip, Option<&mut TooltipPending>), With<Button>>,
+    panels: Query<(Entity, &TooltipPanel)>,
+    hosts: Query<Entity, With<Tooltip>>,
+    layer: Query<Entity, With<crate::layout::TooltipLayer>>,
 ) {
-    for (entity, hovered, tip, pending, children) in q.iter_mut() {
-        let has_panel = children
-            .map(|c| c.iter().any(|child| panels.contains(child)))
-            .unwrap_or(false);
+    let layer_entity = layer.single().ok();
+
+    for (entity, hovered, tip, pending) in q.iter_mut() {
+        let panel = panels
+            .iter()
+            .find(|(_, panel)| panel.host == entity)
+            .map(|(panel_entity, _)| panel_entity);
 
         if hovered.get() {
-            if has_panel {
+            if panel.is_some() {
                 continue;
             }
             match pending {
-                // 计时中
                 Some(mut p) => {
                     p.elapsed += time.delta_secs();
                     if p.elapsed >= 0.5 {
                         commands.entity(entity).remove::<TooltipPending>();
-                        let text = tip.text.clone();
-                        commands.entity(entity).with_children(|t| {
-                            t.spawn((
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left: Val::Percent(100.0),
-                                    top: Val::Px(2.0),
-                                    margin: UiRect::left(px(space::SM)),
-                                    padding: UiRect::all(px(space::XS)),
-                                    border_radius: BorderRadius::all(px(radius::SMALL)),
-                                    flex_shrink: 0.0,
-                                    ..default()
-                                },
-                                BackgroundColor(theme.tooltip_bg),
-                                BorderColor::all(theme.border),
-                                TooltipPanel,
-                            ))
-                            .with_children(|tip_node| {
-                                tip_node.spawn(mono_text(
-                                    &fonts,
-                                    text,
-                                    type_scale::MICRO,
-                                    theme.tooltip_text,
-                                    type_scale::line_height::UI,
-                                ));
-                            });
-                        });
+                        spawn_tooltip_panel(
+                            &mut commands,
+                            layer_entity,
+                            entity,
+                            &tip.text,
+                            &theme,
+                            &fonts,
+                        );
                     }
                 }
-                // 悬停开始：挂计时
                 None => {
                     commands
                         .entity(entity)
@@ -263,18 +272,117 @@ fn tooltip_system(
                 }
             }
         } else {
-            // 离开：清计时与面板
             if pending.is_some() {
                 commands.entity(entity).remove::<TooltipPending>();
             }
-            if let Some(children) = children {
-                for child in children.iter() {
-                    if panels.contains(child) {
-                        commands.entity(child).despawn();
-                    }
-                }
+            if let Some(panel) = panel {
+                commands.entity(panel).despawn();
             }
         }
+    }
+
+    // 宿主已消失的面板一并清理（宿主被 despawn 时不会触发 hovered=false）。
+    for (panel_entity, panel) in &panels {
+        if hosts.get(panel.host).is_err() {
+            commands.entity(panel_entity).despawn();
+        }
+    }
+}
+
+fn spawn_tooltip_panel(
+    commands: &mut Commands,
+    layer: Option<Entity>,
+    host: Entity,
+    text: &str,
+    theme: &Theme,
+    fonts: &UiFonts,
+) {
+    let mut spawn = |parent: Option<Entity>| {
+        let bundle = (
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0.0),
+                top: px(0.0),
+                padding: UiRect::all(px(space::XS)),
+                border_radius: BorderRadius::all(px(radius::SMALL)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(theme.tooltip_bg),
+            BorderColor::all(theme.border),
+            // 穿透装饰层：不吃点击、不参与 hover。
+            Pickable {
+                should_block_lower: false,
+                is_hoverable: false,
+            },
+            TooltipPanel { host },
+        );
+        let mut entity = commands.spawn(bundle);
+        if let Some(parent) = parent {
+            entity.insert(ChildOf(parent));
+        }
+        entity.with_children(|tip_node| {
+            tip_node.spawn(mono_text(
+                fonts,
+                text.to_string(),
+                type_scale::MICRO,
+                theme.tooltip_text,
+                type_scale::line_height::UI,
+            ));
+        });
+    };
+
+    if let Some(layer) = layer {
+        spawn(Some(layer));
+    } else {
+        spawn(None);
+    }
+}
+
+/// 计算 tooltip 的左边界：默认贴宿主右侧；右缘空间不足时翻转到左侧。
+pub fn tooltip_left(
+    host_left: f32,
+    host_right: f32,
+    tip_width: f32,
+    viewport_width: f32,
+    gap: f32,
+) -> f32 {
+    if host_right + gap + tip_width <= viewport_width {
+        host_right + gap
+    } else {
+        (host_left - gap - tip_width).max(0.0)
+    }
+}
+
+/// tooltip 定位：按宿主 `ComputedNode` 与 `GlobalTransform` 计算屏幕位置；
+/// 右缘不足时翻转到宿主左侧。每帧跟随（窗口缩放、滚动、布局变化都能跟上）。
+fn position_tooltips(
+    windows: Query<&Window>,
+    mut tips: Query<(&TooltipPanel, &mut Node, &ComputedNode)>,
+    hosts: Query<(&ComputedNode, &GlobalTransform), Without<TooltipPanel>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let scale = window.scale_factor().max(0.0001);
+    let viewport_width = window.width();
+
+    for (panel, mut node, tip_computed) in &mut tips {
+        let Ok((host_computed, host_transform)) = hosts.get(panel.host) else {
+            continue;
+        };
+        let host_size = host_computed.size() / scale;
+        let host_center = host_transform.translation().truncate() / scale;
+        let host_left = host_center.x - host_size.x / 2.0;
+        let host_top = host_center.y - host_size.y / 2.0;
+        let host_right = host_center.x + host_size.x / 2.0;
+
+        let tip_width = tip_computed.size().x / scale;
+        let gap = space::SM;
+
+        let left = tooltip_left(host_left, host_right, tip_width, viewport_width, gap);
+        node.left = px(left);
+        node.top = px(host_top);
     }
 }
 
@@ -513,6 +621,7 @@ pub fn show_toast(
     mut q_text: Query<&mut Text, With<ToastTextMarker>>,
     mut commands: Commands,
     theme: Res<Theme>,
+    toast_layer: Query<Entity, With<crate::layout::ToastLayer>>,
 ) {
     let Some(latest) = reader.read().last() else {
         return;
@@ -526,8 +635,7 @@ pub fn show_toast(
         return;
     }
     // 原型 .toast：bottom 50px、水平居中；tooltip_bg 恒暗底 + border + 圆角 8
-    commands
-        .spawn((
+    let mut toast = commands.spawn((
             Node {
                 position_type: PositionType::Absolute,
                 bottom: px(50.0),
@@ -547,11 +655,14 @@ pub fn show_toast(
             },
             BackgroundColor(theme.tooltip_bg),
             BorderColor::all(theme.border),
-            GlobalZIndex(400),
+            GlobalZIndex(crate::theme::z::TOAST),
             ToastMarker,
             ToastTtl(TOAST_TTL_SECS),
-        ))
-        .with_children(|t| {
+        ));
+    if let Ok(layer) = toast_layer.single() {
+        toast.insert(ChildOf(layer));
+    }
+    toast.with_children(|t| {
             t.spawn((
                 ui_text(
                     latest.text.clone(),
@@ -593,6 +704,24 @@ impl Plugin for KitPlugin {
                 // 双写 ToastTtl，chain 消除调度歧义
                 (show_toast, toast_ttl_system).chain(),
             )
-            .add_systems(Update, (hover_tint_system, tooltip_system));
+            .add_systems(Update, (hover_tint_system, tooltip_system, position_tooltips));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// A5：tooltip 右缘不足时翻转到左侧；空间足够时贴右侧。
+    #[test]
+    fn tooltip_flips_at_viewport_edge() {
+        let gap = 8.0;
+        assert_eq!(
+            super::tooltip_left(100.0, 140.0, 120.0, 800.0, gap),
+            148.0
+        );
+        assert_eq!(
+            super::tooltip_left(700.0, 740.0, 120.0, 800.0, gap),
+            572.0
+        );
+        assert_eq!(super::tooltip_left(10.0, 40.0, 120.0, 100.0, gap), 0.0);
     }
 }

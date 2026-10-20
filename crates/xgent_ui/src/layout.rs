@@ -1,17 +1,39 @@
-//! 布局：顶栏 + 主区（图标轨 + 对话 + 分隔条 + 上下文面板）+ 状态栏。
+//! 布局：六个静态层根 + BASE 内的顶栏 / 主区 / 状态栏。
 //!
-//! v7 目标形态（M5-T6 起）：文件面板抽屉化（`FileDrawerOpen` + 左侧 overlay），
-//! 主区收四列——图标轨 → 对话主区 → 右手柄 → 上下文面板。
-//!
-//! 各区域挂 marker 组件，供子系统在启动时向其挂子节点。
+//! v8 M1：所有浮层挂固定层根，业务模块不再裸写 `GlobalZIndex`；
+//! BASE 层内的 `MainArea`/`ChatPanel` 保留 `Overflow::clip()`（区域内容确实要裁），
+//! 但任何「要浮在外面」的东西必须迁到层根，不允许留在裁剪子树里。
 
 use bevy::prelude::*;
 
-use crate::theme::{Theme, size};
+use crate::theme::{Theme, size, z};
 
-/// 根 UI 节点（全屏 flex 列容器）。
+/// 根 UI 节点（全屏，承载所有层根）。
 #[derive(Component, Default)]
 pub struct UiRoot;
+
+/// 静态层根标记：携带该层的 z 值。
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerRoot(pub i32);
+
+/// 主布局层（顶栏 / 主区 / 状态栏）。
+#[derive(Component, Default)]
+pub struct BaseLayer;
+/// 侧区内联浮层。
+#[derive(Component, Default)]
+pub struct DockLayer;
+/// 抽屉层（文件 / 历史）。
+#[derive(Component, Default)]
+pub struct DrawerLayer;
+/// 下拉层（补全 / 菜单 / 查找条）。
+#[derive(Component, Default)]
+pub struct DropdownLayer;
+/// tooltip 层。
+#[derive(Component, Default)]
+pub struct TooltipLayer;
+/// toast 层。
+#[derive(Component, Default)]
+pub struct ToastLayer;
 
 /// 顶栏容器。
 #[derive(Component, Default)]
@@ -42,6 +64,8 @@ pub struct StatusBarMarker;
 pub struct MainAreaMarker;
 
 /// 文件抽屉开关（v7 抽屉化：左侧 overlay，rail 文件钮 / `filepanel.toggle` 切换）。
+///
+/// v8 M1 起由 [`crate::overlay::OverlayRegistry`] 统一裁决，本资源是派生视图。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FileDrawerOpen(pub bool);
 
@@ -69,7 +93,7 @@ impl Plugin for LayoutPlugin {
     }
 }
 
-/// 启动时 spawn 全屏根节点与各区域容器。
+/// 启动时 spawn 根节点、六个层根与各区域容器。
 pub(crate) fn spawn_layout(
     mut commands: Commands,
     theme: Res<Theme>,
@@ -89,109 +113,132 @@ pub(crate) fn spawn_layout(
             UiRoot,
         ))
         .with_children(|root| {
-            // ===== 顶栏 =====
+            // ===== BASE：主布局 =====
             root.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: px(size::TOP_BAR_H),
-                    padding: UiRect::horizontal(px(crate::theme::space::LG)),
-                    align_items: AlignItems::Center,
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(crate::theme::space::MD),
-                    border: UiRect::bottom(px(1.0)),
-                    flex_shrink: 0.0,
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    flex_direction: FlexDirection::Column,
                     ..default()
                 },
-                BackgroundColor(theme.surface),
-                BorderColor::all(theme.border),
-                TopBarMarker,
-            ));
-
-            // ===== 主区（图标轨 + 对话 + 分屏；文件面板已抽屉化）=====
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Row,
-                    min_height: Val::ZERO,
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-                MainAreaMarker,
+                GlobalZIndex(z::BASE),
+                BackgroundColor(theme.bg),
+                LayerRoot(z::BASE),
+                BaseLayer,
             ))
-            .with_children(|main| {
-                // 活动栏（52px 固定宽度）
-                main.spawn((
+            .with_children(|base| {
+                // 顶栏
+                base.spawn((
                     Node {
-                        width: px(size::RAIL_W),
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
+                        width: Val::Percent(100.0),
+                        height: px(size::TOP_BAR_H),
+                        padding: UiRect::horizontal(px(crate::theme::space::LG)),
                         align_items: AlignItems::Center,
-                        padding: UiRect::vertical(px(crate::theme::space::SM)),
-                        row_gap: px(crate::theme::space::XS),
+                        flex_direction: FlexDirection::Row,
+                        column_gap: px(crate::theme::space::MD),
+                        border: UiRect::bottom(px(1.0)),
                         flex_shrink: 0.0,
-                        border: UiRect::right(px(1.0)),
                         ..default()
                     },
                     BackgroundColor(theme.surface),
-                    BorderColor::all(theme.line),
-                    ActivityBarMarker,
+                    BorderColor::all(theme.border),
+                    TopBarMarker,
                 ));
 
-                // 对话主区
-                main.spawn((
+                // 主区（图标轨 + 对话 + 分屏；文件面板已抽屉化）
+                base.spawn((
                     Node {
+                        width: Val::Percent(100.0),
                         flex_grow: 1.0,
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        min_width: Val::ZERO,
+                        flex_direction: FlexDirection::Row,
                         min_height: Val::ZERO,
                         overflow: Overflow::clip(),
                         ..default()
                     },
-                    BackgroundColor(theme.bg),
-                    ChatPanelMarker,
-                ));
+                    MainAreaMarker,
+                ))
+                .with_children(|main| {
+                    // 活动栏（52px 固定宽度）
+                    main.spawn((
+                        Node {
+                            width: px(size::RAIL_W),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            padding: UiRect::vertical(px(crate::theme::space::SM)),
+                            row_gap: px(crate::theme::space::XS),
+                            flex_shrink: 0.0,
+                            border: UiRect::right(px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.surface),
+                        BorderColor::all(theme.line),
+                        ActivityBarMarker,
+                    ));
 
-                // 右拖拽手柄
-                main.spawn(crate::resize::handle_bundle(
-                    crate::resize::ResizeEdge::Right,
-                ));
-                // 上下文面板（预览/差异/终端；默认展开，宽度走 PanelWidths）
-                main.spawn((
+                    // 对话主区
+                    main.spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            min_width: Val::ZERO,
+                            min_height: Val::ZERO,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BackgroundColor(theme.bg),
+                        ChatPanelMarker,
+                    ));
+
+                    // 右拖拽手柄
+                    main.spawn(crate::resize::handle_bundle(
+                        crate::resize::ResizeEdge::Right,
+                    ));
+                    // 上下文面板（预览/差异/终端；默认展开，宽度走 PanelWidths）
+                    main.spawn((
+                        Node {
+                            width: px(widths.side_view),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            border: UiRect::left(px(1.0)),
+                            min_width: Val::ZERO,
+                            min_height: Val::ZERO,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BackgroundColor(theme.surface),
+                        BorderColor::all(theme.line),
+                        SideViewMarker,
+                    ));
+                });
+
+                // 状态栏
+                base.spawn((
                     Node {
-                        width: px(widths.side_view),
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        border: UiRect::left(px(1.0)),
-                        min_width: Val::ZERO,
-                        min_height: Val::ZERO,
-                        overflow: Overflow::clip(),
+                        width: Val::Percent(100.0),
+                        height: px(size::STATUS_BAR_H),
+                        padding: UiRect::horizontal(px(crate::theme::space::LG)),
+                        align_items: AlignItems::Center,
+                        flex_direction: FlexDirection::Row,
+                        column_gap: px(crate::theme::space::SM),
+                        border: UiRect::top(px(1.0)),
+                        flex_shrink: 0.0,
                         ..default()
                     },
                     BackgroundColor(theme.surface),
-                    BorderColor::all(theme.line),
-                    SideViewMarker,
+                    BorderColor::all(theme.border),
+                    StatusBarMarker,
                 ));
             });
 
-            // ===== 状态栏 =====
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: px(size::STATUS_BAR_H),
-                    padding: UiRect::horizontal(px(crate::theme::space::LG)),
-                    align_items: AlignItems::Center,
-                    flex_direction: FlexDirection::Row,
-                    column_gap: px(crate::theme::space::SM),
-                    border: UiRect::top(px(1.0)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(theme.surface),
-                BorderColor::all(theme.border),
-                StatusBarMarker,
-            ));
+            // ===== 其余五个静态层根 =====
+            root.spawn((crate::kit::layer_root(z::DOCK), DockLayer));
+            root.spawn((crate::kit::layer_root(z::DRAWER), DrawerLayer));
+            root.spawn((crate::kit::layer_root(z::DROPDOWN), DropdownLayer));
+            root.spawn((crate::kit::layer_root(z::TOOLTIP), TooltipLayer));
+            root.spawn((crate::kit::layer_root(z::TOAST), ToastLayer));
         });
 }
 
@@ -216,5 +263,92 @@ pub(crate) fn toggle_panel_visibility(
         if marker.0 == crate::resize::ResizeEdge::Right {
             node.display = display;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ui::GlobalZIndex;
+
+    fn layout_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(LayoutPlugin);
+        for _ in 0..3 {
+            app.update();
+        }
+        app
+    }
+
+    /// A1：六个静态层根存在，z 来自 `theme::z`，且层根不带 `Pickable`。
+    #[test]
+    fn six_layer_roots_have_expected_z_and_no_pickable() {
+        let mut app = layout_app();
+
+        let mut query = app.world_mut().query::<(&LayerRoot, &GlobalZIndex)>();
+        let mut found: Vec<(i32, i32)> = query
+            .iter(app.world())
+            .map(|(layer, z_index)| (layer.0, z_index.0))
+            .collect();
+        found.sort_unstable();
+
+        assert_eq!(
+            found,
+            vec![
+                (z::BASE, z::BASE),
+                (z::DOCK, z::DOCK),
+                (z::DRAWER, z::DRAWER),
+                (z::DROPDOWN, z::DROPDOWN),
+                (z::TOOLTIP, z::TOOLTIP),
+                (z::TOAST, z::TOAST),
+            ]
+        );
+
+        let mut with_pickable = app
+            .world_mut()
+            .query_filtered::<Entity, (With<LayerRoot>, With<bevy::picking::Pickable>)>();
+        assert_eq!(
+            with_pickable.iter(app.world()).count(),
+            0,
+            "层根不得带 Pickable（require_markers 下应完全惰性）"
+        );
+    }
+
+    /// A1：顶栏 / 主区 / 状态栏都在 BASE 层根之下。
+    #[test]
+    fn main_regions_live_under_base_layer() {
+        let mut app = layout_app();
+
+        let markers: [(&str, Entity); 3] = [
+            ("topbar", first_with::<TopBarMarker>(&mut app)),
+            ("main", first_with::<MainAreaMarker>(&mut app)),
+            ("status", first_with::<StatusBarMarker>(&mut app)),
+        ];
+
+        for (name, entity) in markers {
+            let mut current = entity;
+            let mut on_base = false;
+            for _ in 0..8 {
+                if let Some(layer) = app.world().get::<LayerRoot>(current)
+                    && layer.0 == z::BASE
+                {
+                    on_base = true;
+                    break;
+                }
+                match app.world().get::<ChildOf>(current) {
+                    Some(parent) => current = parent.parent(),
+                    None => break,
+                }
+            }
+            assert!(on_base, "{name} 的祖先链应包含 BASE 层根");
+        }
+    }
+
+    fn first_with<T: Component>(app: &mut App) -> Entity {
+        let mut query = app.world_mut().query_filtered::<Entity, With<T>>();
+        query
+            .iter(app.world())
+            .next()
+            .unwrap_or_else(|| panic!("缺少组件 {}", std::any::type_name::<T>()))
     }
 }
