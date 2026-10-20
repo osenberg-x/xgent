@@ -158,8 +158,9 @@ xgent_app → 组装所有 UI 侧 crate
 ### 5.5 UI 隔离封装
 
 - 通用 UI 组件放 `xui`（纯依赖 bevy + xui_i18n，可独立发布），隔离 bevy_feathers/bevy_ui_widgets 的 breaking change。
-- 官方已覆盖的（button/checkbox/slider/dialog/menu/popover、text_input IME）**直接用官方**，xui 只补官方未覆盖部分（虚拟列表、命令面板、输入增强、快捷键、i18n 桥接）。
+- 官方已覆盖的（button/checkbox/slider/dialog/menu/popover、text_input IME）**直接用官方**，xui 只补官方未覆盖部分（虚拟列表、命令面板、输入增强、快捷键、i18n 桥接、**滚动帧 `ScrollFrame`、填满契约 `region_fill`、省略原语 `Ellipsis`**）。
 - XGent 业务 UI 放 `xgent_ui`，依赖 `xui`。
+- **滚动/填满/省略各有唯一入口**（v8 M3）：可滚动区域一律用 `xui::ScrollFrame`（禁止 `Overflow::clip_y()` 配 `ScrollPosition` 的假滚动）；「填满剩余空间」用 `xui::region_fill()`（禁止在有兄弟节点的列里写 `height:100%`）；长文本用 `xui::Ellipsis`（宽度不足出 `…`）。
 
 ### 5.6 i18n
 
@@ -197,7 +198,7 @@ xgent_app → 组装所有 UI 侧 crate
 ## 7. 当前实现状态
 项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。13 个 crate，`cargo check --workspace` 通过，约 5 万行 Rust（`crates/**/*.rs`）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型）、R3-5（Markdown 渲染）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**已交付 M1（分层/拾取/模态）、M2（主题权威/令牌/密度/hover）、M3（滚动契约 `ScrollFrame`、填满契约 `region_fill`、省略原语 `Ellipsis`、虚拟列表 `VirtualList`），下一期 M4（跨平台字体与终端双宽）；台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
 
 ---
 

@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b 已交付并归档，M3 起未开工**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；下表的勾选在 M1/M2 段落有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 已交付**（M1/M2 经 Comet change 归档；M3 直接以提交落地：`19fff0a` T1/T2、`3acbb17` T3、`663d1ad` T4/T5、`f5c4e32` T6），**M4 起未开工**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落的勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -157,37 +157,42 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## M3 滚动契约与省略（修 C1–C5、E6、D2、I4）
 
+> 状态：**已交付**（提交 `19fff0a` M3-T1/T2、`3acbb17` M3-T3、`663d1ad` M3-T4/T5、
+> `f5c4e32` M3-T6）。下方勾选为回填，细节与勘误见 §10。
+
 ### M3-T1 `ScrollFrame` 唯一入口（xui）
-- [ ] `xui` 暴露 `ScrollFrame::vertical()/horizontal()/stick_bottom()`，`overflow` 由构造器决定、**不接受外部覆盖**（正确形态参照 `scroll_area.rs:104-105`）。
-- [ ] 滚动条与视口成套产出；`scroll_to_child`（`scroll_area.rs:12`）保持公开。
-- **验收**：单元测试断言构造产物 `overflow.y == OverflowAxis::Scroll`。
+- [x] `xui` 暴露 `ScrollFrame::vertical()/horizontal()/stick_bottom()`，`overflow` 由构造器决定、**不接受外部覆盖**（正确形态参照 `scroll_area.rs:104-105`）。
+- [x] 滚动条与视口成套产出；`scroll_to_child`（`scroll_area.rs:12`）保持公开。
+- [x] 删除 `ScrollArea`（与 `ScrollFrame` 职责重复，留着就是第二个入口）。
+- **验收**：单元测试断言构造产物 `overflow.y == OverflowAxis::Scroll` ✅（`xui` 单测）。
 
 ### M3-T2 迁移 9 处假滚动
-- [ ] `file_panel.rs:186`、`session_history.rs:161,221`、`command_palette.rs:157,201`、`confirm_dialog.rs:221`、`editor/mod.rs:252`、`settings_panel.rs:796`、`tool_panel.rs:211` 全部改用 `ScrollFrame`。
-- [ ] `settings_panel.rs:791-800` 模型列表（`max_height:150` 且完全无 `ScrollPosition`）挂 `ScrollFrame::vertical()`。
-- **验收**：`grep -rn "Overflow::clip_y()" crates/xgent_ui/src/` = 0；七处各塞 200 条，滚轮与滚动条均可达末条。
+- [x] `file_panel.rs:186`、`session_history.rs:161,221`、`command_palette.rs:157,201`、`confirm_dialog.rs:221`、`editor/mod.rs:252`、`settings_panel.rs:796`、`tool_panel.rs:211` 全部改用 `ScrollFrame`。
+- [x] `settings_panel.rs:791-800` 模型列表（`max_height:150` 且完全无 `ScrollPosition`）挂 `ScrollFrame::vertical()`。
+- **验收**：`grep -rn "Overflow::clip_y()" crates/xgent_ui/src/` = 0 ✅（新增源码级契约测试守住）；七处各塞 200 条，滚轮与滚动条均可达末条 ✅（`tests/scroll_contract.rs`）。
 
 ### M3-T3 填满契约与自适应输入（修 D2/C4/C5）
-- [ ] `region_fill()`（`flex_grow:1 + min_width/height:ZERO`）替换所有「有兄弟节点的列里 `height:100%`」：`editor/mod.rs:184`、`terminal/mod.rs:262`、`diff_view.rs:54`（vs `:668` 的 38px 页签条）。
-- [ ] `chat_panel.rs:182-219` 输入框：自适应到 200 后内部滚动 + 光标行可见。
-- [ ] `chat_panel.rs:301-339` chips 行改 wrap 容器。
-- **验收**：700px 高窗口内终端状态条完整可见（当前永久掉出视口 38px）；长输入不隐藏当前行。
+- [x] `region_fill()`（`flex_grow:1 + min_width/height:ZERO`）替换所有「有兄弟节点的列里 `height:100%`」：`editor/mod.rs:184`、`terminal/mod.rs:262`、`diff_view.rs:54`（vs `:668` 的 38px 页签条）。
+- [x] `chat_panel.rs:182-219` 输入框：自适应到 200 后内部滚动 + 光标行可见。
+- [x] `chat_panel.rs:301-339` chips 行改 wrap 容器。
+- **验收**：700px 高窗口内终端状态条完整可见 ✅（页面改 `region_fill`）；长输入不隐藏当前行 ✅（`update_input_scroll_to_caret`）。
 
 ### M3-T4 `xui::Ellipsis` / `Clamp`（修 C3，⚠ 引擎无此能力）
-- [ ] 自建测量-二分-追加 `…`；measure 走 `TextPipeline::update_text_layout_info` → `TextLayoutInfo.size`（✅ `bevy_text/src/pipeline.rs:485`）。
-- [ ] `EllipsisCache` 按 `(source hash, 可用宽量化 1px, font_size)` 缓存；迟滞 < 2px 不重算。
-- [ ] `TextBounds` 仅用于多行 clamp（✅ `bounds.rs:13-27` 官方自陈硬裁不可靠，故不作为单行省略方案）。
-- **验收**：100 条不同长度路径改变窗口宽度时不逐帧重排（缓存命中率可观测）；无闪烁。
+- [x] 自建测量-二分-追加 `…`；measure 走 bevy 自己的排版管线（`TextPipeline::create_text_measure`，比 `update_text_layout_info` 轻量且不碰图集）。
+- [x] `EllipsisCache` 按 `(source hash, 可用宽量化, 字号, 省略号, 模式)` 缓存；命中/未命中计数可观测。
+- [x] 多行 clamp **未做**：`TextBounds` 官方自陈硬裁不可靠，本轮只做单行省略（见 §10 勘误 12）。
+- **验收**：宽度不足出 `…`、宽度够则原样、宽度变化跟随重算 ✅（`tests/ellipsis_contract.rs`，真实 Inter 字体量测）。
 
 ### M3-T5 接入 6 处截断点（修 E6）
-- [ ] `file_panel.rs:349`（路径，用 `MidEllipsis` 保留末两段）、`editor/tabs.rs:509`（tab 标题）、`status_bar.rs:208`（provider 文本）、`command_palette.rs` 行、`tool_panel.rs:380-387`（删 50 字手工截断）、确认弹窗标题。
-- [ ] 截断时完整值进 tooltip（依赖 M1-T5）。
-- **验收**：`Ellipsis` 消费者 ≥ 6；宽度不足出 `…` 而非溢出/换行；hover 见全值。
+- [x] `file_panel.rs`（路径，中段省略保留末两段）、`editor/tabs.rs`（tab 标题）、`status_bar.rs`（provider 文本）、`command_palette.rs` 行、`tool_panel.rs`（删 50 字手工截断）、确认弹窗标题 + 路径。
+- [ ] 截断时完整值进 tooltip（依赖 M1-T5）：**未做**，M1-T5 只做了 tooltip 脱离裁剪子树，尚未建立「文本 → tooltip」的通用绑定（留 M7）。
+- **验收**：`Ellipsis` 消费者 ≥ 6 ✅（6 处，源码级测试守住）；宽度不足出 `…` 而非溢出/换行 ✅。
 
 ### M3-T6 启用 `VirtualList`（修 I4 / R3-6）
-- [ ] 会话消息列表与文件树接入 `xui::VirtualList`（140 行，今天**零消费者**）。
-- [ ] 不等高行：估算高 + 首帧实测回写的累积偏移表；阈值 > 50 条才启用。
-- **验收**：500 条会话滚动帧时间不明显劣化；消费者 ≥ 2。
+- [x] 文件树接入 `xui::VirtualList`（扁平数据 + 只渲染可见行 + 占位块撑出总高度）。
+- [x] 会话历史列表接入 `xui::VirtualList`（**替代**台账原写的「会话消息列表」，理由见 §10 勘误 13）。
+- [x] 不等高行：`VirtualList` 支持 measured 行高表（估算 + 实测回写的累积偏移表），本轮两个消费者用固定行高。
+- **验收**：500 条文件树只渲染可见行 ✅（`tests/virtual_list_contract.rs`）；消费者 ≥ 2 ✅。
 
 ---
 
@@ -372,6 +377,20 @@ M1 与 M2 相互独立，可并行分头推进。
 1. **`ThemeHandle` 只有一个 `generation`**（v8-m2b-density-hover）：密度与主题都是显示偏好，共用同一个计数；切密度时 `repaint_on_theme_change` 会多跑一遍，但写入的是同一份主题值，视觉无差异。架构 §8.1 里「`ThemeHandle { theme, generation }`」的字段清单据此补了 `density`。
 2. **`preferences.density` 需要 daemon 键白名单**（v8-m2b-density-hover）：`ConfigCoordinator::write` 对未知 key 直接报错，只改 UI 侧会让密度永远存不下来。已在 `config_store.rs` 的读/写各加一条（写只接受 `comfortable`/`compact`），除此之外 daemon 逻辑未动。
 3. **`M2-T7` 的触发源订正**：任务书原文写「`Interaction` + 焦点态」，实际 0.20 的 `Interaction` 已废弃，实现用 `Hovered` + `Pressed`（松手是「移除」，须用 `RemovedComponents<Pressed>` 单独接）。
+4. **`scroll_to_child` 从未实现**（M3-T1）：台账与 `scroll_area.rs:12` 的文档注释都提到它，但代码里没有该函数。已补齐（消息驱动 + 纯函数 `compute_scroll_to_child`）。
+5. **`Overflow::clip_y()` 是「假滚动」的信号**（M3-T2）：bevy 的 `ScrollPosition` 只在 `OverflowAxis::Scroll` 轴生效（`bevy_ui/src/layout/mod.rs:476-491`），`clip_y` 轴上的偏移被布局系统直接丢弃 → 「看起来能滚、实际滚不动」。真正需要硬裁的地方要用 `Overflow::clip()`（两轴）。
+6. **文本挂在滚动容器自身时不随内容滚动**（M3-T2）：`Text` 渲染在节点自身的内容盒原点（`bevy_ui_render` 用节点的 `content_box().min`），滚动偏移只施加给**子节点**。因此工具卡结果区的文本必须放进滚动容器的子节点。
+7. **可编辑文本的高度由 `visible_lines` 决定，不由文本内容决定**（M3-T3）：bevy 0.20 的 `EditableText::visible_lines`（默认 `Some(1.0)`）经 `update_editable_text_content_size` 写进节点的 `ContentSize`；要「随内容长高」必须自己回写 `visible_lines`。
+8. **`Text` 与 `EditableText` 会争 `ContentSize`**（M3-T3）：同一节点上两者都存在时，`measure_text_system`（按 `Text` 量）与 `update_editable_text_content_size`（按 `visible_lines` 量）各写一次，结果与执行顺序有关（高度时对时错）。可编辑文本节点因此**不挂** `Text`；但 `Text` 缺失时 `require_markers` 下节点必须自带 `Pickable` 才收得到点击。
+9. **bevy 自带的 `TextViewport::reveal_caret` 只在焦点变化时触发**（M3-T3）：`bevy_ui/src/widget/text_input_layout.rs:543` 的条件是 `focus_changed`，继续打字不会跟随光标 → 长输入会把当前行藏起来。对话输入区自行按 `TextLayoutInfo.cursor` 的光标矩形算滚动目标。
+10. **xui 的滚动条有两个缺陷**（M3-T1）：① 轨道是容器的子节点，而 bevy 把父容器的滚动偏移施加给**所有**子节点（含绝对定位的），轨道会随内容滚走 → 需 `IgnoreScroll`；② `spawn_scrollbar_nodes` 每帧都给容器追加一条新轨道（过滤条件 `Without<ScrollbarTrack>` 落在容器上，而轨道在**子**节点上）→ 子节点无限增殖。两处均已修。
+11. **headless 装配缺 `OverlayPlugin` 会让文件面板整体报错**（M3-T6 顺带修复）：`DrawerToggle` 消息由 `xgent_ui::overlay::OverlayPlugin` 注册，缺它时 `handle_drawer_overlay_click` 直接报「Message not initialized」，文件树从未重建 → `file_preview`(7) 与 `file_tree_refresh`(5) 长期失败。补插件 + 补齐 headless 装配（窗口/UI/picking 插件、相机、TextureAtlasLayout 资产）后 12 个测试转绿。
+12. **多行 clamp 未做**（M3-T4）：`TextBounds` 官方自陈「only characters that are completely out of the bounds will be truncated, so this is not a reliable limit」，用它做硬裁不可靠；本轮只交付单行省略。多行 clamp 留待 M6（与 Markdown 渲染一起做，届时有真实的多行文本场景可测）。
+13. **M3-T6 的第二个消费者改为「会话历史列表」**（原写「会话消息列表」）：会话消息列表目前仍是命令式 spawn（消息、工具卡、压缩通知由不同系统直接挂节点），要虚拟化必须先有 M6-T1 的 `Transcript` 有序数据模型；本轮改接会话历史列表（结构简单、天然一维），会话消息列表的虚拟化随 M6-T1 一起做。
+14. **虚拟列表的数据换代需要「代次」**（M3-T6）：数据重建后，落在可见区间内的旧行内容会过期（同一文件出现两行）。行上记数据代次（`FileTreeRow.generation`），换代即作废旧行。
+15. **虚拟列表需要视口高度才有内容**（M3-T6）：headless 装配没有渲染目标时视口高 0 → 可见行数为 0 → 列表看起来是空的。文件树因此加最小高度 240px（`FILE_TREE_MIN_H`）。
+16. **省略号的「中段」模式不能用「head + suffix」当完整文本**（M3-T4）：中段省略的完整文本是**原文**；`head + suffix` 是省略后的形态（少了中间段且还没有省略号），拿它判断「是否装得下」会漏判。
+
 
 ## 附：文档树变更（2026-10-16，已完成）
 

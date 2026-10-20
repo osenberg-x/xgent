@@ -28,6 +28,7 @@
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
 | F-19 | 内置终端（P1） | ✅ | `xgent_terminal/`（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty + vte，不依赖 Bevy）+ `xgent_ui/src/terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）+ `xgent_app` 注入 `TerminalIoRuntime` | `design/terminal-design.md`、ADR-0011/0012 |
 | UI v8 M1 | 分层与模态 | ✅ | `xgent_ui/src/{layout,modal,overlay,picking,kit}.rs`：六静态层根 + `ModalStack` + `require_markers` 拾取白名单 + 抽屉统一裁决 + tooltip 顶层化；`xgent_app` 装配 `UiPickingSettings` | `design/ui-v8-layout-architecture.md`、`docs/comet/specs/ui-m1-layering/spec.md`、§5.17 |
+| UI v8 M3 | 滚动契约 / 填满契约 / 省略原语 / 虚拟列表 | ✅ | `xui/src/{scroll_frame,layout,ellipsis,virtual_list}.rs`：`ScrollFrame` 唯一可滚动入口（overflow 运行时回写）+ `region_fill()` 填满契约 + `Ellipsis`/`MidEllipsis` 省略原语（测量走 bevy 排版管线）+ `VirtualList` 不等高支持；`xgent_ui`：9 处假滚动归零、分屏三页改 `region_fill`、对话输入区自适应滚动、6 处省略截断点、文件树与会话历史虚拟化 | `plans/ui-v8-tasks.md` §M3、§5.20 |
 | 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.13 |
 
 ### 1.2 非功能需求
@@ -89,7 +90,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_spatial` | `parse_manifest`/`ManifestInfo`、`scan(root)`（crate 图 + `DependsOn` 边 + cluster）、`layout`/`layout_incremental`、`LayoutConfig`/`LayoutReport`；类型在 `xgent_core::spatial`（`SpatialGraph`/`SpatialNode`/`SpatialEdge`/`SpatialCluster`） |
 | `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入快照、`with_shared_limits(Arc<RwLock<RetrievalLimits>>)` 供热应用，缺省等于原常量；每次检索开头取一份限额快照）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`/`build_context_provider_shared(strategy, root, Arc<RwLock<limits>>)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`/`retrieval_max_tokens`/`max_events_per_frame`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
-| `xui` | `TextEditor`/`Rope`/`HighlightCache`、`ScrollArea`/`StickToBottom`、`Scrollbar`、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、`VirtualList`、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
+| `xui` | `TextEditor`/`Rope`/`HighlightCache`、**`ScrollFrame`（唯一可滚动入口：`vertical()`/`horizontal()`/`stick_bottom()` + `ScrollFrameMarker` + `scroll_to_child`）**、`StickToBottom`、`Scrollbar`、`region_fill()`/`fill_region()`（唯一填满契约）、**`Ellipsis`/`EllipsisMode`(End/Mid)/`EllipsisCache`/`compute_ellipsis`（单行省略原语）**、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、**`VirtualList`（含 `VirtualListItem`/不等高行高表 `build_measured_offsets`）**、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
 | `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output：PTY 桥接 + 多 tab + 行编辑 + vte 渲染 + SideView 集成）、`handle_palette_triggers` 路由 `plugin.` 前缀到 `PluginCommandTriggered` |
 | `xgent_plugin_api` | 插件作者面向的 API：`Extension` trait（new/register_tools/register_commands/register_context_providers/execute/run_command/retrieve/on_file_changed）、`register_plugin!` 宏（生成 `init-extension` 导出）、WIT 绑定（`wit/plugin.wit`：host/tool/command/context-provider 四 interface + world plugin）、`host` 模块（read_file/write_file/log/get_config/run_command/http_get import）。编译为 `wasm32-wasip2`。 |
 | `xgent_plugin` | 插件宿主核心：`PluginHost`（加载/卸载/索引/reload/load_builtin_plugins）、`WasmHost`（wasmtime Engine+Linker+Store，host import impl：read_file/write_file/run_command 带 cancel 穿透）、`WasmPlugin`（专有 tokio Task 串行调用，cancel via tokio::select! 丢弃 oneshot）、`PluginHostProxy`（反转依赖枢纽，三 proxy trait）、`PluginManifest`/`PluginIndex`、`WasmCallError`(Aborted/Failed)。cancel 用 Zed 模式（非 cancel_handle，偏差修正 3）。 |
@@ -118,6 +119,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | 0010 | OQ-08 检索升级路径分段（编辑器→C，D 延后到 LSP） | `xgent_context` 仅 OnDemand 实现，其余 trait 占位 |
 | 0011 | 用户终端 PTY 选 portable-pty | `xgent_terminal`（`LocalPtyBackend`，portable-pty + spawn_blocking 桥接 ECS）+ `xgent_ui::terminal::io`（crossbeam 桥 tokio→ECS）；Win powershell/Unix $SHELL；保持 shell cooked 模式（portable-pty 无跨平台 raw API），UI 侧**透传模式**——按键直接转原始字节发 PTY，shell 回显为唯一显示源（避免双显），获 shell 原生 readline 历史/补全。读循环直接 `tokio::mpsc::Sender::blocking_send` 转发输出（不经 std mpsc 中转 + async 桥接 task，避免阻塞 std `recv` 冻结 runtime）；读循环检测 DSR 光标查询 `\x1b[6n` 并回复 `\x1b[1;1R`（PowerShell/PSReadLine 启动时探测终端，不回复则卡死等待，输入无响应）；writer 经 `Arc<Mutex>` 共享给读循环（DSR 回写）与命令循环（用户输入）。`LocalPtyBackend` impl `Drop`：drop 时 `take` 所有 session 的 killer slot 调 `kill()`，防止 backend 被 drop 时子进程变孤儿 + 读循环/命令循环线程泄漏（killer 经 `Arc<Mutex<Option<...>>>` 共享给命令循环 `Kill` 路径与 `Drop`，`take` 保证幂等）。vte `execute` 的 BS（`\x08`）处理：`pending_text` 为空时退到 `current` 末 span 的末尾字符（`pop` + 空 span 移除），而非弹出整个 span——修复跨样式边界 BS 丢多字符（如 `ab\x1b[31m\x08c` 应得 `ac` 而非 `c`）。vte `execute` 的 CR（`\r`）用延迟清除（`cr_pending` 标志）：`\r` 设标志不立即清空，下一个 `\n` 时保留内容入 finished（CRLF 换行），下一个普通字符/CSI/Tab 时才清空旧行（行重绘覆盖）——修复 `\r\n` 产生空行的 bug（旧行为 `\r` 直接清空 current，`\n` 推空行）。vte `apply_sgr` 支持 ITU-T T.416 冒号分隔扩展色（`38:5:n` / `38:2:r:g:b`）——vte 将冒号分隔子参数归入同一 sub-param slice，旧代码仅按分号分隔 `iter.next()` 取值导致冒号格式颜色静默丢弃。`xgent_ui::terminal::io::handle_pty_events` 的 `Spawned` 分支：tab 实体已销毁（用户在 PTY spawn 完成前关闭 tab）时 kill 孤儿 PTY 会话，防止 backend sessions map 残留 + 进程泄漏。 |
 | 0012 | 终端独立 crate + TerminalBackend trait | `xgent_terminal`（`TerminalBackend` trait + `LocalPtyBackend`）+ `xgent_ui::terminal`（UI 层只依赖 trait，经 `TerminalIoRuntime` 注入实现）；对齐 xgent_tools/xgent_context 纯逻辑层模式 |
+| 0014 | v7 视觉基准（Linear 色板 + 字号阶梯 + 密度） | `xgent_ui::theme`（`theme::color`/`type_scale`/`space`/`radius`/`size`/`z`）、`xgent_ui::fonts`（`ui_text`/`mono_text`/`ellipsis_text`）、`xgent_ui::density` |
+| 0015 | v8 交互架构层重建（保留 Linear 视觉基准，重建交互层） | M1：`xgent_ui::layout`（六层根）/`modal`/`overlay`/`picking`；M2：`theme::ThemeHandle` + `density`；M3：`xui::scroll_frame`（唯一滚动入口）/`xui::layout::region_fill`（唯一填满契约）/`xui::ellipsis`（单行省略原语）/`xui::virtual_list`（含不等高支持）；设计见 `docs/design/ui-v8-layout-architecture.md`，进度见 `docs/plans/ui-v8-tasks.md` |
 
 ---
 
@@ -757,6 +760,47 @@ v8 M1 把「浮层放在哪、谁吃点击、Esc 关谁」从散落实现收敛�
 - `HoverTintPollStats { visits, releases }` 是这条验收的可观测证据（不是面向用户的功能）：空闲帧 `visits == 0`。
 
 **测试注意**：密度集成测试（`tests/density.rs`）要用真实插件产出节点——对话面板需要 `UiFonts`、`MeshPlugin` 与 agent 的一批消息类型，否则 system 参数校验会以 "Resource does not exist" 直接 panic（看不到系统名，因为 bevy 的 `debug` feature 未开）。
+
+### 5.20 滚动契约 / 填满契约 / 省略原语 / 虚拟列表（v8 M3）
+
+M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么办」四条从散落实现收敛成原语。
+
+**滚动：`xui::ScrollFrame` 是唯一入口**（`xui/src/scroll_frame.rs`）
+
+- `ScrollFrame::vertical() / horizontal() / stick_bottom()` 返回 bundle：`Node + ScrollPosition + ScrollFrameMarker + Scrollbar`。**`overflow` 由构造器决定**，`enforce_scroll_frame_overflow` 系统在布局前把 `Node.overflow` 回写成构造器的值——调用方改了也会被改回来（类型 + 运行时双保险）。
+- **不要手搓滚动容器**：`Overflow::clip_y()` 配 `ScrollPosition` 是「假滚动」——bevy 只在 `OverflowAxis::Scroll` 轴消费偏移（`bevy_ui/src/layout/mod.rs:476-491`），`clip_y` 轴的偏移被直接丢弃 → 看着能滚、实际滚不动。业务代码里 `Overflow::clip_y()` 已归零（由 `tests/scroll_contract.rs` 的源码级契约测试守住）。
+- **文本必须放在滚动容器的子节点里**：挂在容器自身的文本按内容盒原点定位（渲染用节点的 `content_box().min`），滚动偏移只施加给子节点 → 文本不跟着滚。
+- `scroll_to_child`（消息 `ScrollToChild` + 纯函数 `compute_scroll_to_child`）把指定子项滚进视口；`StickToBottom` 贴底跟随随 `stick_bottom()` 一起给。
+- `xui::Scrollbar` 的轨道是容器的子节点，**必须带 `IgnoreScroll`**（否则随内容滚走）；轨道节点由插件 spawn，容器已有轨道子节点时不再重复 spawn（否则子节点每帧增殖）。
+
+**填满：`xui::region_fill()`**（`xui/src/layout.rs`）
+
+- `region_fill()` = `flex_grow:1 + min_width/min_height:ZERO`；`fill_region(&mut node)` 改写既有节点并清掉百分比高度。
+- **有兄弟节点的列里禁止 `height: Val::Percent(100.0)`**：百分比高度相对父容器内容盒算，同列还有固定高度兄弟（分屏的 38px 页签条）时会把底部顶出视口（审计 D2：终端状态条永久掉出 38px）。分屏三页（编辑器/差异/终端）已改 `region_fill`。
+
+**省略：`xui::Ellipsis`**（`xui/src/ellipsis.rs`）
+
+- bevy 0.20 **没有** `TextTruncate`，`TextBounds` 官方自陈硬裁不可靠 → 省略号必须自建。
+- 测量走 bevy 自己的排版管线（`TextPipeline::create_text_measure`），与渲染同一套度量；决策是纯函数 `compute_ellipsis(source, tail, min_keep, mode, avail, measure)`：装得下就原样，装不下就在「可变前缀」上二分。
+- 两种模式：`EllipsisMode::End`（`abc…`）与 `EllipsisMode::Mid`（路径：`a/…/x/y.rs`，保留首段与末两段）。中段模式的「完整文本」是**原文**，不是 `head+suffix`。
+- `EllipsisCache` 按 `(源文本, 可用宽, 字号, 省略号, 模式)` 记忆结果（命中/未命中计数可观测），宽度不变时不重复测量。
+- **前提**：节点宽度必须**确定**（固定宽 / 百分比 / flex 收缩后的宽度），否则文本把节点撑开，没有「装不下」这回事；文本节点要能收缩（`flex_shrink:1 + min_width:ZERO`）。
+- 业务侧用 `fonts::ellipsis_text()` / `fonts::ellipsis_path_text()` 构造（自带 `TextLayout{NoWrap}` + `Ellipsis`）。
+
+**对话输入区**（`xgent_ui/src/chat_panel.rs`）
+
+- 三段式：外框（边框/焦点环/忙碌红边）+ 内层滚动区（`ScrollFrame`）+ 文本节点。文本节点**不挂 `Text`**——`Text` 与 `EditableText` 会争同一个 `ContentSize`（一个按 `Text` 量、一个按 `visible_lines` 量），高度会时对时错；但缺 `Text` 时 `require_markers` 下节点必须自带 `Pickable` 才收得到点击。
+- **高度自适应靠 `EditableText::visible_lines`**：bevy 0.20 的可编辑文本节点高度只看 `visible_lines`（默认 `Some(1.0)`），不由文本内容决定 → `update_input_visible_lines` 按排版结果回写可视行数。
+- **光标行跟随要自己写**：bevy 的 `TextViewport::reveal_caret` 只在焦点变化时触发，继续打字不会跟随光标（长输入会把当前行藏起来）→ `update_input_scroll_to_caret` 按 `TextLayoutInfo.cursor` 的光标矩形自己算滚动目标。
+
+**虚拟列表**（`xui/src/virtual_list.rs` + `xgent_ui` 的文件树/会话历史）
+
+- `VirtualList` 给出可见区间（`first_visible`/`visible_count`）；`VirtualListItem` 标记的行会把**实测高度**写回列表（不等高：估算 + 实测回写的累积偏移表，`build_measured_offsets` / `compute_visible_range_measured`）。
+- 业务侧三件套：数据层拍平成一维（文件树 `flatten_tree`）、只 spawn 可见行（绝对定位到行位）、**占位块撑出列表总高度**（否则滚动条只反映已渲染的行）。
+- **数据换代要带代次**（`FileTreeRow.generation`）：数据重建后落在可见区间内的旧行内容会过期（同一文件出现两行）。
+- **虚拟列表需要视口高度才有内容**：headless 装配没有渲染目标时视口高 0 → 可见行数为 0 → 列表看起来是空的（文件树因此加最小高度 240px）。
+
+**headless 装配清单**（这轮踩得最多，M3 顺带修好 12 个长期红测）：UI 布局要有尺寸，需要 `bevy::ui::UiPlugin` + `bevy::window::WindowPlugin` + 相机 + `bevy::picking::PickingPlugin`（否则 `bevy_ui::widget::viewport` 缺 `HoverMap`）+ `bevy::image::ImagePlugin` 与 `init_asset::<TextureAtlasLayout>()`；**`xgent_ui::overlay::OverlayPlugin` 必装**（`DrawerToggle` 消息由它注册，缺它时文件面板整体报错、文件树从不重建）。排查手段：临时给 bevy 加 `debug` feature，系统名会直接印在报错里。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

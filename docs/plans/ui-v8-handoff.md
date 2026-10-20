@@ -1,113 +1,129 @@
 # UI v8 交接：进度、基线与下一步
 
 > 用途：跨会话交接。**进度台账以 [ui-v8-tasks.md](ui-v8-tasks.md) 为准**（任务级勾选），本文记录「到哪儿了、基线是什么、下一步怎么开工、有哪些坑」。
-> 更新时间：2026-10-20（M2b 归档后）。
+> 更新时间：2026-10-20（M3 交付后）。
 
 ---
 
 ## 0. 一句话现状
 
-UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）已交付并归档**；`cargo check --workspace` 绿，`xgent_ui` lib 76 项测试全绿。下一期按台账顺序是 **M3 滚动契约与省略**（备选：S1 3D 视口，需先补 G7 性能 spike）。
+UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）已交付**；`cargo check --workspace` 绿，`xgent_ui` lib 76 项 + `xui` 103 项测试全绿。下一期按台账顺序是 **M4 跨平台字体与终端双宽**（⚠ 硬门槛 A：三平台 `mono` 解析不到真实等宽就停止铺开）。
 
 ---
 
 ## 1. 已交付里程碑
 
-| 期 | Comet change | 归档提交 | 实现提交 | 关键落点 |
-|:---|:---|:---|:---|:---|
-| M1 分层与模态 | `v8-m1-layering` | `f5fdb87` | `e7834fe` | `theme::z` 六静态层根 + `layout.rs` 层根 + `kit::layer_root`；`picking.rs` 与 `UiPickingSettings{require_markers:true}`；`modal.rs` 的 `ModalStack/Dismiss/ModalPush/Pop` 与栈深 z；`overlay.rs` 的 `OverlayRegistry` + `DrawerToggle`；tooltip 挂 TOOLTIP 层 |
-| M2a 主题与令牌 | `v8-m2-tokens` | `7f67dc1` | `141d05c` | `ThemeHandle{theme,generation}` 唯一权威 + `Themed` 重绘；`Theme::dark()` 降 `pub(crate)`；`px()` 唯一入口；`theme::size` 尺寸令牌；星形/`Color::WHITE` 入 theme；窗口 1280×800 |
-| M2b 密度与 hover | `v8-m2b-density-hover` | `9bb29c9` | `6d83d18` | `density.rs`（`DensityBase` 基线写回，幂等）；`Preferences.density` + `ThemeHandle.density`；设置面板密度分段按钮 + `SaveDensityMessage` + daemon 白名单；`kit.rs` hover 改为 `Changed<Hovered>/Changed<Pressed>` + `RemovedComponents<Pressed>` 松手帧 + `HoverTintPollStats` |
+| 期 | 交付形式 | 提交 | 关键落点 |
+|:---|:---|:---|:---|
+| M1 分层与模态 | Comet change `v8-m1-layering` | 归档 `f5fdb87` / 实现 `e7834fe` | `theme::z` 六静态层根 + `layout.rs` 层根 + `kit::layer_root`；`picking.rs` 与 `UiPickingSettings{require_markers:true}`；`modal.rs` 的 `ModalStack/Dismiss/ModalPush/Pop` 与栈深 z；`overlay.rs` 的 `OverlayRegistry` + `DrawerToggle`；tooltip 挂 TOOLTIP 层 |
+| M2a 主题与令牌 | Comet change `v8-m2-tokens` | 归档 `7f67dc1` / 实现 `141d05c` | `ThemeHandle{theme,generation}` 唯一权威 + `Themed` 重绘；`Theme::dark()` 降 `pub(crate)`；`px()` 唯一入口；`theme::size` 尺寸令牌；星形/`Color::WHITE` 入 theme；窗口 1280×800 |
+| M2b 密度与 hover | Comet change `v8-m2b-density-hover` | 归档 `9bb29c9` / 实现 `6d83d18` | `density.rs`（`DensityBase` 基线写回，幂等）；`Preferences.density` + `ThemeHandle.density`；设置面板密度分段按钮 + `SaveDensityMessage` + daemon 白名单；`kit.rs` hover 改为 `Changed<Hovered>/Changed<Pressed>` + `RemovedComponents<Pressed>` 松手帧 + `HoverTintPollStats` |
+| M3-T1/T2 滚动契约 | 直接提交 | `19fff0a` | `xui::scroll_frame`（`ScrollFrame` 唯一入口 + overflow 运行时回写 + 视口/滚动条成套 + `scroll_to_child`）；删 `ScrollArea`；修 xui 滚动条两个缺陷（轨道随内容滚走 / 每帧增殖轨道）；`xgent_ui` 9 处 `Overflow::clip_y()` 归零；工具卡结果区重构（文本挪进子节点 + 按 `tool_call_id` 定位） |
+| M3-T3 填满契约 | 直接提交 | `3acbb17` | `xui::layout::region_fill()`；分屏三页改 `region_fill`（修 D2 的 38px 顶出）；对话输入区改「外框 + 内层滚动 + 文本节点」三段式 + `visible_lines` 自适应 + 光标行跟随；chips 行改 wrap |
+| M3-T4/T5 省略原语 | 直接提交 | `663d1ad` | `xui::ellipsis`（`Ellipsis`/`EllipsisMode::{End,Mid}` + `compute_ellipsis` 纯函数 + `EllipsisCache` + 中段省略）；6 处截断点接入（文件树/页签/状态栏/命令面板/工具卡/确认弹窗） |
+| M3-T6 虚拟列表 | 直接提交 | `f5c4e32` | `xui::VirtualList` 支持不等高（measured 行高表 + 累积偏移表 + 实测回写）；文件树改扁平虚拟列表（数据层 `flatten_tree` + 只渲染可见行 + 占位块撑总高 + 数据代次）；会话历史列表虚拟化；**顺带修好 12 个长期失败的既有测试**（见 §4.3） |
 
-**提交习惯**：归档提交只含 `docs/comet/**` 正式工件；实现文件另起一条 `feat(ui): ...`（提交信息注明归档号）；`.workbuddy/memory` 单独 `chore(memory)`。不提交 `.agents/.claude/.codex/...` 的换行噪声文件。
+**提交习惯**：M1/M2 走 Comet change（归档提交只含 `docs/comet/**` 正式工件，实现文件另起一条 `feat(ui): ...`）；**M3 起直接以提交落地**（台账 §10 记录勘误）。`.workbuddy/memory` 单独 `chore(memory)`。不提交 `.agents/.claude/.codex/...` 的换行噪声文件。
 
 ---
 
 ## 2. 当前基线（下次开工前直接用，别重跑）
 
 - `cargo check --workspace`：通过。
-- `xgent_ui` lib：**76 passed**（基线 69 + M2b 新增 7）。
-- 集成测试（全绿）：`layout`(2)、`modal_settings`(3)、`toast`(1)、`settings_panel_values`(19)、`settings_panel_i18n`(3)、`interaction_model`(7)、`editor_theme_sync`(2)、`conflict_save_guard`(4)、`settings_input_focus`(2)、`density`(4)。
-- `xgent_settings`：14 passed。
+- `xgent_ui` lib：**76 passed**（与 M2b 同）。
+- `xui` lib：**103 passed**（M2b 基线 + M3 新增 34）。
+- 集成测试（`xgent_ui`，全绿）：`layout`(2)、`modal_settings`(3)、`toast`(1)、`settings_panel_values`(19)、`settings_panel_i18n`(3)、`interaction_model`(7)、`editor_theme_sync`(2)、`conflict_save_guard`(4)、`settings_input_focus`(2)、`density`(4)、`scroll_contract`(8)、`ellipsis_contract`(6)、`virtual_list_contract`(3)、**`file_preview`(7)**、**`file_tree_refresh`(5)**。
+  - 标粗的两组在 M2b 基线是**长期失败**（见 §4.3），M3-T6 顺带修好了。
 
-**基线既有失败（不是回归，别当自己弄坏的）**——已用 `git stash` 撤改动复跑确认：
+**基线既有失败（不是回归，别当自己弄坏的）**——`cargo test --workspace` 里仍有：
 
 | 目标 | 数量 | 现象 |
 |:---|:---|:---|
-| `tests/file_preview.rs` | 7 | `Parameter ::messages failed validation: Message not initialized` |
-| `tests/file_tree_refresh.rs` | 5 | 同上 |
-| `settings_core::paths::daemon_socket_env_override` | 1 | Windows 下期望 `/tmp/.../daemon.sock`，实际 named pipe |
-| `daemon::config_store::global_write_lands_inside_the_isolated_dir` | 1 | 多个测试并行写同一个临时配置文件，基线两次复跑都失败 |
-
-复跑基线的办法：`git stash push -- <你有改动的源文件>` → 跑目标测试 → `git stash pop`。
+| `xgent_tools` `builtins::run_command::tests::*` | 6 | 依赖 POSIX shell，Windows 上失败 |
+| `xgent_plugin_host` `git_plugin` / `ecs_registration` | 6 | git 插件 WASM 未构建（`preview-diff` 导出缺失） |
+| `xgent_daemon::config_store::global_write_lands_inside_the_isolated_dir` | 1 | 多个测试并行写同一个临时配置文件 |
+| `xgent_settings_core::paths::daemon_socket_env_override` | 1 | Windows 下期望 `/tmp/.../daemon.sock`，实际 named pipe |
+| `xgent_agent::bridge_tests::max_parallel_tools_written_to_handle_bounds_next_turn` | 1 | 并发时序偶发（复跑通常过） |
 
 ---
 
 ## 3. 环境与工具坑（省时间，逐条都踩过）
 
-1. **必须带**：`CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`（本机全量 debug info 链接极慢甚至卡死）。Comet 检查计划里用 `cmd /c "set X=0&& set Y=0&& cargo ..."` 包装。
-2. **Comet 检查尾部被标 `interrupted`**：先执行 continuation 的 `retry-checks`（`{"kind":"retry-checks","check_ids":[...]}`），Runtime 只重跑这些项并保留已通过项；**不要**一上来就 `doctor --repair`（会清空检查记录，得再用空 checks 分派、让 Verifier 读 `.comet/runtime/native/changes/<change>/logs/checks/*`）。
-3. **`cargo` 报 `invalid metadata files for crate ...`**：target 被写坏了（多为并发/杀软占用）。`cargo clean -p <crate>` 后复跑；这一步偶尔被安全软件打断返回 SIGTERM，重试即可。
-4. **`cargo fmt`** 只能用 `-p <crate>`，`--all` 会改写 `../bevy` 检出。
-5. **headless 测试装配**：`ChatPanelPlugin` 需要 `UiFonts`、`MeshPlugin`、`Clipboard` 与一批 agent 消息（`DeltaMessage`/`BoundedMessage`/`ToastMessage`/`ChatInputSubmitted` 等），缺了只报 `Resource does not exist` 且看不到系统名（bevy `debug` feature 未开）。完整清单见项目知识「ChatPanelPlugin 的 headless 测试装配」，实现样例见 `crates/xgent_ui/tests/density.rs`。
+1. **必须带**：`CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`（本机全量 debug info 链接极慢甚至卡死）。
+2. **`cargo` 报 `invalid metadata files for crate ...`**：target 被写坏了（多为并发/杀软占用）。`cargo clean -p <crate>` 后复跑；这一步偶尔被安全软件打断返回 SIGTERM，重试即可。
+3. **`cargo fmt`** 只能用 `-p <crate>`，`--all` 会改写 `../bevy` 检出。
+4. **headless 装配的坑（这轮踩得最多）**：UI 布局需要**渲染目标**才有尺寸——
+   - 缺 `bevy::ui::UiPlugin` → 没有 `ComputedNode`（尺寸恒 0）；
+   - 缺 `bevy::window::WindowPlugin` → 相机没有视口；
+   - 缺 `bevy::picking::PickingPlugin` → `bevy_ui::widget::viewport` 报缺 `HoverMap`；
+   - 缺 `bevy::image::ImagePlugin` / `init_asset::<TextureAtlasLayout>()` → 字体图集相关系统报错；
+   - 缺 `xgent_ui::overlay::OverlayPlugin` → `DrawerToggle` 消息未注册 → **文件面板整体报错**（这条曾让 12 个测试长期红）。
+   排查手段：临时给 bevy 加 `debug` feature，系统名会直接印在报错里（`bevy` 的 "Enable the debug feature to see the name"）。
+5. **提交信息要写文件再 `git commit -F`**：PowerShell 管道按 GBK 代码页转码，中文提交信息会被搞坏（`git log` 里能看到乱码）。
 6. **验收人独立性**：平台无法自证 Verifier 独立性，`confirm-skill-coordinated-pass` 必须由用户点头，不要代签。
 
 ---
 
-## 4. 下一步 A：M3 滚动契约与省略（推荐）
+## 4. 下一步：M4 跨平台字体与终端双宽（⚠ 硬门槛 A）
 
-### 4.1 起点事实（2026-10-20 实测，不是文档里的旧数字）
+### 4.1 起点事实（2026-10-20 实测）
 
-- `grep -rn "Overflow::clip_y()" crates/xgent_ui/src` = **9 处 / 7 个文件**：`file_panel.rs`、`session_history.rs`(×2)、`command_palette.rs`(×2)、`confirm_dialog.rs`、`editor/mod.rs`、`settings_panel.rs`、`tool_panel.rs`。
-- `xui` **没有** `ScrollFrame`；`xgent_ui`/`xui` **没有** `region_fill()`；**没有** `Ellipsis`；`xui::VirtualList` **0 消费者**。
-- 正确形态的参照实现：`crates/xui/src/scroll_area.rs`（`x: Hidden, y: Scroll` + `ScrollPosition` + 视口 + 滚动条），`scroll_to_child` 已公开。
+- 字体资产只有 `crates/xgent_app/assets/fonts/Inter-Variable.ttf`（**无等宽资产**）→ 审计 A1。
+- `crates/xgent_app/src/startup.rs:88` 非 macOS 走 `Handle::default()` → 实际落回 Inter（不是等宽）。
+- `MonoMetrics`、双宽单元格、`display_width()` 全部**不存在**（grep = 0）。
+- 终端输出仍按 shaper 连续排版（`terminal/output.rs` 的 `font × 0.6` 估算仍在）。
 
-### 4.2 建议拆成 3 个 change（按风险从低到高，每个都能独立回滚）
+### 4.2 建议拆成 3 个 change（按风险从低到高）
 
-| 顺序 | 建议 change 名 | 范围 | 验收（可机器判定） |
-|:---|:---|:---|:---|
-| 1 | `v8-m3-scroll-frame` | M3-T1 + M3-T2：`xui::ScrollFrame::{vertical,horizontal,stick_bottom}`（overflow 由构造器定，不接受外部覆盖）+ 迁移 9 处；`settings_panel` 模型列表（`max_height:150` 且无 `ScrollPosition`）一并接入 | `grep -c "Overflow::clip_y()" crates/xgent_ui/src` = 0；7 处各塞 200 条滚轮可达末项（集成测试） |
-| 2 | `v8-m3-fill-and-input` | M3-T3：`region_fill()` 替换「有兄弟节点的列里 `height:100%`」（`editor/mod.rs`、`terminal/mod.rs`、`diff_view.rs`）；`chat_panel` 输入框自适应到 200 后内部滚动 + 光标行可见；chips 行改 wrap | 700px 高窗口内终端状态条完整可见；长输入不隐藏当前行 |
-| 3 | `v8-m3-ellipsis` | M3-T4 + M3-T5：自建 `Ellipsis`/`Clamp`（`TextPipeline::update_text_layout_info` → `TextLayoutInfo.size` 测量，`(源哈希, 量化宽, 字号)` 缓存 + 2px 迟滞）+ 接 6 处截断点（路径用 `MidEllipsis`），完整值进 tooltip | 6 处宽度不足出 `…` 而非溢出；拖窗口不逐帧重排（缓存命中可观测） |
-| 4（可选，最重） | `v8-m3-virtuallist` | M3-T6：会话消息列表 + 文件树接 `VirtualList`，> 50 条才启用，不等高行用「估算 + 首帧实测回写」 | 500 条滚动不明显劣化；消费者 ≥ 2 |
+| 顺序 | 范围 | 验收（可机器判定） |
+|:---|:---|:---|
+| 1 | **M4-T1 字体装配层**：内嵌 JetBrains Mono（OFL 1.1）到 `crates/xgent_app/assets/fonts/`；`FontSpec/FontCandidate` 候选栈（`mono` 末条必须是内嵌资产）；**删掉** `startup.rs:88` 的 `else { Handle::default() }`；`tracing::info!` 打出实际命中的家族与来源 | ⚠ **硬门槛 A**：三平台各启动一次，日志显示 `mono` 解析到真实等宽字体（非 Inter）；不过则停止铺开 |
+| 2 | **M4-T3 代码与行号消费 `mono`** + **M4-T4 中文排版约束** | 行号列与代码列在 125%/150% 缩放下仍对齐；中英混排无豆腐块 |
+| 3 | **M4-T2 终端双宽单元格**（⚠ 改动面最大）：`MonoMetrics` 启动期实测 + `display_width(char)`（wcwidth 语义）+ 终端按格数 × `cell_w` 手工定位（保留旧路径 feature flag 做 A/B 对照） | 三平台 `ls -l` / 中文输出 / `top` 列对齐正确；`vim` 全屏 TUI 不乱行 |
 
-> 顺序理由：T1/T2 是「唯一入口 + 迁移」，改完立刻让 `clip_y` 归零、后续几项才有正确基座；T4 是引擎缺口（bevy 0.20 无 `TextTruncate`），自建测量风险最高，单独 change 便于回滚。
+> 顺序理由：T1 是硬门槛（不满足就没必要做 T2 的按格定位）；T3/T4 只换字体与排版约束，风险低；T2 最重，独立提交便于回滚。
 
-### 4.3 开工前读什么
+### 4.3 M3 顺带修好的 12 个长期失败测试（别再当成"基线失败"）
 
-- `docs/plans/ui-v8-tasks.md` §M3（任务原文与行号）
-- `docs/design/ui-v8-layout-architecture.md` §4（滚动契约）、§5（省略与测量）
-- `crates/xui/src/scroll_area.rs`、`crates/xgent_ui/src/chat_panel.rs:174-175`（现有正确用法样例）
-
----
-
-## 5. 下一步 B（备选）：S1 3D 视口
-
-- 闸门：M1 已满足 **G1（层根/拾取）**、M2a 已满足 **G2（主题热驱动）**；**G7 性能 spike 仍缺**（2k 节点、实例化/合批、降级阶梯）。
-- S1 范围：`xgent_spatial` 图 → 离屏纹理（`RenderTarget::Image`）→ UI `ImageNode` 呈现 + 只读相机（轨道/缩放/拾取）。**不做**：写回代码、L3 源码渲染、时间轴（S3）；L1/L2（文件/符号）数据也不在 S1。
-- `Slot::Center` 是 **S2** 的前提（G3），S1 不需要。
-- 建议先单开一个 `v8-s1-perf-spike` change 交 G7 结论，再决定是否进 S1；不要和 M3 并行（都要动 `xgent_ui` 主区结构）。
+`file_preview`(7) + `file_tree_refresh`(5) 的根因**不是**产品缺陷，而是 headless 装配缺
+`xgent_ui::overlay::OverlayPlugin`（`DrawerToggle` 消息未注册 → 文件面板的系统整体报错，
+文件树从未重建）。M3-T6 补上插件并补齐装配缺项后全绿。
+改动落在 `crates/xgent_ui/tests/file_preview.rs` 与 `tests/file_tree_refresh.rs`：
+加插件/窗口/UI/picking/相机/资产；抽屉开关改走 `DrawerToggle` 消息（M1-T4 之后
+`OverlayRegistry` 是唯一权威，直接改 Resource 会与注册表失配）。
 
 ---
 
-## 6. 本轮遗留风险（M2b，Verifier 已记录；不修也不违约）
+## 5. M3 之后的可选方向（按台账 §8 里程碑表）
 
-1. **同帧后段 spawn 的节点有一帧舒适间距**：`capture_density_bases` 在 `Update` 里没有相对各 spawn 系统的排序约束。若想彻底消除，把它挪到 `PostUpdate` 且 `.before(UiSystem::Layout)`；改动很小但要重跑验收。
-2. **主题换色时正悬停节点不会即时刷新 hover 色**：改成变更驱动后的固有代价，等下一次指针状态变化；当前只有 dark 单主题，不可观测。
+- **M5 槽位注册表**（⚠ 最大改动面）：`PanelRegistry` 取代 `SideViewContent` closed 枚举、派生可见性单一系统、`SplitTree` 分割模型。
+- **M6 会话内容**：`Transcript` 有序树 + Markdown + 输入区（依赖 M3 的滚动/省略/填满契约；M3-T6 的会话消息列表虚拟化随 M6-T1 一起做，见台账 §10 勘误 13）。
+- **M7 闭环**：快捷键单一来源、焦点栈、i18n 扩面、几何断言层（台账 §0.2 的 P0 缺陷回归测试多数在 M7 收口）。
+- **M8 Git 探针**（北极星：新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）。
+
+---
+
+## 6. 本轮遗留风险（Verifier 口径，不修也不违约）
+
+1. **对话输入区的可视行数是 1 帧滞后**：`update_input_visible_lines` 在 PostUpdate 写 `visible_lines`，下一帧的 Content 阶段才生效——打字时输入框高度有极轻微的滞后感。
+2. **光标行跟随也是 1 帧滞后**（同上，滚动位置写入 PostUpdate → 下一帧布局生效）。
+3. **文件树最小高度 240px**：窗口极矮时树会超出抽屉（抽屉 `overflow: clip` 会裁掉底部）——极端小窗下的取舍，非典型场景。
+4. **虚拟列表只覆盖固定行高场景**：不等高（会话消息列表）待 M6-T1。
+5. **省略号测量每帧最多触发一次二分**（宽度不变时命中缓存）；拖窗口改变宽度时会重新二分（log2(n) 次排版），超大文本时可能有轻微开销。
 
 ---
 
 ## 7. 下次开工的前 5 步
 
-1. `comet native status --json` 确认无活动 change（当前 14 条全是 Archive）。
-2. 读本文 §4 + `docs/plans/ui-v8-tasks.md` §M3。
-3. 复核 §4.1 的三条 grep（数字会随 M3 推进变化）。
-4. `comet native new v8-m3-scroll-frame --isolation current --language zh-CN --json`，Shape 只圈 T1+T2。
-5. Shape 里的验收写死成：`clip_y` = 0 + 7 处 200 条可达末项 + 既有 lib/集成测试不回归。
+1. `git log --oneline -8` 确认 M3 四个提交在 HEAD。
+2. 读本文 §4 + `docs/plans/ui-v8-tasks.md` §M4。
+3. 复核 §4.1 的三条事实（字体资产 / `startup.rs:88` / `MonoMetrics` 是否存在）。
+4. 准备 JetBrains Mono 资产（OFL 1.1，subset 到 ASCII + 常用符号）并放进 `crates/xgent_app/assets/fonts/`。
+5. 先做「硬门槛 A」的最小验证：三平台启动一次，日志打出 `mono` 命中的家族与来源。
 
 ---
 
 ## 8. 维护约定
 
-- 每次 change 归档后更新本文 **§1（交付表）** 与 **§2（基线数字/既有失败）**；§4 的「起点事实」在开工时复核一次。
-- 任务级勾选仍记在 [ui-v8-tasks.md](ui-v8-tasks.md)；两边冲突时以「归档 change + 代码实测」为准，并在台账 §10 记勘误。
+- 每次里程碑交付后更新本文 **§1（交付表）** 与 **§2（基线数字/既有失败）**；§4 的「起点事实」在开工时复核一次。
+- 任务级勾选仍记在 [ui-v8-tasks.md](ui-v8-tasks.md)；两边冲突时以「提交 + 代码实测」为准，并在台账 §10 记勘误。
