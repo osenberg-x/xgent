@@ -40,10 +40,7 @@ fn file_drawer_panel_spawns_with_plugin() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_resource::<Localizer>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins(LayoutPlugin)
         .add_plugins(xgent_ui::overlay::OverlayPlugin)
         .add_plugins(xgent_ui::file_panel::FilePanelPlugin)

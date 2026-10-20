@@ -53,10 +53,7 @@ fn file_tree_shows_top_level_files() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_asset::<bevy::image::TextureAtlasLayout>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::window::WindowPlugin::default(),
@@ -119,10 +116,7 @@ fn file_tree_refreshes_on_file_changed_event() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_asset::<bevy::image::TextureAtlasLayout>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::window::WindowPlugin::default(),
@@ -203,10 +197,7 @@ fn expanded_dirs_preserved_across_rebuild() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_asset::<bevy::image::TextureAtlasLayout>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::window::WindowPlugin::default(),
@@ -299,10 +290,7 @@ fn ignored_dirs_excluded_from_tree() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_asset::<bevy::image::TextureAtlasLayout>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::window::WindowPlugin::default(),
@@ -376,10 +364,7 @@ fn selected_marker_preserved_across_rebuild() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_asset::<bevy::image::TextureAtlasLayout>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::window::WindowPlugin::default(),

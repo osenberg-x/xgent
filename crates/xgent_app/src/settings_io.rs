@@ -1069,7 +1069,10 @@ mod tests {
             .init_resource::<Localizer>()
             .insert_resource(xgent_ui::fonts::UiFonts {
                 ui: Handle::default(),
-                mono: Handle::default(),
+                // 测试/无头装配：等宽走通用等宽族（真实 app 由 startup::load_fonts 解析候选栈）
+                mono: bevy::text::FontSource::Generic(bevy::text::GenericFontFamily::Monospace),
+                ui_cjk: bevy::text::FontSource::Generic(bevy::text::GenericFontFamily::SansSerif),
+                mono_cjk: bevy::text::FontSource::Generic(bevy::text::GenericFontFamily::Monospace),
             })
             .insert_resource(GlobalConfigRes::default())
             .insert_resource(ProjectConfigRes::default())

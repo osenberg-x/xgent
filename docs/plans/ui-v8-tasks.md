@@ -198,12 +198,17 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## M4 跨平台字体与终端双宽（修 A1/A3，⚠ 硬门槛 A）
 
+> 状态：**M4-T1 已交付**（Comet change `v8-m4-font-assembly`）；M4-T2/T3/T4 未开工。
+> 台账与勘误见本文 §10。
+
 ### M4-T1 字体装配层（三平台一阶）
-- [ ] 内嵌 **JetBrains Mono**（OFL 1.1）到 `crates/xgent_app/assets/fonts/`，与 `Inter-Variable.ttf` 同目录（今天只有 Inter，✅ 已核实）。
-- [ ] `FontSpec/FontCandidate` 候选栈数据表：`mono` 末条必须为内嵌资产；`ui_cjk`/`mono_cjk` 走系统发现（`system_font_discovery` 已启用，根 `Cargo.toml:7`）。
-- [ ] **删除** `startup.rs:88` 的 `else { Handle::default() }` 分支（这是 A1 的直接病灶）；`fonts.rs:19-20` 注释同步。
-- [ ] `tracing::info!` 输出实际命中家族与来源（C-FONT-2）。
+- [x] 内嵌 **JetBrains Mono**（OFL 1.1）到 `crates/xgent_app/assets/fonts/`，与 `Inter-Variable.ttf` 同目录（今天只有 Inter，✅ 已核实）。
+- [x] `FontSpec/FontCandidate` 候选栈数据表：`mono` 末条必须为内嵌资产；`ui_cjk`/`mono_cjk` 走系统发现（`system_font_discovery` 已启用，根 `Cargo.toml:7`）。
+- [x] **删除** `startup.rs:88` 的 `else { Handle::default() }` 分支（这是 A1 的直接病灶）；`fonts.rs:19-20` 注释同步。
+- [x] `tracing::info!` 输出实际命中家族与来源（C-FONT-2）。
 - **验收（硬门槛 A）**：三平台各启动一次，日志显示 `mono` 解析到真实等宽字体（非 Inter）；不过则停止铺开并升级处理。
+  - Windows（本机）：✅ `tests/font_slots.rs::mono_resolves_to_real_monospace_on_this_machine` 断言本机解析到真等宽（家族 ≠ Inter）。
+  - macOS / Linux：⏳ 需在对应平台各启动一次确认同一行日志（本变更无法在本机覆盖）。
 
 ### M4-T2 终端双宽单元格（⚠ 最大改动面）
 - [ ] `MonoMetrics { latin_advance, cjk_advance, line_height, at_size }` 启动期实测；校验 `cjk_advance ≈ 2×latin_advance`，不满足记警告并调基准（C-FONT-4）。
@@ -390,6 +395,10 @@ M1 与 M2 相互独立，可并行分头推进。
 14. **虚拟列表的数据换代需要「代次」**（M3-T6）：数据重建后，落在可见区间内的旧行内容会过期（同一文件出现两行）。行上记数据代次（`FileTreeRow.generation`），换代即作废旧行。
 15. **虚拟列表需要视口高度才有内容**（M3-T6）：headless 装配没有渲染目标时视口高 0 → 可见行数为 0 → 列表看起来是空的。文件树因此加最小高度 240px（`FILE_TREE_MIN_H`）。
 16. **省略号的「中段」模式不能用「head + suffix」当完整文本**（M3-T4）：中段省略的完整文本是**原文**；`head + suffix` 是省略后的形态（少了中间段且还没有省略号），拿它判断「是否装得下」会漏判。
+17. **bevy 0.20 的「系统字体发现」要自己查集合**（M4-T1）：`parley/system` 特性让 `fontique::Collection` 默认加载系统字体（`CollectionOptions::default().system_fonts == true`），但**没有**「按家族名查存在性」的便捷 API——用 `collection.family_names()` 取快照或 `collection.family_id(name)`（两者都要 `&mut`，所以要先收集快照再闭包查询）。另：`Font::from_bytes` 的 `alias` 是**空串**（内嵌资产只能按 `FontSource::Handle` 引用，不能按家族名进 fallback 链）。
+18. **`ui` 槽位不能带字体句柄**（M4-T1）：`xgent_ui::fonts::ui_text` 不接收 `UiFonts`（约 50 处调用点），所以 `ui` 槽位只能继续用**默认字体资产**（`Handle::default()` → 内嵌 Inter Variable），CJK 靠 parley 的系统回退承担。设计系统的 `ui_cjk` 槽位本轮只做**解析与日志**（保证 CJK 可用性可核对），专用 CJK 表面留给 M4-T4。
+19. **`UiFonts.mono` 的类型从 `Handle<Font>` 变成 `FontSource`**（M4-T1）：候选栈的解析结果不是单一资产而是「家族名或内嵌句柄」，只能用 `FontSource` 表达；`mono_text` / `mono_text_weighted` 的调用点不变（`FontSource` 直接进 `TextFont.font`）。headless 装配用 `UiFonts::fallback()`（等宽与 CJK 走系统通用族）。
+20. **硬门槛 A 的跨平台部分无法在本机验证**（M4-T1）：本机（Windows）可用 `tests/font_slots.rs::mono_resolves_to_real_monospace_on_this_machine` 断言解析到真等宽；macOS / Linux 的同一行启动日志需在对应平台各启动一次确认（台账 M4-T1 验收已标注为待确认）。
 
 
 ## 附：文档树变更（2026-10-16，已完成）

@@ -22,6 +22,13 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 | M3-T3 填满契约 | 直接提交 | `3acbb17` | `xui::layout::region_fill()`；分屏三页改 `region_fill`（修 D2 的 38px 顶出）；对话输入区改「外框 + 内层滚动 + 文本节点」三段式 + `visible_lines` 自适应 + 光标行跟随；chips 行改 wrap |
 | M3-T4/T5 省略原语 | 直接提交 | `663d1ad` | `xui::ellipsis`（`Ellipsis`/`EllipsisMode::{End,Mid}` + `compute_ellipsis` 纯函数 + `EllipsisCache` + 中段省略）；6 处截断点接入（文件树/页签/状态栏/命令面板/工具卡/确认弹窗） |
 | M3-T6 虚拟列表 | 直接提交 | `f5c4e32` | `xui::VirtualList` 支持不等高（measured 行高表 + 累积偏移表 + 实测回写）；文件树改扁平虚拟列表（数据层 `flatten_tree` + 只渲染可见行 + 占位块撑总高 + 数据代次）；会话历史列表虚拟化；**顺带修好 12 个长期失败的既有测试**（见 §4.3） |
+| M4-T1 字体装配层 | Comet change `v8-m4-font-assembly` | 见 §1.1 | `xgent_ui::fonts`：四槽位模型（`FontSlot`/`FontSpec`/`FontCandidate`）+ 纯函数 `resolve_slot`（系统命中 → 内嵌兜底 → 失败记警告）；`UiFonts` 扩为 `mono/ui_cjk/mono_cjk: FontSource`；内嵌 **JetBrains Mono**（OFL 1.1，264KB）；`startup::load_fonts` 解析四槽位并打「槽位→家族名→来源」日志；**删除** `else { Handle::default() }` 分支 |
+
+### 1.1 M4-T1 的硬门槛 A 状态
+
+- ✅ **Windows（本机）**：`tests/font_slots.rs::mono_resolves_to_real_monospace_on_this_machine` 断言本机解析到真实等宽（家族 ≠ Inter）。
+- ⏳ **macOS / Linux**：需在对应平台各启动一次 `xgent_app`，确认启动日志里 `mono` 那行是 system/embedded 来源的真实等宽家族。这是**唯一还没闭环的验收项**，闭环前不要开始 M4-T2（终端双宽按格定位的前提是 mono 真的是等宽）。
+
 
 **提交习惯**：M1/M2 走 Comet change（归档提交只含 `docs/comet/**` 正式工件，实现文件另起一条 `feat(ui): ...`）；**M3 起直接以提交落地**（台账 §10 记录勘误）。`.workbuddy/memory` 单独 `chore(memory)`。不提交 `.agents/.claude/.codex/...` 的换行噪声文件。
 
@@ -68,20 +75,21 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 
 ### 4.1 起点事实（2026-10-20 实测）
 
-- 字体资产只有 `crates/xgent_app/assets/fonts/Inter-Variable.ttf`（**无等宽资产**）→ 审计 A1。
-- `crates/xgent_app/src/startup.rs:88` 非 macOS 走 `Handle::default()` → 实际落回 Inter（不是等宽）。
-- `MonoMetrics`、双宽单元格、`display_width()` 全部**不存在**（grep = 0）。
+- 字体资产：`crates/xgent_app/assets/fonts/` 现有 **Inter-Variable.ttf**（879KB）+ **JetBrainsMono-Regular.ttf**（264KB，M4-T1 新增）+ `OFL.txt` + `README.md`（来源与许可说明）。
+- `mono` 槽位已按候选栈装配（`xgent_ui::fonts::font_specs()`），**不再有** `cfg!(target_os)` 特权路径，也不再有 `Handle::default()` 兜底。
+- `MonoMetrics`、双宽单元格、`display_width()` 全部**不存在**（grep = 0）→ M4-T2 未开工。
 - 终端输出仍按 shaper 连续排版（`terminal/output.rs` 的 `font × 0.6` 估算仍在）。
+- `type_scale` 仍无 `CODE` 档、`SMALL` 仍是 12.5、`line_height` 无 `CJK` → M4-T3/T4 未开工。
 
 ### 4.2 建议拆成 3 个 change（按风险从低到高）
 
 | 顺序 | 范围 | 验收（可机器判定） |
 |:---|:---|:---|
-| 1 | **M4-T1 字体装配层**：内嵌 JetBrains Mono（OFL 1.1）到 `crates/xgent_app/assets/fonts/`；`FontSpec/FontCandidate` 候选栈（`mono` 末条必须是内嵌资产）；**删掉** `startup.rs:88` 的 `else { Handle::default() }`；`tracing::info!` 打出实际命中的家族与来源 | ⚠ **硬门槛 A**：三平台各启动一次，日志显示 `mono` 解析到真实等宽字体（非 Inter）；不过则停止铺开 |
+| 1 | **M4-T1 字体装配层** ✅ 已交付 | 见 §1.1（Windows 已闭环；macOS/Linux 待确认） |
 | 2 | **M4-T3 代码与行号消费 `mono`** + **M4-T4 中文排版约束** | 行号列与代码列在 125%/150% 缩放下仍对齐；中英混排无豆腐块 |
 | 3 | **M4-T2 终端双宽单元格**（⚠ 改动面最大）：`MonoMetrics` 启动期实测 + `display_width(char)`（wcwidth 语义）+ 终端按格数 × `cell_w` 手工定位（保留旧路径 feature flag 做 A/B 对照） | 三平台 `ls -l` / 中文输出 / `top` 列对齐正确；`vim` 全屏 TUI 不乱行 |
 
-> 顺序理由：T1 是硬门槛（不满足就没必要做 T2 的按格定位）；T3/T4 只换字体与排版约束，风险低；T2 最重，独立提交便于回滚。
+> 顺序理由：T1 是硬门槛（不满足就没必要做 T2 的按格定位）；T3/T4 只换字体与排版约束，风险低；T2 最重，独立提交便于回滚。**T2 开工前先确认 §1.1 的 macOS/Linux 日志**。
 
 ### 4.3 M3 顺带修好的 12 个长期失败测试（别再当成"基线失败"）
 

@@ -38,10 +38,7 @@ fn test_app() -> App {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_asset::<bevy::image::TextureAtlasLayout>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins((
             bevy::input::InputPlugin,
             bevy::input_focus::InputFocusPlugin,

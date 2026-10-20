@@ -802,6 +802,23 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 
 **headless 装配清单**（这轮踩得最多，M3 顺带修好 12 个长期红测）：UI 布局要有尺寸，需要 `bevy::ui::UiPlugin` + `bevy::window::WindowPlugin` + 相机 + `bevy::picking::PickingPlugin`（否则 `bevy_ui::widget::viewport` 缺 `HoverMap`）+ `bevy::image::ImagePlugin` 与 `init_asset::<TextureAtlasLayout>()`；**`xgent_ui::overlay::OverlayPlugin` 必装**（`DrawerToggle` 消息由它注册，缺它时文件面板整体报错、文件树从不重建）。排查手段：临时给 bevy 加 `debug` feature，系统名会直接印在报错里。
 
+### 5.21 跨平台字体候选栈（v8 M4-T1）
+
+`mono`（等宽）曾经是「macOS 独占特权路径」：非 macOS 走 `Handle::default()`，而默认槽位已被 Inter 占据——**Windows/Linux 上的「等宽」其实是比例字体**（审计 A1）。v8 改成**按槽位装配**：
+
+- **四个槽位**（`xgent_ui::fonts::FontSlot`）：`ui`（界面拉丁，内嵌 Inter Variable 作默认字体资产）、`ui_cjk`（界面中文）、`mono`（代码/终端/diff/行号）、`mono_cjk`（终端内中文）。
+- **候选栈**（`FontSpec` + `FontCandidate`）：每槽一份**有序**候选，平台差异只存在于这份**数据**里（`font_specs()` 按 `std::env::consts::OS` 选表），代码**不分叉**（禁止 `cfg!(target_os = …)`，`tests/font_slots.rs` 有源码级断言守住）。
+- **解析规则**（`resolve_slot`，纯函数）：① 按栈序取第一个系统里**真实存在**的家族（用 parley 字体集合的家族名快照判定）→ `FontOrigin::System`；② 全缺则用该槽位的**内嵌兜底资产** → `FontOrigin::Embedded`；③ 再全缺 → `FontOrigin::Failed` + 该槽位声明的通用族兜底，**调用方记 `warn!`**（绝不静默）。
+- **硬约束**：`mono` **永不**回退到 `ui` 槽位或任何比例字体（设计系统 C-FONT-1）；它的兜底通用族是 `Monospace`，内嵌兜底是 **JetBrains Mono**（OFL 1.1，随包分发，`assets/fonts/`）。
+- **可核对**：`xgent_app::startup::load_fonts` 启动时解析四个槽位并 `tracing::info!` 打出「槽位 → 家族名 → 来源」（C-FONT-2），三平台各启动一次即可核对；`assets/fonts/README.md` 记了两个字体的来源与许可。
+
+**坑**：
+
+- **`ui` 槽位不能带字体句柄**：`ui_text` 不接收 `UiFonts`（约 50 处调用点），所以 `ui` 只能继续用默认字体资产；CJK 靠 parley 的系统回退承担（`ui_cjk` 本轮只做解析与日志，专用 CJK 表面留给 M4-T4）。
+- **内嵌资产的 `alias` 是空串**：`Font::from_bytes` 不解析家族名 → 内嵌字体只能按 `FontSource::Handle` 引用，**不能**写进 `FontSource::Families` 的 fallback 链。
+- **查家族存在性要先取快照**：`collection.family_id(name)` / `family_names()` 都要 `&mut` → 先 `family_names().map(String::from).collect()` 再用闭包查。
+- `UiFonts.mono` 的类型是 `FontSource`（候选栈解析结果），不是 `Handle<Font>`；headless 装配用 `UiFonts::fallback()`。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 

@@ -151,10 +151,7 @@ fn chat_app() -> App {
         .init_resource::<Localizer>()
         .init_resource::<Conversation>()
         .init_resource::<bevy::clipboard::Clipboard>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .insert_resource(xgent_ui::kit::IconAssets::default())
         .add_message::<UserInputMessage>()
         .add_message::<DeltaMessage>()

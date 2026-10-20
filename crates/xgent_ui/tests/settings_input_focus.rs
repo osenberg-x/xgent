@@ -48,10 +48,7 @@ pub(crate) fn test_app() -> App {
         .add_plugins(bevy::mesh::MeshPlugin)
         .init_resource::<Theme>()
         .init_resource::<Localizer>()
-        .insert_resource(UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(UiFonts::fallback())
         .insert_resource(xgent_settings::GlobalConfigRes::default())
         .insert_resource(xgent_settings::ProjectConfigRes::default())
         .insert_resource(xgent_agent::ProviderInfo {

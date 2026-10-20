@@ -1,0 +1,93 @@
+schema: comet.native.v4
+name: v8-m4-font-assembly
+language: zh-CN
+phase: build
+status: active
+state_version: 3
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 4d413ca227c908f3080f6076bcef03893114ba1b1e4f101f1458ba9315ae2a9b
+spec_changes:
+  - capability: ui-m4-font-assembly
+    operation: create
+    source: specs/ui-m4-font-assembly/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: building
+  goal_cycle: 1
+  iteration: 1
+  attempt: 0
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: submit-builder-candidate
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1 `mono` 槽位在全缺系统等宽时回退到内嵌 JetBrains Mono：给定候选集合里没有任何家族可用，解析结果的来源是
+      `Embedded`、家族名是 JetBrains Mono，且**不等于** `ui` 槽位的家族。
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: A2 候选栈按顺序命中：给定系统里存在第二个候选家族，解析结果取第二个（不是第一个、不是最后一个）。
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: A3 解析失败是警告不是静默：给定某槽位无任何可用家族且无内嵌资产，解析结果标记为失败（调用方据此 `warn!`），不静默返回 `ui` 槽位。
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: A4 平台差异只在数据里：`crates/` 内字体相关代码的 `cfg!(target_os` 命中数为 0。
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: A5 内嵌资产就位：`crates/xgent_app/assets/fonts/` 存在 JetBrains Mono 字体文件（OFL
+      1.1），并被装配为 `mono` 槽位的内嵌兜底候选。
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: A6 解析在本机命中真实等宽：在本机系统字体集合上解析 `mono` 槽位，来源是 system 或 embedded，家族名**不是** `ui`
+      槽位的家族（Inter Variable）。
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: A7 既有行为不回归：`xgent_ui` lib 76 项与既有集成测试全绿；`cargo check --workspace` 与 `cargo
+      clippy -p xui -p xgent_ui -p xgent_app --all-targets` 通过。
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: A8 文档同步：`docs/plans/ui-v8-tasks.md` 的 M4-T1 勾选 + §10
+      勘误、`docs/dev-tutorial.md` 新增 M4 小节、`docs/plans/ui-v8-handoff.md` 的交付表与下一步。
+    result: pending
+    reason: null
+builder_handoff: null
+blockers: []
+verification: null
+history: []
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-10-20T09:25:24.262Z

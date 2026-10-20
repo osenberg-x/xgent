@@ -266,10 +266,7 @@ fn file_tree_is_a_scroll_frame() {
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
         .init_resource::<xgent_settings::Localizer>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins(xgent_ui::layout::LayoutPlugin)
         .add_plugins(xgent_ui::overlay::OverlayPlugin)
         .add_plugins(FilePanelPlugin)
@@ -492,10 +489,7 @@ fn chat_app() -> App {
         .init_resource::<xgent_settings::Localizer>()
         .init_resource::<Conversation>()
         .init_resource::<bevy::clipboard::Clipboard>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .insert_resource(xgent_ui::kit::IconAssets::default())
         .add_message::<UserInputMessage>()
         .add_message::<DeltaMessage>()

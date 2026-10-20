@@ -29,10 +29,7 @@ fn toast_lifecycle() {
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(xgent_ui::fonts::UiFonts {
-            ui: Handle::default(),
-            mono: Handle::default(),
-        })
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback())
         .add_plugins(xgent_ui::layout::LayoutPlugin)
         .add_plugins(KitPlugin);
 

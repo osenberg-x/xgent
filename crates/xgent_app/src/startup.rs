@@ -2,10 +2,13 @@
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::text::{FontCx, FontSource, GenericFontFamily};
 use xgent_agent::AgentBridge;
 use xgent_settings_core::store::ProjectConfigStore;
 use xgent_ui::file_panel::ProjectRoot;
-use xgent_ui::fonts::UiFonts;
+use xgent_ui::fonts::{
+    EMBEDDED_MONO_PATH, FontCandidate, FontOrigin, FontSlot, UiFonts, resolve_slot,
+};
 
 use crate::fs_event_bridge::IpcClientResource;
 
@@ -51,17 +54,24 @@ pub fn open_project(
     });
 }
 
-/// 加载字体：Inter Variable 为全局默认 + Menlo 等宽（macOS）。
+/// 加载字体：Inter Variable（界面拉丁）+ JetBrains Mono（等宽兜底），并解析四个槽位。
 ///
-/// Inter 读自随仓库分发的 `assets/fonts/Inter-Variable.ttf`（OFL 许可），
-/// 覆盖 `Assets<Font>` 的 `AssetId::default()`——所有未显式指定 `font` 的
-/// [`TextFont`] 自动用 Inter（Linear 视觉基准的排版底座）。Menlo 为 macOS
-/// Terminal/Xcode 默认等宽，度量紧凑，经 `fonts.add` 得强句柄存入
-/// [`UiFonts::mono`] 供等宽场景（代码/终端）显式引用。
+/// **Inter Variable** 为全局默认：读自随仓库分发的 `assets/fonts/Inter-Variable.ttf`
+/// （OFL 许可），覆盖 `Assets<Font>` 的 `AssetId::default()`——所有未显式指定
+/// `font` 的 [`TextFont`] 自动用 Inter（Linear 视觉基准的排版底座）。
 ///
-/// 非 macOS：Inter 照常加载（随仓库分发），Menlo 跳过（mono 回退默认句柄）。
-pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
-    // Inter Variable —— 全局默认
+/// **JetBrains Mono**（OFL 1.1）是 `mono` 槽位的**内嵌兜底**（v8 M4-T1）：系统里
+/// 装了等宽字体就用系统的（Cascadia Mono / SF Mono / JetBrains Mono …），全缺则用
+/// 内嵌的——**永不**回退到 `ui` 槽位的比例字体（设计系统 C-FONT-1）。
+///
+/// 四个槽位按**候选栈**解析（平台差异只在候选顺序数据里，代码不分叉），结果写
+/// `tracing::info!` 便于三平台核对（C-FONT-2）：槽位 → 家族名 → 来源。
+pub fn load_fonts(
+    mut commands: Commands,
+    mut fonts: ResMut<Assets<Font>>,
+    mut font_cx: ResMut<FontCx>,
+) {
+    // ---- Inter Variable —— 全局默认（界面拉丁）----
     let inter_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/assets/fonts/Inter-Variable.ttf"
@@ -76,22 +86,85 @@ pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
         }
     }
 
-    // Menlo —— 等宽（macOS 系统字体）
-    let mono = if cfg!(target_os = "macos") {
-        match std::fs::read("/System/Library/Fonts/Menlo.ttc") {
-            Ok(data) => fonts.add(Font::from_bytes(data)),
-            Err(e) => {
-                tracing::warn!("加载 Menlo 失败，等宽回退默认字体: {e}");
-                Handle::default()
-            }
+    // ---- JetBrains Mono —— mono 槽位的内嵌兜底 ----
+    let mono_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/fonts/JetBrainsMono-Regular.ttf"
+    );
+    let embedded_mono: Option<Handle<Font>> = match std::fs::read(mono_path) {
+        Ok(data) => {
+            let handle = fonts.add(Font::from_bytes(data));
+            tracing::info!("已加载内嵌 JetBrains Mono（等宽兜底）");
+            Some(handle)
         }
-    } else {
-        Handle::default()
+        Err(e) => {
+            tracing::warn!("加载内嵌 JetBrains Mono 失败: {mono_path}: {e}");
+            None
+        }
+    };
+
+    // ---- 槽位解析 ----
+    // 系统字体集合：parley 的 collection 默认已发现系统字体（parley/system 特性）。
+    // 先取一份家族名快照（`family_id` 需要可变借用），再逐槽位解析。
+    let families: Vec<String> = font_cx
+        .context
+        .collection
+        .family_names()
+        .map(str::to_string)
+        .collect();
+    let available = |family: &str| families.iter().any(|f| f == family);
+    let embedded = |candidate: &FontCandidate| -> Option<Handle<Font>> {
+        match candidate.embedded {
+            Some(path) if path == EMBEDDED_MONO_PATH => embedded_mono.clone(),
+            _ => None,
+        }
+    };
+
+    let specs = xgent_ui::fonts::font_specs();
+    let mut sources: Vec<(FontSlot, FontSource)> = Vec::new();
+    for spec in specs {
+        let r = resolve_slot(spec, &available, &embedded);
+        match r.origin {
+            FontOrigin::System => tracing::info!(
+                "字体槽位 {} → {}（来源 system）",
+                spec.slot.as_str(),
+                r.family
+            ),
+            FontOrigin::Embedded => tracing::info!(
+                "字体槽位 {} → {}（来源 embedded）",
+                spec.slot.as_str(),
+                r.family
+            ),
+            FontOrigin::Failed => tracing::warn!(
+                "字体槽位 {} 无可用候选，回退通用族 {}（来源 failed）",
+                spec.slot.as_str(),
+                r.family
+            ),
+        }
+        sources.push((spec.slot, r.source));
+    }
+    let slot_source = |slot: FontSlot, fallback: FontSource| -> FontSource {
+        sources
+            .iter()
+            .find(|(s, _)| *s == slot)
+            .map(|(_, src)| src.clone())
+            .unwrap_or(fallback)
     };
 
     commands.insert_resource(UiFonts {
         ui: Handle::default(),
-        mono,
+        mono: slot_source(
+            FontSlot::Mono,
+            FontSource::Generic(GenericFontFamily::Monospace),
+        ),
+        ui_cjk: slot_source(
+            FontSlot::UiCjk,
+            FontSource::Generic(GenericFontFamily::SansSerif),
+        ),
+        mono_cjk: slot_source(
+            FontSlot::MonoCjk,
+            FontSource::Generic(GenericFontFamily::Monospace),
+        ),
     });
 }
 
