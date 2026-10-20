@@ -70,6 +70,66 @@ pub fn ui_text_style(size: f32, weight: u16, color: Color, line_height: f32) -> 
     )
 }
 
+/// 单行省略文本构造器（尾部省略）。
+///
+/// 与 [`ui_text`] 的差别：额外挂 `TextLayout{NoWrap}` 与 `xui::Ellipsis`——
+/// 节点宽度不够时渲染成 `前缀…`（而不是溢出或换行）。
+///
+/// 节点仍需**确定宽度**才会截断（固定宽 / 百分比 / flex 收缩后的宽度）；
+/// 文本节点本身要能收缩：`flex_shrink: 1` + `min_width: Val::ZERO`。
+pub fn ellipsis_text(
+    source: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Color,
+    line_height: f32,
+) -> impl Bundle {
+    let source = source.into();
+    (
+        Text::new(source.clone()),
+        TextFont {
+            font_size: FontSize::Px(size),
+            weight: FontWeight(weight),
+            font_features: inter_font_features(),
+            ..default()
+        },
+        TextColor(color),
+        LineHeight::RelativeToFont(line_height),
+        TextLayout {
+            linebreak: LineBreak::NoWrap,
+            ..default()
+        },
+        xui::Ellipsis::new(source),
+    )
+}
+
+/// 单行省略文本构造器（中段省略，路径类：保留首段与末两段）。
+pub fn ellipsis_path_text(
+    source: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Color,
+    line_height: f32,
+) -> impl Bundle {
+    let source = source.into();
+    (
+        Text::new(source.clone()),
+        TextFont {
+            font_size: FontSize::Px(size),
+            weight: FontWeight(weight),
+            font_features: inter_font_features(),
+            ..default()
+        },
+        TextColor(color),
+        LineHeight::RelativeToFont(line_height),
+        TextLayout {
+            linebreak: LineBreak::NoWrap,
+            ..default()
+        },
+        xui::Ellipsis::mid(source),
+    )
+}
+
 /// 等宽文本构造器（带字重，等宽标签/强调用）。
 pub fn mono_text_weighted(
     fonts: &UiFonts,

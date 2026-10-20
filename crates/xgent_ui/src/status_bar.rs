@@ -122,7 +122,21 @@ fn spawn_status_bar(
                     StatusDotMarker,
                 ));
                 seg.spawn((
-                    ui_text(String::new(), micro, 400, dim, type_scale::line_height::UI),
+                    Node {
+                        flex_shrink: 1.0,
+                        min_width: Val::ZERO,
+                        max_width: px(crate::theme::size::STATUS_PROVIDER_MAX_W),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    // v8 M3-T5：provider 段过长时省略（审计 C3）。
+                    crate::fonts::ellipsis_text(
+                        String::new(),
+                        micro,
+                        400,
+                        dim,
+                        type_scale::line_height::UI,
+                    ),
                     ProviderTextMarker,
                 ));
             });
@@ -195,18 +209,22 @@ fn update_status_segments(
     tokens: Res<TokenUsage>,
     loc: Res<xgent_settings::Localizer>,
     mut q: ParamSet<(
-        Query<&mut Text, With<ProviderTextMarker>>,
+        Query<(&mut Text, &mut xui::Ellipsis), With<ProviderTextMarker>>,
         Query<&mut Text, With<TokenTextMarker>>,
     )>,
 ) {
     if !info.is_changed() && !loc.is_changed() {
         // provider 段无变化
-    } else if let Ok(mut text) = q.p0().single_mut() {
+    } else if let Ok(q_provider) = q.p0().single_mut() {
+        let (mut text, mut ellipsis) = q_provider;
         let label = if info.id.is_empty() {
             crate::i18n::tr(&loc, "status-provider-not-configured").to_string()
         } else {
             format!("{} / {}", info.id, info.model)
         };
+        if ellipsis.source != label {
+            ellipsis.source = label.clone();
+        }
         if text.0 != label {
             text.0 = label;
         }

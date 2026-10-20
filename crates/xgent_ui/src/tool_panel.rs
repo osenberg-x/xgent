@@ -167,12 +167,18 @@ fn spawn_tool_card(
                                 type_scale::line_height::UI,
                             ),));
                             // 参数摘要
+                            // v8 M3-T5：摘要过长时省略（不再手工截 50 字，
+                            // 审计 E6：手工截断与真实宽度无关）。
                             header.spawn((
                                 Node {
                                     flex_grow: 1.0,
+                                    flex_shrink: 1.0,
+                                    min_width: Val::ZERO,
+                                    max_width: px(crate::theme::size::TOOL_SUMMARY_MAX_W),
+                                    overflow: Overflow::clip(),
                                     ..default()
                                 },
-                                ui_text(
+                                crate::fonts::ellipsis_text(
                                     summary,
                                     type_scale::CAPTION,
                                     400,
@@ -408,10 +414,12 @@ fn format_tool_summary(tool_id: &str, input: &serde_json::Value) -> String {
         _ => {}
     }
     let s = input.to_string();
+    // v8 M3-T5：不再手工截 50 字（审计 E6）——真实宽度由 Ellipsis 原语按节点
+    // 宽度决定，这里只保证不把整段 JSON 塞进 UI。
     let chars: Vec<char> = s.chars().collect();
-    if chars.len() > 50 {
-        let truncated: String = chars[..47].iter().collect();
-        format!("{truncated}…")
+    if chars.len() > 200 {
+        let truncated: String = chars[..197].iter().collect();
+        format!("{}…", truncated)
     } else {
         s
     }

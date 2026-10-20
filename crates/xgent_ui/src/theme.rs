@@ -293,6 +293,12 @@ pub mod size {
     pub const ICON_MD: f32 = 28.0;
     /// 工具卡最大高度
     pub const TOOL_PANEL_MAX_H: f32 = 200.0;
+    /// 编辑器页签标题最大宽度（超出省略，v8 M3-T5）
+    pub const TAB_TITLE_MAX_W: f32 = 160.0;
+    /// 状态栏 provider 段文本最大宽度（超出省略，v8 M3-T5）
+    pub const STATUS_PROVIDER_MAX_W: f32 = 220.0;
+    /// 工具卡摘要最大宽度（超出省略，v8 M3-T5）
+    pub const TOOL_SUMMARY_MAX_W: f32 = 320.0;
 }
 
 /// 排版阶梯（v7，原型唯一字号集合；新界面禁止就地发明字号）。

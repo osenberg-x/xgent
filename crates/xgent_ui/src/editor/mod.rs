@@ -497,12 +497,22 @@ pub fn rebuild_editor_tabs(
                     ));
                 }
                 // 文件名
-                tab.spawn(ui_text(
-                    name.clone(),
-                    type_scale::SMALL,
-                    400,
-                    txt_color,
-                    type_scale::line_height::UI,
+                // v8 M3-T5：文件名过长时省略（审计 C3），不挤掉关闭钮。
+                tab.spawn((
+                    Node {
+                        flex_shrink: 1.0,
+                        min_width: Val::ZERO,
+                        max_width: px(crate::theme::size::TAB_TITLE_MAX_W),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    crate::fonts::ellipsis_text(
+                        name.clone(),
+                        type_scale::SMALL,
+                        400,
+                        txt_color,
+                        type_scale::line_height::UI,
+                    ),
                 ));
                 // 关闭×
                 tab.spawn((

@@ -11,6 +11,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod command_palette;
+pub mod ellipsis;
 pub mod hotkeys;
 pub mod i18n_bridge;
 pub mod input;
@@ -25,6 +26,9 @@ use bevy::prelude::*;
 pub use command_palette::{
     CommandKind, CommandPalettePlugin, CommandPaletteState, CommandRegistry, PaletteCommand,
     PaletteTriggered,
+};
+pub use ellipsis::{
+    ELLIPSIS_TAIL, Ellipsis, EllipsisCache, EllipsisMode, EllipsisPlugin, binary_search_prefix,
 };
 pub use hotkeys::{Hotkey, HotkeyConflict, HotkeyRegistry, Mod, platform_primary_mod};
 pub use i18n_bridge::{Strings, tr, tr_with};
@@ -63,6 +67,7 @@ impl Plugin for XuiPlugin {
             scroll_frame::ScrollFramePlugin,
             scroll_frame::ScrollToChildPlugin,
             scrollbar::ScrollbarPlugin,
+            ellipsis::EllipsisPlugin,
         ))
         .init_resource::<HotkeyRegistry>();
     }

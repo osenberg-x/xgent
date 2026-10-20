@@ -317,12 +317,21 @@ fn rebuild_list(
                         ),
                     ));
                     // 命令名（SMALL/510）
-                    row.spawn(crate::fonts::ui_text(
-                        cmd.label.clone(),
-                        type_scale::SMALL,
-                        510,
-                        theme.text,
-                        type_scale::line_height::UI,
+                    // v8 M3-T5：命令名过长时省略（审计 C3）。
+                    row.spawn((
+                        Node {
+                            flex_shrink: 1.0,
+                            min_width: Val::ZERO,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        crate::fonts::ellipsis_text(
+                            cmd.label.clone(),
+                            type_scale::SMALL,
+                            510,
+                            theme.text,
+                            type_scale::line_height::UI,
+                        ),
                     ));
                 });
             }

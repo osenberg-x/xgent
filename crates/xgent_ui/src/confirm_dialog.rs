@@ -163,13 +163,22 @@ fn show_on_request(
                                         type_scale::line_height::UI,
                                     ),
                                 ));
-                                left.spawn((ui_text(
-                                    tr(&loc, "confirm-title"),
-                                    type_scale::H3,
-                                    590,
-                                    theme.text,
-                                    type_scale::line_height::UI,
-                                ),));
+                                left.spawn((
+                                    Node {
+                                        flex_shrink: 1.0,
+                                        min_width: Val::ZERO,
+                                        overflow: Overflow::clip(),
+                                        ..default()
+                                    },
+                                    // v8 M3-T5：标题过长时省略（审计 C3）。
+                                    crate::fonts::ellipsis_text(
+                                        tr(&loc, "confirm-title").to_string(),
+                                        type_scale::H3,
+                                        590,
+                                        theme.text,
+                                        type_scale::line_height::UI,
+                                    ),
+                                ));
                             });
                         head.spawn((
                             Button,
@@ -201,18 +210,29 @@ fn show_on_request(
                         ..default()
                     },))
                     .with_children(|body| {
-                        // 工具名 + 描述
+                        // 工具名 + 动作
                         body.spawn(ui_text(
-                            format!(
-                                "{} {} {}",
-                                req.tool_id,
-                                tr(&loc, "confirm-will-write"),
-                                path
-                            ),
+                            format!("{} {}", req.tool_id, tr(&loc, "confirm-will-write")),
                             type_scale::BODY,
                             400,
                             theme.text_dim,
                             type_scale::line_height::UI,
+                        ));
+                        // 路径（长路径中段省略，保留末两段——v8 M3-T5）
+                        body.spawn((
+                            Node {
+                                flex_shrink: 1.0,
+                                min_width: Val::ZERO,
+                                overflow: Overflow::clip(),
+                                ..default()
+                            },
+                            crate::fonts::ellipsis_path_text(
+                                path,
+                                type_scale::BODY_SM,
+                                400,
+                                theme.text_muted,
+                                type_scale::line_height::UI,
+                            ),
                         ));
                         // diff 区（若有 old/new）
                         if let (Some(old), Some(new)) = (&req.old_content, &req.new_content) {

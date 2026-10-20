@@ -342,12 +342,21 @@ fn spawn_entry(
                         theme.accent_interactive,
                     ));
                     // 名称
-                    row.spawn(crate::fonts::ui_text(
-                        entry.name.clone(),
-                        crate::theme::type_scale::CAPTION,
-                        400,
-                        theme.text_dim,
-                        crate::theme::type_scale::line_height::UI,
+                    // v8 M3-T5：长名不再溢出抽屉宽度（审计 C3），中段省略保留末两段。
+                    row.spawn((
+                        Node {
+                            flex_shrink: 1.0,
+                            min_width: Val::ZERO,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        crate::fonts::ellipsis_path_text(
+                            entry.name.clone(),
+                            crate::theme::type_scale::CAPTION,
+                            400,
+                            theme.text_dim,
+                            crate::theme::type_scale::line_height::UI,
+                        ),
                     ));
                 });
                 // 子项容器（折叠态空，预展开时递归 spawn 子条目）
@@ -400,12 +409,21 @@ fn spawn_entry(
             // 文件图标（file，v7 中性灰染色）
             row.spawn(crate::kit::icon(icons, "file", 14.0, theme.text_muted));
             // 名称
-            row.spawn(crate::fonts::ui_text(
-                entry.name.clone(),
-                crate::theme::type_scale::CAPTION,
-                400,
-                theme.text_dim,
-                crate::theme::type_scale::line_height::UI,
+            // v8 M3-T5：长名不再溢出抽屉宽度（审计 C3）。
+            row.spawn((
+                Node {
+                    flex_shrink: 1.0,
+                    min_width: Val::ZERO,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                crate::fonts::ellipsis_path_text(
+                    entry.name.clone(),
+                    crate::theme::type_scale::CAPTION,
+                    400,
+                    theme.text_dim,
+                    crate::theme::type_scale::line_height::UI,
+                ),
             ));
         });
     }
