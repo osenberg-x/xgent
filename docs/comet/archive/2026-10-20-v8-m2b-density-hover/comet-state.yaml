@@ -1,0 +1,535 @@
+schema: comet.native.v4
+name: v8-m2b-density-hover
+language: zh-CN
+phase: archive
+status: done
+state_version: 8
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 1fb559161d78f4d99b2509f4896798f9042085adf35b85a37f91c4930b5a3f63
+spec_changes:
+  - capability: ui-m2b-density
+    operation: create
+    source: specs/ui-m2b-density/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1 偏好缺省与兼容：`Preferences::default().density == Comfortable`；`density =
+      "compact"` 可反序列化为 `Compact`；不含 `density` 键的老 TOML 反序列化后仍为
+      `Comfortable`（`xgent_settings_core` 单测）。
+    result: passed
+    reason:
+      text: 'crates/xgent_settings_core/src/global.rs:277-279 对 density 字段加
+        #[serde(default)]，Density 派生 Default 且 #[default] 在
+        Comfortable（:296-304）；单测
+        global::tests::density_defaults_and_parses（:370-396）断言
+        Preferences::default()==Comfortable、density="compact" 反序列化为 Compact、仅有
+        [providers.*] 的老 TOML 仍为 Comfortable、往返保持；density-units
+        日志：xgent_settings_core lib 14 passed / 0 failed。'
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: A2 切档即时重排：切到 `Compact` 后同一帧或下一帧，rail（8→6 / 4→3）、对话区（24→18、row_gap
+      20→15）、设置面板卡片（16→12、row_gap 8→6）的 `Node.padding` / `row_gap` 按 0.75
+      收紧（集成测试断言这三处具体数值）。
+    result: passed
+    reason:
+      text: 断言落在真实插件产出的节点上：tests/density.rs:52-92 取
+        ActivityBarMarker（layout.rs:174-193，padding
+        vertical=space::SM=8、row_gap=XS=4）与 TopBarMarker，切 Compact 后
+        8→6、4→3、16→12、12→9 且 rail width 仍 52；:96-109 取
+        chat_panel::MessageListMarker（chat_panel.rs:173-177，padding
+        XXL=24、row_gap XL=20）断言 24→18、20→15；:180-195
+        取设置面板卡片（settings_panel.rs:758-762，width=size::OVERLAY_SETTINGS_W=640、padding
+        LG=16、row_gap SM=8，全仓仅此一处使用该宽度常量）断言 16→12、8→6。数值与 brief/spec
+        文本逐项一致；ui-density 日志 4 passed / 0 failed。生效时机由 density.rs:175-187
+        的单测（set 后仅 app.update() 一次即 18/15）证到「同一帧或下一帧」。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: A3 幂等不累乘：连续 5 帧不切档数值不变；重复应用 `Compact` 不再继续缩小；切回 `Comfortable` 回到基线（单测）。
+    result: passed
+    reason:
+      text: 不累乘由结构保证而非一次性算术：DensityBase 仅在 Without<DensityBase>
+        时捕获一次基线（density.rs:102-113），写回始终是 scale(base,
+        density)（:47-79），从不以当前值再乘。单测
+        density_is_idempotent_and_reversible（:191-213）连续 5 帧断言仍为 12.0、切回
+        Comfortable 回到 16.0/8.0；集成测试 tests/density.rs:78-91 再跑 5 帧仍为 6.0 并逐字还原
+        8.0/12.0。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: A4 持久化：daemon 配置协调器写入 `preferences.density = "compact"` 成功（不再报「未知配置
+      key」）并可读回 `Compact`（`xgent_daemon` 单测）。
+    result: passed
+    reason:
+      text: crates/xgent_daemon/src/config_store.rs:87 读白名单返回 as_str()，:128-136 写白名单新增
+        preferences.density 且对非 comfortable/compact 直接报 Config 错误（不静默回落）；单测
+        config_store::tests::density_key_is_writable_and_readable（:471-491）验证默认读
+        comfortable、写 compact 后 config().preferences.density==Compact 且可读回
+        "compact"、非法值 "tight" 被拒且权威副本不变；density-units 日志：xgent_daemon 1 passed /
+        0 failed。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A5 空闲帧零扫描：无 hover 变化的帧里 `HoverTintPollStats.visits == 0`（单测）。
+    result: passed
+    reason:
+      text: kit.rs:133-154 查询过滤改为 Or<(Changed<Hovered>,
+        Changed<Pressed>)>，无变化的节点不进入迭代，每帧只重置并累加统计；单测
+        idle_frames_do_not_visit_any_node（kit.rs:824-840）在 3 个 HoverTint 节点稳定后连跑
+        3 帧断言 visits==0 且 releases==0（首帧 3 次仅是组件新增带来的 Added/Changed，符合语义）；ui-lib
+        日志含该用例并通过。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: A6 悬停/按下/松手色序：`Hovered(true)` → hover 色；`Pressed` 插入 → 按下色；`Pressed` 移除 →
+      回到 hover 色（不停在按下色）；对应帧 `visits > 0`（单测）。
+    result: passed
+    reason:
+      text: 松手单独由 hover_tint_release_system（kit.rs:159-179）读
+        RemovedComponents<Pressed>，按 hovered/pressed 重新 apply_tint，因此移除 Pressed
+        后回到 hover 色而非停在 active。单测
+        hover_press_release_sequence_restores_hover_color（:844-875）断言背景依次
+        subtle→theme.hover→theme.active→theme.hover→subtle，松手帧 releases==1 且
+        visits>0，前两段各 visits>0。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: A7 不回归：`xgent_ui` 既有 69 项 lib 测试与 `layout` / `settings_panel_values` /
+      `settings_panel_i18n` / `toast` / `modal_settings` / `interaction_model`
+      集成测试全绿。
+    result: passed
+    reason:
+      text: ui-lib 日志 76 passed / 0 failed（= brief 的既有 69 项 + 新增 7 项：density 5 + kit
+        2）；ui-integration 日志六个目标全绿：interaction_model 7、layout 2、modal_settings
+        3、settings_panel_i18n 3、settings_panel_values 19、toast 1；核对 git
+        diff，tests/modal_settings.rs 的改动仅为 rustfmt 换行，interaction_model.rs
+        无改动，未见为通过而弱化断言。已知基线失败（file_preview 7、file_tree_refresh
+        5、paths::daemon_socket_env_override、config_store::tests::global_write_lands_inside_the_isolated_dir）不在本
+        brief 的 A7 范围内，且与本次改动无因果关系。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: A8 静态门禁：`cargo check --workspace` 通过；`cargo clippy -p xgent_ui
+      --no-deps`（lib）无新增告警；`cargo fmt -p ...` 后无 diff。
+    result: passed
+    reason:
+      text: workspace-check 日志以 `Finished dev profile` 结束、exit_code=0；clippy-ui 日志在
+        `Checking xgent_ui v0.1.0` 之后无任何告警（日志中的告警全部来自 xgent_tools/xgent_context
+        等既有 crate 的既有 lint），且以 exit_code=0 结束；fmt 由我独立执行 `cargo fmt -p xgent_ui
+        -p xgent_settings_core -p xgent_app -p xgent_daemon --check`，无 diff 输出。
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: A9 文档同步：`docs/dev-tutorial.md` 有 §5.19 且 `grep -c "M2b 待做"` 为
+      0；`docs/plans/ui-v8-tasks.md` 勾选 M2-T1（密度）/M2-T7 并追加勘误。
+    result: passed
+    reason:
+      text: docs/dev-tutorial.md:741 把 §5.18 末尾改为「M2b 已闭合」，:743 新增「### 5.19 密度档位与
+        hover 量化（v8 M2b）」并写明权威链、基线写回、只缩间距、入口与启动读取、hover 变更驱动与松手补帧；`grep -c "M2b
+        待做" docs/dev-tutorial.md` = 0；docs/plans/ui-v8-tasks.md:121 勾选 M2-T1
+        的密度部分、:149 勾选 M2-T7，§10（:366-370）追加三条勘误，含 ThemeHandle 单 generation 共用。
+      truncated: false
+builder_handoff:
+  candidate_id: c9aa7667-5fca-411c-a44b-4a512c5438fb
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:8e72ec2f-4bb2-415f-879c-71a966aad5d7
+  iteration: 1
+  summary:
+    text: v8 M2b 实现完成：preferences.density 两档偏好（comfortable 缺省 / compact）经
+      ThemeHandle 驱动全界面间距重排（density.rs 的 DensityBase
+      基线写回，幂等不累乘），设置面板新增密度分段按钮并写盘（daemon config_store 白名单各加一条），启动时读一次偏好；kit.rs 的
+      hover 换色改为只处理 Or<(Changed<Hovered>, Changed<Pressed>)> 的节点，并用
+      RemovedComponents<Pressed> 补松手帧，新增 HoverTintPollStats
+      作为「空闲帧零扫描」的可观测证据。文档同步 dev-tutorial §5.19 与 ui-v8-tasks.md（M2-T1
+      密度部分、M2-T7、§10 三条勘误）。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_settings_core/src/global.rs: `Density` 枚举（serde
+          snake_case，`#[default] Comfortable`）+
+          `Preferences.density`（`#[serde(default)]`）"
+        - crates/xgent_settings_core/src/global.rs 单测
+          `density_defaults_and_parses`：Preferences::default 为
+          Comfortable、`density = "compact"` 反序列化为 Compact、无键老 TOML 仍为
+          Comfortable、往返保持
+        - "cargo test -p xgent_settings_core --lib global:: → 14 passed"
+      note: 缺省与老配置兼容；未知字符串由 Density::parse 回落 Comfortable，与 theme 的回落策略一致。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_ui/src/density.rs: DensityBase 记录基线
+          padding/margin/row_gap/column_gap，capture_density_bases +
+          apply_density_on_change 以「基线 × 系数」写回"
+        - "crates/xgent_ui/tests/density.rs:
+          `rail_and_top_bar_tighten_on_compact`（rail padding 8→6、row_gap 4→3；顶栏
+          padding 16→12、column_gap 12→9；rail 宽仍 52）"
+        - "crates/xgent_ui/tests/density.rs:
+          `chat_panel_spacing_tightens_on_compact`（对话区 padding 24→18、row_gap
+          20→15，节点来自真实 ChatPanelPlugin）"
+        - "crates/xgent_ui/tests/density.rs:
+          `settings_card_tightens_on_compact`（设置卡片 padding 16→12、row_gap
+          8→6，节点来自真实设置面板）"
+        - "crates/xgent_ui/tests/density.rs:
+          `density_button_switches_immediately_and_writes_once`（点按钮即改偏好并只发一条
+          SaveDensityMessage，下一帧 ThemeHandle 跟上）"
+        - cargo test -p xgent_ui --test density → 4 passed
+      note: 三处都在真实插件产出的节点上断言具体像素，不是测试替身；切档在两帧内（通常同帧后的下一次布局）完成。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/density.rs 单测
+          `density_is_idempotent_and_reversible`：紧凑档连跑 5 帧数值不变，再切回舒适逐值还原
+        - crates/xgent_ui/src/density.rs 单测
+          `nodes_spawned_while_compact_are_scaled_on_first_frame`：紧凑档下新建节点首帧即
+          12→9、4→3，切回舒适回到 12
+        - crates/xgent_ui/src/density.rs 单测
+          `non_px_values_and_fixed_sizes_are_untouched`：Percent/Auto/0
+          原样，width/height 不缩放
+      note: 所有写入都以 DensityBase 基线为源，因此重复应用不会累乘。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_daemon/src/config_store.rs: read/write 白名单各加
+          `preferences.density`，写只接受 comfortable/compact，非法值报
+          XgentError::Config"
+        - crates/xgent_daemon/src/config_store.rs 单测
+          `density_key_is_writable_and_readable`：默认读到 comfortable、写 compact
+          后可读回、非法值被拒且权威副本不变
+        - "crates/xgent_app/src/settings_io.rs: save_density 经 CONFIG_WRITE 写
+          preferences.density 后重读；read_global / drain_snapshot /
+          apply_save_result 覆盖该键"
+        - "crates/xgent_app/src/settings_io.rs:
+          request_preferences_on_startup（Startup）只回填
+          preferences，SnapshotResult.preferences_only 保证不碰项目配置与 LiveSettings"
+        - cargo test -p xgent_daemon --bins config_store::tests::density → 25
+          passed（含新测试）
+      note: 持久化闭环：面板 → CONFIG_WRITE → daemon 白名单 → 落盘 TOML；重启时 Startup 读取让磁盘档位首帧生效。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_ui/src/kit.rs: hover_tint_system 查询过滤
+          Or<(Changed<Hovered>, Changed<Pressed>)>，每帧把 HoverTintPollStats.visits
+          重置为 0 后只在命中时累加"
+        - crates/xgent_ui/src/kit.rs 单测 `idle_frames_do_not_visit_any_node`：首帧 3
+          次（组件新增），其后三帧 visits == 0、releases == 0
+        - cargo test -p xgent_ui --lib（76 passed，含该单测）
+      note: 统计资源是这条验收的可观测证据，不面向用户。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_ui/src/kit.rs: 新增
+          hover_tint_release_system（RemovedComponents<Pressed>），与
+          hover_tint_system 串联执行"
+        - crates/xgent_ui/src/kit.rs 单测
+          `hover_press_release_sequence_restores_hover_color`：subtle → hover →
+          active → hover → subtle，松手帧 releases == 1
+        - cargo test -p xgent_ui --lib（76 passed，含该单测）
+      note: 松手是「移除 Pressed」，Changed 看不到，必须用 RemovedComponents 补；否则按钮会停在按下色。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - cargo test -p xgent_ui --lib → 76 passed（基线 69 项全在，新增 7 项：density 5 +
+          kit 2）
+        - cargo test -p xgent_ui --test layout / modal_settings / toast /
+          settings_panel_values / settings_panel_i18n / interaction_model → 分别 2
+          / 3 / 1 / 19 / 3 / 7 passed，0 failed
+        - cargo test -p xgent_ui --test editor_theme_sync / conflict_save_guard
+          / settings_input_focus → 2 / 4 / 2 passed
+        - cargo test -p xgent_settings → 14 passed
+      note: 基线既有失败（已用 git stash 撤掉本次改动复跑确认）：file_preview 7 项、file_tree_refresh 5 项（均为
+        "Message not
+        initialized"）、xgent_settings_core::paths::daemon_socket_env_override（Windows
+        下期望 unix socket
+        路径）、xgent_daemon::config_store::tests::global_write_lands_inside_the_isolated_dir（并行写同一临时配置文件导致，基线两次复跑均失败）。这些与本次改动无关，见
+        known_limits。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - cargo check --workspace → Finished（0 error）
+        - cargo clippy -p xgent_ui --no-deps --lib → xgent_ui 无告警（仅依赖 crate
+          既有告警与 Windows 增量锁文件删除噪声）
+        - cargo fmt -p xgent_ui -p xgent_settings_core -p xgent_app -p
+          xgent_daemon -- --check → FMT CLEAN（首次报 diff 的两处测试格式已修正）
+      note: 均带 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 执行。
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - "docs/dev-tutorial.md: 新增 §5.19「密度档位与 hover 量化（v8 M2b）」，§5.18 末行改为「M2b
+          已闭合（… 见 §5.19）」"
+        - grep -c "M2b 待做" docs/dev-tutorial.md → 0
+        - "docs/plans/ui-v8-tasks.md: M2-T1 两条打勾并写明 v8-m2b 落点、M2-T7 打勾并订正触发源；§10
+          追加三条勘误（单一 generation、daemon 白名单、Interaction 已废弃）"
+      note: 文档跟随代码，勘误按台账要求记在 §10。
+  checks:
+    - name:
+        text: xgent_ui lib 测试
+        truncated: false
+      result: passed
+      note:
+        text: 76 passed（基线 69 + 新增 7）
+        truncated: false
+    - name:
+        text: xgent_ui tests/density.rs
+        truncated: false
+      result: passed
+      note:
+        text: 4 passed
+        truncated: false
+    - name:
+        text: xgent_ui
+          既有集成测试（layout/modal_settings/toast/settings_panel_values/settings_panel_i18n/interaction_model）
+        truncated: false
+      result: passed
+      note:
+        text: 全部通过
+        truncated: false
+    - name:
+        text: xgent_settings_core 偏好单测
+        truncated: false
+      result: passed
+      note:
+        text: "global:: 14 passed"
+        truncated: false
+    - name:
+        text: xgent_daemon config_store 密度单测
+        truncated: false
+      result: passed
+      note:
+        text: 25 passed（过滤 config_store）
+        truncated: false
+    - name:
+        text: cargo check --workspace
+        truncated: false
+      result: passed
+      note:
+        text: Finished
+        truncated: false
+    - name:
+        text: cargo clippy -p xgent_ui --no-deps --lib
+        truncated: false
+      result: passed
+      note:
+        text: xgent_ui 无告警
+        truncated: false
+    - name:
+        text: cargo fmt --check
+        truncated: false
+      result: passed
+      note:
+        text: FMT CLEAN
+        truncated: false
+    - name:
+        text: 基线既有失败复核（stash 撤销本次改动后复跑）
+        truncated: false
+      result: passed
+      note:
+        text: file_preview / file_tree_refresh / daemon 隔离测试在基线上同样失败
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: M2b 只做两档（comfortable/compact）且只缩放间距；字号、图标、rail 宽 52、ICON_BTN
+        40、页签高度均不随密度变化（决策 D-2）。
+      truncated: false
+    - text: ThemeHandle 共用一个 generation：切密度时颜色重绘会多跑一遍（写入同一份主题值，视觉无差异），已在
+        ui-v8-tasks.md §10 记为勘误。
+      truncated: false
+    - text: 密度重排依赖 DensityBase 的首次捕获：若有系统在 spawn 之后另行改写 Node 的
+        padding/margin/gap，基线会过期（当前 crates/xgent_ui、crates/xui 中无此类后置写入，已 grep
+        确认）。
+      truncated: false
+    - text: xgent_daemon 的 global_write_lands_inside_the_isolated_dir
+        是基线既有的并行写冲突（stash 复跑同样失败），本次未修，避免扩大范围。
+      truncated: false
+    - text: file_preview（7 项）与 file_tree_refresh（5 项）在基线上即失败（Message not
+        initialized），本次未修。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-20T03:12:32.038Z
+blockers: []
+verification:
+  candidate_id: c9aa7667-5fca-411c-a44b-4a512c5438fb
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:5c88bd07-206c-44f0-af1e-17dca660d68d
+  iteration: 1
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: ui-lib
+      name:
+        text: xgent_ui lib（含新增 7 项）
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_ui --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 2703
+    - id: ui-density
+      name:
+        text: xgent_ui 密度集成测试
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_ui --test density
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 3044
+    - id: ui-integration
+      name:
+        text: xgent_ui 既有集成测试不回归
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_ui --test layout --test modal_settings --test toast
+            --test settings_panel_values --test settings_panel_i18n --test
+            interaction_model
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 55216
+    - id: density-units
+      name:
+        text: 偏好与 daemon 密度单测
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: "set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_settings_core --lib global:: && cargo test -p
+            xgent_daemon --bins config_store::tests::density"
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 2914
+    - id: workspace-check
+      name:
+        text: 全量编译检查
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            check --workspace
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 13213
+    - id: clippy-ui
+      name:
+        text: clippy（lib，无依赖 lint）
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            clippy -p xgent_ui --no-deps --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 11862
+  summary:
+    text: 9/9 通过。A1 偏好类型与老配置兼容、A4 daemon 键白名单由单测直接覆盖；A2
+      的三处数值断言确实落在真实插件节点（ActivityBarMarker / MessageListMarker / 设置卡片
+      ScrollArea）上并与 brief 文本逐项一致；A3 的幂等来自「基线为唯一写回源」的结构而非一次性算术；A5/A6 的
+      visits/releases 语义与「空闲帧零扫描」「松手回 hover 色」对应；A7 的 76 项 lib 测试 = 既有 69 + 新增
+      7，六个集成目标全绿且未见弱化断言；A8 的 fmt 由 Verifier 独立补验无 diff；A9 文档两处齐全且「M2b 待做」计数为
+      0。未发现实现与 brief/spec 的实质不符，仅留三条非验收项风险（同帧后段 spawn 的一帧舒适尺寸、主题色值变更时的 hover
+      色陈旧、三个未纳入计划的集成测试未重跑）。
+    truncated: false
+  risks:
+    - text: capture_density_bases 在 Update 中没有相对 spawn 系统的显式排序：若某系统在同一帧晚于它 spawn
+        节点，该节点当帧 PostUpdate 的布局仍按舒适间距跑一次，下一帧才收紧（一帧闪烁）。现有单测只覆盖「帧前已存在」与「切档」两种情形；本仓
+        layout/chat/settings 的节点均在启动或状态变更时生成，未观察到可见问题。
+      truncated: false
+    - text: hover 换色改为变更驱动后，唯一不再被覆盖的路径是「主题色值变化而节点状态不变」：正悬停的按钮不会在主题切换那一帧刷新 hover
+        色，要等下一次 Hovered/Pressed 变化。当前只有 dark 单一主题（spec 明确不做亮色主题），因此不可观测。
+      truncated: false
+    - text: A7 只按 brief
+        列出的六个集成测试目标取证；tests/settings_input_focus.rs、editor_theme_sync.rs、conflict_save_guard.rs
+        未在本次 Runtime 计划内重跑（静态核对：三者只使用 Theme，未构造 ThemeHandle 字面量，不含 density
+        相关断言，编译与行为风险低）。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-20T03:25:33.497Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 9/9 通过。A1 偏好类型与老配置兼容、A4 daemon 键白名单由单测直接覆盖；A2
+        的三处数值断言确实落在真实插件节点（ActivityBarMarker / MessageListMarker / 设置卡片
+        ScrollArea）上并与 brief 文本逐项一致；A3 的幂等来自「基线为唯一写回源」的结构而非一次性算术；A5/A6 的
+        visits/releases 语义与「空闲帧零扫描」「松手回 hover 色」对应；A7 的 76 项 lib 测试 = 既有 69 + 新增
+        7，六个集成目标全绿且未见弱化断言；A8 的 fmt 由 Verifier 独立补验无 diff；A9 文档两处齐全且「M2b 待做」计数为
+        0。未发现实现与 brief/spec 的实质不符，仅留三条非验收项风险（同帧后段 spawn 的一帧舒适尺寸、主题色值变更时的 hover
+        色陈旧、三个未纳入计划的集成测试未重跑）。
+      truncated: false
+    completed_at: 2026-10-20T03:25:33.497Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-20T02:15:02.959Z
