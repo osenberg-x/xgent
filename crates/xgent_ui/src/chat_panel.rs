@@ -20,7 +20,7 @@ use xgent_agent::{
     RetryMessage, SessionClearedMessage, SteeringMessage, UserInputMessage,
 };
 use xui::input::{ChatInput, ChatInputSubmitted};
-use xui::scroll_area::{ScrollArea, StickToBottom};
+use xui::scroll_frame::ScrollFrame;
 
 use crate::fonts::ui_text;
 use crate::i18n::tr;
@@ -170,11 +170,12 @@ pub(crate) fn spawn_chat_panel(
         .id();
 
     // 消息列表（居中 max-width 容器 + 可滚动）
-    let mut scroll_area = ScrollArea::vertical();
-    scroll_area.node.padding = UiRect::all(px(space::XXL));
-    scroll_area.node.row_gap = px(space::XL);
+    // v8 M3-T2：滚动语义只由 ScrollFrame 决定。
+    let (mut frame, stick) = ScrollFrame::stick_bottom();
+    frame.style().padding = UiRect::all(px(space::XXL));
+    frame.style().row_gap = px(space::XL);
     let message_list = commands
-        .spawn((scroll_area, StickToBottom::default(), MessageListMarker))
+        .spawn((frame, stick, MessageListMarker))
         .add_child(current_text)
         .id();
 

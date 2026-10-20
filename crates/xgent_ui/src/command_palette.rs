@@ -12,7 +12,6 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Pressed;
-use bevy::ui::ScrollPosition;
 use bevy::ui_widgets::{Button, TextInput};
 
 use xgent_agent::NewSessionMessage;
@@ -156,7 +155,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                         flex_direction: FlexDirection::Column,
                         border: UiRect::all(px(1.0)),
                         border_radius: BorderRadius::all(px(crate::theme::radius::PANEL)),
-                        overflow: Overflow::clip_y(),
+                        // v8 M3-T2：面板外壳只做硬裁；滚动的是下面的命令列表。
+                        overflow: Overflow::clip(),
                         ..default()
                     },
                     BackgroundColor(theme.elevated),
@@ -197,17 +197,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                         crate::cursor::CursorHit::default(),
                     ));
                     // 命令列表
-                    panel.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            flex_grow: 1.0,
-                            flex_direction: FlexDirection::Column,
-                            overflow: Overflow::clip_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        PaletteListMarker,
-                    ));
+                    // v8 M3-T2：改用 ScrollFrame（滚轮真的能滚到末条命令）。
+                    panel.spawn((xui::ScrollFrame::vertical(), PaletteListMarker));
                 });
         });
 }

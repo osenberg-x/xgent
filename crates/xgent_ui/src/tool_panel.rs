@@ -6,7 +6,6 @@
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
-use bevy::ui::ScrollPosition;
 use bevy::ui_widgets::Button;
 
 use xgent_agent::{ToolCallMessage, ToolProgressMessage, ToolResultMessage};
@@ -34,8 +33,20 @@ pub struct ToolCardMarker {
 pub struct ToolStatusLabelMarker;
 
 /// 工具卡片结果文本节点标记。
+///
+/// 带 `tool_call_id` 而非只靠层级定位：v8 M3-T2 把结果文本挪进滚动容器的子节点
+/// （文本挂在滚动容器自身上时不会随内容滚动），层级不再是可靠的关联方式。
 #[derive(Component, Default)]
-pub struct ToolResultTextMarker;
+pub struct ToolResultTextMarker {
+    /// 所属工具调用 id
+    pub tool_call_id: String,
+}
+
+/// 工具卡片结果区（滚动容器）标记。
+///
+/// 折叠/展开由它的高度控制（0 = 收起，`TOOL_PANEL_MAX_H` = 展开）。
+#[derive(Component, Default)]
+pub struct ToolResultAreaMarker;
 
 /// 工具卡片状态点（dot）标记。
 #[derive(Component, Default)]
@@ -62,6 +73,7 @@ impl Plugin for ToolPanelPlugin {
                 handle_tool_card_click,
                 apply_tool_card_visibility,
             )
+                .chain()
                 .after(xgent_agent::agent_loop::agent_poll_system),
         );
     }
@@ -205,23 +217,32 @@ fn spawn_tool_card(
                                 });
                         });
                         // 结果区域（初始隐藏）
-                        card.spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                overflow: Overflow::clip_y(),
-                                max_height: Val::Px(0.0),
-                                ..default()
-                            },
-                            ScrollPosition::default(),
-                            ui_text(
-                                String::new(),
-                                type_scale::CAPTION,
-                                400,
-                                theme.text_dim,
-                                type_scale::line_height::CTRL,
-                            ),
-                            ToolResultTextMarker,
-                        ));
+                        // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定）。
+                        // 文本必须放在**子节点**里：挂在滚动容器自身的文本按容器
+                        // 内容盒定位，不随 ScrollPosition 滚动。
+                        let mut result_area = xui::ScrollFrame::vertical();
+                        result_area.content_sized();
+                        result_area.style().width = Val::Percent(100.0);
+                        result_area.style().max_height = Val::Px(0.0);
+                        card.spawn((result_area, ToolResultAreaMarker))
+                            .with_children(|area| {
+                                area.spawn((
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        ..default()
+                                    },
+                                    ui_text(
+                                        String::new(),
+                                        type_scale::CAPTION,
+                                        400,
+                                        theme.text_dim,
+                                        type_scale::line_height::CTRL,
+                                    ),
+                                    ToolResultTextMarker {
+                                        tool_call_id: ev.tool_call_id.clone(),
+                                    },
+                                ));
+                            });
                         // fold 行
                         card.spawn((
                             Button,
@@ -254,15 +275,14 @@ fn spawn_tool_card(
 /// 用户能看到增量输出（如 `run_command` 的 stdout），不必干等（R1-9）。
 fn update_tool_progress(
     mut reader: MessageReader<ToolProgressMessage>,
-    q_cards: Query<&ToolCardMarker>,
-    mut q_result: Query<&mut Text, With<ToolResultTextMarker>>,
+    mut q_result: Query<(&mut Text, &ToolResultTextMarker)>,
 ) {
     for ev in reader.read() {
-        // 仅当该 call 的卡片已存在时更新（卡片由 ToolCallMessage 创建）
-        if !q_cards.iter().any(|c| c.tool_call_id == ev.tool_call_id) {
-            continue;
-        }
-        for mut text in q_result.iter_mut() {
+        // 只更新本次调用对应的结果文本（此前实现会写到**所有**卡片的结果文本上）。
+        for (mut text, marker) in q_result.iter_mut() {
+            if marker.tool_call_id != ev.tool_call_id {
+                continue;
+            }
             text.0 = ev.output.clone();
             text.0.push_str("\n…");
         }
@@ -275,9 +295,10 @@ fn update_tool_result(
     mut q_cards: Query<(&mut ToolCardMarker, &Children), With<ToolCardMarker>>,
     mut params: ParamSet<(
         Query<(&mut Text, &mut TextColor), With<ToolStatusLabelMarker>>,
-        Query<(&mut Text, &mut Node), With<ToolResultTextMarker>>,
+        Query<(&mut Text, &ToolResultTextMarker), With<ToolResultTextMarker>>,
         Query<&mut BackgroundColor, With<ToolStatusDotMarker>>,
         Query<&mut Text, With<ToolFoldMarker>>,
+        Query<&mut Node, With<ToolResultAreaMarker>>,
     )>,
     loc: Res<Localizer>,
     theme: Res<Theme>,
@@ -324,9 +345,18 @@ fn update_tool_result(
             }
             {
                 let mut q_result = params.p1();
+                for (mut text, marker) in q_result.iter_mut() {
+                    if marker.tool_call_id != ev.tool_call_id {
+                        continue;
+                    }
+                    text.0 = ev.output.clone();
+                }
+            }
+            {
+                // 结果区高度：展开时给出可视高度（收起时为 0）。
+                let mut q_area = params.p4();
                 for child in children.iter() {
-                    if let Ok((mut text, mut node)) = q_result.get_mut(child) {
-                        text.0 = ev.output.clone();
+                    if let Ok(mut node) = q_area.get_mut(child) {
                         node.max_height = Val::Px(crate::theme::size::TOOL_PANEL_MAX_H);
                     }
                 }
@@ -408,13 +438,13 @@ fn handle_tool_card_click(
 /// 优化：仅处理 `expanded` 状态变化的卡片（Changed<ToolCardMarker>）。
 fn apply_tool_card_visibility(
     q_cards: Query<(&ToolCardMarker, &Children), Changed<ToolCardMarker>>,
-    mut q_result: Query<&mut Node, With<ToolResultTextMarker>>,
+    mut q_area: Query<&mut Node, With<ToolResultAreaMarker>>,
     mut q_fold: Query<&mut Text, With<ToolFoldMarker>>,
     loc: Res<Localizer>,
 ) {
     for (card, children) in q_cards.iter() {
         for child in children.iter() {
-            if let Ok(mut node) = q_result.get_mut(child) {
+            if let Ok(mut node) = q_area.get_mut(child) {
                 node.max_height = if card.expanded {
                     Val::Px(crate::theme::size::TOOL_PANEL_MAX_H)
                 } else {

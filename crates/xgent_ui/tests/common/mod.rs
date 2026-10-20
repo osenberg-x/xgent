@@ -153,7 +153,7 @@ pub fn set_num_field_text(app: &mut App, key: &str, text: &str) {
         .world_mut()
         .get_mut::<EditableText>(target)
         .expect("输入框应有 EditableText");
-    *e = EditableText::new(text.to_string());
+    *e = EditableText::new(text);
 }
 
 /// 把带标记的按钮置为"刚被按下"（等价于交互系统给出的 `Added<Pressed>`）。

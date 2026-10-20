@@ -68,11 +68,19 @@ impl Plugin for ScrollbarPlugin {
 }
 
 /// 为挂了 `Scrollbar` 但还没子轨道节点的容器 spawn 轨道 + 滑块。
+///
+/// 幂等：容器已有轨道子节点时直接跳过。此前实现每帧都会给容器追加一条新轨道
+/// （过滤条件 `Without<ScrollbarTrack>` 落在容器上，而轨道在**子**节点上），
+/// 滚动容器会随着帧数无限增殖子节点。
 fn spawn_scrollbar_nodes(
-    q: Query<(Entity, &Scrollbar), Without<ScrollbarTrack>>,
+    q: Query<(Entity, &Scrollbar, &Children), Without<ScrollbarTrack>>,
+    q_track: Query<(), With<ScrollbarTrack>>,
     mut commands: Commands,
 ) {
-    for (entity, bar) in q.iter() {
+    for (entity, bar, children) in q.iter() {
+        if children.iter().any(|c| q_track.contains(c)) {
+            continue;
+        }
         let track = commands
             .spawn((
                 Node {
@@ -86,6 +94,9 @@ fn spawn_scrollbar_nodes(
                 },
                 BackgroundColor(bar.track_color),
                 ScrollbarTrack,
+                // 轨道必须固定在视口内：bevy 布局会把父容器的滚动偏移施加给
+                // 所有子节点（含绝对定位的），不显式忽略就会随内容滚走。
+                crate::scroll_frame::track_ignore_scroll(),
             ))
             .id();
         let thumb = commands

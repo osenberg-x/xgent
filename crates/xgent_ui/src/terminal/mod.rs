@@ -37,7 +37,7 @@ use crate::i18n::tr;
 use crate::theme::{Theme, px, space, type_scale};
 use xgent_settings::Localizer;
 use xgent_terminal::{LocalPtyBackend, TerminalBackend};
-use xui::scroll_area::{ScrollArea, StickToBottom};
+use xui::scroll_frame::ScrollFrame;
 
 /// 终端视图容器标记（挂于 [`crate::layout::SideViewMarker`] 下，初始隐藏）。
 ///
@@ -362,12 +362,13 @@ fn spawn_terminal_view(
                 ));
             });
 
-            // tv-body：输出历史容器（ScrollArea 贴底滚动，每 tab 动态 spawn 行）
-            let mut output_area = ScrollArea::vertical();
-            output_area.node.padding = UiRect::horizontal(px(space::SM));
+            // tv-body：输出历史容器（ScrollFrame 贴底滚动，每 tab 动态 spawn 行）
+            // v8 M3-T2：滚动语义只由 ScrollFrame 决定。
+            let (mut output_area, output_stick) = ScrollFrame::stick_bottom();
+            output_area.style().padding = UiRect::horizontal(px(space::SM));
             view.spawn((
                 output_area,
-                StickToBottom::default(),
+                output_stick,
                 BackgroundColor(theme.bg),
                 TerminalOutputMarker,
                 output::RenderedCursor::default(),

@@ -14,8 +14,9 @@ pub mod command_palette;
 pub mod hotkeys;
 pub mod i18n_bridge;
 pub mod input;
+pub mod layout;
 pub mod mouse_wheel_scroll;
-pub mod scroll_area;
+pub mod scroll_frame;
 pub mod scrollbar;
 pub mod shortcuts;
 pub mod text_editor;
@@ -28,7 +29,11 @@ pub use command_palette::{
 pub use hotkeys::{Hotkey, HotkeyConflict, HotkeyRegistry, Mod, platform_primary_mod};
 pub use i18n_bridge::{Strings, tr, tr_with};
 pub use input::{ChatInput, ChatInputSubmitted, InputEnhancePlugin, SendModifier};
-pub use scroll_area::{ScrollArea, ScrollAreaMarker, ScrollAreaPlugin, StickToBottom};
+pub use layout::{fill_region, region_fill};
+pub use scroll_frame::{
+    ScrollFrame, ScrollFrameMarker, ScrollFramePlugin, ScrollToChild, ScrollToChildPlugin,
+    StickToBottom, compute_scroll_to_child,
+};
 pub use scrollbar::{Scrollbar, ScrollbarPlugin, ScrollbarThumb, ScrollbarTrack};
 pub use shortcuts::{HotkeyTriggered, ShortcutsPlugin};
 pub use text_editor::highlight::{HighlightSpan, SpanKind, highlight, span_color_for};
@@ -55,7 +60,8 @@ impl Plugin for XuiPlugin {
             ShortcutsPlugin,
             text_editor::TextEditorPlugin,
             mouse_wheel_scroll::MouseWheelScrollPlugin,
-            scroll_area::ScrollAreaPlugin,
+            scroll_frame::ScrollFramePlugin,
+            scroll_frame::ScrollToChildPlugin,
             scrollbar::ScrollbarPlugin,
         ))
         .init_resource::<HotkeyRegistry>();

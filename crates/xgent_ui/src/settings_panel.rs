@@ -753,14 +753,14 @@ fn spawn_panel(
                 SettingsScrimMarker,
             ));
             // 卡片本身是可滚动容器：设置项一多就超过视口高度，
-            // 用 xui 的 ScrollArea（与对话区/终端同一套）而不是裸 Overflow——
+            // 用 xui 的 ScrollFrame（与对话区/终端同一套）而不是裸 Overflow——
             // 裸 Overflow 在根节点无 UiRoot 时量不出尺寸，子节点会全部叠在原点。
-            let mut area = xui::scroll_area::ScrollArea::vertical();
-            area.node.width = Val::Px(crate::theme::size::OVERLAY_SETTINGS_W);
-            area.node.height = Val::Percent(92.0);
-            area.node.padding = UiRect::all(px(space::LG));
-            area.node.row_gap = px(space::SM);
-            area.node.border = UiRect::all(px(1.0));
+            let mut area = xui::ScrollFrame::vertical();
+            area.style().width = Val::Px(crate::theme::size::OVERLAY_SETTINGS_W);
+            area.style().height = Val::Percent(92.0);
+            area.style().padding = UiRect::all(px(space::LG));
+            area.style().row_gap = px(space::SM);
+            area.style().border = UiRect::all(px(1.0));
             p.spawn((
                 area,
                 BackgroundColor(theme.elevated),
@@ -846,16 +846,12 @@ fn spawn_panel(
                     ModelInput,
                     false,
                 );
-                card.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        max_height: px(150.0),
-                        overflow: Overflow::clip_y(),
-                        ..default()
-                    },
-                    ModelListContainerMarker,
-                ));
+                // 模型列表：v8 M3-T2——此前只有 max_height:150 且完全没有
+                // ScrollPosition，条目一多就被硬裁（审计 C2：可达末项）。
+                let mut model_list = xui::ScrollFrame::vertical();
+                model_list.content_sized();
+                model_list.style().max_height = px(150.0);
+                card.spawn((model_list, ModelListContainerMarker));
                 for f in provider_num_fields(&pc) {
                     spawn_num_field(card, theme, loc, font, &f, true);
                 }

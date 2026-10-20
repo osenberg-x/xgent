@@ -240,20 +240,15 @@ fn spawn_editor_view(
             });
             // 编辑器区：填充顶部栏以下空间，buffer 实体动态挂入。
             // 不挂 ScrollPosition——滚动职责在 buffer 实体自身的
-            // `xui::ScrollArea::vertical()`（含 ScrollPosition），外层容器
-            // 仅做裁剪（clip_y）与布局，避免双层 ScrollPosition 嵌套干扰
+            // `xui::ScrollFrame::vertical()`（含 ScrollPosition），外层容器
+            // 仅做硬裁剪（clip）与布局，避免双层 ScrollPosition 嵌套干扰
             // 内层的跳转行定位（handle_pending_goto 写的是 buffer 的滚动）。
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    min_height: Val::ZERO,
-                    overflow: Overflow::clip_y(),
-                    ..default()
-                },
-                EditorAreaMarker,
-            ));
+            // v8 M3-T2：clip_y → clip（clip_y 是「假滚动」的信号，grep 归零）。
+            let mut area = xui::region_fill();
+            area.width = Val::Percent(100.0);
+            area.flex_direction = FlexDirection::Column;
+            area.overflow = Overflow::clip();
+            p.spawn((area, EditorAreaMarker));
         })
         .id();
     commands.entity(side).add_child(editor_view);

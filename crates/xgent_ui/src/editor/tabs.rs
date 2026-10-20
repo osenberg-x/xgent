@@ -238,8 +238,8 @@ pub fn handle_open_file_requests(
                 .id();
             let buffer_entity = commands
                 .spawn((
-                    xui::ScrollArea::vertical(),
-                    xui::Scrollbar::default(),
+                    // v8 M3-T2：ScrollFrame 自带滚动条（不再单独插 Scrollbar）。
+                    xui::ScrollFrame::vertical(),
                     crate::editor::buffer::EditorBuffer::from_disk(req.path.clone(), String::new()),
                     xui::TextEditor {
                         line_height: editor_line_height,

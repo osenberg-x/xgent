@@ -10,7 +10,6 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
-use bevy::ui::ScrollPosition;
 use bevy::ui_widgets::Button;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -181,17 +180,8 @@ fn spawn_file_panel(
                 ));
             });
             // 文件树区（可滚动，独占抽屉）
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    overflow: Overflow::clip_y(),
-                    ..default()
-                },
-                ScrollPosition::default(),
-                FileTreeMarker,
-            ));
+            // v8 M3-T2：滚动语义只由 ScrollFrame 决定（overflow 由构造器定）。
+            p.spawn((xui::ScrollFrame::vertical(), FileTreeMarker));
         });
     });
 }

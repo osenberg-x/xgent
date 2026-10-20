@@ -224,20 +224,18 @@ fn show_on_request(
                                 type_scale::line_height::UI,
                             ));
                             let lines = line_diff(old, new);
+                            // v8 M3-T2：diff 区改用 ScrollFrame（overflow 由构造器定）。
+                            // 文本行是子节点，随内容一起滚动。
+                            let mut diff_area = xui::ScrollFrame::vertical();
+                            diff_area.content_sized();
+                            diff_area.style().max_height = px(220.0);
+                            diff_area.style().padding = UiRect::vertical(px(space::SM));
+                            diff_area.style().border = UiRect::all(px(1.0));
+                            diff_area.style().border_radius = BorderRadius::all(px(radius::CTRL));
                             body.spawn((
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    max_height: px(220.0),
-                                    flex_direction: FlexDirection::Column,
-                                    overflow: Overflow::clip_y(),
-                                    padding: UiRect::vertical(px(space::SM)),
-                                    border: UiRect::all(px(1.0)),
-                                    border_radius: BorderRadius::all(px(radius::CTRL)),
-                                    ..default()
-                                },
+                                diff_area,
                                 BackgroundColor(theme.code_bg),
                                 BorderColor::all(theme.border),
-                                ScrollPosition::default(),
                             ))
                             .with_children(|diff| {
                                 for line in &lines {

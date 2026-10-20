@@ -6,7 +6,6 @@
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
-use bevy::ui::ScrollPosition;
 use bevy::ui_widgets::Button;
 
 use xgent_agent::{
@@ -156,7 +155,9 @@ fn spawn_overlay(
                         height: Val::Percent(100.0),
                         flex_direction: FlexDirection::Column,
                         border: UiRect::right(Val::Px(1.0)),
-                        overflow: Overflow::clip_y(),
+                        // v8 M3-T2：抽屉外壳只做硬裁（不是滚动容器）；
+                        // 真正滚动的是下面的会话列表。
+                        overflow: Overflow::clip(),
                         ..default()
                     },
                     BackgroundColor(theme.surface),
@@ -212,17 +213,9 @@ fn spawn_overlay(
                         });
 
                     // 会话列表
+                    // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定，滚轮真的能滚）。
                     panel
-                        .spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                flex_grow: 1.0,
-                                flex_direction: FlexDirection::Column,
-                                overflow: Overflow::clip_y(),
-                                ..default()
-                            },
-                            ScrollPosition::default(),
-                        ))
+                        .spawn(xui::ScrollFrame::vertical())
                         .with_children(|list| {
                             if cached.sessions.is_empty() {
                                 list.spawn((
