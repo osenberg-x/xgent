@@ -228,6 +228,8 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "XGent".into(),
+                    // v8 M2a：首帧确定尺寸（逻辑像素，HiDPI 由 winit 缩放）
+                    resolution: bevy::window::WindowResolution::new(1280, 800),
                     // 最小窗口尺寸（方案 §8.8）：五列/四列布局的钳制下限
                     resize_constraints: WindowResizeConstraints {
                         min_width: 1024.0,

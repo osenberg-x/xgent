@@ -122,6 +122,7 @@ pub(crate) fn rebuild_diff_view(
             &empties,
             &rows,
             &tr(&loc, "diff-empty-nobuffer"),
+            &theme,
         );
         return;
     };
@@ -133,6 +134,7 @@ pub(crate) fn rebuild_diff_view(
             &empties,
             &rows,
             &tr(&loc, "diff-empty-nobuffer"),
+            &theme,
         );
         return;
     };
@@ -154,6 +156,7 @@ pub(crate) fn rebuild_diff_view(
             &empties,
             &rows,
             &tr(&loc, "diff-empty-clean"),
+            &theme,
         );
         return;
     }
@@ -195,6 +198,7 @@ fn show_empty(
     empties: &Query<(), With<DiffEmptyMarker>>,
     rows: &Query<(), With<DiffLineRowMarker>>,
     text: &str,
+    theme: &Theme,
 ) {
     if children.iter().any(|c| empties.contains(*c)) {
         return;
@@ -214,7 +218,7 @@ fn show_empty(
                 text.to_string(),
                 type_scale::SMALL,
                 400,
-                Theme::dark().text_muted,
+                theme.text_muted,
                 type_scale::line_height::UI,
             ),
         ));

@@ -19,7 +19,7 @@ use crate::i18n::tr;
 use crate::kit::{HoverTint, IconAssets, UiKit, icon};
 use crate::layout::TopBarMarker;
 use crate::theme::{Theme, radius};
-use crate::theme::{space, type_scale};
+use crate::theme::{size, space, type_scale};
 
 use xgent_agent::Conversation;
 
@@ -109,8 +109,8 @@ fn spawn_top_bar(
             .with_children(|brand| {
                 brand.spawn((
                     Node {
-                        width: px(28.0),
-                        height: px(28.0),
+                        width: px(size::BRAND),
+                        height: px(size::BRAND),
                         border_radius: BorderRadius::all(px(radius::CARD)),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,

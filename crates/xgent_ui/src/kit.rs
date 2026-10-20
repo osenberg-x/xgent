@@ -638,7 +638,7 @@ pub fn show_toast(
     let mut toast = commands.spawn((
             Node {
                 position_type: PositionType::Absolute,
-                bottom: px(50.0),
+                bottom: px(crate::theme::size::TOAST_BOTTOM),
                 left: Val::Percent(50.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,

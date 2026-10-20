@@ -24,7 +24,7 @@ use xui::command_palette::{
 use xui::input::ChatInput;
 
 use crate::i18n::tr;
-use crate::theme::{Theme, px, space, type_scale};
+use crate::theme::{Theme, px, size, space, type_scale};
 
 /// 命令面板 overlay 根节点标记。
 #[derive(Component, Default)]
@@ -151,8 +151,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
             overlay
                 .spawn((
                     Node {
-                        width: px(560.0),
-                        max_height: px(440.0),
+                        width: px(size::OVERLAY_PALETTE_W),
+                        max_height: px(size::OVERLAY_PALETTE_H),
                         flex_direction: FlexDirection::Column,
                         border: UiRect::all(px(1.0)),
                         border_radius: BorderRadius::all(px(crate::theme::radius::PANEL)),

@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 
 /// 暗色主题（v7，Linear 基准）。
-#[derive(Resource, Debug, Clone, Copy)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     // ===== 表面：明度阶梯 =====
     /// L0 会话画布（最深层）#08090A
@@ -63,6 +63,10 @@ pub struct Theme {
     pub accent_glow: Color,
     /// 强调色上的文字 #FFFFFF
     pub accent_text: Color,
+    /// 活动栏陪伴星形（暖褐描边色）
+    pub star: Color,
+    /// 强调底上的通用前景（替代 Color::WHITE）
+    pub on_accent: Color,
 
     // ===== 功能状态色（Radix 深色阶，外推值见 ADR-0014 裁剪#1）=====
     /// 待确认 #FFB224
@@ -126,8 +130,8 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// 暗色主题（v7，Linear 基准）。
-    pub fn dark() -> Self {
+    /// 暗色主题（v7，Linear 基准）。生产代码经 [`ThemeHandle`] 取用。
+    pub(crate) fn dark() -> Self {
         Self {
             // 表面明度阶梯
             bg: Color::srgba(0.0314, 0.0353, 0.0392, 1.0), // #08090A
@@ -160,6 +164,8 @@ impl Theme {
             accent_bg: Color::srgba(0.3686, 0.4157, 0.8235, 0.14),
             accent_glow: Color::srgba(0.4431, 0.4392, 1.0, 0.16),
             accent_text: Color::WHITE,
+            star: Color::srgb_u8(0x1C, 0x19, 0x17),
+            on_accent: Color::WHITE,
 
             // 状态色
             st_pending: Color::srgba(1.0, 0.6980, 0.1412, 1.0), // #FFB224
@@ -244,6 +250,46 @@ pub mod size {
     pub const EDITOR_TABS_H: f32 = 28.0;
     /// 终端 tab 条高度
     pub const TERMINAL_TABS_H: f32 = 32.0;
+    /// 图标按钮（rail / 顶栏小件）
+    pub const ICON_BTN: f32 = 40.0;
+    /// rail 单项
+    pub const RAIL_ITEM: f32 = 40.0;
+    /// 品牌块（现值 28；设计表 34 为旧值，按像素不变原则保留 28）
+    pub const BRAND: f32 = 28.0;
+    /// 上下文 scope 高度
+    pub const SCOPE_H: f32 = 28.0;
+    /// 消息气泡最大宽度
+    pub const MSG_MAX_W: f32 = 820.0;
+    /// toast 距底距离
+    pub const TOAST_BOTTOM: f32 = 50.0;
+    /// 命令面板宽度
+    pub const OVERLAY_PALETTE_W: f32 = 560.0;
+    /// 命令面板最大高度
+    pub const OVERLAY_PALETTE_H: f32 = 440.0;
+    /// 设置面板宽度
+    pub const OVERLAY_SETTINGS_W: f32 = 640.0;
+    /// 确认弹窗宽度
+    pub const OVERLAY_CONFIRM_W: f32 = 560.0;
+    /// 冲突弹窗最小宽度
+    pub const MODAL_MIN_W: f32 = 360.0;
+    /// 拖拽手柄命中宽度
+    pub const HANDLE_W: f32 = 6.0;
+    /// 欢迎页卡片宽度
+    pub const WELCOME_W: f32 = 560.0;
+    /// 编辑器页签最小宽度
+    pub const TAB_MIN_W: f32 = 360.0;
+    /// 滚动条宽度
+    pub const SCROLLBAR_W: f32 = 3.0;
+    /// 页签操作区宽度
+    pub const TAB_ACTION_W: f32 = 48.0;
+    /// 页签图标尺寸
+    pub const TAB_ICON: f32 = 20.0;
+    /// 小图标（历史条目）
+    pub const ICON_SM: f32 = 24.0;
+    /// 中图标（历史头部）
+    pub const ICON_MD: f32 = 28.0;
+    /// 工具卡最大高度
+    pub const TOOL_PANEL_MAX_H: f32 = 200.0;
 }
 
 /// 排版阶梯（v7，原型唯一字号集合；新界面禁止就地发明字号）。
@@ -323,6 +369,113 @@ pub fn px(v: f32) -> Val {
     Val::Px(v)
 }
 
+
+/// 主题语义角色（`Themed` 用）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeRole {
+    /// 会话画布（最深层）。
+    Canvas,
+    /// 顶栏 / 图标轨 / 上下文面板。
+    Surface,
+    /// 浮层 / 下拉 / 卡片。
+    Elevated,
+    /// 边框。
+    Border,
+    /// 主文字。
+    Text,
+    /// 次级文字。
+    TextDim,
+}
+
+/// 主题权威：`generation` 变化即触发全量重绘。
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct ThemeHandle {
+    /// 当前主题。
+    pub theme: Theme,
+    /// 代数；每次替换主题递增。
+    pub generation: u64,
+}
+
+/// 随主题重绘的节点。
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Themed {
+    /// 语义色角色。
+    pub role: ThemeRole,
+    /// 上次重绘时的 generation。
+    pub generation: u64,
+}
+
+/// 主题插件：注册权威资源与重绘系统。
+pub struct ThemePlugin;
+
+impl Plugin for ThemePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ThemeHandle>()
+            .init_resource::<Theme>()
+            .add_systems(Update, (sync_theme_from_config, repaint_on_theme_change).chain());
+    }
+}
+
+/// `preferences.theme` 变化时更新权威（当前只有 dark，未知值回落 dark）。
+fn sync_theme_from_config(
+    config: Option<Res<xgent_settings::GlobalConfigRes>>,
+    mut handle: ResMut<ThemeHandle>,
+) {
+    let Some(config) = config else {
+        return;
+    };
+    if !config.is_changed() {
+        return;
+    }
+    // 目前只有 dark；未知值/空值一律回落。
+    let theme = Theme::dark();
+    if theme != handle.theme {
+        handle.theme = theme;
+        handle.generation = handle.generation.wrapping_add(1);
+    }
+}
+
+/// generation 变化时，把语义色写回 `Themed` 节点，并同步 `Theme` 快照。
+fn repaint_on_theme_change(
+    handle: Res<ThemeHandle>,
+    mut snapshot: ResMut<Theme>,
+    mut nodes: Query<(
+        &mut Themed,
+        &mut BackgroundColor,
+        Option<&mut BorderColor>,
+        Option<&mut TextColor>,
+    )>,
+) {
+    if !handle.is_changed() {
+        return;
+    }
+    *snapshot = handle.theme;
+
+    for (mut themed, mut background, border, text) in &mut nodes {
+        let theme = &handle.theme;
+        match themed.role {
+            ThemeRole::Canvas => background.0 = theme.bg,
+            ThemeRole::Surface => background.0 = theme.surface,
+            ThemeRole::Elevated => background.0 = theme.elevated,
+            ThemeRole::Border => {}
+            ThemeRole::Text => {
+                if let Some(mut text) = text {
+                    text.0 = theme.text;
+                }
+            }
+            ThemeRole::TextDim => {
+                if let Some(mut text) = text {
+                    text.0 = theme.text_dim;
+                }
+            }
+        }
+        if let Some(mut border) = border {
+            border.set_all(theme.border);
+        }
+        themed.generation = handle.generation;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,6 +494,46 @@ mod tests {
         let accent = t.accent.to_srgba();
         assert!((accent.red - 0.3686).abs() < 0.001, "accent 应为 #5E6AD2");
         assert!((accent.blue - 0.8235).abs() < 0.001, "accent 应为 #5E6AD2");
+    }
+
+    /// A1：主题替换后 `Themed` 节点重绘，快照同步。
+    #[test]
+    fn theme_handle_repaints_themed_nodes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(ThemePlugin);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                Themed {
+                    role: ThemeRole::Surface,
+                    generation: 0,
+                },
+                BackgroundColor(Color::BLACK),
+                BorderColor::all(Color::BLACK),
+            ))
+            .id();
+
+        app.update();
+        {
+            let mut handle = app.world_mut().resource_mut::<ThemeHandle>();
+            handle.theme.surface = Color::srgb(1.0, 0.0, 0.0);
+            handle.generation = handle.generation.wrapping_add(1);
+        }
+        app.update();
+
+        assert_eq!(
+            app.world().get::<BackgroundColor>(entity).unwrap().0,
+            Color::srgb(1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            app.world().get::<Themed>(entity).unwrap().generation,
+            1
+        );
+        assert_eq!(
+            app.world().resource::<Theme>().surface,
+            Color::srgb(1.0, 0.0, 0.0)
+        );
     }
 
     /// 正文/背景对比度门槛（简化 luma，暗色主题可读性护栏）。

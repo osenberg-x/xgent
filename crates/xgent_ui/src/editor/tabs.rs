@@ -216,7 +216,7 @@ pub fn handle_open_file_requests(
                         position_type: PositionType::Absolute,
                         top: Val::Px(0.0),
                         left: Val::Px(0.0),
-                        width: Val::Px(48.0),
+                        width: Val::Px(crate::theme::size::TAB_ACTION_W),
                         height: Val::Percent(100.0),
                         ..default()
                     },
@@ -227,9 +227,9 @@ pub fn handle_open_file_requests(
                     Node {
                         position_type: PositionType::Absolute,
                         top: Val::Px(0.0),
-                        left: Val::Px(48.0),
+                        left: Val::Px(crate::theme::size::TAB_ACTION_W),
                         width: Val::Px(2.0),
-                        height: Val::Px(20.0),
+                        height: Val::Px(crate::theme::size::TAB_ICON),
                         ..default()
                     },
                     BackgroundColor(theme.accent_interactive),
@@ -386,11 +386,11 @@ fn spawn_dirty_close_dialog(
         .with_children(|p| {
             p.spawn((
                 Node {
-                    padding: UiRect::all(Val::Px(16.0)),
+                    padding: UiRect::all(Val::Px(crate::theme::space::LG)),
                     border: UiRect::all(Val::Px(1.0)),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    min_width: Val::Px(360.0),
+                    row_gap: Val::Px(crate::theme::space::MD),
+                    min_width: Val::Px(crate::theme::size::TAB_MIN_W),
                     ..default()
                 },
                 BackgroundColor(panel),
@@ -406,7 +406,7 @@ fn spawn_dirty_close_dialog(
                 ));
                 card.spawn((Node {
                     flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(12.0),
+                    column_gap: Val::Px(crate::theme::space::MD),
                     ..default()
                 },))
                     .with_children(|btns| {
@@ -414,7 +414,7 @@ fn spawn_dirty_close_dialog(
                             Button,
                             Hovered::default(),
                             Node {
-                                padding: UiRect::all(Val::Px(8.0)),
+                                padding: UiRect::all(Val::Px(crate::theme::space::SM)),
                                 border_radius: BorderRadius::all(Val::Px(
                                     crate::theme::radius::CTRL,
                                 )),
@@ -426,7 +426,7 @@ fn spawn_dirty_close_dialog(
                                 crate::theme::type_scale::BODY_SM,
                                 510,
                                 // st_fail 底白字（主题无 fail_text 令牌，语义=accent_text）
-                                bevy::prelude::Color::WHITE,
+                                theme.on_accent,
                                 crate::theme::type_scale::line_height::UI,
                             ),
                             DirtyCloseDiscardMarker,
@@ -435,7 +435,7 @@ fn spawn_dirty_close_dialog(
                             Button,
                             Hovered::default(),
                             Node {
-                                padding: UiRect::all(Val::Px(8.0)),
+                                padding: UiRect::all(Val::Px(crate::theme::space::SM)),
                                 border_radius: BorderRadius::all(Val::Px(
                                     crate::theme::radius::CTRL,
                                 )),

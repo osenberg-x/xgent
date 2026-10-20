@@ -256,6 +256,8 @@ fn map_color(color: Option<xgent_terminal::Color>, theme: &Theme) -> bevy::color
 }
 
 /// 基本色（0-7）。
+///
+/// 白名单：ANSI 终端协议色，不参与主题令牌（由终端输出语义决定，换主题不改）。
 fn basic_color(idx: u8) -> bevy::color::Color {
     const COLORS: [bevy::color::Color; 8] = [
         bevy::color::Color::srgb_u8(0, 0, 0),       // 黑

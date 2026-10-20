@@ -39,7 +39,7 @@ use xgent_tools::{SecurityPolicy, ToolExecutor, ToolExecutorResource};
 
 use crate::fonts::ui_text;
 use crate::i18n::tr;
-use crate::theme::{Theme, space, type_scale};
+use crate::theme::{Theme, px, space, type_scale};
 
 /// 设置面板根节点标记。
 #[derive(Component, Default)]
@@ -737,7 +737,7 @@ fn spawn_panel(
             // 用 xui 的 ScrollArea（与对话区/终端同一套）而不是裸 Overflow——
             // 裸 Overflow 在根节点无 UiRoot 时量不出尺寸，子节点会全部叠在原点。
             let mut area = xui::scroll_area::ScrollArea::vertical();
-            area.node.width = Val::Px(640.0);
+            area.node.width = Val::Px(crate::theme::size::OVERLAY_SETTINGS_W);
             area.node.height = Val::Percent(92.0);
             area.node.padding = UiRect::all(px(space::LG));
             area.node.row_gap = px(space::SM);
@@ -1287,10 +1287,6 @@ fn text_input_node(theme: &Theme, font: f32, value: &str, marker: impl Bundle) -
 }
 
 /// px 辅助。
-fn px(v: f32) -> Val {
-    Val::Px(v)
-}
-
 /// 处理 kind 按钮点击：切换当前选中 kind，更新按钮高亮。
 fn handle_kind_button(
     q_kind: Query<&KindButton, Added<Pressed>>,

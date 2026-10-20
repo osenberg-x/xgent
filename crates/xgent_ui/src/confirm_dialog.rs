@@ -13,7 +13,7 @@ use xgent_tools::confirm::ConfirmDecision;
 
 use crate::fonts::{mono_text_weighted, ui_text};
 use crate::i18n::tr;
-use crate::theme::{Theme, radius, space, type_scale};
+use crate::theme::{Theme, px, radius, size, space, type_scale};
 
 /// 确认弹窗根节点标记。
 #[derive(Component, Default)]
@@ -39,11 +39,6 @@ impl Plugin for ConfirmDialogPlugin {
                 .after(xgent_agent::agent_loop::agent_poll_system),
         );
     }
-}
-
-/// 便捷：f32 → Val::Px
-fn px(v: f32) -> Val {
-    Val::Px(v)
 }
 
 use crate::diff::{DiffKind, line_diff};
@@ -114,7 +109,7 @@ fn show_on_request(
         overlay
             .spawn((
                 Node {
-                    width: px(560.0),
+                    width: px(size::OVERLAY_CONFIRM_W),
                     max_height: Val::Percent(80.0),
                     flex_direction: FlexDirection::Column,
                     border: UiRect::all(px(1.0)),

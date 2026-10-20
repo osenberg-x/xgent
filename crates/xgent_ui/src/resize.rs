@@ -21,12 +21,12 @@ use bevy::ui_widgets::Button;
 use crate::layout::{MainAreaMarker, SideViewCollapsed};
 use crate::theme::size;
 
-/// 上下文面板最小宽度（逻辑像素）。
-const SIDE_VIEW_MIN: f32 = 380.0;
-/// 对话主区最小宽度（逻辑像素）——拖拽时为其保留的最小空间。
-const CHAT_MIN: f32 = 520.0;
-/// 分隔手柄命中宽度（逻辑像素）。
-const HANDLE_W: f32 = 6.0;
+/// 上下文面板最小宽度（单源：`theme::size`）。
+const SIDE_VIEW_MIN: f32 = size::CONTEXT_W_MIN;
+/// 对话主区最小宽度（单源：`theme::size`）。
+const CHAT_MIN: f32 = size::CHAT_MIN;
+/// 分隔手柄命中宽度（单源：`theme::size`）。
+const HANDLE_W: f32 = size::HANDLE_W;
 /// 双击判定窗口（秒）。
 const DOUBLE_CLICK_SECS: f64 = 0.3;
 

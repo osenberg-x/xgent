@@ -327,7 +327,7 @@ fn update_tool_result(
                 for child in children.iter() {
                     if let Ok((mut text, mut node)) = q_result.get_mut(child) {
                         text.0 = ev.output.clone();
-                        node.max_height = Val::Px(200.0);
+                        node.max_height = Val::Px(crate::theme::size::TOOL_PANEL_MAX_H);
                     }
                 }
             }
@@ -416,7 +416,7 @@ fn apply_tool_card_visibility(
         for child in children.iter() {
             if let Ok(mut node) = q_result.get_mut(child) {
                 node.max_height = if card.expanded {
-                    Val::Px(200.0)
+                    Val::Px(crate::theme::size::TOOL_PANEL_MAX_H)
                 } else {
                     Val::Px(0.0)
                 };

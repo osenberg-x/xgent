@@ -194,8 +194,8 @@ fn spawn_overlay(
                                 Button,
                                 Hovered::default(),
                                 Node {
-                                    width: Val::Px(24.0),
-                                    height: Val::Px(24.0),
+                                    width: Val::Px(crate::theme::size::ICON_SM),
+                                    height: Val::Px(crate::theme::size::ICON_SM),
                                     align_items: AlignItems::Center,
                                     justify_content: JustifyContent::Center,
                                     ..default()
@@ -471,9 +471,9 @@ fn spawn_history_message_row(
             .with_children(|row| {
                 row.spawn((
                     Node {
-                        width: Val::Px(28.0),
-                        height: Val::Px(28.0),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        width: Val::Px(crate::theme::size::ICON_MD),
+                        height: Val::Px(crate::theme::size::ICON_MD),
+                        border_radius: BorderRadius::all(Val::Px(crate::theme::radius::CTRL)),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
                         flex_shrink: 0.0,

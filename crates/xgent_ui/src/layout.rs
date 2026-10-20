@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::theme::{Theme, size, z};
+use crate::theme::{ThemeHandle, ThemeRole, Themed, size, z};
 
 /// 根 UI 节点（全屏，承载所有层根）。
 #[derive(Component, Default)]
@@ -81,7 +81,8 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Theme>()
+        app.init_resource::<crate::theme::ThemeHandle>()
+            .init_resource::<crate::theme::Theme>()
             .init_resource::<FileDrawerOpen>()
             .init_resource::<SideViewCollapsed>()
             .init_resource::<crate::resize::PanelWidths>()
@@ -96,9 +97,11 @@ impl Plugin for LayoutPlugin {
 /// 启动时 spawn 根节点、六个层根与各区域容器。
 pub(crate) fn spawn_layout(
     mut commands: Commands,
-    theme: Res<Theme>,
+    handle: Res<ThemeHandle>,
     widths: Res<crate::resize::PanelWidths>,
 ) {
+    let theme = handle.theme;
+    let generation = handle.generation;
     commands.spawn(Camera2d);
 
     commands
@@ -124,6 +127,7 @@ pub(crate) fn spawn_layout(
                 },
                 GlobalZIndex(z::BASE),
                 BackgroundColor(theme.bg),
+                Themed { role: ThemeRole::Canvas, generation },
                 LayerRoot(z::BASE),
                 BaseLayer,
             ))
@@ -143,6 +147,7 @@ pub(crate) fn spawn_layout(
                     },
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.border),
+                    Themed { role: ThemeRole::Surface, generation },
                     TopBarMarker,
                 ));
 
@@ -174,6 +179,7 @@ pub(crate) fn spawn_layout(
                         },
                         BackgroundColor(theme.surface),
                         BorderColor::all(theme.line),
+                        Themed { role: ThemeRole::Surface, generation },
                         ActivityBarMarker,
                     ));
 
@@ -189,6 +195,7 @@ pub(crate) fn spawn_layout(
                             ..default()
                         },
                         BackgroundColor(theme.bg),
+                        Themed { role: ThemeRole::Canvas, generation },
                         ChatPanelMarker,
                     ));
 
@@ -210,6 +217,7 @@ pub(crate) fn spawn_layout(
                         },
                         BackgroundColor(theme.surface),
                         BorderColor::all(theme.line),
+                        Themed { role: ThemeRole::Surface, generation },
                         SideViewMarker,
                     ));
                 });
@@ -229,6 +237,7 @@ pub(crate) fn spawn_layout(
                     },
                     BackgroundColor(theme.surface),
                     BorderColor::all(theme.border),
+                    Themed { role: ThemeRole::Surface, generation },
                     StatusBarMarker,
                 ));
             });

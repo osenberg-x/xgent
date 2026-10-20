@@ -730,6 +730,16 @@ v8 M1 把「浮层放在哪、谁吃点击、Esc 关谁」从散落实现收敛�
 
 测试注意：模态相关 Message 用 `Option<MessageWriter<...>>` 取用——不装 `ModalPlugin` 的 headless 测试不会 panic，也不会重复注册消息。Esc 不能直接 `ButtonInput::press`（PreUpdate 会清掉 `just_pressed`），测试应写 `KeyboardInput` 消息。
 
+### 5.18 主题权威与令牌收敛（v8 M2a）
+
+- **ThemeHandle 是唯一权威**（`theme.rs`）：`ThemeHandle { theme, generation }`；`Themed { role, generation }` 挂在 BASE 六个表面节点上；`repaint_on_theme_change` 在 generation 变化时按角色重绘并同步 `Theme` 快照（旧 `Res<Theme>` 调用点不改签名）。
+- **单一构造入口**：`Theme::dark()` 为 `pub(crate)`，生产代码不得现场构造；`px()` 只在 `theme.rs` 定义。
+- **尺寸/圆角令牌**：区域尺寸走 `theme::size`（含 `MSG_MAX_W/OVERLAY_*/MODAL_MIN_W/HANDLE_W` 等），圆角走 `theme::radius`；`Val::Px(<数字>)` 只允许 0/1/2 这类装饰值。
+- **最小宽度单源**：`resize.rs` 引用 `size::CONTEXT_W_MIN/CHAT_MIN/HANDLE_W`。
+- **色板**：星形与 `Color::WHITE` 已入 `theme.star/on_accent`；ANSI 表是显式白名单（终端协议色，不参与主题）。
+- **窗口**：主窗口 `WindowResolution::new(1280, 800)`（逻辑像素）。
+- M2b 待做：密度档位（`preferences.density` + 设置入口 + 全界面重排）与 hover 全量化（用 `Hovered`/`Pressed` 取代已废弃的 `Interaction`）。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 

@@ -26,7 +26,7 @@ use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::kit::{HoverTint, icon};
 use crate::layout::ChatPanelMarker;
-use crate::theme::{Theme, radius, space, type_scale};
+use crate::theme::{Theme, radius, size, space, type_scale};
 /// 历史消息容器（消息列表，可滚动）。
 #[derive(Component, Default)]
 pub struct MessageListMarker;
@@ -152,7 +152,7 @@ pub(crate) fn spawn_chat_panel(
     let current_text = commands
         .spawn((
             Node {
-                max_width: px(820.0),
+                max_width: px(size::MSG_MAX_W),
                 align_self: AlignSelf::Center,
                 flex_direction: FlexDirection::Row,
                 column_gap: px(space::MD),
@@ -431,7 +431,7 @@ fn spawn_user_message(
         // 在当前助手节点之前插入用户消息（全宽行式：头像 + 消息体）
         commands.entity(list).with_children(|p| {
             p.spawn((Node {
-                max_width: px(820.0),
+                max_width: px(size::MSG_MAX_W),
                 align_self: AlignSelf::Center,
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
@@ -542,7 +542,7 @@ fn finalize_on_done(
     // 历史副本（限宽 820 居中：头像 + 消息体）
     commands.entity(list).with_children(|p| {
         p.spawn((Node {
-            max_width: px(820.0),
+            max_width: px(size::MSG_MAX_W),
             align_self: AlignSelf::Center,
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
@@ -929,7 +929,7 @@ fn update_input_focus_ring(
         commands.entity(entity).insert(want_border);
     }
     let want_outline = focused.then_some(Outline {
-        width: Val::Px(3.0),
+        width: Val::Px(crate::theme::size::SCROLLBAR_W),
         offset: Val::Px(0.0),
         color: theme.accent_glow,
     });

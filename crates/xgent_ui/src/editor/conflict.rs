@@ -164,11 +164,11 @@ fn spawn_conflict_dialog(
         .with_children(|p| {
             p.spawn((
                 Node {
-                    padding: UiRect::all(Val::Px(16.0)),
+                    padding: UiRect::all(Val::Px(crate::theme::space::LG)),
                     border: UiRect::all(Val::Px(1.0)),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    min_width: Val::Px(360.0),
+                    row_gap: Val::Px(crate::theme::space::MD),
+                    min_width: Val::Px(crate::theme::size::MODAL_MIN_W),
                     ..default()
                 },
                 BackgroundColor(panel),
@@ -184,7 +184,7 @@ fn spawn_conflict_dialog(
                 ));
                 card.spawn((Node {
                     flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(12.0),
+                    column_gap: Val::Px(crate::theme::space::MD),
                     ..default()
                 },))
                     .with_children(|btns| {
@@ -192,7 +192,7 @@ fn spawn_conflict_dialog(
                             Button,
                             Hovered::default(),
                             Node {
-                                padding: UiRect::all(Val::Px(8.0)),
+                                padding: UiRect::all(Val::Px(crate::theme::space::SM)),
                                 ..default()
                             },
                             BackgroundColor(accent),
@@ -209,7 +209,7 @@ fn spawn_conflict_dialog(
                             Button,
                             Hovered::default(),
                             Node {
-                                padding: UiRect::all(Val::Px(8.0)),
+                                padding: UiRect::all(Val::Px(crate::theme::space::SM)),
                                 ..default()
                             },
                             BackgroundColor(accent),
@@ -226,7 +226,7 @@ fn spawn_conflict_dialog(
                             Button,
                             Hovered::default(),
                             Node {
-                                padding: UiRect::all(Val::Px(8.0)),
+                                padding: UiRect::all(Val::Px(crate::theme::space::SM)),
                                 ..default()
                             },
                             BackgroundColor(accent),

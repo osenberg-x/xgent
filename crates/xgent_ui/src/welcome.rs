@@ -163,7 +163,7 @@ fn spawn_welcome(
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: px(space::XS),
-                    width: px(560.0),
+                    width: px(crate::theme::size::WELCOME_W),
                     margin: UiRect::top(px(space::XS)),
                     ..default()
                 },

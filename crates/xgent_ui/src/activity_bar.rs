@@ -13,7 +13,7 @@ use bevy::ui_widgets::Button;
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
 use crate::layout::{ActivityBarMarker, SideViewCollapsed};
 use crate::status_bar::CompanionOn;
-use crate::theme::{Theme, space};
+use crate::theme::{Theme, size, space};
 
 /// 图标轨项类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -86,8 +86,8 @@ fn rail_button(
         Button,
         Hovered::default(),
         Node {
-            width: px(40.0),
-            height: px(40.0),
+            width: px(size::ICON_BTN),
+            height: px(size::ICON_BTN),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             border_radius: BorderRadius::all(px(6.0)),
@@ -151,8 +151,8 @@ fn spawn_activity_bar(
             Button,
             Hovered::default(),
             Node {
-                width: px(40.0),
-                height: px(40.0),
+                width: px(size::ICON_BTN),
+                height: px(size::ICON_BTN),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border_radius: BorderRadius::all(px(6.0)),
@@ -176,8 +176,8 @@ fn spawn_activity_bar(
             Button,
             Hovered::default(),
             Node {
-                width: px(40.0),
-                height: px(40.0),
+                width: px(size::ICON_BTN),
+                height: px(size::ICON_BTN),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border_radius: BorderRadius::MAX,
@@ -194,8 +194,8 @@ fn spawn_activity_bar(
             b.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    width: px(40.0),
-                    height: px(40.0),
+                    width: px(size::ICON_BTN),
+                    height: px(size::ICON_BTN),
                     border: UiRect::all(px(2.0)),
                     border_radius: BorderRadius::MAX,
                     ..default()
@@ -204,7 +204,7 @@ fn spawn_activity_bar(
                 CompanionRingMarker,
             ));
             companion_star = Some(
-                b.spawn(icon(&icons, "star", 20.0, Color::srgb_u8(0x1C, 0x19, 0x17)))
+                b.spawn(icon(&icons, "star", 20.0, theme.star))
                     .id(),
             );
         });
@@ -237,11 +237,11 @@ fn companion_ring_system(
             node.display = display;
         }
         if on.0 {
-            let side = 40.0 * scale;
+            let side = size::ICON_BTN * scale;
             node.width = px(side);
             node.height = px(side);
-            node.left = px(-(side - 40.0) / 2.0);
-            node.top = px(-(side - 40.0) / 2.0);
+            node.left = px(-(side - size::ICON_BTN) / 2.0);
+            node.top = px(-(side - size::ICON_BTN) / 2.0);
             border.set_all(theme.warm.with_alpha(alpha));
         }
     }
@@ -388,11 +388,7 @@ fn update_companion_visual(
     if !on.is_changed() && !theme.is_changed() {
         return;
     }
-    let star_color = if on.0 {
-        Color::srgb_u8(0x1C, 0x19, 0x17)
-    } else {
-        theme.text_muted
-    };
+    let star_color = if on.0 { theme.star } else { theme.text_muted };
     for mut bg in q.iter_mut() {
         let want = if on.0 { theme.warm } else { theme.subtle };
         if bg.0 != want {
