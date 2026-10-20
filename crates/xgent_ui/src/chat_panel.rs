@@ -11,7 +11,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::text::EditableText;
+use bevy::text::{EditableText, TextLayoutInfo};
 use bevy::ui::Pressed;
 use bevy::ui_widgets::{Button, TextInput};
 
@@ -60,13 +60,33 @@ const QA_ACTIONS: &[(&str, &str)] = &[
     ("qa-review", "qa-review-prompt"),
 ];
 
-/// 对话输入框实体标记。
+/// 输入卡最小高度（单行输入时的常态高度）。
+const INPUT_MIN_H: f32 = 38.0;
+/// 输入卡最大高度（超过后由内层滚动区承载）。
+const INPUT_MAX_H: f32 = 200.0;
+/// 输入卡上下内边距合计（滚动区可用高度要减掉它）。
+const INPUT_PADDING_V: f32 = 2.0 * 8.0;
+/// 输入卡边框厚度合计。
+const INPUT_BORDER: f32 = 2.0;
+
+/// 对话输入框实体标记（挂在**文本节点**上，即真正持有 `EditableText` 的那个）。
 #[derive(Component, Default)]
 pub struct ChatInputMarker;
 
 /// 输入框边框标记（用于忙时变色）。
 #[derive(Component, Default)]
 pub struct ChatInputBorderMarker;
+
+/// 输入卡（可见外框）标记。
+///
+/// v8 M3-T3：输入区改成「外框 + 内层可滚动文本区」两段式，边框变色与焦点环
+/// 都挂在外框上（文本节点在框内滚动，边框不该跟着动）。
+#[derive(Component, Default)]
+pub struct ChatInputCardMarker;
+
+/// 输入区滚动容器标记（文本超过上限时在这里滚）。
+#[derive(Component, Default)]
+pub struct ChatInputScrollMarker;
 
 /// 输入框忙时标记（空输入发送时插入，红边闪烁 0.4s 后移除）。
 #[derive(Component)]
@@ -86,7 +106,10 @@ pub struct TokenHintMarker;
 pub struct ChatPanelEntities {
     pub message_list: Option<Entity>,
     pub current_text: Option<Entity>,
+    /// 输入框的**文本节点**（持有 `EditableText`，提交事件的来源）。
     pub input: Option<Entity>,
+    /// 输入卡外框（边框变色 / 焦点环挂在这里）。
+    pub input_card: Option<Entity>,
     /// 回到底部浮钮（M4-T3）。
     pub back_to_bottom: Option<Entity>,
 }
@@ -106,6 +129,13 @@ impl Plugin for ChatPanelPlugin {
                     handle_qa_chips,
                     update_msg_actions,
                 ),
+            )
+            // v8 M3-T3：光标行跟随 + 可视行数自适应（要拿到本帧最新的布局与光标矩形）
+            .add_systems(
+                PostUpdate,
+                (update_input_visible_lines, update_input_scroll_to_caret)
+                    .chain()
+                    .after(bevy::ui::UiSystems::PostLayout),
             )
             .add_systems(
                 Update,
@@ -180,43 +210,72 @@ pub(crate) fn spawn_chat_panel(
         .id();
 
     // 浮动输入卡
-    let input_entity = commands
+    // v8 M3-T3：改成「外框 + 内层可滚动文本区」两段式——文本到上限（200px）
+    // 后由内层滚动，光标行始终可见（审计 C4：长输入把当前行藏起来）。
+    // 文本必须放在滚动容器的**子节点**里：挂在容器自身的文本按内容盒定位，
+    // 不随 ScrollPosition 移动。
+    let mut input_scroll = ScrollFrame::vertical();
+    input_scroll.content_sized();
+    input_scroll.style().max_height = px(INPUT_MAX_H - INPUT_PADDING_V - INPUT_BORDER);
+    let mut input_text_entity = Entity::PLACEHOLDER;
+    let input_card = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                min_height: px(38.0),
-                max_height: px(200.0),
+                min_height: px(INPUT_MIN_H),
                 flex_shrink: 0.0,
                 padding: UiRect::all(px(space::SM)),
                 border: UiRect::all(px(1.0)),
                 border_radius: BorderRadius::all(px(radius::PANEL)),
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
             BackgroundColor(theme.input_bg),
             BorderColor::all(theme.border),
-            ui_text(
-                String::new(),
-                theme.font_size,
-                400,
-                theme.text,
-                type_scale::line_height::UI,
-            ),
-            bevy::text::TextCursorStyle::default(),
-            EditableText {
-                allow_newlines: true,
-                ..default()
-            },
-            TextInput,
-            ChatInput::multiline(),
-            AutoFocus,
-            // 点击重新聚焦（AutoFocus 只在 spawn 时生效；0.20 点击聚焦须 TabIndex）
-            TabIndex(0),
-            ChatInputMarker,
             ChatInputBorderMarker,
-            // 文本输入 → 竖线 I-beam 指针
-            crate::cursor::CursorStyle::Text,
-            crate::cursor::CursorHit::default(),
+            ChatInputCardMarker,
         ))
+        .with_children(|card| {
+            card.spawn((input_scroll, ChatInputScrollMarker))
+                .with_children(|area| {
+                    input_text_entity = area
+                        .spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                ..default()
+                            },
+                            // 可编辑文本只给样式不给 `Text`：`Text` 会与
+                            // `EditableText` 争 `ContentSize`（高度时对时错）。
+                            crate::fonts::ui_text_style(
+                                theme.font_size,
+                                400,
+                                theme.text,
+                                type_scale::line_height::UI,
+                            ),
+                            bevy::text::TextCursorStyle::default(),
+                            EditableText {
+                                allow_newlines: true,
+                                // 可视行数由 `update_input_visible_lines` 按
+                                // 实际文本行数维护（1 = 初始空输入）。
+                                visible_lines: Some(1.0),
+                                ..default()
+                            },
+                            TextInput,
+                            ChatInput::multiline(),
+                            AutoFocus,
+                            // 点击重新聚焦（AutoFocus 只在 spawn 时生效；0.20 点击聚焦须 TabIndex）
+                            TabIndex(0),
+                            ChatInputMarker,
+                            // 没有 `Text` 组件时，require_markers 下必须自带
+                            // Pickable 才收得到点击（否则点不进而无法聚焦）。
+                            bevy::picking::Pickable::default(),
+                            // 文本输入 → 竖线 I-beam 指针
+                            crate::cursor::CursorStyle::Text,
+                            crate::cursor::CursorHit::default(),
+                        ))
+                        .id();
+                });
+        })
         .id();
 
     // 工具栏（快捷键提示 + 发送按钮区）
@@ -299,10 +358,13 @@ pub(crate) fn spawn_chat_panel(
         .id();
 
     // qa 快捷 chips 行（v7.1：点击填入输入框，M4-T8）
+    // v8 M3-T3：窄窗下换行而不是裁掉（审计 C5）。
     let qa_row = commands
         .spawn((Node {
             flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
             column_gap: px(space::SM),
+            row_gap: px(space::XS),
             margin: UiRect::bottom(px(space::XS)),
             flex_shrink: 0.0,
             ..default()
@@ -357,7 +419,7 @@ pub(crate) fn spawn_chat_panel(
             BackgroundColor(theme.surface),
         ))
         .add_child(qa_row)
-        .add_child(input_entity)
+        .add_child(input_card)
         .add_child(toolbar)
         .id();
 
@@ -401,7 +463,8 @@ pub(crate) fn spawn_chat_panel(
 
     entities.message_list = Some(message_list);
     entities.current_text = Some(current_text);
-    entities.input = Some(input_entity);
+    entities.input = Some(input_text_entity);
+    entities.input_card = Some(input_card);
     entities.back_to_bottom = Some(back_to_bottom);
 }
 
@@ -766,8 +829,9 @@ pub fn forward_input_submission(
             continue;
         }
         if ev.text.is_empty() {
-            if let Some(input) = entities.input {
-                commands.entity(input).insert(InputBusyMarker {
+            // 红边闪烁标记挂在外框上（边框在外框，文本节点在框内滚动）。
+            if let Some(card) = entities.input_card {
+                commands.entity(card).insert(InputBusyMarker {
                     started_at: time.elapsed().as_secs_f64(),
                 });
             }
@@ -905,19 +969,25 @@ fn update_token_hint(
 }
 
 /// 输入卡 focus 环（M4-T7）：聚焦时 `Outline` 3px `accent_glow` + 边框 `accent_interactive`。
+///
+/// v8 M3-T3：焦点环画在**外框**上（文本节点在框内滚动，环跟着文本走会抖）。
 fn update_input_focus_ring(
     mut commands: Commands,
     focus: Res<InputFocus>,
     theme: Res<Theme>,
     q_input: Query<Entity, With<ChatInputMarker>>,
-    q_border: Query<&BorderColor, With<ChatInputMarker>>,
-    q_outline: Query<Option<&Outline>, With<ChatInputMarker>>,
+    q_card: Query<Entity, With<ChatInputCardMarker>>,
+    q_border: Query<&BorderColor, With<ChatInputCardMarker>>,
+    q_outline: Query<Option<&Outline>, With<ChatInputCardMarker>>,
 ) {
     let Ok(entity) = q_input.single() else {
         return;
     };
+    let Ok(card) = q_card.single() else {
+        return;
+    };
     let focused = focus.get() == Some(entity);
-    let Ok(border) = q_border.get(entity) else {
+    let Ok(border) = q_border.get(card) else {
         return;
     };
     let line = if focused {
@@ -927,26 +997,26 @@ fn update_input_focus_ring(
     };
     let want_border = BorderColor::all(line);
     if *border != want_border {
-        commands.entity(entity).insert(want_border);
+        commands.entity(card).insert(want_border);
     }
     let want_outline = focused.then_some(Outline {
         width: Val::Px(crate::theme::size::SCROLLBAR_W),
         offset: Val::Px(0.0),
         color: theme.accent_glow,
     });
-    let has = matches!(q_outline.get(entity), Ok(Some(_)));
+    let has = matches!(q_outline.get(card), Ok(Some(_)));
     match (want_outline, has) {
         (Some(o), false) => {
-            commands.entity(entity).insert(o);
+            commands.entity(card).insert(o);
         }
         (None, true) => {
-            commands.entity(entity).remove::<Outline>();
+            commands.entity(card).remove::<Outline>();
         }
         (Some(o), true) => {
-            if let Ok(Some(cur)) = q_outline.get(entity)
+            if let Ok(Some(cur)) = q_outline.get(card)
                 && *cur != o
             {
-                commands.entity(entity).insert(o);
+                commands.entity(card).insert(o);
             }
         }
         (None, false) => {}
@@ -997,6 +1067,74 @@ fn handle_qa_chips(
                 crate::i18n::tr(&loc, marker.key).to_string().into(),
             ));
         }
+    }
+}
+
+/// 输入框高度自适应：可视行数 = 文本实际行数。
+///
+/// bevy 0.20 的可编辑文本节点高度由 `EditableText::visible_lines` 决定
+/// （`bevy_ui/src/widget/text_input_layout.rs:171`），不是由文本内容自动决定。
+/// 这里按排版结果的行数回写，于是输入框从 1 行长到内容那么多行；再长就由内层
+/// 滚动区承载（上限 200px）。
+fn update_input_visible_lines(
+    mut q: Query<
+        (&mut EditableText, &TextLayoutInfo),
+        (With<ChatInputMarker>, Changed<TextLayoutInfo>),
+    >,
+    theme: Res<Theme>,
+) {
+    for (mut editable, info) in q.iter_mut() {
+        // 解析后的行高 = 行高比例 × 字号（物理像素；`type_scale::line_height` 是比例）
+        let line_h = type_scale::line_height::UI * theme.font_size * info.scale_factor;
+        if line_h <= 0.0 {
+            continue;
+        }
+        let lines = (info.size.y / line_h).ceil().max(1.0);
+        if editable
+            .visible_lines
+            .is_none_or(|cur| (cur - lines).abs() > 0.01)
+        {
+            editable.visible_lines = Some(lines);
+        }
+    }
+}
+
+/// 输入区滚动：保证光标所在行可见（审计 C4：长输入会把当前行藏起来）。
+///
+/// bevy 0.20 自带的 `TextViewport::reveal_caret` **只在焦点变化时**触发
+/// （`bevy_ui/src/widget/text_input_layout.rs:543`），继续打字不会跟随光标。
+/// 这里按 `TextLayoutInfo.cursor` 的光标矩形自己算一次滚动目标：
+/// 光标行不在视口内时，把视口对齐到光标行。
+///
+/// 必须在布局与可编辑文本布局之后跑（需要本帧最新的 `ComputedNode` 与光标矩形）。
+fn update_input_scroll_to_caret(
+    q_text: Query<&TextLayoutInfo, (With<ChatInputMarker>, Changed<EditableText>)>,
+    mut q_scroll: Query<(&mut ScrollPosition, &ComputedNode), With<ChatInputScrollMarker>>,
+) {
+    let Ok(info) = q_text.single() else {
+        return;
+    };
+    let Some((_blink, caret)) = info.cursor else {
+        return;
+    };
+    let Ok((mut scroll, computed)) = q_scroll.single_mut() else {
+        return;
+    };
+    // `TextLayoutInfo` 的尺寸与光标矩形都是物理像素；`ScrollPosition` 是逻辑像素。
+    let scale = computed.inverse_scale_factor();
+    let viewport_h = computed.size().y;
+    let content_h = info.size.y;
+    let caret_top = caret.min.y;
+    let caret_h = (caret.max.y - caret.min.y).max(0.0);
+    let want = xui::compute_scroll_to_child(
+        viewport_h,
+        content_h,
+        caret_top,
+        caret_h,
+        scroll.0.y * scale,
+    ) * scale;
+    if (want - scroll.0.y).abs() > 0.5 {
+        scroll.0.y = want;
     }
 }
 

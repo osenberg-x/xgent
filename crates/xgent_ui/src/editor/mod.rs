@@ -177,19 +177,15 @@ fn spawn_editor_view(
         return;
     };
     // 编辑器视图容器：作为分屏内容，初始隐藏（由 buffer 显隐 + 分屏显隐共同决定）
+    // v8 M3-T3：同列还有 38px 页签条，页面若用 `height:100%` 会把底部顶出视口
+    // （审计 D2：终端状态条永久掉出 38px）。改用 `region_fill`（flex 填满剩余空间）。
+    let mut view_node = xui::region_fill();
+    view_node.width = Val::Percent(100.0);
+    view_node.flex_direction = FlexDirection::Column;
+    view_node.overflow = Overflow::clip();
+    view_node.display = Display::None;
     let editor_view = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::clip(),
-                display: Display::None,
-                ..default()
-            },
-            BackgroundColor(theme.code_bg),
-            EditorViewMarker,
-        ))
+        .spawn((view_node, BackgroundColor(theme.code_bg), EditorViewMarker))
         .with_children(|p| {
             // 顶部栏：tab 条（EditorTabBarMarker，动态 spawn tab 项）+ spacer + ✕ 关分屏
             p.spawn((

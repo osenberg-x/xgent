@@ -49,13 +49,15 @@ pub fn spawn_diff_view(
     };
     let view = commands
         .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::clip(),
-                display: Display::None,
-                ..default()
+            // v8 M3-T3：同列有 38px 页签条，页面用 `height:100%` 会把底部顶出
+            // 视口（审计 D2）。改用 `region_fill`（flex 填满剩余空间）。
+            {
+                let mut n = xui::region_fill();
+                n.width = Val::Percent(100.0);
+                n.flex_direction = FlexDirection::Column;
+                n.overflow = Overflow::clip();
+                n.display = Display::None;
+                n
             },
             BackgroundColor(theme.code_bg),
             DiffViewMarker,

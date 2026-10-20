@@ -51,6 +51,25 @@ pub fn ui_text(
     )
 }
 
+/// UI 文本**样式**构造器（不含 `Text` 组件）——给可编辑文本（`EditableText`）用。
+///
+/// 可编辑文本的内容由编辑器自己驱动（`EditableText` + `visible_lines`）。若同时
+/// 挂 `Text`，bevy 的两个系统会争同一个 `ContentSize`（`measure_text_system` 按
+/// `Text` 量、`update_editable_text_content_size` 按 `visible_lines` 量），
+/// 高度会时对时错。可编辑文本节点因此只给样式，不给 `Text`。
+pub fn ui_text_style(size: f32, weight: u16, color: Color, line_height: f32) -> impl Bundle {
+    (
+        TextFont {
+            font_size: FontSize::Px(size),
+            weight: FontWeight(weight),
+            font_features: inter_font_features(),
+            ..default()
+        },
+        TextColor(color),
+        LineHeight::RelativeToFont(line_height),
+    )
+}
+
 /// 等宽文本构造器（带字重，等宽标签/强调用）。
 pub fn mono_text_weighted(
     fonts: &UiFonts,

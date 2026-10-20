@@ -292,3 +292,227 @@ fn file_tree_is_a_scroll_frame() {
         .expect("文件树应是 ScrollFrame");
     assert_eq!(marker.overflow().y, bevy::ui::OverflowAxis::Scroll);
 }
+
+/// D2 回归：分屏里的三个页面（编辑器 / 差异 / 终端）用 `region_fill` 而不是
+/// `height: 100%`。
+///
+/// 同列还有 38px 页签条，页面若按父容器全高排布，底部 38px（终端状态条所在）
+/// 会被顶出视口且永久看不见。
+#[test]
+fn side_view_pages_use_region_fill() {
+    for (name, src) in [
+        ("editor/mod.rs", include_str!("../src/editor/mod.rs")),
+        (
+            "editor/diff_view.rs",
+            include_str!("../src/editor/diff_view.rs"),
+        ),
+        ("terminal/mod.rs", include_str!("../src/terminal/mod.rs")),
+    ] {
+        assert!(
+            src.contains("xui::region_fill()"),
+            "{name} 的分屏页面应改用 xui::region_fill()（height:100% 会把底部顶出视口）"
+        );
+    }
+}
+
+/// D2 回归（机制层）：列里有固定高度兄弟时，`region_fill` 的内容区不溢出。
+///
+/// 这就是「终端底部状态条永久掉出视口 38px」的机制：内容区按父容器全高排布，
+/// 加上同列的 38px 页签条就多出 38px。
+#[test]
+fn region_fill_does_not_overflow_with_fixed_sibling() {
+    let mut app = ui_app();
+    // 300px 高的列：38px 页签条 + region_fill 内容区
+    let root = app
+        .world_mut()
+        .spawn((Node {
+            width: Val::Px(200.0),
+            height: Val::Px(300.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },))
+        .id();
+    let bar = app
+        .world_mut()
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(38.0),
+            flex_shrink: 0.0,
+            ..default()
+        },))
+        .id();
+    let content = app.world_mut().spawn((xui::region_fill(),)).id();
+    app.world_mut().entity_mut(root).add_child(bar);
+    app.world_mut().entity_mut(root).add_child(content);
+    for _ in 0..4 {
+        app.update();
+    }
+
+    let computed = *app
+        .world()
+        .get::<ComputedNode>(content)
+        .expect("内容区应有 ComputedNode");
+    assert!(
+        (computed.size().y - 262.0).abs() < 1.0,
+        "内容区应恰好占满剩余 262px（实测 {}）",
+        computed.size().y
+    );
+}
+
+/// 按标记取唯一实体（不存在则 panic）。
+fn find_one<M: Component>(app: &mut App) -> Entity {
+    let mut q = app.world_mut().query_filtered::<Entity, With<M>>();
+    let mut found: Vec<Entity> = q.iter(app.world()).collect();
+    found.sort();
+    assert_eq!(
+        found.len(),
+        1,
+        "应恰有一个带 {} 的节点，实际 {} 个",
+        std::any::type_name::<M>(),
+        found.len()
+    );
+    found[0]
+}
+
+/// C4 回归：长输入时输入区内部滚动，且光标行被滚进视口。
+///
+/// 结构上：输入卡（外框）+ 内层滚动区（ScrollFrame）+ 文本节点。
+/// 行为上：输入框高度被上限卡住、文本节点随内容长高、光标行可见（滚动位置被推下去）。
+///
+/// 注：headless 装配下 UI 根没有相机视口，宽度为 0（文本按自然宽度排版），
+/// 因此这里断言的是**契约性质**（上限、随内容长高、光标跟随），不是具体像素。
+#[test]
+fn chat_input_scrolls_and_keeps_caret_visible() {
+    use bevy::input_focus::{FocusCause, InputFocus};
+    use bevy::text::EditableText;
+    use xgent_ui::chat_panel::{ChatInputCardMarker, ChatInputMarker, ChatInputScrollMarker};
+
+    /// 输入区高度上限（与 chat_panel 的常量一致）。
+    const INPUT_MAX_H: f32 = 200.0;
+
+    let mut app = chat_app();
+    let input = find_one::<ChatInputMarker>(&mut app);
+
+    // 灌一段超过上限的长文本
+    let long = (0..40)
+        .map(|i| format!("第 {i} 行 of a fairly long input line"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    {
+        let mut entity = app.world_mut().entity_mut(input);
+        let mut e = entity
+            .get_mut::<EditableText>()
+            .expect("输入节点应有 EditableText");
+        // 走正规编辑通道（queue_edit）：`editor.set_text` 不推进 generation，
+        // bevy 的可编辑文本布局系统不会重新排版。
+        e.queue_edit(bevy::text::TextEdit::Insert(long.clone().into()));
+        e.queue_edit(bevy::text::TextEdit::TextEnd(false));
+    }
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(input, FocusCause::Pressed);
+    for _ in 0..6 {
+        app.update();
+    }
+
+    // 结构：滚动区是 ScrollFrame
+    let scroll_entity = find_one::<ChatInputScrollMarker>(&mut app);
+    let marker = app
+        .world()
+        .get::<ScrollFrameMarker>(scroll_entity)
+        .expect("输入区应是 ScrollFrame");
+    assert_eq!(marker.overflow().y, bevy::ui::OverflowAxis::Scroll);
+
+    // 结构：输入卡自身不设高度上限（上限由内层滚动区承担）
+    let card = find_one::<ChatInputCardMarker>(&mut app);
+    let card_node = app.world().get::<Node>(card).expect("输入卡应有 Node");
+    assert_eq!(card_node.max_height, Val::Auto, "上限由内层滚动区承担");
+
+    // 行为：输入框高度被上限卡住（长文本不会把输入框顶得无限高）
+    let computed = *app
+        .world()
+        .get::<ComputedNode>(scroll_entity)
+        .expect("滚动区应有 ComputedNode");
+    assert!(
+        computed.size().y <= INPUT_MAX_H + 1.0,
+        "输入区高度应被上限卡住（实测 {}）",
+        computed.size().y
+    );
+
+    // 行为：文本节点随内容长高（不是固定一行）
+    let text_node = *app
+        .world()
+        .get::<ComputedNode>(input)
+        .expect("文本节点应有 ComputedNode");
+    assert!(
+        text_node.size().y > 1.0,
+        "文本节点应随内容长高（实测 {}）",
+        text_node.size().y
+    );
+
+    // 行为：光标行被滚进视口（滚动位置被推下去）
+    let scroll_y = app
+        .world()
+        .get::<ScrollPosition>(scroll_entity)
+        .expect("滚动区应有 ScrollPosition")
+        .y;
+    assert!(
+        scroll_y > 0.0,
+        "光标行应被滚进视口（实测滚动位置 {}）",
+        scroll_y
+    );
+}
+
+/// 能 spawn 对话面板的最小 App（与 density 测试同款装配）。
+fn chat_app() -> App {
+    use xgent_agent::{
+        CompactedMessage, Conversation, DeltaMessage, DoneMessage, ErrorMessage, RetryMessage,
+        SessionClearedMessage, SteeringMessage, UserInputMessage,
+    };
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .add_plugins(bevy::image::ImagePlugin::default())
+        .add_plugins(bevy::window::WindowPlugin::default())
+        .add_message::<bevy::window::WindowEvent>()
+        .add_plugins(bevy::picking::input::PointerInputPlugin)
+        .add_plugins(bevy::picking::PickingPlugin)
+        .add_plugins(bevy::picking::InteractionPlugin)
+        .add_plugins(bevy::input::InputPlugin)
+        .add_plugins(bevy::input_focus::InputFocusPlugin)
+        .add_plugins(bevy::input_focus::InputDispatchPlugin)
+        .add_plugins(bevy::text::TextPlugin)
+        .add_plugins(bevy::ui::UiPlugin)
+        .add_plugins(bevy::ui_widgets::UiWidgetsPlugins)
+        .init_asset::<bevy::image::TextureAtlasLayout>()
+        .add_plugins(bevy::camera::visibility::VisibilityPlugin)
+        .add_plugins(bevy::mesh::MeshPlugin)
+        .init_resource::<xgent_ui::theme::Theme>()
+        .init_resource::<xgent_settings::Localizer>()
+        .init_resource::<Conversation>()
+        .init_resource::<bevy::clipboard::Clipboard>()
+        .insert_resource(xgent_ui::fonts::UiFonts {
+            ui: Handle::default(),
+            mono: Handle::default(),
+        })
+        .insert_resource(xgent_ui::kit::IconAssets::default())
+        .add_message::<UserInputMessage>()
+        .add_message::<DeltaMessage>()
+        .add_message::<DoneMessage>()
+        .add_message::<ErrorMessage>()
+        .add_message::<RetryMessage>()
+        .add_message::<SteeringMessage>()
+        .add_message::<CompactedMessage>()
+        .add_message::<SessionClearedMessage>()
+        .add_message::<xgent_agent::BoundedMessage>()
+        .add_message::<xgent_ui::kit::ToastMessage>()
+        .add_message::<xui::input::ChatInputSubmitted>()
+        .add_plugins(xgent_ui::layout::LayoutPlugin)
+        .add_plugins(xgent_ui::chat_panel::ChatPanelPlugin);
+    app.world_mut().spawn(Camera::default());
+    for _ in 0..3 {
+        app.update();
+    }
+    app
+}

@@ -256,14 +256,16 @@ fn spawn_terminal_view(
     };
     commands.entity(side).with_children(|p| {
         // 终端视图容器：初始隐藏（由 apply_terminal_view_visibility 据 SideViewContent 切换）
+        // v8 M3-T3：同列有 38px 页签条，页面用 `height:100%` 会把底部状态条顶出
+        // 视口（审计 D2：永久掉出 38px）。改用 `region_fill`（flex 填满剩余空间）。
         p.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::clip(),
-                display: Display::None,
-                ..default()
+            {
+                let mut n = xui::region_fill();
+                n.width = Val::Percent(100.0);
+                n.flex_direction = FlexDirection::Column;
+                n.overflow = Overflow::clip();
+                n.display = Display::None;
+                n
             },
             BackgroundColor(theme.bg),
             TerminalViewMarker,
