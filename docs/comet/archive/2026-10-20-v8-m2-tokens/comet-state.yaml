@@ -1,0 +1,329 @@
+schema: comet.native.v4
+name: v8-m2-tokens
+language: zh-CN
+phase: archive
+status: done
+state_version: 8
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 5f663053ba57a59da264aa6be39d682794e2687c47e10e28ef35fa7455d72474
+spec_changes:
+  - capability: ui-m2a-tokens
+    operation: create
+    source: specs/ui-m2a-tokens/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: 修改 `ThemeHandle.theme`（或配置 `preferences.theme`）后，`generation` 递增，所有
+      `Themed` 节点的背景/边框/文字颜色在下一帧更新，无需重启。
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression
+        22、modal 3、workspace check）与 clippy 库目标均通过；因平台 429
+        无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "`Theme::dark()` 仅命中 `theme.rs` 内定义与测试；`fn px(` 仅 `theme.rs` 一处。"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression
+        22、modal 3、workspace check）与 clippy 库目标均通过；因平台 429
+        无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "`size` 新增的 10 个常量被实际引用；区域尺寸不再出现裸 `Val::Px(<数字>)`（1px 边框等装饰需注释豁免）。"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression
+        22、modal 3、workspace check）与 clippy 库目标均通过；因平台 429
+        无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "`CONTEXT_W_MIN`/`CHAT_MIN` 只在 `theme::size` 定义，`resize.rs` 引用同一常量。"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression
+        22、modal 3、workspace check）与 clippy 库目标均通过；因平台 429
+        无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: 非 theme 色字面量只剩 ANSI 表白名单项（带注释）；星形与 `Color::WHITE` 已入 theme。
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression
+        22、modal 3、workspace check）与 clippy 库目标均通过；因平台 429
+        无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: 启动首帧窗口为 1280×800 逻辑像素；HiDPI 下不出现尺寸异常。
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression
+        22、modal 3、workspace check）与 clippy 库目标均通过；因平台 429
+        无独立语义评审，验证报告需如实记录该边界。"
+      truncated: false
+builder_handoff:
+  candidate_id: 3630cb51-5b18-4739-b2f1-1975ec0fb13d
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:0e1d7a77-fd79-40bf-83ce-5524fd249a4b
+  iteration: 1
+  summary:
+    text: UI v8 M2a：ThemeHandle 成为主题唯一权威（Themed 按 generation 重绘、Theme 降为快照）；删除
+      Theme::dark 现场构造与两处本地 px()；区域尺寸/圆角/最小宽度/色值收敛到 theme 令牌；窗口默认
+      1280×800。像素值保持不变。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/theme.rs：ThemeHandle{theme,generation}、ThemeRole、Themed{role,generation}、repaint_on_theme_change、sync_theme_from_config
+        - crates/xgent_ui/src/layout.rs：BASE/顶栏/状态栏/图标轨/对话区/上下文面板挂
+          Themed（Canvas/Surface）
+        - crates/xgent_ui/src/theme.rs::tests::theme_handle_repaints_themed_nodes
+          通过（generation+1 后 BackgroundColor 与 Theme 快照同步）
+        - 实测：cargo test -p xgent_ui --lib → 69 passed
+      note: ThemeHandle 是唯一权威；generation 变化时按角色写 BackgroundColor/BorderColor/TextColor
+        并同步 Theme 快照，旧 Res<Theme> 调用点无需改签名。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - theme.rs：Theme::dark() 改为 pub(crate)
+        - confirm_dialog.rs / settings_panel.rs：删除本地 fn px()，改用 theme::px
+        - "editor/diff_view.rs: show_empty 接收 &Theme，移除 Theme::dark() 现场构造"
+        - grep：Theme::dark() 与 fn px( 在 theme.rs 之外 0 命中
+      note: 生产代码不再现场构造主题；px 只有一个定义。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - theme::size 新增
+          ICON_BTN/RAIL_ITEM/BRAND/SCOPE_H/MSG_MAX_W/TOAST_BOTTOM/OVERLAY_*/MODAL_MIN_W/HANDLE_W/WELCOME_W/TAB_*/SCROLLBAR_W/ICON_*/TOOL_PANEL_MAX_H
+        - 替换：chat_panel 820、top_bar 品牌块、activity_bar 40、command_palette
+          560/440、settings 640、confirm 560、conflict 360、welcome 560、tabs
+          48/20/360、tool_panel 200、session_history 24/28
+        - grep -rn "Val::Px([0-9]" 排除 0/1/2 后为 0
+        - 注：品牌块实际现值 28（计划表写 34 为旧值），按像素不变原则 BRAND=28
+      note: 区域尺寸全部走 theme::size / theme::space / theme::radius；剩余 0/1/2 为定位与描边装饰值。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/resize.rs：SIDE_VIEW_MIN/CHAT_MIN/HANDLE_W 改为
+          size::CONTEXT_W_MIN/CHAT_MIN/HANDLE_W 的别名
+        - grep 380.0/520.0：仅 theme.rs 的 size 定义（另有 legacy
+          CHAT_SIDEBAR_W=380，非最小宽度）
+      note: 最小宽度只有一个数值来源。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - theme.rs 新增 star（0x1C1917）与 on_accent（白）
+        - activity_bar.rs 星形使用 theme.star；editor/tabs.rs 使用 theme.on_accent
+        - terminal/output.rs basic_color 增加 ANSI 白名单注释
+        - grep Color::WHITE 在 theme.rs 之外 0 命中
+      note: 非主题色只剩 ANSI 表（带白名单注释）。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_app/src/main.rs:232 resolution:
+          WindowResolution::new(1280, 800)"
+        - 保留原有 resize_constraints（1024×640 下限）
+      note: 首帧逻辑尺寸确定；未新增尺寸持久化（按 M2a 范围）。
+  checks:
+    - name:
+        text: cargo test -p xgent_ui --lib
+        truncated: false
+      result: passed
+      note:
+        text: 69 passed / 0 failed（含主题重绘、层根、模态、抽屉、拾取）
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test layout --test modal_settings --test
+          settings_panel_values --test toast
+        truncated: false
+      result: passed
+      note:
+        text: 2 + 3 + 19 + 1 passed
+        truncated: false
+    - name:
+        text: cargo check --workspace
+        truncated: false
+      result: passed
+      note:
+        text: 通过；xgent_tools 一条既有 unused_must_use 警告
+        truncated: false
+    - name:
+        text: cargo clippy -p xgent_ui -p xgent_app --lib --no-deps -- -D warnings
+        truncated: false
+      result: passed
+      note:
+        text: 库目标通过
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: A1 的「主题替换」目前只有 dark 一套色板；机制已验证，light 色板不在 M2a 范围。
+      truncated: false
+    - text: 密度档位与 hover 全量化留给 M2b（Interaction 在 0.20 已废弃，届时用 Hovered/Pressed）。
+      truncated: false
+    - text: 品牌块按像素不变保留 28px，与计划表 34 不一致，已在 A3 说明。
+      truncated: false
+    - text: 窗口只设默认尺寸，未做「记住上次尺寸」。
+      truncated: false
+    - text: A6 为静态断言（main.rs 的 WindowResolution），未在 HiDPI 真机做截图验证。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-20T01:47:46.846Z
+blockers: []
+verification:
+  candidate_id: 3630cb51-5b18-4739-b2f1-1975ec0fb13d
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:5f3f96a2-e9de-4c26-8bf0-c035da1d957c
+  iteration: 1
+  attempt: 1
+  assurance: user-confirmed-degraded
+  verdict: pass
+  checks:
+    - id: ui-lib-tests
+      name:
+        text: UI 库内测试（主题重绘/层根/模态/抽屉/拾取）
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_ui --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 2875
+    - id: ui-regression
+      name:
+        text: 布局/设置/ toast 回归
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_ui --test layout --test settings_panel_values --test
+            toast
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 59405
+    - id: ui-modal-tests
+      name:
+        text: 设置面板模态回归
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
+            test -p xgent_ui --test modal_settings
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 18642
+    - id: workspace-check
+      name:
+        text: 全工作区编译检查
+        truncated: false
+      argv_display:
+        - text: /c
+          truncated: false
+        - text: set CARGO_PROFILE_DEV_DEBUG=0&& cargo check --workspace
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 3280
+  summary:
+    text: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression 22、modal 3、workspace
+      check）与 clippy 库目标均通过；因平台 429 无独立语义评审，验证报告需如实记录该边界。
+    truncated: false
+  risks:
+    - text: No independent semantic Verifier execution was available; Runtime checks
+        alone do not cover acceptance semantics.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-20T02:04:50.773Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: blocked
+    unresolved_ids:
+      - A1
+      - A2
+      - A3
+      - A4
+      - A5
+      - A6
+    summary:
+      text: 独立 Verifier 子代理两次启动均被平台以 429 too many requests 拒绝（任务未开始）；Runtime 4 项检查（lib
+        69、regression 22、modal 3、workspace check）全部通过，clippy
+        库目标手工通过，但当前无法进行独立语义评审。
+      truncated: false
+    completed_at: 2026-10-20T01:58:40.924Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 用户明确选择 B：接受只有自动检查的结果。4 项 Runtime 检查（lib 69、regression 22、modal 3、workspace
+        check）与 clippy 库目标均通过；因平台 429 无独立语义评审，验证报告需如实记录该边界。
+      truncated: false
+    completed_at: 2026-10-20T02:04:50.773Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-20T01:36:28.986Z
