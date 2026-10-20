@@ -48,7 +48,10 @@ pub use text_editor::{
     EditorActive, EditorDirtyChanged, EditorSaveRequested, HighlightCache, Language, Rope,
     TextEditor, TextEditorPlugin, TextEditorUpdateSet,
 };
-pub use virtual_list::{VirtualItemBuilder, VirtualList, VirtualListPlugin};
+pub use virtual_list::{
+    VIRTUAL_LIST_THRESHOLD, VirtualItemBuilder, VirtualList, VirtualListItem, VirtualListPlugin,
+    build_measured_offsets, compute_visible_range_measured,
+};
 
 /// `xui` 插件：注册所有子组件插件与快捷键注册表。
 ///

@@ -319,11 +319,11 @@ fn measure_width(
 ///
 /// 必须在布局之后跑（需要本帧最新的节点宽度）。
 fn apply_ellipsis(
-    mut pipeline: ResMut<TextPipeline>,
-    fonts: Res<Assets<Font>>,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
-    rem_size: Res<RemSize>,
+    mut pipeline: Option<ResMut<TextPipeline>>,
+    fonts: Option<Res<Assets<Font>>>,
+    mut font_cx: Option<ResMut<FontCx>>,
+    mut layout_cx: Option<ResMut<LayoutCx>>,
+    rem_size: Option<Res<RemSize>>,
     mut cache: ResMut<EllipsisCache>,
     mut scratch: Local<ComputedTextBlock>,
     mut q: Query<
@@ -341,6 +341,17 @@ fn apply_ellipsis(
         With<Ellipsis>,
     >,
 ) {
+    // 文本管线来自 bevy 的 TextPlugin；宿主没装时无法测量，
+    // 此时不做截断（退化：文本原样显示），不因缺资源而让整个 App 报错。
+    let (Some(pipeline), Some(fonts), Some(font_cx), Some(layout_cx), Some(rem_size)) = (
+        pipeline.as_mut(),
+        fonts.as_ref(),
+        font_cx.as_mut(),
+        layout_cx.as_mut(),
+        rem_size.as_ref(),
+    ) else {
+        return;
+    };
     for (mut text, ellipsis, computed, font, color, line_height, letter_spacing, layout, target) in
         q.iter_mut()
     {
@@ -349,7 +360,7 @@ fn apply_ellipsis(
             // 宽度还没算出来（或节点被隐藏）：先不截断，等下一帧。
             continue;
         }
-        let font_size = font.font_size.eval(target.logical_size(), *rem_size);
+        let font_size = font.font_size.eval(target.logical_size(), **rem_size);
         let key = CacheKey {
             source: hash_str(&ellipsis.source),
             width_px: (avail.round() as i64) * 2, // 量化到 0.5px，配合 2px 迟滞
@@ -369,10 +380,10 @@ fn apply_ellipsis(
         let (prefix_src, suffix) = split_for_mode(&ellipsis.source, ellipsis.mode);
         let mut measure = |candidate: &str| {
             measure_width(
-                &mut pipeline,
-                &fonts,
-                &mut font_cx,
-                &mut layout_cx,
+                &mut *pipeline,
+                fonts,
+                &mut *font_cx,
+                &mut *layout_cx,
                 &mut scratch,
                 text_entity_placeholder(),
                 candidate,
@@ -383,7 +394,7 @@ fn apply_ellipsis(
                 layout,
                 target.scale_factor(),
                 target.logical_size(),
-                *rem_size,
+                **rem_size,
             )
         };
         let _ = (&prefix_src, &suffix);

@@ -47,6 +47,24 @@ pub struct SessionRestoreButtonMarker {
 #[derive(Component, Default)]
 pub struct SessionHistoryCloseMarker;
 
+/// 会话列表容器标记（虚拟列表）。
+#[derive(Component, Default)]
+pub struct SessionListMarker;
+
+/// 会话列表占位块标记（撑出列表总高度）。
+#[derive(Component, Default)]
+pub struct SessionListSpacerMarker;
+
+/// 会话列表行标记（虚拟列表的行，携带数据下标）。
+#[derive(Component)]
+pub struct SessionListRow {
+    /// 对应 `CachedSessionList.sessions` 的下标
+    pub index: usize,
+}
+
+/// 会话行高（逻辑像素）。固定行高是虚拟化定位的前提。
+const SESSION_ROW_H: f32 = 48.0;
+
 /// 缓存的会话列表（用于渲染）。
 #[derive(Resource, Default)]
 pub struct CachedSessionList {
@@ -67,7 +85,53 @@ impl Plugin for SessionHistoryPlugin {
             .add_systems(
                 Update,
                 handle_restore_results.after(xgent_agent::agent_loop::agent_poll_system),
-            );
+            )
+            .add_systems(Update, sync_session_list_rows);
+    }
+}
+
+/// 虚拟列表同步：按可见区间增删会话行（v8 M3-T6）。
+///
+/// 可见区间由 `xui::VirtualList` 每帧算出；本系统把区间外的行 despawn、把缺失
+/// 的行 spawn。会话数据来自 [`CachedSessionList`]。
+fn sync_session_list_rows(
+    cached: Res<CachedSessionList>,
+    theme: Res<Theme>,
+    loc: Res<Localizer>,
+    mut q_list: Query<(Entity, &mut xui::VirtualList), With<SessionListMarker>>,
+    q_rows: Query<(Entity, &SessionListRow), With<SessionListRow>>,
+    mut commands: Commands,
+) {
+    let Ok((list_entity, mut list)) = q_list.single_mut() else {
+        return;
+    };
+    let total = cached.sessions.len();
+    if list.item_count != total {
+        list.item_count = total;
+    }
+    let first = list.first_visible;
+    let last = (first + list.visible_count).min(total);
+
+    for (entity, row) in q_rows.iter() {
+        if row.index < first || row.index >= last {
+            commands.entity(entity).despawn();
+        }
+    }
+    let present: std::collections::HashSet<usize> = q_rows
+        .iter()
+        .map(|(_, row)| row.index)
+        .filter(|idx| *idx >= first && *idx < last)
+        .collect();
+    for index in first..last {
+        if present.contains(&index) {
+            continue;
+        }
+        let Some(session) = cached.sessions.get(index) else {
+            continue;
+        };
+        commands.entity(list_entity).with_children(|p| {
+            spawn_session_item(p, session, index, &theme, &loc);
+        });
     }
 }
 
@@ -214,8 +278,13 @@ fn spawn_overlay(
 
                     // 会话列表
                     // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定，滚轮真的能滚）。
+                    // v8 M3-T6：虚拟化——只渲染可见行，占位块撑出总高度。
                     panel
-                        .spawn(xui::ScrollFrame::vertical())
+                        .spawn((
+                            xui::ScrollFrame::vertical(),
+                            xui::VirtualList::new(cached.sessions.len(), SESSION_ROW_H),
+                            SessionListMarker,
+                        ))
                         .with_children(|list| {
                             if cached.sessions.is_empty() {
                                 list.spawn((
@@ -234,9 +303,15 @@ fn spawn_overlay(
                                     ),
                                 ));
                             } else {
-                                for s in &cached.sessions {
-                                    spawn_session_item(list, s, theme, loc);
-                                }
+                                // 占位块：撑出列表总高度
+                                list.spawn((
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: px(cached.sessions.len() as f32 * SESSION_ROW_H),
+                                        ..default()
+                                    },
+                                    SessionListSpacerMarker,
+                                ));
                             }
                         });
                 });
@@ -247,6 +322,7 @@ fn spawn_overlay(
 fn spawn_session_item(
     parent: &mut ChildSpawnerCommands,
     session: &SessionSummary,
+    index: usize,
     theme: &Theme,
     loc: &Localizer,
 ) {
@@ -265,7 +341,12 @@ fn spawn_session_item(
     parent
         .spawn((
             Node {
+                // v8 M3-T6：绝对定位到行位（虚拟列表只渲染可见行）
+                position_type: PositionType::Absolute,
+                top: px(index as f32 * SESSION_ROW_H),
+                left: px(0.0),
                 width: Val::Percent(100.0),
+                height: px(SESSION_ROW_H),
                 padding: UiRect::all(Val::Px(space::SM)),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -277,6 +358,7 @@ fn spawn_session_item(
             SessionItemMarker {
                 session_id: session.id.clone(),
             },
+            SessionListRow { index },
         ))
         .with_children(|row| {
             // 左侧：标题 + 元信息

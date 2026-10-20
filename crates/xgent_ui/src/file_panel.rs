@@ -6,7 +6,6 @@
 //! 忽略路径：MVP 硬编码匹配构建产物（`target/`、`node_modules/` 等）+ dotfile 白名单。
 //! 文件系统变更时（daemon `FileChangedEvent`）自动重建文件树，保留已展开目录。
 
-use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
@@ -25,9 +24,51 @@ pub struct FileTreeMarker;
 #[derive(Component, Default)]
 pub struct FileDrawerOverlayMarker;
 
-/// 目录子项容器标记（展开时在此 spawn 子条目）。
+/// 文件树行标记（虚拟列表的行，携带数据下标与代次）。
 #[derive(Component, Default)]
-pub struct DirChildrenMarker;
+pub struct FileTreeRow {
+    /// 对应 `FileTreeItems` 的下标
+    pub index: usize,
+    /// 数据代次：数据重建后旧行作废（否则区间内的旧行会留着过期内容）。
+    pub generation: u32,
+}
+
+/// 文件树占位块标记：撑出列表总高度（虚拟列表只渲染可见行）。
+#[derive(Component, Default)]
+pub struct FileTreeSpacerMarker;
+
+/// 文件树扁平条目（数据层，与渲染解耦）。
+#[derive(Debug, Clone)]
+pub struct FileTreeItem {
+    /// 缩进层级
+    pub depth: u16,
+    /// 是否目录
+    pub is_dir: bool,
+    /// 目录是否已展开
+    pub expanded: bool,
+    /// 显示名
+    pub name: String,
+    /// 绝对路径
+    pub path: PathBuf,
+}
+
+/// 文件树数据（扁平列表；虚拟列表按可见区间渲染其中一段）。
+#[derive(Resource, Default)]
+pub struct FileTreeItems {
+    /// 扁平条目
+    pub items: Vec<FileTreeItem>,
+    /// 数据代次（每次重建 +1）：行按代次对齐，数据换了旧行作废。
+    pub generation: u32,
+}
+
+/// 文件树行高（逻辑像素）。固定行高是虚拟化定位的前提。
+const FILE_TREE_ROW_H: f32 = 26.0;
+
+/// 文件树最小高度（逻辑像素）。
+///
+/// 窗口极矮时（以及 headless 装配没有渲染目标、视口高 0 时）树仍保持可滚，
+/// 而不是塌成 0 高——虚拟列表没有视口就不渲染任何行。
+const FILE_TREE_MIN_H: f32 = 240.0;
 
 /// 当前选中的文件条目标记（高亮显示）。
 #[derive(Component, Default)]
@@ -78,6 +119,7 @@ impl Plugin for FilePanelPlugin {
             .init_resource::<SelectedFilePath>()
             .init_resource::<FileTreeDirty>()
             .init_resource::<ExpandedDirs>()
+            .init_resource::<FileTreeItems>()
             // FileChangedEvent 由 EditorPlugin 注册，此处幂等再注册确保独立可用
             .add_message::<crate::editor::conflict::FileChangedEvent>()
             .add_systems(Startup, spawn_file_panel.after(crate::layout::spawn_layout))
@@ -89,6 +131,7 @@ impl Plugin for FilePanelPlugin {
                     handle_file_click,
                     handle_dir_click,
                     rebuild_file_tree,
+                    sync_file_tree_rows,
                     mark_file_tree_dirty_on_fs_change,
                 )
                     .chain()
@@ -179,9 +222,29 @@ fn spawn_file_panel(
                     crate::theme::type_scale::line_height::UI,
                 ));
             });
-            // 文件树区（可滚动，独占抽屉）
-            // v8 M3-T2：滚动语义只由 ScrollFrame 决定（overflow 由构造器定）。
-            p.spawn((xui::ScrollFrame::vertical(), FileTreeMarker));
+            // 文件树区（可滚动 + 虚拟化，独占抽屉）
+            // v8 M3-T6：只渲染可见行（行数多时不再一次性 spawn 几千个节点）。
+            // 可见区间由 xui::VirtualList 计算，占位块撑出列表总高度。
+            // 树的最小高度：窗口极矮时（headless 装配无渲染目标，视口高 0）
+            // 树仍是可滚的，而不是 0 高（虚拟列表没有视口就不渲染任何行）。
+            let mut tree_frame = xui::ScrollFrame::vertical();
+            tree_frame.style().min_height = px(FILE_TREE_MIN_H);
+            p.spawn((
+                tree_frame,
+                xui::VirtualList::new(0, FILE_TREE_ROW_H),
+                FileTreeMarker,
+            ))
+            .with_children(|c| {
+                // 占位块：高度 = 总行数 × 行高（撑出滚动范围）
+                c.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: px(0.0),
+                        ..default()
+                    },
+                    FileTreeSpacerMarker,
+                ));
+            });
         });
     });
 }
@@ -281,123 +344,133 @@ fn list_dir(dir: &std::path::Path) -> Vec<DirContent> {
     entries
 }
 
-/// spawn 一个文件树条目（目录或文件）。
+/// 把目录树拍平成「可见条目」列表（只下钻已展开的目录）。
+///
+/// 虚拟列表需要**扁平**的数据：一维数组 + 每项的缩进层级。展开状态由
+/// [`ExpandedDirs`] 给出，折叠的目录不产生子项。
+fn flatten_tree(root: &std::path::Path, expanded_dirs: &HashSet<PathBuf>) -> Vec<FileTreeItem> {
+    fn walk(
+        dir: &std::path::Path,
+        depth: u16,
+        expanded_dirs: &HashSet<PathBuf>,
+        out: &mut Vec<FileTreeItem>,
+    ) {
+        for entry in list_dir(dir) {
+            let is_expanded = entry.is_dir && expanded_dirs.contains(&entry.path);
+            out.push(FileTreeItem {
+                depth,
+                is_dir: entry.is_dir,
+                expanded: is_expanded,
+                name: entry.name.clone(),
+                path: entry.path.clone(),
+            });
+            if is_expanded {
+                walk(&entry.path, depth + 1, expanded_dirs, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, 0, expanded_dirs, &mut out);
+    out
+}
+
+/// spawn 一个文件树行（目录或文件，扁平结构）。
 ///
 /// 目录行（折叠箭头 + 矢量目录图标 + 名称）/ 文件行（矢量文件图标 + 名称），
 /// 条目选中态由 [`update_file_entry_style`] 绘制背景。
-fn spawn_entry(
+///
+/// v8 M3-T6：行是**绝对定位**的（`top = index × 行高`），缩进改由每行的
+/// 左内边距表达（原递归结构靠每层容器的 padding 缩进）。
+fn spawn_tree_row(
     parent: &mut ChildSpawnerCommands,
-    entry: &DirContent,
+    item: &FileTreeItem,
+    index: usize,
+    generation: u32,
     theme: &Theme,
     icons: &crate::kit::IconAssets,
-    expanded_dirs: &HashSet<PathBuf>,
     selected_path: Option<&std::path::Path>,
 ) {
-    if entry.is_dir {
-        let is_expanded = expanded_dirs.contains(&entry.path);
-        // 外层 Column：目录行 + 子项容器
+    let row_node = Node {
+        position_type: PositionType::Absolute,
+        top: px(index as f32 * FILE_TREE_ROW_H),
+        left: px(0.0),
+        width: Val::Percent(100.0),
+        height: px(FILE_TREE_ROW_H),
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: px(space::XS),
+        padding: UiRect {
+            left: px(item.depth as f32 * space::LG + space::XS),
+            right: px(space::XS),
+            top: px(0.0),
+            bottom: px(0.0),
+        },
+        border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
+        ..default()
+    };
+    if item.is_dir {
         parent
-            .spawn((Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },))
-            .with_children(|col| {
-                // 目录行（Button + row: 箭头 + 图标 + 名称）
-                col.spawn((
-                    Button,
-                    Hovered::default(),
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: px(space::XS),
-                        padding: UiRect::all(px(space::XS)),
-                        border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
-                        ..default()
+            .spawn((
+                Button,
+                Hovered::default(),
+                row_node,
+                DirEntry {
+                    path: item.path.clone(),
+                    expanded: item.expanded,
+                },
+                BackgroundColor(Color::NONE),
+                FileTreeRow { index, generation },
+            ))
+            .with_children(|row| {
+                // 折叠箭头（chevron-right 折叠 / chevron-down 展开）
+                row.spawn(crate::kit::icon(
+                    icons,
+                    if item.expanded {
+                        "chevron-down"
+                    } else {
+                        "chevron-right"
                     },
-                    DirEntry {
-                        path: entry.path.clone(),
-                        expanded: is_expanded,
-                    },
-                    BackgroundColor(Color::NONE),
-                ))
-                .with_children(|row| {
-                    // 折叠箭头（chevron-right 折叠 / chevron-down 展开）
-                    row.spawn(crate::kit::icon(
-                        icons,
-                        if is_expanded {
-                            "chevron-down"
-                        } else {
-                            "chevron-right"
-                        },
-                        12.0,
-                        theme.text_muted,
-                    ));
-                    // 目录图标（folder，v7 accent 染色）
-                    row.spawn(crate::kit::icon(
-                        icons,
-                        "folder",
-                        14.0,
-                        theme.accent_interactive,
-                    ));
-                    // 名称
-                    // v8 M3-T5：长名不再溢出抽屉宽度（审计 C3），中段省略保留末两段。
-                    row.spawn((
-                        Node {
-                            flex_shrink: 1.0,
-                            min_width: Val::ZERO,
-                            overflow: Overflow::clip(),
-                            ..default()
-                        },
-                        crate::fonts::ellipsis_path_text(
-                            entry.name.clone(),
-                            crate::theme::type_scale::CAPTION,
-                            400,
-                            theme.text_dim,
-                            crate::theme::type_scale::line_height::UI,
-                        ),
-                    ));
-                });
-                // 子项容器（折叠态空，预展开时递归 spawn 子条目）
-                let mut child_container = col.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::left(px(space::LG)),
-                        ..default()
-                    },
-                    DirChildrenMarker,
+                    12.0,
+                    theme.text_muted,
                 ));
-                if is_expanded {
-                    let children = list_dir(&entry.path);
-                    child_container.with_children(|cc| {
-                        for child in &children {
-                            spawn_entry(cc, child, theme, icons, expanded_dirs, selected_path);
-                        }
-                    });
-                }
+                // 目录图标（folder，v7 accent 染色）
+                row.spawn(crate::kit::icon(
+                    icons,
+                    "folder",
+                    14.0,
+                    theme.accent_interactive,
+                ));
+                // 名称
+                // v8 M3-T5：长名不再溢出抽屉宽度（审计 C3），中段省略保留末两段。
+                row.spawn((
+                    Node {
+                        flex_shrink: 1.0,
+                        min_width: Val::ZERO,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    crate::fonts::ellipsis_path_text(
+                        item.name.clone(),
+                        crate::theme::type_scale::CAPTION,
+                        400,
+                        theme.text_dim,
+                        crate::theme::type_scale::line_height::UI,
+                    ),
+                ));
             });
     } else {
         let mut cmd = parent.spawn((
             Button,
             Hovered::default(),
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(space::XS),
-                padding: UiRect::all(px(space::XS)),
-                border_radius: BorderRadius::all(px(crate::theme::radius::SMALL)),
-                ..default()
-            },
+            row_node,
             FileEntry {
-                path: entry.path.clone(),
+                path: item.path.clone(),
             },
             BackgroundColor(Color::NONE),
+            FileTreeRow { index, generation },
         ));
         // 重建后恢复选中态
-        if selected_path == Some(entry.path.as_path()) {
+        if selected_path == Some(item.path.as_path()) {
             cmd.insert(FileSelectedMarker);
         }
         cmd.with_children(|row| {
@@ -418,7 +491,7 @@ fn spawn_entry(
                     ..default()
                 },
                 crate::fonts::ellipsis_path_text(
-                    entry.name.clone(),
+                    item.name.clone(),
                     crate::theme::type_scale::CAPTION,
                     400,
                     theme.text_dim,
@@ -437,11 +510,7 @@ fn rebuild_file_tree(
     root: Res<ProjectRoot>,
     mut dirty: ResMut<FileTreeDirty>,
     expanded: Res<ExpandedDirs>,
-    q_tree: Query<Entity, With<FileTreeMarker>>,
-    selected_file: Res<SelectedFilePath>,
-    theme: Res<Theme>,
-    icons: Res<crate::kit::IconAssets>,
-    mut commands: Commands,
+    mut items: ResMut<FileTreeItems>,
 ) {
     // 仅在项目根路径变化或文件系统变更时重建
     // dirty.0=true 时进行 debounce 倒计时，归零后才实际重建
@@ -457,22 +526,81 @@ fn rebuild_file_tree(
         dirty.1 = 0;
         return;
     }
-    let Ok(tree) = q_tree.single() else {
-        return;
-    };
-    // 从 resource 取选中路径（重建后 spawn_entry 恢复 FileSelectedMarker）
-    let selected_path = selected_file.0.clone();
-    // 清除旧条目
-    commands.entity(tree).despawn_children();
-    let entries = list_dir(&root.path);
-    let expanded = &expanded.0;
-    commands.entity(tree).with_children(|p| {
-        for entry in &entries {
-            spawn_entry(p, entry, &theme, &icons, expanded, selected_path.as_deref());
-        }
-    });
+    // v8 M3-T6：只重建**数据**（扁平列表），渲染由 `sync_file_tree_rows`
+    // 按可见区间增量做（可见行才 spawn）。代次 +1 → 旧行全部作废。
+    items.items = flatten_tree(&root.path, &expanded.0);
+    items.generation = items.generation.wrapping_add(1);
     dirty.0 = false;
     dirty.1 = 0;
+}
+
+/// 虚拟列表同步：按可见区间增删文件树行。
+///
+/// 可见区间由 `xui::VirtualList` 每帧算出（`first_visible` / `visible_count`）；
+/// 本系统把区间外的行 despawn、把缺失的行 spawn。占位块撑出列表总高度，
+/// 滚动条因此反映真实内容长度。
+fn sync_file_tree_rows(
+    items: Res<FileTreeItems>,
+    theme: Res<Theme>,
+    icons: Res<crate::kit::IconAssets>,
+    selected_file: Res<SelectedFilePath>,
+    mut q_list: Query<(Entity, &mut xui::VirtualList), With<FileTreeMarker>>,
+    q_rows: Query<(Entity, &FileTreeRow), With<FileTreeRow>>,
+    mut q_spacer: Query<&mut Node, With<FileTreeSpacerMarker>>,
+    mut commands: Commands,
+) {
+    let Ok((list_entity, mut list)) = q_list.single_mut() else {
+        return;
+    };
+    let total = items.items.len();
+    let generation = items.generation;
+    if list.item_count != total {
+        list.item_count = total;
+    }
+    let first = list.first_visible;
+    let last = (first + list.visible_count).min(total);
+
+    // 区间外（或数据已换代）的行删掉
+    for (entity, row) in q_rows.iter() {
+        if row.generation != generation || row.index < first || row.index >= last {
+            commands.entity(entity).despawn();
+        }
+    }
+    // 区间内缺的行补上
+    let present: HashSet<usize> = q_rows
+        .iter()
+        .map(|(_, row)| row.index)
+        .filter(|idx| *idx >= first && *idx < last)
+        .collect();
+    let selected_path = selected_file.0.clone();
+    for index in first..last {
+        if present.contains(&index) {
+            continue;
+        }
+        let Some(item) = items.items.get(index) else {
+            continue;
+        };
+        commands.entity(list_entity).with_children(|p| {
+            spawn_tree_row(
+                p,
+                item,
+                index,
+                generation,
+                &theme,
+                &icons,
+                selected_path.as_deref(),
+            );
+        });
+    }
+
+    // 占位块：撑出列表总高度（否则滚动条只反映已渲染的行）
+    let spacer_height = total as f32 * FILE_TREE_ROW_H;
+    if let Ok(mut node) = q_spacer.single_mut() {
+        let want = px(spacer_height);
+        if node.height != want {
+            node.height = want;
+        }
+    }
 }
 
 /// debounce 帧数：收到文件系统变更事件后等待 N 帧无新事件才重建文件树。
@@ -533,90 +661,26 @@ fn handle_file_click(
         ));
     }
 }
-/// 处理目录条目点击：展开/折叠切换，在子项容器 spawn/despawn 子条目。
+/// 处理目录条目点击：展开/折叠切换。
 ///
-/// 展开/折叠时替换目录行的折叠箭头图标（chevron-right/chevron-down，
-/// ImageNode 不能旋转故用两枚图标），并 spawn/despawn 子项容器内容。
+/// v8 M3-T6：文件树改成**扁平虚拟列表**后不再有「子项容器」，展开/折叠只改
+/// [`ExpandedDirs`] 并把树标脏（重建时重新拍平 + 重新渲染可见行）。折叠箭头
+/// 在行重建时按展开状态生成，无需再单独换图标。
 fn handle_dir_click(
-    mut commands: Commands,
-    mut q_dirs: Query<(&mut DirEntry, &ChildOf), Added<Pressed>>,
-    q_children: Query<&Children>,
-    q_dir_children: Query<Entity, With<DirChildrenMarker>>,
-    q_dir_rows: Query<Entity, With<DirEntry>>,
-    mut q_icons: Query<&mut ImageNode>,
-    selected_file: Res<SelectedFilePath>,
-    theme: Res<Theme>,
-    icons: Res<crate::kit::IconAssets>,
+    q_dirs: Query<&DirEntry, Added<Pressed>>,
+    mut dirty: ResMut<FileTreeDirty>,
     mut expanded: ResMut<ExpandedDirs>,
 ) {
-    for (mut dir, parent) in q_dirs.iter_mut() {
-        // 拿外层 Column 的 children，找目录行 Button 与 DirChildrenMarker 子容器
-        let Ok(col_children) = q_children.get(parent.0) else {
-            continue;
-        };
-        let mut child_container = None;
-        let mut dir_row = None;
-        for &c in col_children {
-            if q_dir_children.get(c).is_ok() {
-                child_container = Some(c);
-            } else if q_dir_rows.get(c).is_ok() {
-                dir_row = Some(c);
-            }
-        }
-        let Some(child_container) = child_container else {
-            continue;
-        };
-        let Some(dir_row) = dir_row else {
-            continue;
-        };
-        // 在目录行 Button 的子节点里找折叠箭头（首个 ImageNode 子节点）
-        let Ok(row_children) = q_children.get(dir_row) else {
-            continue;
-        };
-        let mut arrow_entity = None;
-        for &c in row_children {
-            if q_icons.get(c).is_ok() {
-                arrow_entity = Some(c);
-                break;
-            }
-        }
-
+    for dir in q_dirs.iter() {
         if dir.expanded {
             // 折叠：清理该目录及所有子孙目录的展开记录，避免悬空路径残留
-            dir.expanded = false;
-            let collapsed_path = dir.path.clone();
-            expanded.0.retain(|p| !p.starts_with(&collapsed_path));
-            if let Some(e) = arrow_entity
-                && let Ok(mut img) = q_icons.get_mut(e)
-            {
-                img.image = icons.get("chevron-right");
-            }
-            commands.entity(child_container).despawn_children();
+            expanded.0.retain(|p| !p.starts_with(&dir.path));
         } else {
-            // 展开：读子目录内容，spawn 到子容器
-            dir.expanded = true;
             expanded.0.insert(dir.path.clone());
-            if let Some(e) = arrow_entity
-                && let Ok(mut img) = q_icons.get_mut(e)
-            {
-                img.image = icons.get("chevron-down");
-            }
-            let entries = list_dir(&dir.path);
-            let expanded_set = &expanded.0;
-            let selected_path = selected_file.0.clone();
-            commands.entity(child_container).with_children(|p| {
-                for entry in &entries {
-                    spawn_entry(
-                        p,
-                        entry,
-                        &theme,
-                        &icons,
-                        expanded_set,
-                        selected_path.as_deref(),
-                    );
-                }
-            });
         }
+        // 标脏 → 下一帧重建（拍平 + 重渲染）
+        dirty.0 = true;
+        dirty.1 = 0;
     }
 }
 /// 更新文件/目录条目背景色：选中态半透明 accent、悬停态更淡 accent、默认透明。

@@ -52,23 +52,44 @@ fn file_tree_shows_top_level_files() {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
+        .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(xgent_ui::fonts::UiFonts {
             ui: Handle::default(),
             mono: Handle::default(),
         })
         .add_plugins((
             bevy::input::InputPlugin,
+            bevy::window::WindowPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+            bevy::picking::input::PointerInputPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .add_plugins((
             bevy::input_focus::InputFocusPlugin,
             xui::XuiPlugin,
             LayoutPlugin,
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::overlay::OverlayPlugin,
             xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() });
+        .insert_resource(ProjectRoot { path: root.clone() })
+        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
+        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
+
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
 
     // 跑 Startup + 几帧 Update 让 rebuild_file_tree 执行
     for _ in 0..5 {
@@ -97,23 +118,40 @@ fn file_tree_refreshes_on_file_changed_event() {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
+        .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(xgent_ui::fonts::UiFonts {
             ui: Handle::default(),
             mono: Handle::default(),
         })
         .add_plugins((
             bevy::input::InputPlugin,
+            bevy::window::WindowPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+            bevy::picking::input::PointerInputPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .add_plugins((
             bevy::input_focus::InputFocusPlugin,
             xui::XuiPlugin,
             LayoutPlugin,
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::overlay::OverlayPlugin,
             xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() });
+        .insert_resource(ProjectRoot { path: root.clone() })
+        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
+        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
 
     for _ in 0..5 {
         app.update();
@@ -164,23 +202,40 @@ fn expanded_dirs_preserved_across_rebuild() {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
+        .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(xgent_ui::fonts::UiFonts {
             ui: Handle::default(),
             mono: Handle::default(),
         })
         .add_plugins((
             bevy::input::InputPlugin,
+            bevy::window::WindowPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+            bevy::picking::input::PointerInputPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .add_plugins((
             bevy::input_focus::InputFocusPlugin,
             xui::XuiPlugin,
             LayoutPlugin,
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::overlay::OverlayPlugin,
             xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() });
+        .insert_resource(ProjectRoot { path: root.clone() })
+        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
+        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
 
     for _ in 0..5 {
         app.update();
@@ -243,23 +298,40 @@ fn ignored_dirs_excluded_from_tree() {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
+        .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(xgent_ui::fonts::UiFonts {
             ui: Handle::default(),
             mono: Handle::default(),
         })
         .add_plugins((
             bevy::input::InputPlugin,
+            bevy::window::WindowPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+            bevy::picking::input::PointerInputPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .add_plugins((
             bevy::input_focus::InputFocusPlugin,
             xui::XuiPlugin,
             LayoutPlugin,
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::overlay::OverlayPlugin,
             xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() });
+        .insert_resource(ProjectRoot { path: root.clone() })
+        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
+        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
 
     for _ in 0..5 {
         app.update();
@@ -303,23 +375,40 @@ fn selected_marker_preserved_across_rebuild() {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
+        .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(xgent_ui::fonts::UiFonts {
             ui: Handle::default(),
             mono: Handle::default(),
         })
         .add_plugins((
             bevy::input::InputPlugin,
+            bevy::window::WindowPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+            bevy::picking::input::PointerInputPlugin,
+            bevy::picking::PickingPlugin,
+            bevy::picking::InteractionPlugin,
+        ))
+        .add_plugins((
             bevy::input_focus::InputFocusPlugin,
             xui::XuiPlugin,
             LayoutPlugin,
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::overlay::OverlayPlugin,
             xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() });
+        .insert_resource(ProjectRoot { path: root.clone() })
+        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
+        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
 
     for _ in 0..5 {
         app.update();

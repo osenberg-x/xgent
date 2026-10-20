@@ -37,6 +37,7 @@ fn test_app() -> App {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<bevy::image::Image>()
         .init_asset::<bevy::text::Font>()
+        .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(xgent_ui::fonts::UiFonts {
             ui: Handle::default(),
             mono: Handle::default(),
@@ -49,11 +50,15 @@ fn test_app() -> App {
             ResizePlugin,
             EditorPlugin,
             FilePanelPlugin,
+            xgent_ui::overlay::OverlayPlugin,
             xgent_ui::terminal::TerminalPlugin,
             xgent_ui::kit::KitPlugin,
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>();
+    // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
+    // 虚拟列表因视口高 0 而不渲染任何行）
+    app.world_mut().spawn(Camera::default());
     for _ in 0..3 {
         app.update();
     }
@@ -201,7 +206,15 @@ fn file_drawer_visibility_toggles() {
     }
 
     // 打开抽屉
-    app.world_mut().resource_mut::<FileDrawerOpen>().0 = true;
+    // v8 M1-T4：抽屉开关统一走 DrawerToggle 消息（OverlayRegistry 是唯一权威），
+    // 直接改 Resource 会与注册表失配（点击时的 toggle 会当成「打开」）。
+    app.world_mut()
+        .write_message(xgent_ui::overlay::DrawerToggle(
+            xgent_ui::overlay::OverlayId::FileDrawer,
+        ));
+    // 两帧：overlay 的 toggle 系统（改 Resource）与文件面板的显隐系统（写
+    // Node.display）之间没有显式排序，第二帧保证显示层跟上
+    app.update();
     app.update();
     {
         let (panel, overlay) = drawer_displays(&mut app);
@@ -250,12 +263,19 @@ fn clicking_file_closes_drawer_and_opens_preview() {
 
     let mut app = test_app();
     // 先打开抽屉
-    app.world_mut().resource_mut::<FileDrawerOpen>().0 = true;
+    // v8 M1-T4：抽屉开关统一走 DrawerToggle 消息（OverlayRegistry 是唯一权威），
+    // 直接改 Resource 会与注册表失配（点击时的 toggle 会当成「打开」）。
+    app.world_mut()
+        .write_message(xgent_ui::overlay::DrawerToggle(
+            xgent_ui::overlay::OverlayId::FileDrawer,
+        ));
     app.update();
 
     click_file(&mut app, &path);
-    // 两帧：handle_file_click（写 Resource）与 handle_drawer_visibility（写
-    // Node.display）无显式排序，第二帧保证显示层跟上
+    // 三帧：handle_file_click（写 DrawerToggle）→ overlay 的 toggle（改
+    // Resource）→ handle_drawer_visibility（写 Node.display）之间无显式排序，
+    // 三帧保证链路走完
+    app.update();
     app.update();
     app.update();
 

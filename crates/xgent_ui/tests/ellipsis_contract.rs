@@ -37,7 +37,8 @@ fn ellipsis_app() -> App {
         "/../xgent_app/assets/fonts/Inter-Variable.ttf"
     );
     let data = std::fs::read(path).expect("Inter Variable 字体应随仓库分发");
-    app.world_mut()
+    let _ = app
+        .world_mut()
         .resource_mut::<Assets<Font>>()
         .insert(AssetId::default(), Font::from_bytes(data));
     app
