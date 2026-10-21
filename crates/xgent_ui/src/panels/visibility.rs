@@ -28,7 +28,11 @@ pub fn derive_panel_visibility(
     for (vis, mut node) in q.iter_mut() {
         let want = match vis.panel {
             Some(id) => layout.is_panel_visible(&registry, id),
-            None => layout.is_open(vis.slot),
+            None => {
+                let open = layout.is_open(vis.slot);
+                // 反向跟随：槽位**关闭**时可见（如 rail 的「展开面板」钮）。
+                if vis.invert_slot { !open } else { open }
+            }
         };
         let display = if want { Display::Flex } else { Display::None };
         if node.display != display {

@@ -24,11 +24,13 @@ const HANDLE_W: f32 = size::HANDLE_W;
 /// 双击判定窗口（秒）。
 const DOUBLE_CLICK_SECS: f64 = 0.3;
 
-/// 分割叶子对应的 UI 区域（宽度由分割树驱动）。
+/// 分割叶子对应的 UI 区域（尺寸由分割树驱动）。
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SplitLeafMarker {
     /// 叶子 id（`panels::split::leaf_ids`）。
     pub id: &'static str,
+    /// 分割轴：横向 = 改**宽度**，纵向 = 改**高度**。
+    pub axis: Axis,
 }
 
 /// 分割手柄标记（携带被调整的叶子与方向）。
@@ -189,7 +191,11 @@ pub fn apply_split_sizes(tree: Res<SplitTree>, mut q_leaves: Query<(&SplitLeafMa
         if matches!(size, LeafSize::Grow(_)) {
             continue;
         }
-        node.width = Val::Px(size.preferred());
+        // 按轴写尺寸：横向改宽、纵向改高。
+        match marker.axis {
+            Axis::Horizontal => node.width = Val::Px(size.preferred()),
+            Axis::Vertical => node.height = Val::Px(size.preferred()),
+        }
     }
 }
 
@@ -250,9 +256,17 @@ fn handle_resize_drag(
         return;
     }
 
-    // 4. 应用位移（AccumulatedMouseMotion.delta 为逻辑像素）
-    let dx = motion.delta.x;
-    if dx == 0.0 {
+    // 4. 应用位移（AccumulatedMouseMotion.delta 为逻辑像素，按手柄的轴取分量）
+    let axis = handles
+        .iter()
+        .find(|(m, _, _)| m.leaf == active_leaf.unwrap_or(""))
+        .map(|(m, _, _)| m.axis)
+        .unwrap_or(Axis::Horizontal);
+    let delta = match axis {
+        Axis::Horizontal => motion.delta.x,
+        Axis::Vertical => motion.delta.y,
+    };
+    if delta == 0.0 {
         return;
     }
 
@@ -275,7 +289,7 @@ fn handle_resize_drag(
         .find(|(m, _, _)| m.leaf == leaf)
         .map(|(m, _, _)| m.dir)
         .unwrap_or(1.0);
-    let next = current.preferred() + dx * dir;
+    let next = current.preferred() + delta * dir;
     let clamped = clamp_leaf(leaf, next, main_w);
     if clamped != current.preferred() {
         tree.set_leaf_size(leaf, current.with_current(clamped));

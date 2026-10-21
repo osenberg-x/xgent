@@ -223,6 +223,7 @@ fn spawn_file_panel(
             // v8 M5-T5：抽屉宽度由分割树的 `drawer` 叶子驱动（可拖宽）。
             crate::resize::SplitLeafMarker {
                 id: crate::panels::split::leaf_ids::DRAWER,
+                axis: crate::panels::split::Axis::Horizontal,
             },
         ))
         .id();

@@ -210,6 +210,7 @@ pub(crate) fn spawn_layout(
                             ChatPanelMarker,
                             crate::resize::SplitLeafMarker {
                                 id: crate::panels::split::leaf_ids::CHAT,
+                                axis: crate::panels::split::Axis::Horizontal,
                             },
                         ))
                         .id();
@@ -251,6 +252,7 @@ pub(crate) fn spawn_layout(
                         // v8 M5-T5：宽度由分割树的 `side-dock` 叶子驱动。
                         crate::resize::SplitLeafMarker {
                             id: crate::panels::split::leaf_ids::SIDE_DOCK,
+                            axis: crate::panels::split::Axis::Horizontal,
                         },
                     ));
                 });

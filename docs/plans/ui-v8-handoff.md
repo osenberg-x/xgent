@@ -100,9 +100,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 > ⚠ **`FileDrawerOpen` / `SessionHistoryState` 是派生视图**——测试要开抽屉必须发
 > `PanelActivate { id: ids::FILE_DRAWER }`，直接改 Resource 会被派生系统覆盖。
 
-## 5. 下一步：M6 会话内容（Transcript 有序树 + Markdown + 输入区）
-
-### 4.1 起点事实（2026-10-21 实测）
+### 4.1 M6 的起点事实（2026-10-21 实测）
 
 - 字体资产：`crates/xgent_app/assets/fonts/` 现有 **Inter-Variable.ttf**（879KB）+ **JetBrainsMono-Regular.ttf**（264KB）+ `OFL.txt` + `README.md`。
 - `mono` 槽位已按候选栈装配（`xgent_ui::fonts::font_specs()`），**不再有** `cfg!(target_os)` 特权路径，也不再有 `Handle::default()` 兜底。
@@ -110,20 +108,26 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 - `type_scale` 已有 `CODE` 档、`SMALL` 已 12.0、`line_height::CJK` 已 1.7；代码类文本已走 `mono` 槽位。
 - 仍**未闭环**：硬门槛 A 的 macOS / Linux `mono` 启动日志确认（不阻塞，见 §1.1）。
 
-### 4.2 下一期的任务范围（台账 §M5）
+> ⚠ **本文的 §4.1 / §4.2 原文写的是 M5 的起点事实与任务范围**（M5 交付前写的），
+> 已在 M5 交付时改写为 **M6** 的口径：M5 的落点见 §4.0，台账 §M5 已勾选。
+
+### 4.2 下一期的任务范围（台账 §M6）
 
 | 任务 | 范围 | 验收（可机器判定） |
 |:---|:---|:---|
-| M5-T1 | `PanelRegistry` 取代 `closed` 枚举（`Slot` + `PanelDescriptor` + `PanelRuntime`），`PanelRegister/Activate/Deactivate` 消息 | 新增一个 `SideDock` 面板无需改 `layout.rs`/`editor/mod.rs` 的枚举与页签条代码 |
-| M5-T2 | 删 `ActiveActivity`，选中态从 `registry ∩ slots.is_visible()` 派生；rail 与会话历史改描述符驱动 | 连点 Files 两次关掉抽屉后选中态回落正确 |
-| M5-T3 | `derive_panel_visibility` 成为唯一写 `Node.display` 的系统（清掉 5 处各自写手） | `grep -rn "\.display = " crates/xgent_ui/src/` 命中仅限该系统与层根构造 |
-| M5-T4 | 单页签条所有者（`SlotLayout` 拥有页签条，编辑器 tab 条降级为「文档列表」） | 页签条只有一个所有者，无双份 |
-| M5-T5 | 拖拽排序 + 面板宽度持久化 | 拖拽后重启仍保持顺序与宽度 |
-| M5-T6 | 移除 `SideViewContent` 旧枚举 | 全仓无 `SideViewContent` 引用 |
+| M6-T1 | `Transcript` 有序树（`Transcript` / `BlockRef` 块序列），渲染按顺序 spawn/despawn/update，顺序键 `(turn_index, block_index)`；删除命令式挪子节点（`chat_panel.rs:489`、`tool_panel.rs:85`、`chat_panel.rs:724`、`undo.rs:286`） | 边流式边插工具卡，顺序稳定不倒退（自动化断言序列单调） |
+| M6-T2 | Markdown 块模型与依赖评审（优先 `pulldown-cmark`，走一次依赖评审；退化方案为仅代码块 + 列表 + 粗体） | 评审记录落 `docs/notes/`；解析器单测覆盖六类元素 |
+| M6-T3 | 富文本渲染（单节点多 `TextSection`；代码块 `surface_code` 底 + `mono` + 语言标签 + 复制按钮；语法色接 `xui` 高亮链） | 六类元素混合样张视觉正确；对照原型截图 |
+| M6-T4 | `@` 内联补全（浮层挂 `DROPDOWN` 层；方向键导航 + `Enter` 接受；候选来自文件/符号/`@selection`） | 输入 `@` 出现补全并可键盘选择；窄窗不被裁 |
+| M6-T5 | 发送/停止动作条（显式按钮；禁用态由 `AgentStatus` 派生；删除「发送按钮区」空注释） | 不碰键盘可完成一次完整发送与一次中断 |
+| M6-T6 | `ContextSet` 建模（独立 `Resource`，可增删、可持久化、显示 token 占比；替换 `context_scope.rs` 的只读镜像） | 移除某 chip 后其不再进入下一轮请求 |
 
-> ⚠ M5 依赖 M3/M4 已就位的契约（滚动/省略/填满/等宽），本轮它们都已交付——**M5 可以直接开工**。
+> ⚠ M6 依赖 M3 的滚动/省略/填满契约与 M5 的槽位注册表（面板 = 注册项）——两者都已交付，
+> **M6 可以直接开工**。
 
-### 4.3 M3 顺带修好的 12 个长期失败测试（别再当成"基线失败"）
+## 5. 下一步：M6 会话内容（Transcript 有序树 + Markdown + 输入区）
+
+### 5.1 M3 顺带修好的 12 个长期失败测试（别再当成"基线失败"）
 
 `file_preview`(7) + `file_tree_refresh`(5) 的根因**不是**产品缺陷，而是 headless 装配缺
 `xgent_ui::overlay::OverlayPlugin`（`DrawerToggle` 消息未注册 → 文件面板的系统整体报错，
@@ -167,7 +171,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 
 ---
 
-## 8. 维护约定
+## 9. 维护约定
 
 - 每次里程碑交付后更新本文 **§1（交付表）** 与 **§2（基线数字/既有失败）**；§4 的「起点事实」在开工时复核一次。
 - 任务级勾选仍记在 [ui-v8-tasks.md](ui-v8-tasks.md)；两边冲突时以「提交 + 代码实测」为准，并在台账 §10 记勘误。

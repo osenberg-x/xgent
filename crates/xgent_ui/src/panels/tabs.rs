@@ -17,7 +17,7 @@ use xgent_settings::Localizer;
 
 use crate::i18n::tr;
 use crate::panels::{PanelActivate, PanelRegistry, Slot, SlotLayout, ids};
-use crate::theme::{Theme, space, type_scale};
+use crate::theme::{Theme, radius, space, type_scale};
 
 /// 槽位页签按钮标记。
 #[derive(Component, Debug, Clone)]
@@ -38,10 +38,14 @@ pub struct EditorBackButtonMarker;
 pub struct SlotTabBarMarker;
 
 /// 启动时在右侧分屏容器顶部 spawn 槽位页签条。
+///
+/// 页签条含两部分：① 页签项（由 [`sync_slot_tab_bar`] 从注册表生成，插在**最前**）
+/// 与 ② **唯一返回入口**（✕，挂 [`EditorBackButtonMarker`]，永远是最后一个子节点）。
 pub fn spawn_slot_tab_bar(
     mut commands: Commands,
     q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
     theme: Res<Theme>,
+    mut layout: ResMut<SlotLayout>,
 ) {
     let Ok(side) = q_side.single() else {
         return;
@@ -64,6 +68,35 @@ pub fn spawn_slot_tab_bar(
         ))
         .id();
     commands.entity(side).insert_children(0, &[bar]);
+    // v8 M5-T4：页签条由 `SlotLayout` 拥有（记录实体，便于后续布局调整）。
+    layout.set_tab_bar(bar);
+
+    // 唯一返回入口：✕（收起侧区、回到主区对话）。
+    let close = commands
+        .spawn((
+            Button,
+            Hovered::default(),
+            Node {
+                width: px(28.0),
+                height: px(28.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(radius::SMALL)),
+                margin: UiRect::right(px(space::XS)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            crate::fonts::ui_text(
+                "×",
+                type_scale::BODY,
+                400,
+                theme.text_muted,
+                type_scale::line_height::UI,
+            ),
+            EditorBackButtonMarker,
+        ))
+        .id();
+    commands.entity(bar).add_child(close);
 }
 
 /// 注册表变化时重建页签条目（槽位页签 = `Slot::SideDock` 面板）。
@@ -90,6 +123,8 @@ pub fn sync_slot_tab_bar(
     for entity in q_tabs.iter() {
         commands.entity(entity).despawn();
     }
+    // 页签项插在**最前**（返回入口 ✕ 永远是最后一个子节点）。
+    let mut tabs: Vec<Entity> = Vec::new();
     for (id, _) in wanted {
         let title = registry
             .get(id)
@@ -117,7 +152,10 @@ pub fn sync_slot_tab_bar(
                 SlotTabMarker { id },
             ))
             .id();
-        commands.entity(bar).add_child(tab);
+        tabs.push(tab);
+    }
+    if !tabs.is_empty() {
+        commands.entity(bar).insert_children(0, &tabs);
     }
 }
 

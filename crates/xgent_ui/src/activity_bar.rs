@@ -129,7 +129,9 @@ fn spawn_activity_bar(
                 text: "展开面板".to_string(),
             },
             ExpandPanelButtonMarker,
-            crate::panels::PanelVisibility::of_slot(Slot::SideDock),
+            // v8 M5-T3：展开钮是**恢复入口**——分屏折叠时才出现（反向跟随
+            // `Slot::SideDock` 的开合）。
+            crate::panels::PanelVisibility::of_closed_slot(Slot::SideDock),
         ))
         .with_children(|b| {
             b.spawn(icon(&icons, "panel-right", 20.0, theme.text_muted));

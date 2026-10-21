@@ -882,7 +882,7 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - `derive_panel_visibility`（`panels/visibility.rs`）是**唯一**写「面板 / 区域」`Node.display` 的系统：`PanelVisibility` 组件声明「跟随某面板」还是「跟随某槽位」。
 - rail 选中态从「注册表 ∩ 槽位可见性」派生（`PanelRegistry::active_rail`，后激活者优先）——`ActiveActivity` 已删除。
 - 会话历史不再是浮层，而是 `Slot::Overlay` 的注册面板（与文件抽屉同属单例槽位 → 不再争层级）。
-- 侧区顶部页签条由槽位布局拥有（`panels/tabs.rs`），页签项来自注册表的 `Slot::SideDock` 面板，标题取 `title_key`；编辑器内部 tab 条降级为「文档列表」，两者**不合并**（布局架构 §12 风险预案）。
+- 侧区顶部页签条由槽位布局拥有（`panels/tabs.rs`），页签项来自注册表的 `Slot::SideDock` 面板，标题取 `title_key`；编辑器内部 tab 条降级为「文档列表」，两者**不合并**（布局架构 §12 风险预案）。**唯一返回入口（✕）挂在页签条上**（页签项插在它前面，✕ 永远是最后一个子节点）。
 - 分割模型 `SplitTree` / `Split` / `LeafSize`（`panels/split.rs`）：`resize.rs` 遍历分割树生成分割条，**注册一个新的纵向分割不需要改 `resize.rs`**；抽屉宽度从定值 320 改为 `Min(240, Preferred(320))`、上限 480。
 
 **坑**：
@@ -892,7 +892,8 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **派生视图不能当权威状态改**：`FileDrawerOpen` / `SessionHistoryState` 现在由注册表算出，测试直接 `insert_resource(FileDrawerOpen(true))` 会被派生系统覆盖 → 抽屉保持隐藏、依赖抽屉宽度的文件树不渲染行。要开抽屉必须发 `PanelActivate { id: ids::FILE_DRAWER }`。
 - **消息链多一跳，可见性晚 1～2 帧**：打开代码文件经「点击 → `OpenFileRequest` → `PanelActivate` → 注册表」三跳，断言要从「逐帧等于 Editor」改成「一旦可见不得再消失」。
 - **`.display =` 的口径分三类**（2026-10-21 用户裁决）：动态面板/区域可见性（7 处）归一进派生系统；spawn 期构造默认值（3 处）改构造期字面量；**内容态可见性（5 处：欢迎空态、最近会话标题、回到底部按钮、文档页签、陪伴激活环）不动**——它们描述内容状态而非面板，塞进注册表是类别错误。白名单由 `tests/panel_registry_contract.rs` 的源码级测试固化。
-- **`EditorBackButtonMarker` 原本有两套**（编辑器顶栏 ✕ 与页签条 ✕）——M5 合一，侧区顶部只保留一个返回入口。
+- **`EditorBackButtonMarker` 原本有两套**（编辑器顶栏 ✕ 与页签条 ✕）——M5 合一，侧区顶部只保留一个返回入口（页签条上的 ✕）。
+- **「展开面板」钮是恢复入口，语义与其它槽位跟随**相反**：分屏**折叠**时才出现（`PanelVisibility::of_closed_slot` 的反向跟随）。若照搬「跟随槽位开放」的写法，按钮会在分屏展开时出现、折叠时消失——恰好在最需要时不可用（Verifer 复验轮发现）。
 - **`Slot::Center` 只建模不接消费者**：首个消费者留给 F-16 的 3D 空间视图。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）

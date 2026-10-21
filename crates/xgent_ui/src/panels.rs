@@ -417,6 +417,8 @@ pub struct PanelVisibility {
     pub panel: Option<&'static str>,
     /// 所属槽位。
     pub slot: Slot,
+    /// **反向**跟随槽位：槽位**关闭**时可见（如 rail 的「展开面板」钮）。
+    pub invert_slot: bool,
 }
 
 impl PanelVisibility {
@@ -425,12 +427,28 @@ impl PanelVisibility {
         Self {
             panel: Some(panel),
             slot,
+            invert_slot: false,
         }
     }
 
-    /// 只跟随槽位开合。
+    /// 只跟随槽位开合（槽位开放时可见）。
     pub fn of_slot(slot: Slot) -> Self {
-        Self { panel: None, slot }
+        Self {
+            panel: None,
+            slot,
+            invert_slot: false,
+        }
+    }
+
+    /// 反向跟随槽位（槽位**关闭**时可见）。
+    ///
+    /// 用于「展开面板」这类**恢复入口**：分屏折叠时按钮才出现。
+    pub fn of_closed_slot(slot: Slot) -> Self {
+        Self {
+            panel: None,
+            slot,
+            invert_slot: true,
+        }
     }
 }
 

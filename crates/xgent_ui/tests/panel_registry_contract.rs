@@ -607,3 +607,65 @@ fn panel_sets_are_ordered() {
     assert_eq!(set, PanelSet::Registry);
     assert_ne!(PanelSet::Requests, PanelSet::Visibility);
 }
+
+// ===== 回归：恢复入口与返回入口（A5 / A6 的 Verifier 缺陷修复）=====
+
+/// 「展开面板」钮是**恢复入口**：分屏**折叠**时才出现（分屏展开时隐藏）。
+#[test]
+fn expand_button_appears_only_when_slot_is_closed() {
+    use xgent_ui::panels::PanelVisibility;
+    use xgent_ui::panels::visibility::derive_panel_visibility;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<PanelRegistry>()
+        .init_resource::<SlotLayout>()
+        .add_systems(Update, derive_panel_visibility);
+    let entity = app
+        .world_mut()
+        .spawn((
+            Node::default(),
+            PanelVisibility::of_closed_slot(Slot::SideDock),
+        ))
+        .id();
+
+    // 槽位默认开放 → 恢复入口隐藏
+    app.update();
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&Node, With<PanelVisibility>>();
+    assert_eq!(
+        q.get(app.world(), entity).unwrap().display,
+        Display::None,
+        "分屏展开时「展开面板」钮应隐藏"
+    );
+
+    // 槽位折叠 → 恢复入口出现
+    app.world_mut()
+        .resource_mut::<SlotLayout>()
+        .set_open(Slot::SideDock, false);
+    app.update();
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&Node, With<PanelVisibility>>();
+    assert_eq!(
+        q.get(app.world(), entity).unwrap().display,
+        Display::Flex,
+        "分屏折叠时「展开面板」钮应出现（恢复入口）"
+    );
+}
+
+/// 侧区顶部**有且只有一个**返回入口（✕）：槽位页签条 spawn 它，编辑器顶栏不再有。
+#[test]
+fn side_view_has_exactly_one_return_entry() {
+    let tabs = read(&repo_root().join("crates/xgent_ui/src/panels/tabs.rs"));
+    assert!(
+        tabs.contains("EditorBackButtonMarker"),
+        "槽位页签条应 spawn 返回入口（✕）"
+    );
+    let editor = read(&repo_root().join("crates/xgent_ui/src/editor/mod.rs"));
+    assert!(
+        !editor.contains("EditorBackButtonMarker"),
+        "编辑器顶栏不应再有第二个返回入口（两套标记合一）"
+    );
+}
