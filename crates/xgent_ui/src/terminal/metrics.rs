@@ -122,6 +122,18 @@ pub struct CellGrid {
     pub line_h: f32,
 }
 
+impl Default for CellGrid {
+    fn default() -> Self {
+        // 等宽度量未实测完成前的占位（cell_w = 0 → 列数退化为 1）。
+        Self {
+            cols: 1,
+            rows: 1,
+            cell_w: 0.0,
+            line_h: 0.0,
+        }
+    }
+}
+
 impl CellGrid {
     /// 由视口逻辑宽高与实测度量派生。
     ///

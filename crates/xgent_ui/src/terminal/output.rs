@@ -11,12 +11,14 @@ use bevy::prelude::*;
 
 use crate::fonts::{UiFonts, mono_text};
 use crate::terminal::io::{TerminalOutputChunk, TerminalResize};
+use crate::terminal::metrics::{CellGrid, MonoMetrics};
 use crate::terminal::{
     TerminalOutputMarker, TerminalStatusBarMarker, TerminalTab, TerminalTabStatus, TerminalTabs,
 };
 use crate::theme::{Theme, px, type_scale};
 
 use xgent_terminal::{RenderLine, TerminalParser};
+use xui::scrollbar::Scrollbar;
 /// 历史上限（行）。
 const MAX_LINES: usize = 10_000;
 
@@ -93,34 +95,111 @@ pub struct RenderedCursor {
 #[derive(Component, Default)]
 pub struct OutputLineMarker;
 
+/// 按格定位的 run 节点标记（记录该 run 的起始列与占格数）。
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputCellRun {
+    /// 起始列（0 起的格号）。
+    pub start_col: usize,
+    /// 占用的格数。
+    pub cells: usize,
+}
+
 /// 当前未 flush 行（prompt / 正在输入的命令行）节点标记——每次内容变化
 /// 整行 despawn 重 spawn，保证 shell 回显实时可见。
 #[derive(Component, Default)]
 pub struct OutputCurrentMarker;
 
-/// 渲染一行（空行占位 或 span 行）。
+/// 渲染一行（按格定位：行容器 + 绝对定位的 run 节点）。
+///
+/// 每个 run 的 `left = 起始列 × cell_w`——**定位不依赖文本 shaper 的连续排版
+/// 度量**：拉丁与 CJK 由两条回退链拼接时（等宽拉丁 0.6em vs 比例 CJK 1em），
+/// 只有按格定位才能保证列对齐。
 ///
 /// `is_current` 为 true 时额外挂 [`OutputCurrentMarker`]（current 行定位用）。
+#[cfg(not(feature = "legacy-terminal-layout"))]
 fn spawn_line(
     c: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
     line: &RenderLine,
-    font: f32,
+    metrics: &MonoMetrics,
     theme: &Theme,
     fonts: &UiFonts,
     is_current: bool,
 ) {
-    let mut e = c.spawn((Node {
-        width: Val::Percent(100.0),
-        height: if line.spans.is_empty() {
-            px(font * 1.4)
-        } else {
-            Val::Auto
+    use xgent_terminal::layout_cells;
+
+    let cell_w = metrics.cell_width();
+    let mut e = c.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: px(metrics.line_height),
+            position_type: PositionType::Relative,
+            ..default()
         },
-        flex_direction: FlexDirection::Row,
-        flex_wrap: FlexWrap::Wrap,
-        ..default()
-    },));
-    e.insert(OutputLineMarker);
+        OutputLineMarker,
+    ));
+    if is_current {
+        e.insert(OutputCurrentMarker);
+    }
+    if line.spans.is_empty() {
+        return;
+    }
+    let runs = layout_cells(&line.spans);
+    e.with_children(|row| {
+        for run in runs {
+            let style = line
+                .spans
+                .get(run.style_index)
+                .map(|s| s.style)
+                .unwrap_or_default();
+            row.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(run.start_col as f32 * cell_w),
+                    top: px(0.0),
+                    width: Val::Auto,
+                    height: Val::Auto,
+                    ..default()
+                },
+                mono_text(
+                    fonts,
+                    run.text,
+                    type_scale::CODE,
+                    map_color(style.fg, theme),
+                    type_scale::line_height::TERM,
+                ),
+                OutputSpanMarker,
+                OutputCellRun {
+                    start_col: run.start_col,
+                    cells: run.cells,
+                },
+            ));
+        }
+    });
+}
+
+/// 渲染一行（旧路径：flex 行 + shaper 连续排版）。
+///
+/// 仅在 cargo feature `legacy-terminal-layout` 下编译，保留它是为了与按格定位
+/// 路径做 A/B 截图对照；对照通过后连同该 feature 一起删。
+#[cfg(feature = "legacy-terminal-layout")]
+fn spawn_line(
+    c: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    line: &RenderLine,
+    metrics: &MonoMetrics,
+    theme: &Theme,
+    fonts: &UiFonts,
+    is_current: bool,
+) {
+    let mut e = c.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: px(metrics.line_height),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            ..default()
+        },
+        OutputLineMarker,
+    ));
     if is_current {
         e.insert(OutputCurrentMarker);
     }
@@ -163,6 +242,7 @@ pub fn update_output_visibility(
     q_current_node: Query<Entity, With<OutputCurrentMarker>>,
     theme: Res<Theme>,
     fonts: Res<UiFonts>,
+    metrics: Option<Res<MonoMetrics>>,
     mut commands: Commands,
     q_line_children: Query<Entity, With<OutputLineMarker>>,
 ) {
@@ -184,6 +264,12 @@ pub fn update_output_visibility(
     let Ok((hist, _tab)) = q_hist.get(active) else {
         return;
     };
+    // 按格定位需要**实测**的等宽度量；未就绪则本帧不推进游标（下一帧补齐）
+    // ——先渲染再改度量会让已有行停在错误的列位置上。
+    let Some(metrics) = metrics else {
+        return;
+    };
+    let metrics = *metrics;
 
     // tab 切换 / 清屏 / 窗口滑过游标（封顶裁剪丢掉了未渲染行）→ 全量重建
     //
@@ -206,13 +292,12 @@ pub fn update_output_visibility(
         cursor.current_sig = 0;
     }
 
-    let font = theme.font_size;
     // 追加新增的完整行（按累计行号对齐滑窗内下标）
     if cursor.lines < hist.total {
         let start = cursor.lines - window_start;
         commands.entity(output_container).with_children(|c| {
             for line in &hist.lines[start..] {
-                spawn_line(c, line, font, &theme, &fonts, false);
+                spawn_line(c, line, &metrics, &theme, &fonts, false);
             }
         });
         cursor.lines = hist.total;
@@ -233,7 +318,7 @@ pub fn update_output_visibility(
         }
         if !current.spans.is_empty() {
             commands.entity(output_container).with_children(|c| {
-                spawn_line(c, &current, font, &theme, &fonts, true);
+                spawn_line(c, &current, &metrics, &theme, &fonts, true);
             });
         }
         cursor.current_sig = sig;
@@ -378,14 +463,21 @@ pub struct TerminalResizeTracker {
 
 /// 监测 `TerminalOutputMarker` 的视口尺寸变化 → 发 [`TerminalResize`]。
 ///
-/// SideView 展开/窗口 resize 时触发；按字体大小估算 cols/rows（等宽字体
-/// 宽 ≈ font × 0.6，行高 ≈ font × 1.4）。物理像素经 inverse_scale_factor
-/// 转逻辑像素后再算（HiDPI 一致）。精确字符度量留后续。
+/// 列 / 行数由**实测**的等宽度量派生（v8 M4-T2）：
+/// `cols = floor(视口逻辑宽 / cell_w)`、`rows = floor(视口逻辑高 / line_h)`。
+///
+/// 此前用「字号 × 0.6 / × 1.4」估算，且字号取的是**界面正文**档（14）而非终端
+/// 实际渲染的 CODE 档（12）——列数被低估约 17%，shell 的自动换行与 UI 显示宽度
+/// 对不上，中文输出更是完全错位。
+///
+/// 视口宽取输出容器的**内容盒**宽（扣掉 8px 横向内边距），再扣掉滚动条占位
+/// （滚动条是绝对定位覆盖层，不扣会把最右一列裁掉）。
 pub fn handle_terminal_resize(
     content: Res<crate::editor::SideViewContent>,
     tabs: Res<TerminalTabs>,
-    q_output: Query<&ComputedNode, With<TerminalOutputMarker>>,
-    theme: Res<Theme>,
+    q_output: Query<(&ComputedNode, Option<&Scrollbar>), With<TerminalOutputMarker>>,
+    metrics: Option<Res<MonoMetrics>>,
+    mut grid: ResMut<CellGrid>,
     mut tracker: ResMut<TerminalResizeTracker>,
     mut writer: MessageWriter<TerminalResize>,
 ) {
@@ -396,21 +488,29 @@ pub fn handle_terminal_resize(
     let Some(active_tab) = tabs.active_entity() else {
         return;
     };
-    let Ok(node) = q_output.single() else {
+    let Ok((node, scrollbar)) = q_output.single() else {
         return;
     };
-    let font = theme.font_size.max(1.0);
-    // size() 返回物理像素，font 是逻辑像素——乘 inverse_scale_factor
-    // 转逻辑像素后再算字符宽/行高（HiDPI 下不转会导致 cols/rows 翻倍，
+    // 等宽度量未实测完成前不发 resize：宁可让 PTY 保持默认尺寸，也不能用错的
+    // 列数让 shell 按错误宽度折行（那正是本缺陷本身）。
+    let Some(metrics) = metrics else {
+        return;
+    };
+    // size() 返回物理像素，度量是逻辑像素——乘 inverse_scale_factor
+    // 转逻辑像素后再算（HiDPI 下不转会导致 cols/rows 翻倍，
     // shell 自动换行与 UI 显示错位）。
     let scale = node.inverse_scale_factor();
-    let width = node.size().x * scale;
-    let height = node.size().y * scale;
+    let content_box = node.content_box().size();
+    let scrollbar_w = scrollbar.map(|bar| bar.width).unwrap_or(0.0);
+    let width = (content_box.x * scale - scrollbar_w).max(0.0);
+    let height = content_box.y * scale;
     if width <= 0.0 || height <= 0.0 {
         return;
     }
-    let cols = (width / (font * 0.6)).max(1.0) as u16;
-    let rows = (height / (font * 1.4)).max(1.0) as u16;
+    let cell_grid = CellGrid::from_viewport(width, height, &metrics);
+    *grid = cell_grid;
+    let cols = cell_grid.cols.min(u16::MAX as usize) as u16;
+    let rows = cell_grid.rows.min(u16::MAX as usize) as u16;
     if tracker.last == Some((active_tab, cols, rows)) {
         return;
     }

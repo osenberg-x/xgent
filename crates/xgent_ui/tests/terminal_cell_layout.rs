@@ -7,11 +7,16 @@
 
 use bevy::prelude::*;
 use xgent_settings::Localizer;
+use xgent_ui::editor::SideViewContent;
 use xgent_ui::layout::LayoutPlugin;
 use xgent_ui::terminal::TerminalPlugin;
-use xgent_ui::terminal::metrics::MonoMetrics;
+use xgent_ui::terminal::io::TerminalOutputChunk;
+use xgent_ui::terminal::metrics::{CellGrid, MonoMetrics};
+use xgent_ui::terminal::output::{OutputCellRun, RenderHistory};
+use xgent_ui::terminal::{TerminalTab, TerminalTabStatus, TerminalTabs};
 use xgent_ui::theme::type_scale;
 use xui::i18n_bridge::Strings;
+use xui::scrollbar::Scrollbar;
 use xui_i18n::StringSource;
 
 /// 空 StringSource（测试不关心 i18n 文案）。
@@ -60,6 +65,20 @@ fn terminal_app() -> App {
         .init_asset::<bevy::image::TextureAtlasLayout>()
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>();
+    // Startup 会 spawn 相机（layout::spawn_layout）。跑一帧后给它一个非零的
+    // 渲染目标——headless 环境没有渲染管线，相机视口恒 0 → UI 视口恒 0 →
+    // 所有节点尺寸为 0（台账 §10 勘误 15 记的同一个坑）。
+    app.update();
+    {
+        let world = app.world_mut();
+        let mut q = world.query::<&mut Camera>();
+        for mut camera in q.iter_mut(world) {
+            camera.computed.target_info = Some(bevy::camera::RenderTargetInfo {
+                physical_size: UVec2::new(1280, 720),
+                scale_factor: 1.0,
+            });
+        }
+    }
     app
 }
 
@@ -101,5 +120,168 @@ fn mono_metrics_is_measured_at_runtime() {
     assert!(
         metrics.cell_width() >= metrics.latin_advance - 1e-6,
         "单元格基准宽不得小于窄字符步进"
+    );
+}
+
+/// 造一个 tab 并喂入一行输出，返回 tab 实体。
+fn feed_output(app: &mut App, bytes: &[u8]) -> bevy::ecs::entity::Entity {
+    let tab = app
+        .world_mut()
+        .spawn((
+            RenderHistory::default(),
+            TerminalTab {
+                pty_id: None,
+                title: "test".into(),
+                status: TerminalTabStatus::Running,
+                shell: xgent_terminal::ShellSpec::FromEnv,
+                cwd: std::env::temp_dir(),
+                exit_code: None,
+            },
+        ))
+        .id();
+    app.world_mut().resource_mut::<TerminalTabs>().open(tab);
+    app.world_mut().write_message(TerminalOutputChunk {
+        tab,
+        bytes: bytes.to_vec(),
+    });
+    tab
+}
+
+/// 终端行内 run 节点必须按「起始列 × 单元格宽」定位（A5）。
+#[test]
+fn terminal_runs_are_positioned_by_cell() {
+    let mut app = terminal_app();
+    settle(&mut app);
+    let cell_w = app.world().resource::<MonoMetrics>().cell_width();
+
+    // "ab中cd"：a(0) b(1) 中(2) c(4) d(5)
+    feed_output(&mut app, "ab\u{4e2d}cd\n".as_bytes());
+    app.update();
+
+    // 收集输出容器内所有按格定位的 run（按起始列排序）
+    let mut runs: Vec<(usize, usize, Val)> = {
+        let world = app.world_mut();
+        let mut q = world.query::<(&OutputCellRun, &Node)>();
+        q.iter(world)
+            .map(|(run, node)| (run.start_col, run.cells, node.left))
+            .collect()
+    };
+    runs.sort_by_key(|(col, _, _)| *col);
+    assert!(
+        runs.len() >= 3,
+        "「ab中cd」应切出至少 3 个 run（窄字符合并 + 宽字符独立），实得 {}",
+        runs.len()
+    );
+
+    // 起始列按累计格数推进：0 / 2 / 4
+    assert_eq!(runs[0].0, 0, "首个 run 应从第 0 格开始");
+    assert_eq!(runs[1].0, 2, "宽字符之后应跳到第 2 格");
+    assert_eq!(runs[2].0, 4, "宽字符占 2 格，后续应到第 4 格");
+
+    // 每个 run 的 left == 起始列 × cell_w
+    for (col, _cells, left) in &runs {
+        let Val::Px(px) = left else {
+            panic!("run 的 left 应为绝对像素，实得 {left:?}");
+        };
+        let expected = *col as f32 * cell_w;
+        assert!(
+            (px - expected).abs() < 0.01,
+            "run（起始列 {col}）的 left 应为 {expected}px，实得 {px}px"
+        );
+    }
+}
+
+/// 给 PTY 的列数必须来自实测 cell_w，而不是「字号 × 0.6」估算（A6）。
+#[test]
+fn pty_cols_come_from_measured_cell_width() {
+    let mut app = terminal_app();
+    settle(&mut app);
+    let metrics = *app.world().resource::<MonoMetrics>();
+
+    // 切到终端视图（resize 只在终端激活时跟踪；分屏展开与布局需要几帧）
+    *app.world_mut().resource_mut::<SideViewContent>() = SideViewContent::Terminal;
+    feed_output(&mut app, b"ready\n");
+    for _ in 0..6 {
+        app.update();
+    }
+
+    // 视口可用宽 = 输出容器内容盒宽 − 滚动条占位
+    let (content_width, scrollbar_width) = {
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<
+            (&ComputedNode, Option<&Scrollbar>),
+            With<xgent_ui::terminal::TerminalOutputMarker>,
+        >();
+        let (node, bar) = q.single(world).expect("终端输出容器应存在");
+        (
+            node.content_box().size().x * node.inverse_scale_factor(),
+            bar.map(|b| b.width).unwrap_or(0.0),
+        )
+    };
+    assert!(
+        content_width > 0.0,
+        "headless 下需给相机一个非零渲染目标，否则 UI 视口恒 0"
+    );
+
+    let grid = *app.world().resource::<CellGrid>();
+    assert!(grid.cell_w > 0.0, "单元格宽应来自实测度量");
+    assert!(
+        (grid.cell_w - metrics.cell_width()).abs() < 1e-4,
+        "网格的单元格宽应等于实测度量"
+    );
+    let expected_cols = ((content_width - scrollbar_width) / grid.cell_w).floor() as usize;
+    assert_eq!(
+        grid.cols, expected_cols,
+        "列数应为 floor(视口逻辑宽 / cell_w) = {expected_cols}，实得 {}",
+        grid.cols
+    );
+    assert!(grid.rows >= 1, "行数应为正：{grid:?}");
+}
+
+/// 输出行的行高用实测行高（不再是「字号 × 1.4」估算）。
+#[test]
+fn output_line_height_uses_measured_line_height() {
+    let mut app = terminal_app();
+    settle(&mut app);
+    let metrics = *app.world().resource::<MonoMetrics>();
+
+    feed_output(&mut app, b"hello\n");
+    app.update();
+
+    let world = app.world_mut();
+    let mut q = world.query::<&Node>();
+    let heights: Vec<Val> = q
+        .iter(world)
+        .filter(|node| matches!(node.height, Val::Px(_)))
+        .map(|node| node.height)
+        .collect();
+    assert!(
+        heights.contains(&Val::Px(metrics.line_height)),
+        "输出行高应等于实测行高 {}px，实得 {heights:?}",
+        metrics.line_height
+    );
+}
+
+/// 旧的列宽估算（字号 × 0.6 / × 1.4）必须已删除（A6）。
+#[test]
+fn legacy_column_width_estimate_is_removed() {
+    let src = include_str!("../src/terminal/output.rs");
+    // 去掉注释行：文档注释里会提到「被删除的系数」，不能误伤。
+    let code: String = src
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !code.contains("* 0.6"),
+        "output.rs 仍残留「字号 × 0.6」估算"
+    );
+    assert!(
+        !code.contains("* 1.4"),
+        "output.rs 仍残留「字号 × 1.4」估算"
+    );
+    assert!(
+        !code.contains("theme.font_size"),
+        "output.rs 不应再用界面正文字号（theme.font_size）估算终端尺寸"
     );
 }

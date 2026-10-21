@@ -205,6 +205,7 @@ impl Plugin for TerminalPlugin {
             .init_resource::<TerminalIoRuntime>()
             .init_resource::<input::TerminalLineBuf>()
             .init_resource::<output::TerminalResizeTracker>()
+            .init_resource::<metrics::CellGrid>()
             .insert_resource(bridge_tx)
             .insert_resource(bridge_rx)
             .add_systems(

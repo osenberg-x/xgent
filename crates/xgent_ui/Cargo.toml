@@ -3,6 +3,13 @@ name = "xgent_ui"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# 旧的终端排版路径（flex 行 + shaper 连续排版）——默认**不开启**。
+#
+# v8 M4-T2：按格定位路径落地后，旧路径保留在本 feature 下，用于与新路径做
+# A/B 截图对照；对照通过后连同该 feature 一起删除。
+legacy-terminal-layout = []
+
 [dependencies]
 bevy = { workspace = true, features = ["ui", "bevy_ui_widgets", "default_font"] }
 xgent_core = { path = "../xgent_core" }
