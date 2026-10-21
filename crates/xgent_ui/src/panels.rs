@@ -15,6 +15,7 @@ use bevy::math::Vec2;
 use bevy::prelude::*;
 
 pub mod shim;
+pub mod tabs;
 pub mod visibility;
 
 /// 面板 id 常量（注册表的主键）。

@@ -3,6 +3,14 @@ confirm-will-write = will write file:
 confirm-diff-label = diff preview:
 settings-kind = Provider Type
 file-panel-title = Explorer
+
+# Panel titles (v8 M5: slot registry -- descriptor title_key points here)
+panel-chat = Chat
+panel-file-drawer = Files
+panel-session-history = Session History
+panel-terminal = Terminal
+panel-editor = Preview
+panel-diff = Diff
 hint-send = Ctrl+Enter Send
 hint-abort = Esc Abort
 hint-palette = Ctrl+Shift+P Palette

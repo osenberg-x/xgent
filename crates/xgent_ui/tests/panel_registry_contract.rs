@@ -355,7 +355,84 @@ fn overlay_slot_is_exclusive() {
 
 // ===== 6. i18n 页签标题 =====
 
+/// 英文语料下页签标题为英文（不含 CJK 码位）；两种语料都齐备 panel-* key。
+#[test]
+fn english_corpus_has_english_panel_titles() {
+    let en = read(&repo_root().join("crates/xgent_settings/locales/en-US/main.ftl"));
+    let zh = read(&repo_root().join("crates/xgent_settings/locales/zh-CN/main.ftl"));
+    for key in [
+        "panel-chat",
+        "panel-file-drawer",
+        "panel-session-history",
+        "panel-terminal",
+        "panel-editor",
+        "panel-diff",
+    ] {
+        let en_line = en
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{key} =")))
+            .unwrap_or_else(|| panic!("英文语料缺 key：{key}"));
+        let value = en_line.split_once('=').map(|(_, v)| v.trim()).unwrap_or("");
+        assert!(!value.is_empty(), "英文语料 {key} 的值不能为空");
+        assert!(
+            !value
+                .chars()
+                .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c)),
+            "英文语料 {key} 不应含 CJK：{value}"
+        );
+        assert!(
+            zh.lines()
+                .any(|l| l.trim_start().starts_with(&format!("{key} ="))),
+            "中文语料缺 key：{key}"
+        );
+    }
+}
+
 // ===== 源码级契约（D1 / D3 / 北极星前置） =====
+
+/// `EditorBackButtonMarker` 全仓只定义一次（D3 闭合：两套标记合一）。
+#[test]
+fn editor_back_button_marker_is_defined_once() {
+    let mut definitions = Vec::new();
+    for path in ui_sources() {
+        let text = read(&path);
+        let lines = lines_with(&text, "struct EditorBackButtonMarker");
+        if !lines.is_empty() {
+            let rel = path
+                .strip_prefix(repo_root().join("crates/xgent_ui/src"))
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            definitions.push((rel, lines));
+        }
+    }
+    assert_eq!(
+        definitions.len(),
+        1,
+        "`EditorBackButtonMarker` 应全仓唯一定义，实际：{definitions:?}"
+    );
+}
+
+/// 侧区顶部只有一条页签条（槽位页签由 `SlotLayout` 拥有；编辑器内部 tab 条
+/// 降级为「文档列表」，两者不合并）。
+#[test]
+fn side_view_has_single_tab_bar_owner() {
+    let tabs_src = read(&repo_root().join("crates/xgent_ui/src/panels/tabs.rs"));
+    assert!(
+        tabs_src.contains("SlotTabBarMarker"),
+        "槽位页签条应由 panels/tabs.rs 拥有"
+    );
+    let editor_src = read(&repo_root().join("crates/xgent_ui/src/editor/mod.rs"));
+    assert!(
+        !editor_src.contains("SideViewPage"),
+        "旧的页签页枚举 `SideViewPage` 应已移除（页签由注册表生成）"
+    );
+    // 编辑器内部 tab 条保留（文档列表语义）
+    assert!(
+        editor_src.contains("EditorTabBarMarker"),
+        "编辑器内部 tab 条应保留为「文档列表」"
+    );
+}
 
 /// 面板集合的变更不落在布局文件里——`layout.rs` 不含任何面板 id 分派。
 #[test]

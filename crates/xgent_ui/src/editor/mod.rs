@@ -41,9 +41,8 @@ use crate::editor::tabs::{
     handle_dirty_close_decision, handle_open_file_requests,
 };
 use crate::fonts::ui_text;
-use xgent_settings::Localizer;
 
-use crate::theme::{Theme, px, radius, space, type_scale};
+use crate::theme::{Theme, px, type_scale};
 use xgent_agent::EditorCommandRequestMessage;
 
 /// 编辑器视图状态（对话/编辑器/文件预览切换）。
@@ -57,11 +56,6 @@ pub enum EditorView {
 }
 
 /// 右侧分屏内容类型（**迁移 shim**，M5-T1 引入、M5-T6 拆除）。
-///
-/// v8 M5 起分屏内容由**面板注册表**（`crate::panels`）裁决：右侧分屏是
-/// `Slot::SideDock` 槽位，editor / preview / diff / terminal 各自是注册面板。
-/// 本枚举**仅保留**给迁移 shim 使用（`crate::panels::shim` 的「枚举 → 描述符
-/// 一次性映射」），产品代码不再读写它——M5-T6 连同枚举一并删除。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideViewContent {
     /// 无内容（分屏收起或初始）
@@ -140,7 +134,6 @@ impl Plugin for EditorPlugin {
                         update_editor_state_snapshot,
                         rebuild_editor_tabs,
                         handle_editor_tab_click,
-                        handle_back_button_click,
                         handle_file_changed,
                         handle_conflict_decision,
                         handle_dirty_close_decision,
@@ -217,27 +210,6 @@ fn spawn_editor_view(
                     },
                     EditorTabBarMarker,
                 ));
-                // ✕ 关闭分屏按钮（收起 SideView）
-                bar.spawn((
-                    Button,
-                    Hovered::default(),
-                    Node {
-                        width: px(28.0),
-                        height: px(28.0),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        border_radius: BorderRadius::all(px(4.0)),
-                        ..default()
-                    },
-                    ui_text(
-                        "×",
-                        type_scale::BODY,
-                        400,
-                        theme.text_dim,
-                        type_scale::line_height::UI,
-                    ),
-                    EditorBackButtonMarker,
-                ));
             });
             // 编辑器区：填充顶部栏以下空间，buffer 实体动态挂入。
             // 不挂 ScrollPosition——滚动职责在 buffer 实体自身的
@@ -306,10 +278,6 @@ fn sync_editor_theme(
     editor_theme.punc = Some(theme.punc);
     editor_theme.plain = Some(theme.code_text);
 }
-/// 返回对话按钮标记（v8 M5-T4 前有两套；本期先保留编辑器侧这一套）。
-#[derive(Component, Default)]
-pub struct EditorBackButtonMarker;
-
 /// 编辑器区容器标记（buffer 实体动态挂入）。
 #[derive(Component, Default)]
 pub struct EditorAreaMarker;
@@ -610,178 +578,5 @@ pub fn handle_pending_goto(
         commands
             .entity(entity)
             .remove::<crate::editor::buffer::PendingGoTo>();
-    }
-}
-
-// ===== 上下文面板页签（M5-T4：本期仍留在编辑器侧，下一期迁到槽位布局）=====
-
-/// 页签页类型（映射注册表面板 id）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SideViewPage {
-    Preview,
-    Diff,
-    Terminal,
-}
-
-/// 页签按钮标记。
-#[derive(Component)]
-pub struct PageTabMarker {
-    pub page: SideViewPage,
-}
-
-/// 启动时在分屏容器顶部（index 0）spawn 38px 页签条。
-fn spawn_page_tabs(
-    mut commands: Commands,
-    q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
-    theme: Res<Theme>,
-    loc: Res<Localizer>,
-) {
-    let Ok(side) = q_side.single() else {
-        return;
-    };
-    let pages = [
-        (SideViewPage::Preview, "预览"),
-        (SideViewPage::Diff, "差异"),
-        (SideViewPage::Terminal, "终端"),
-    ];
-    let _ = loc;
-    let bar = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: px(crate::theme::size::CONTEXT_TABS_H),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                padding: UiRect::horizontal(px(space::XS)),
-                border: UiRect::bottom(px(1.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(theme.surface),
-            BorderColor::all(theme.line),
-        ))
-        .id();
-    for (page, label) in pages {
-        let tab = commands
-            .spawn((
-                Button,
-                Hovered::default(),
-                Node {
-                    height: Val::Percent(100.0),
-                    padding: UiRect::horizontal(px(space::MD)),
-                    align_items: AlignItems::Center,
-                    border: UiRect::bottom(px(2.0)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                ui_text(
-                    label,
-                    type_scale::SMALL,
-                    510,
-                    theme.text_muted,
-                    type_scale::line_height::UI,
-                ),
-                PageTabMarker { page },
-            ))
-            .id();
-        commands.entity(bar).add_child(tab);
-    }
-    // 收起钮（复用 EditorBackButtonMarker 的行为链路）
-    let close = commands
-        .spawn((
-            Button,
-            Hovered::default(),
-            Node {
-                width: px(28.0),
-                height: px(28.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border_radius: BorderRadius::all(px(radius::SMALL)),
-                margin: UiRect::right(px(space::XS)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            ui_text(
-                "×",
-                type_scale::BODY,
-                400,
-                theme.text_muted,
-                type_scale::line_height::UI,
-            ),
-            EditorBackButtonMarker,
-        ))
-        .id();
-    commands.entity(bar).add_child(close);
-    commands.entity(side).insert_children(0, &[bar]);
-}
-
-/// 页签点击：激活对应面板（消息）。
-fn handle_page_tab_click(
-    q: Query<&PageTabMarker, (Added<Pressed>, With<Button>)>,
-    mut activate: MessageWriter<crate::panels::PanelActivate>,
-) {
-    for tab in q.iter() {
-        let id = match tab.page {
-            SideViewPage::Preview => crate::panels::ids::EDITOR,
-            SideViewPage::Diff => crate::panels::ids::DIFF,
-            SideViewPage::Terminal => crate::panels::ids::TERMINAL,
-        };
-        activate.write(crate::panels::PanelActivate { id });
-    }
-}
-
-/// 页签指示器：当前可见的面板页签用 `accent_interactive` 文字 + 底部 2px 线。
-fn update_page_tab_indicators(
-    registry: Res<crate::panels::PanelRegistry>,
-    theme: Res<Theme>,
-    mut q: Query<(&PageTabMarker, &mut TextColor, &mut Node, &mut BorderColor), With<Button>>,
-) {
-    if !registry.is_changed() && !theme.is_changed() {
-        return;
-    }
-    let active_id = registry.visible_in_slot(crate::panels::Slot::SideDock);
-    for (tab, mut color, mut node, mut border) in q.iter_mut() {
-        let page_id = match tab.page {
-            SideViewPage::Preview => crate::panels::ids::EDITOR,
-            SideViewPage::Diff => crate::panels::ids::DIFF,
-            SideViewPage::Terminal => crate::panels::ids::TERMINAL,
-        };
-        let is_active = active_id == Some(page_id);
-        let want_color = if is_active {
-            theme.accent_interactive
-        } else {
-            theme.text_muted
-        };
-        if color.0 != want_color {
-            color.0 = want_color;
-        }
-        node.border = UiRect {
-            bottom: px(if is_active { 2.0 } else { 0.0 }),
-            ..default()
-        };
-        border.set_all(if is_active {
-            theme.accent_interactive
-        } else {
-            Color::NONE
-        });
-    }
-}
-
-/// 处理返回对话按钮点击：收起右侧分屏并回到主区对话。
-pub fn handle_back_button_click(
-    q_btn: Query<(), (With<EditorBackButtonMarker>, Added<Pressed>)>,
-    registry: Res<crate::panels::PanelRegistry>,
-    mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
-    mut activate: MessageWriter<crate::panels::PanelActivate>,
-    mut layout: ResMut<crate::panels::SlotLayout>,
-    mut view: ResMut<EditorView>,
-) {
-    for _ in q_btn.iter() {
-        for entry in registry.iter_slot(crate::panels::Slot::SideDock) {
-            deactivate.write(crate::panels::PanelDeactivate { id: entry.desc.id });
-        }
-        layout.set_open(crate::panels::Slot::SideDock, false);
-        activate.write(crate::panels::PanelActivate { id: crate::panels::ids::CHAT });
-        *view = EditorView::Chat;
     }
 }

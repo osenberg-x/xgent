@@ -3,6 +3,14 @@ confirm-will-write = 将写入文件：
 confirm-diff-label = diff 预览：
 confirm-allow = 允许执行
 file-panel-title = 资源管理器
+
+# 面板标题（v8 M5：槽位注册表 —— 描述符的 title_key 指向这些 key）
+panel-chat = 对话
+panel-file-drawer = 文件
+panel-session-history = 历史会话
+panel-terminal = 终端
+panel-editor = 预览
+panel-diff = 差异
 hint-send = Ctrl+Enter 发送
 hint-abort = Esc 中断
 hint-palette = Ctrl+Shift+P 命令

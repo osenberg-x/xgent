@@ -70,6 +70,7 @@ impl Plugin for XgentUiPlugin {
             cursor::CursorStylePlugin,
             panels::PanelsPlugin,
             panels::visibility::VisibilityPlugin,
+            panels::tabs::TabsPlugin,
             session_history::SessionHistoryPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
