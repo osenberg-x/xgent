@@ -14,7 +14,6 @@ use std::collections::BTreeMap;
 use bevy::math::Vec2;
 use bevy::prelude::*;
 
-pub mod shim;
 pub mod split;
 pub mod tabs;
 pub mod visibility;

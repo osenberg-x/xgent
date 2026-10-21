@@ -472,6 +472,44 @@ fn english_corpus_has_english_panel_titles() {
 
 // ===== 源码级契约（D1 / D3 / 北极星前置） =====
 
+/// `SideViewContent` 在 `crates/` 内零引用（D1 闭合）。
+#[test]
+fn side_view_content_is_fully_removed() {
+    let mut hits = Vec::new();
+    let crates = repo_root().join("crates");
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    walk(&crates, &mut hits);
+    for path in hits {
+        // 断言本身提到该名字（断言文本），排除本文件。
+        let rel_owned = path.to_string_lossy().replace('\\', "/");
+        if rel_owned.ends_with("tests/panel_registry_contract.rs") {
+            continue;
+        }
+        let text = read(&path);
+        if text.contains("SideViewContent") {
+            let rel = path
+                .strip_prefix(repo_root())
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let lines = lines_with(&text, "SideViewContent");
+            panic!("`SideViewContent` 仍被引用：{rel}（行 {lines:?}）");
+        }
+    }
+}
+
 /// `EditorBackButtonMarker` 全仓只定义一次（D3 闭合：两套标记合一）。
 #[test]
 fn editor_back_button_marker_is_defined_once() {
@@ -514,6 +552,22 @@ fn side_view_has_single_tab_bar_owner() {
         editor_src.contains("EditorTabBarMarker"),
         "编辑器内部 tab 条应保留为「文档列表」"
     );
+}
+
+/// 北极星前置：`layout.rs` / `editor/mod.rs` 不含 `SideViewContent`
+/// （新增面板不需要改这两个文件）。
+#[test]
+fn layout_files_have_no_closed_enum() {
+    for rel in [
+        "crates/xgent_ui/src/layout.rs",
+        "crates/xgent_ui/src/editor/mod.rs",
+    ] {
+        let text = read(&repo_root().join(rel));
+        assert!(
+            !text.contains("SideViewContent"),
+            "{rel} 不应再引用 closed 枚举"
+        );
+    }
 }
 
 /// 面板集合的变更不落在布局文件里——`layout.rs` 不含任何面板 id 分派。

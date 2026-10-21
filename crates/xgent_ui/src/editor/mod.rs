@@ -55,22 +55,6 @@ pub enum EditorView {
     Editor,
 }
 
-/// 右侧分屏内容类型（**迁移 shim**，M5-T1 引入、M5-T6 拆除）。
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SideViewContent {
-    /// 无内容（分屏收起或初始）
-    #[default]
-    None,
-    /// 编辑器视图（代码文件）
-    Editor,
-    /// 文件预览（非代码文件）
-    Preview,
-    /// 差异视图（buffer vs 磁盘）
-    Diff,
-    /// 终端视图（多 tab PTY）
-    Terminal,
-}
-
 /// 编辑器视图标记节点（编辑器容器，初始隐藏）。
 #[derive(Component, Default)]
 pub struct EditorViewMarker;
@@ -99,7 +83,6 @@ impl Plugin for EditorPlugin {
             .add_message::<xui::EditorDirtyChanged>()
             .init_resource::<EditorTabs>()
             .init_resource::<EditorView>()
-            .init_resource::<SideViewContent>()
             .init_resource::<EditorIoRuntime>()
             .init_resource::<EditorStateSnapshot>()
             .add_systems(Update, sync_editor_theme.before(xui::TextEditorUpdateSet))
