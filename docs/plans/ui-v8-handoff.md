@@ -7,7 +7,7 @@
 
 ## 0. 一句话现状
 
-UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）、M4-T1（字体候选栈与等宽内嵌兜底）、M4-T2（终端双宽单元格与按格定位）、M4-T3/T4（代码类文本消费 `mono` + 中文排版约束）已交付**；`cargo check --workspace` 绿，`xgent_ui` lib 83 项 + `xui` 103 项测试全绿。**M4 已收口**，下一期是 **M5（槽位注册表与派生可见性，⚠ 最大改动面）**。
+UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）、M4-T1（字体候选栈与等宽内嵌兜底）、M4-T2（终端双宽单元格与按格定位）、M4-T3/T4（代码类文本消费 `mono` + 中文排版约束）已交付**；`cargo check --workspace` 绿，`xgent_ui` lib 84 项 + `xui` 103 项测试全绿。**M4 已收口**，下一期是 **M5（槽位注册表与派生可见性，⚠ 最大改动面）**。
 
 > ⚠ 唯一未闭环项：**硬门槛 A 的 macOS / Linux 的 `mono` 启动日志确认**（用户 2026-10-21 决定降级为不阻塞，先做 Windows 适配，其他平台后续适配）。详见 §1.1。
 
@@ -41,7 +41,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 ## 2. 当前基线（下次开工前直接用，别重跑）
 
 - `cargo check --workspace`：通过。
-- `xgent_ui` lib：**83 passed**（M2b 基线 76 + M4-T2 新增 7）。
+- `xgent_ui` lib：**84 passed**（M2b 基线 76 + M4-T2 新增 8）。
 - `xui` lib：**103 passed**（M2b 基线 + M3 新增 34）。
 - `xgent_terminal` lib：**33 passed**（M4-T2 新增 12：display_width 边界 / layout_cells）。
 - 集成测试（`xgent_ui`，全绿）：`layout`(2)、`modal_settings`(3)、`toast`(1)、`settings_panel_values`(19)、`settings_panel_i18n`(3)、`interaction_model`(7)、`editor_theme_sync`(2)、`conflict_save_guard`(4)、`settings_input_focus`(2)、`density`(4)、`scroll_contract`(8)、`ellipsis_contract`(6)、`virtual_list_contract`(3)、**`file_preview`(7)**、**`file_tree_refresh`(5)**、`mono_typography`(9)、`font_slots`(6)、**`terminal_cell_layout`(6，M4-T2 新增)**。

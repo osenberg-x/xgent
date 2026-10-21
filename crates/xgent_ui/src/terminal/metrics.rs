@@ -81,10 +81,23 @@ impl MonoMetrics {
         let warning = if double_width_ok {
             None
         } else {
+            // 基准宽「调整」与否取决于 CJK 步进偏宽还是偏窄——措辞必须如实。
+            let adjust = if cell_w > self.latin_advance {
+                format!(
+                    "→ 单元格基准宽由 {:.3}px 调整为 {:.3}px（宽字符需容下 2 格）",
+                    self.latin_advance, cell_w
+                )
+            } else {
+                format!(
+                    "→ 单元格基准宽维持 {:.3}px（= 窄字符步进；宽字符步进偏窄，\
+                     2 格内留有间隙）",
+                    cell_w
+                )
+            };
             Some(format!(
                 "等宽 CJK 步进不是拉丁步进的 2 倍：latin={:.3}px cjk={:.3}px \
-                 （期望 {:.3}px，偏差 {:.1}%）→ 单元格基准宽调整为 {:.3}px；\
-                 宽字符将按 2 格定位，与相邻窄字符之间留有间隙",
+                 （期望 {:.3}px，偏差 {:.1}%）{adjust}；\
+                 宽字符仍按 2 格定位（起点严格落在格边界）",
                 self.latin_advance,
                 self.cjk_advance,
                 expected,
@@ -93,7 +106,6 @@ impl MonoMetrics {
                 } else {
                     0.0
                 },
-                cell_w
             ))
         };
         MonoMetricsCheck {
@@ -294,34 +306,28 @@ pub fn collect_mono_metrics(
         at_size: type_scale::CODE,
     };
     let check = metrics.check();
-    // 家族名一并打进日志：三平台核对时「家族 + 四个数值 + 校验结论」同在一行，
-    // 不必再跨两条日志对照（M4-T1 的槽位日志另有一条）。
+    // 家族名与校验结论一并打进日志：三平台核对时「家族 + 四个数值 + 校验结论」同在
+    // 一行（info!），不必跨两条日志对照（M4-T1 的槽位日志另有一条）。告警的细节
+    // 另走 warn!，同样带家族名。
     let family = fonts
         .as_ref()
         .map(|f| mono_family_label(&f.mono))
         .unwrap_or_else(|| "未知".to_string());
-    match &check.warning {
-        Some(warning) => {
-            tracing::warn!("终端等宽度量（{family}）：{warning}");
-            tracing::info!(
-                "终端等宽度量（{family}）：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px",
-                metrics.latin_advance,
-                metrics.cjk_advance,
-                metrics.line_height,
-                metrics.at_size,
-                check.cell_w
-            );
-        }
-        None => {
-            tracing::info!(
-                "终端等宽度量（{family}）：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px（双宽比例正常）",
-                metrics.latin_advance,
-                metrics.cjk_advance,
-                metrics.line_height,
-                metrics.at_size,
-                check.cell_w
-            );
-        }
+    let conclusion = if check.double_width_ok {
+        "双宽比例正常"
+    } else {
+        "双宽比例偏离（详见告警）"
+    };
+    tracing::info!(
+        "终端等宽度量（{family}）：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px（{conclusion}）",
+        metrics.latin_advance,
+        metrics.cjk_advance,
+        metrics.line_height,
+        metrics.at_size,
+        check.cell_w
+    );
+    if let Some(warning) = &check.warning {
+        tracing::warn!("终端等宽度量（{family}）：{warning}");
     }
     commands.insert_resource(metrics);
 }
@@ -332,9 +338,9 @@ pub fn collect_mono_metrics(
 /// 要能区分，否则三平台核对时分不清「真等宽家族」与「通用族兜底」。
 pub fn mono_family_label(source: &FontSource) -> String {
     match source {
-        FontSource::Family(name) => name.to_string(),
+        FontSource::Family(name) => format!("系统家族 {name}"),
         FontSource::Handle(_) => "内嵌资产（句柄）".to_string(),
-        FontSource::Generic(generic) => format!("{generic:?}"),
+        FontSource::Generic(generic) => format!("通用族兜底（{generic:?}）"),
         _ => "未知来源".to_string(),
     }
 }
@@ -412,17 +418,38 @@ mod tests {
     fn family_label_distinguishes_sources() {
         assert_eq!(
             mono_family_label(&FontSource::Family("Cascadia Mono".into())),
-            "Cascadia Mono"
+            "系统家族 Cascadia Mono"
         );
         assert_eq!(
             mono_family_label(&FontSource::Generic(
                 bevy::text::GenericFontFamily::Monospace
             )),
-            "Monospace"
+            "通用族兜底（Monospace）"
         );
         assert!(
             mono_family_label(&FontSource::Handle(Handle::default())).contains("内嵌"),
             "句柄来源应标为内嵌资产"
+        );
+    }
+
+    /// 双宽告警的措辞必须如实：CJK 步进偏**窄**时基准宽其实没变（仍是窄字符步进）。
+    #[test]
+    fn warning_wording_matches_actual_cell_width_change() {
+        // cjk 偏窄：2 × cjk / 2 = cjk < latin → 基准宽维持 latin
+        let narrow = metrics(7.2, 12.0).check();
+        let warning = narrow.warning.expect("应告警");
+        assert!(
+            warning.contains("维持"),
+            "CJK 偏窄时基准宽未变，措辞应为「维持」：{warning}"
+        );
+        assert!(!warning.contains("调整为"), "{warning}");
+
+        // cjk 偏宽：cjk / 2 > latin → 基准宽确实被调大
+        let wide = metrics(7.0, 20.0).check();
+        let warning = wide.warning.expect("应告警");
+        assert!(
+            warning.contains("调整为"),
+            "CJK 偏宽时基准宽被调大，措辞应为「调整为」：{warning}"
         );
     }
 }
