@@ -1,0 +1,135 @@
+schema: comet.native.v4
+name: v8-m5-panel-registry
+language: zh-CN
+phase: build
+status: active
+state_version: 3
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 2c0ea4bf3cf3dd6a343b84df84cfef98267711a50abc9a86723bd504213efa68
+spec_changes:
+  - capability: ui-m5-panel-registry
+    operation: create
+    source: specs/ui-m5-panel-registry/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: building
+  goal_cycle: 1
+  iteration: 1
+  attempt: 0
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: submit-builder-candidate
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1 槽位与描述符模型：`Slot` 覆盖
+      `Rail/Center/SideDock/BottomDock/SettingsSection/StatusSegment/Palette/Overlay`；`PanelDescriptor.title_key`
+      必填（i18n key）；`PanelRegistry` 可注册并按 id / slot 查询（按 `order`
+      排序）；`PanelRegister` / `PanelActivate` / `PanelDeactivate` 是 ECS `Message`。
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: A2 扩展性（北极星前置）：新增一个 `SideDock` 面板只需「一个描述符 + 一个视图模块 + 一条
+      `PanelRegister`」；`crates/xgent_ui/src/layout.rs` 与
+      `crates/xgent_ui/src/editor/mod.rs` 中不含 `SideViewContent`，也不含按面板 id 分派的
+      `match`。
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: A3 rail 选中态派生：`ActiveActivity` 资源被删除；rail 选中态由「注册表 ∩ 槽位可见性」派生；连点 Files
+      两次关闭抽屉后，rail 上不残留 Files 选中态。
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: A4 历史面板进槽位：`session_history`
+      由自建浮层改为注册面板（`Slot::Overlay`），与文件抽屉同属单例槽位，二者同一时刻至多一个可见（不再争层级）。
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: A5 派生可见性单一系统：`derive_panel_visibility` 是**唯一**写「面板 / 区域」`Node.display`
+      的系统；原 7 处动态面板可见性写手（`layout.rs` 分屏与手柄、`file_panel.rs`
+      遮罩与面板、`activity_bar.rs` 展开钮、`editor/mod.rs` 编辑器视图、`terminal/mod.rs`
+      终端视图）全部并入该系统；3 处 spawn 期默认值改为构造期字面量；`crates/xgent_ui/src/` 内 `.display =`
+      的命中**仅限**「派生系统 + 构造期字面量 + 5 处内容态白名单」（`chat_panel.rs`
+      回到底部按钮、`activity_bar.rs` 陪伴激活环、`welcome.rs` 欢迎空态、`welcome.rs`
+      最近会话标题、`editor/mod.rs` 编辑器文档页签），白名单以源码级测试固化且逐条注明属内容态而非面板态。
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: A6 单页签条所有者：侧区顶部只有一条页签条、且由槽位布局拥有并渲染；编辑器内部 tab 条降级为「文档列表」语义（不与槽位页签合并）；仓库内
+      `EditorBackButtonMarker` 只定义一次（源码级断言）。
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: A7 分割模型：`SplitTree / Split / LeafSize` 建模；`resize.rs`
+      改为遍历分割树生成分割条（注册一个纵向分割**不需要**改 `resize.rs`）；抽屉宽度从定值 320 改为 `Min(240,
+      Preferred(320))`、上限 480，且**可拖宽**并被钳制在 `[240, 480]`。
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: A8 移除 closed 枚举：`crates/` 内 `SideViewContent` **零引用**（含 `enum
+      SideViewContent`）；editor / preview / diff / terminal 全部为原生注册项。
+    result: pending
+    reason: null
+  - id: A9
+    source: brief.md
+    text: A9 i18n 页签标题：页签标题取自描述符 `title_key`（fluent 语料）；`editor/mod.rs` 中的 `let _ =
+      loc;` 被删除；**英文语料**下页签显示英文（自动化断言：切 `en-US` 后取到的页签标题不含 CJK 码位）。
+    result: pending
+    reason: null
+  - id: A10
+    source: brief.md
+    text: A10 迁移 shim 一致性：在 shim 存在期间（M5-T1…M5-T5），「枚举变体 → 描述符
+      id」的映射是**纯函数**且与注册表一致（每个 shim 变体都能在注册表中查到唯一描述符）；M5-T6 拆除 shim
+      后该一致性由注册表本身承担（每个既有面板在注册表中有唯一描述符）。
+    result: pending
+    reason: null
+  - id: A11
+    source: brief.md
+    text: A11 既有基线不回归 + 交付纪律：`cargo check --workspace` 通过；`cargo fmt -p xgent_ui` 无
+      diff；`cargo clippy -p xgent_ui --all-targets` 在改动文件零新增警告；`cargo test
+      --workspace` 的失败集合**不超出**既有 15 项基线（`xgent_tools` 6 / `xgent_plugin_host` 6
+      / `xgent_daemon` 1 / `xgent_settings_core` 1 / `xgent_agent` 1）。
+    result: pending
+    reason: null
+  - id: A12
+    source: brief.md
+    text: "A12 文档同步与提交粒度：`docs/plans/ui-v8-tasks.md` §M5 逐条勾选 + §10
+      追加本轮勘误、`docs/plans/ui-v8-handoff.md` 交付表 / 基线 / 下一步（并订正 §4.2
+      的过时判据）、`docs/dev-tutorial.md` 新增 M5 小节；提交粒度为 M5-T1…M5-T6 各一条 `feat(ui): …`
+      + 一条文档提交 + 一条 `chore(native): archive v8-m5-panel-registry`。"
+    result: pending
+    reason: null
+builder_handoff: null
+blockers: []
+verification: null
+history: []
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-10-21T06:44:47.655Z

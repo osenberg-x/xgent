@@ -26,6 +26,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 | M3-T6 虚拟列表 | 直接提交 | `f5c4e32` | `xui::VirtualList` 支持不等高（measured 行高表 + 累积偏移表 + 实测回写）；文件树改扁平虚拟列表（数据层 `flatten_tree` + 只渲染可见行 + 占位块撑总高 + 数据代次）；会话历史列表虚拟化；**顺带修好 12 个长期失败的既有测试**（见 §4.3） |
 | M4-T1 字体装配层 | Comet change `v8-m4-font-assembly` | 归档 `bd18ddd` / 实现 `d314256` | `xgent_ui::fonts`：四槽位模型（`FontSlot`/`FontSpec`/`FontCandidate`）+ 纯函数 `resolve_slot`（系统命中 → 内嵌兜底 → 失败记警告）；`UiFonts` 扩为 `mono/ui_cjk/mono_cjk: FontSource`；内嵌 **JetBrains Mono**（OFL 1.1，264KB）；`startup::load_fonts` 解析四槽位并打「槽位→家族名→来源」日志；**删除** `else { Handle::default() }` 分支 |
 | M4-T3/T4 排版消费 | Comet change `v8-m4-mono-typography` | 归档 `7c76366` / 实现 `de2bb68`+`5fa84e6` | 代码类文本走 `mono` 槽位（`EditorTheme.font` 注入 + **span 自带字体** + 行号列同源 + diff 行 `mono_text` + 工具卡摘要 `ellipsis_mono_text`）；`SMALL 12.5 → 12`、`MONO` → `CODE`、新增 `line_height::CJK = 1.7`；中文约束（`display_spacing` 负字距不作用中文、`line_height::for_text` 正文按内容选档） |
+| M5 槽位注册表与派生可见性 | Comet change `v8-m5-panel-registry` | 实现 `0aeecc4` / `0141343` / `dc22458` / `7eb83e9` | `xgent_ui::panels`：`Slot`（含 `Center`，只建模不接消费者）/ `PanelDescriptor`（`title_key` 必填）/ `PanelRegistry` / `SlotLayout` + `PanelRegister`/`PanelActivate`/`PanelDeactivate` 消息；`derive_panel_visibility` 唯一写面板可见性；rail 选中态派生（`ActiveActivity` 删除）；会话历史改 `Slot::Overlay` 注册面板；槽位页签条（`panels::tabs`）+ `EditorBackButtonMarker` 合一；`SplitTree`/`Split`/`LeafSize` 分割模型 + 抽屉可拖宽（240–480）；`SideViewContent` 枚举与 shim 全量拆除；`tests/panel_registry_contract.rs` 18 项契约测试 |
 | M4-T2 终端双宽单元格 | Comet change `v8-m4-terminal-cells` | 实现 `ff9c203`+`5e1d4cb`+`e06f77d`+`d3a276b`+`0fd632b`+`fe96a82` | `xgent_terminal::render`：`display_width`（wcwidth）+ `display_width_str` + `CellRun` + `layout_cells`（按格布局内核）；`xgent_ui::terminal::metrics`：`MonoMetrics`（启动期**实测**）+ 双宽校验 + `CellGrid`；`terminal/output.rs`：行渲染改「行容器 + 绝对定位 run 节点」（`left = 起始列 × cell_w`）、PTY 列数改 `floor(视口逻辑宽 / cell_w)`、**删除** `font × 0.6` 估算；cargo feature `legacy-terminal-layout` 保留旧路径做 A/B |
 
 ### 1.1 硬门槛 A 状态
@@ -44,7 +45,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 - `xgent_ui` lib：**84 passed**（M2b 基线 76 + M4-T2 新增 8）。
 - `xui` lib：**103 passed**（M2b 基线 + M3 新增 34）。
 - `xgent_terminal` lib：**33 passed**（M4-T2 新增 12：display_width 边界 / layout_cells）。
-- 集成测试（`xgent_ui`，全绿）：`layout`(2)、`modal_settings`(3)、`toast`(1)、`settings_panel_values`(19)、`settings_panel_i18n`(3)、`interaction_model`(7)、`editor_theme_sync`(2)、`conflict_save_guard`(4)、`settings_input_focus`(2)、`density`(4)、`scroll_contract`(8)、`ellipsis_contract`(6)、`virtual_list_contract`(3)、**`file_preview`(7)**、**`file_tree_refresh`(5)**、`mono_typography`(9)、`font_slots`(6)、**`terminal_cell_layout`(6，M4-T2 新增)**。
+- 集成测试（`xgent_ui`，全绿）：`layout`(2)、`modal_settings`(3)、`toast`(1)、`settings_panel_values`(19)、`settings_panel_i18n`(3)、`interaction_model`(7)、`editor_theme_sync`(2)、`conflict_save_guard`(4)、`settings_input_focus`(2)、`density`(4)、`scroll_contract`(8)、`ellipsis_contract`(6)、`virtual_list_contract`(3)、**`file_preview`(7)**、**`file_tree_refresh`(5)**、`mono_typography`(9)、`font_slots`(6)、**`terminal_cell_layout`(6，M4-T2 新增)**、**`panel_registry_contract`(18，M5 新增)**。
   - 标粗的两组在 M2b 基线是**长期失败**（见 §4.3），M3-T6 顺带修好了。
   - `terminal_cell_layout` 需**给相机一个非零渲染目标**（headless 无渲染管线 → UI 视口宽高全 0，见台账 §10 勘误 32）；其中 2 项按格定位专属用例在 `legacy-terminal-layout` feature 下自动跳过（旧路径不 spawn `OutputCellRun`）。
 
@@ -80,7 +81,26 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 
 ---
 
-## 4. 下一步：M5 槽位注册表与派生可见性（⚠ 改动面最大）
+## 4. 上期：M5 槽位注册表与派生可见性（已交付）
+
+### 4.0 M5 落点速查
+
+| 任务 | 落点 | 关键决策 |
+|:---|:---|:---|
+| M5-T1 注册表 | `crates/xgent_ui/src/panels.rs` | `Slot`（含 `Center`，只建模不接消费者）/ `PanelDescriptor`（`title_key` 必填）/ `PanelRegistry` / `SlotLayout`；注册与激活一律 ECS 消息；`SideViewContent` 期间为迁移 shim（M5-T6 已拆） |
+| M5-T2 rail + 历史 | `activity_bar.rs` / `session_history.rs` / `overlay.rs` | 删 `ActiveActivity`，选中态从「注册表 ∩ 槽位可见性」派生（后激活者优先）；历史面板改 `Slot::Overlay` 注册面板，与文件抽屉同属单例槽位；`FileDrawerOpen` / `SessionHistoryState` 变派生视图 |
+| M5-T3 派生可见性 | `panels/visibility.rs` | `derive_panel_visibility` 唯一写「面板 / 区域」`Node.display`（原 7 处动态写手归一，3 处 spawn 期默认值改构造期字面量）；**内容态可见性 5 处按用户裁决不动**（白名单 + 源码级测试固化，见台账 §10 勘误 34） |
+| M5-T4 单页签条 | `panels/tabs.rs` | 页签条由槽位布局拥有，标题取 `title_key`（i18n）；编辑器 tab 条降级为「文档列表」；`EditorBackButtonMarker` 全仓唯一定义 |
+| M5-T5 分割模型 | `panels/split.rs` / `resize.rs` | `SplitTree`/`Split`/`LeafSize`；`resize.rs` 遍历分割树生成分割条（注册纵向分割不改 `resize.rs`）；抽屉宽度 `Min(240, Preferred(320))` 上限 480 |
+| M5-T6 拆枚举 | `editor/mod.rs` | `SideViewContent` 与 shim 全量拆除，全仓零引用 |
+
+> ⚠ **Bevy 0.20 的 `add_plugins` 不幂等**（重复添加会 panic）——共享插件必须先
+> `app.is_plugin_added::<T>()` 判空；`PanelsPlugin` 用 `init_resource` 兜底
+> `Localizer` / `Theme` / `SplitTree`（不覆盖宿主注入的真值）。
+> ⚠ **`FileDrawerOpen` / `SessionHistoryState` 是派生视图**——测试要开抽屉必须发
+> `PanelActivate { id: ids::FILE_DRAWER }`，直接改 Resource 会被派生系统覆盖。
+
+## 5. 下一步：M6 会话内容（Transcript 有序树 + Markdown + 输入区）
 
 ### 4.1 起点事实（2026-10-21 实测）
 
@@ -114,17 +134,17 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 
 ---
 
-## 5. M4 之后的可选方向（按台账 §8 里程碑表）
+## 6. 之后的可选方向（按台账 §8 里程碑表）
 
-- **M5 槽位注册表**（⚠ 最大改动面，**下一期**）：`PanelRegistry` 取代 `SideViewContent` closed 枚举、派生可见性单一系统、`SplitTree` 分割模型。详见 §4.2。
-- **M6 会话内容**：`Transcript` 有序树 + Markdown + 输入区（依赖 M3 的滚动/省略/填满契约；M3-T6 的会话消息列表虚拟化随 M6-T1 一起做，见台账 §10 勘误 13）。
+- **M5 槽位注册表**（⚠ 最大改动面，**已交付**）：`PanelRegistry` 取代 `SideViewContent` closed 枚举、派生可见性单一系统、`SplitTree` 分割模型。详见 §4.0。
+- **M6 会话内容**（**下一期**）：`Transcript` 有序树 + Markdown + 输入区（依赖 M3 的滚动/省略/填满契约与 M5 的槽位注册表；M3-T6 的会话消息列表虚拟化随 M6-T1 一起做，见台账 §10 勘误 13）。
 - **M7 闭环**：快捷键单一来源、焦点栈、i18n 扩面、几何断言层（台账 §0.2 的 P0 缺陷回归测试多数在 M7 收口）。
 - **M8 Git 探针**（北极星：新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）。
 - **M4 尾巴**：硬门槛 A 的 macOS / Linux 确认 + 终端按格定位的实机视觉确认（`ls -l` / 中文输出 / `top` / `vim`）。
 
 ---
 
-## 6. 本轮遗留风险（Verifier 口径，不修也不违约）
+## 7. 本轮遗留风险（Verifier 口径，不修也不违约）
 
 1. **对话输入区的可视行数是 1 帧滞后**：`update_input_visible_lines` 在 PostUpdate 写 `visible_lines`，下一帧的 Content 阶段才生效——打字时输入框高度有极轻微的滞后感。
 2. **光标行跟随也是 1 帧滞后**（同上，滚动位置写入 PostUpdate → 下一帧布局生效）。
@@ -137,12 +157,12 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 
 ---
 
-## 7. 下次开工的前 5 步
+## 8. 下次开工的前 5 步
 
-1. `git log --oneline -8` 确认 M4-T2 的实现提交（`ff9c203` / `5e1d4cb` / `e06f77d` / `d3a276b` / `0fd632b` / `fe96a82`）在 HEAD。
-2. 读本文 §4 + `docs/plans/ui-v8-tasks.md` §M5。
-3. 复核 §4.1 的起点事实（`MonoMetrics` 存在 / `display_width` 存在 / 终端已按格定位）。
-4. 读 `docs/design/ui-v8-layout-architecture.md` §8.1–§8.3 与 `docs/design/ui-v8-design-system.md` §1.2–§1.4（字体槽位与宽度模型的权威口径）。
+1. `git log --oneline -8` 确认 M5 的实现提交（`0aeecc4` / `0141343` / `dc22458` / `7eb83e9`）在 HEAD。
+2. 读本文 §4.0 + `docs/plans/ui-v8-tasks.md` §M5 与 §10 勘误 34–38。
+3. 复核 §4.0 的落点（`xgent_ui::panels` 的 `Slot` / `PanelRegistry` / `SlotLayout` / `derive_panel_visibility` / `SplitTree`）。
+4. 读 `docs/design/ui-v8-layout-architecture.md` §6（Transcript 有序树）与 §3.1（注册表模型）。
 5. 开工前先跑一遍基线：`cargo test -p xgent_ui -p xgent_terminal -p xui`（全绿 = 基线没被本轮弄坏）。
 
 ---

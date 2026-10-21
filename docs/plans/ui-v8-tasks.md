@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b / M3 / M4 已交付**（M1/M2/M4 经 Comet change 归档；M3 直接以提交落地：`19fff0a` T1/T2、`3acbb17` T3、`663d1ad` T4/T5、`f5c4e32` T6；M4 见 §M4），**下一期 M5（槽位注册表与派生可见性）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落的勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 / M4 / M5 已交付**（M1/M2/M4 经 Comet change 归档；M3 直接以提交落地：`19fff0a` T1/T2、`3acbb17` T3、`663d1ad` T4/T5、`f5c4e32` T6；M4 见 §M4），**下一期 M6（会话内容：Transcript 有序树 + Markdown + 输入区）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落的勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -241,35 +241,41 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## M5 槽位注册表与派生可见性（修 D1–D6、I3）
 
+> 状态：**已交付**（Comet change `v8-m5-panel-registry`；实现提交 `0aeecc4` T1–T3、
+> `0141343` T4、`dc22458` T5、`7eb83e9` T6）。落点：`xgent_ui::panels`（模型 / 派生可见性 /
+> 槽位页签 / 分割树）、`activity_bar.rs`（rail 描述符驱动）、`session_history.rs`（注册面板）、
+> `resize.rs`（遍历分割树）、`tests/panel_registry_contract.rs`（18 项契约测试）。
+> M5-T3 的验收口径见 §10 勘误 34（内容态可见性不进派生系统）。
+
 ### M5-T1 `PanelRegistry` 取代 closed 枚举（⚠）
-- [ ] `Slot{Rail,SideDock,BottomDock,SettingsSection,StatusSegment,Palette,Overlay}` + `PanelDescriptor`（`title_key` 必填 i18n key）+ `PanelRuntime`。
-- [ ] `PanelRegister/PanelActivate/PanelDeactivate` 消息（遵守 ECS 契约，禁直接方法调用）。
-- [ ] `SideViewContent`（`editor/mod.rs:69-81`）加**临时 shim**（枚举 → 描述符一次性映射），使后续可分小批合入且每批可编译。
-- **验收**：新增一个 `SideDock` 面板无需修改 `layout.rs`/`editor/mod.rs` 的枚举与页签条代码。
+- [x] `Slot{Rail,Center,SideDock,BottomDock,SettingsSection,StatusSegment,Palette,Overlay}` + `PanelDescriptor`（`title_key` 必填 i18n key）+ `PanelRuntime`。
+- [x] `PanelRegister/PanelActivate/PanelDeactivate` 消息（遵守 ECS 契约，禁直接方法调用）。
+- [x] `SideViewContent`（`editor/mod.rs:69-81`）加**临时 shim**（枚举 → 描述符一次性映射），使后续可分小批合入且每批可编译。
+- **验收**：新增一个 `SideDock` 面板无需修改 `layout.rs`/`editor/mod.rs` 的枚举与页签条代码。✅ 源码级断言（`layout.rs` / `editor/mod.rs` 不含 `SideViewContent`、不含按面板 id 的分派）。
 
 ### M5-T2 rail 与历史进槽位（修 D4/D5）
-- [ ] 删除 `ActiveActivity`，选中态从 `registry ∩ slots.is_visible()` 派生。
-- [ ] `ActivityKind{Chat,Files,History,Terminal}`（`activity_bar.rs:20-30,251-306`）改为描述符驱动；`session_history.rs:136-251` 从浮层改为可注册面板。
-- **验收**：连点 Files 两次关掉抽屉后选中态回落正确；历史面板与文件抽屉不再争层级。
+- [x] 删除 `ActiveActivity`，选中态从 `registry ∩ slots.is_visible()` 派生。
+- [x] `ActivityKind{Chat,Files,History,Terminal}`（`activity_bar.rs:20-30,251-306`）改为描述符驱动；`session_history.rs:136-251` 从浮层改为可注册面板。
+- **验收**：连点 Files 两次关掉抽屉后选中态回落正确；历史面板与文件抽屉不再争层级。✅ 单测（`active_rail` 回落）+ 集成测试（Overlay 单例槽位）。
 
 ### M5-T3 派生可见性单一系统（修 I3/D2）
-- [ ] `derive_panel_visibility` 成为唯一写 `Node.display` 的系统；删除 `layout.rs:199`、`file_panel.rs:199`、`editor/mod.rs:342`、`terminal/mod.rs:475`、`welcome.rs:178` 五处各自写手。
-- **验收**：`grep -rn "\.display = " crates/xgent_ui/src/` 命中仅限该系统与层根构造。
+- [x] `derive_panel_visibility` 成为唯一写「面板 / 区域」`Node.display` 的系统；原 7 处动态写手（`layout.rs` 分屏与手柄、`file_panel.rs` 遮罩与面板、`activity_bar.rs` 展开钮、`editor/mod.rs` 编辑器视图、`terminal/mod.rs` 终端视图）全部并入；3 处 spawn 期默认值改为构造期字面量。
+- **验收**：`grep -rn "\.display = " crates/xgent_ui/src/` 的命中仅限**派生系统 + 构造期字面量 + 内容态白名单**（白名单口径见 §10 勘误 34，由源码级测试固化）。✅
 
 ### M5-T4 单页签条所有者（修 D3）
-- [ ] 页签条由 `SlotLayout` 拥有并渲染；编辑器内部 tab 条降级为「文档列表」语义（与槽位页签不是一回事，不合并）。
-- [ ] 合并两套 `EditorBackButtonMarker`（`editor/mod.rs:220-239` 与 `:706-731`）。
-- **验收**：侧区顶部只有一条页签条、只有一个返回入口。
+- [x] 页签条由槽位布局拥有并渲染（`xgent_ui::panels::tabs`）；编辑器内部 tab 条降级为「文档列表」语义（与槽位页签不是一回事，不合并）。
+- [x] 合并两套 `EditorBackButtonMarker`（`editor/mod.rs:220-239` 与 `:706-731`）。
+- **验收**：侧区顶部只有一条页签条、只有一个返回入口。✅ 源码级断言（`EditorBackButtonMarker` 全仓唯一定义）。
 
 ### M5-T5 分割模型（修 D6）
-- [ ] `SplitTree/Split/LeafSize` + `resize.rs` 从单字段（`resize.rs:47-50,205`）改为遍历生成分割条。
-- [ ] `DRAWER_W` 从定值 320（`theme.rs:236`）改为 `Min(240, Preferred(320))`、上限 480。
-- **验收**：抽屉可拖宽；可注册纵向分割而无需改 `resize.rs`。
+- [x] `SplitTree/Split/LeafSize` + `resize.rs` 从单字段（`resize.rs:47-50,205`）改为遍历生成分割条。
+- [x] `DRAWER_W` 从定值 320（`theme.rs:236`）改为 `Min(240, Preferred(320))`、上限 480。
+- **验收**：抽屉可拖宽；可注册纵向分割而无需改 `resize.rs`。✅ 单测（手柄遍历 / 宽度钳制）+ 源码级断言（`resize.rs` 无按分割 id 的特判）。
 
 ### M5-T6 移除 `SideViewContent` 枚举
-- [ ] shim 拆除，所有既有面板（editor/preview/diff/terminal）为原生注册项。
-- [ ] `i18n`：页签标题取 `title_key`，删除 `editor/mod.rs:659-664` 的 `let _ = loc;`。
-- **验收**：`grep -rn "enum SideViewContent" crates/` 无命中；英文语料下页签为英文。
+- [x] shim 拆除，所有既有面板（editor/preview/diff/terminal）为原生注册项。
+- [x] `i18n`：页签标题取 `title_key`，删除 `editor/mod.rs:659-664` 的 `let _ = loc;`。
+- **验收**：`grep -rn "enum SideViewContent" crates/` 无命中；英文语料下页签为英文。✅ 源码级断言 + 语料断言（en-US 无 CJK）。
 
 ---
 
@@ -422,6 +428,12 @@ M1 与 M2 相互独立，可并行分头推进。
 31. **硬门槛 A 的 macOS / Linux 部分降级为不阻塞**（M4-T2，用户 2026-10-21 决定）：M4-T2 的按格定位依赖「`mono` 是真等宽」这一前提，但该前提只在 Windows 上确认过。用户决定「不要阻塞于 macOS/Linux 下的运行结果，可以优先做 Windows 的适配，后面再适配其他平台」→ macOS / Linux 的 `mono` 启动日志确认与实机验证**记为待办**，不阻塞 M4-T2 归档。后续在其他平台适配时须回头确认该项。
 32. **headless 集成测试里 UI 视口恒为 0**（M4-T2）：没有渲染管线时相机的 `computed.target_info` 为空 → `physical_viewport_size()` 返回 0 → UI 根节点尺寸 0 → 所有子节点尺寸 0（与 §10 勘误 15 同一个坑，但更隐蔽：不是「视口高 0」而是**宽高全 0**）。解法：测试 App 建好后手动给相机塞一个 `RenderTargetInfo { physical_size: UVec2::new(1280, 720), scale_factor: 1.0 }`，UI 才有非零视口，终端的列数/行数才可断言。
 33. **绝对定位的子节点按 max-content 定宽，不按「容器宽 − left 偏移」收缩**（M4-T2 验证轮）：曾担心靠右的 run 会因可用宽不足而在 run 内折行、行高超出固定 `line_h` 压到下一行。实测（`tests/terminal_cell_layout.rs::long_run_does_not_wrap_inside_the_run`，200 字符 ≈1320px 放在 ≈700px 宽的输出容器里）**不成立**——run 节点实测尺寸就是 1320×20（max-content），没有折行。run 仍显式挂 `TextLayout { linebreak: NoWrap }` 作**硬化**（不依赖这条 taffy 行为）。
+
+34. **M5-T3 的 `.display =` 验收口径与实测不符**（M5，用户 2026-10-21 裁决）：台账原文写「命中仅限该系统与层根构造」，但 `crates/xgent_ui/src/` 实测共 **15 处** `.display =` 写手，分三类——① **7 处动态面板/区域可见性**（`layout.rs` 分屏与右手柄、`file_panel.rs` 抽屉遮罩与面板、`activity_bar.rs` rail 展开钮、`editor/mod.rs` 编辑器视图、`terminal/mod.rs` 终端视图）；② **3 处 spawn 期构造默认值**（`editor/mod.rs` 186、`editor/diff_view.rs` 59、`terminal/mod.rs` 275，视图容器初始隐藏）；③ **5 处内容态可见性**（`chat_panel.rs` 1054 回到底部按钮、`activity_bar.rs` 234 陪伴激活环、`welcome.rs` 190 欢迎空态、`welcome.rs` 223 最近会话标题、`editor/mod.rs` 398 文档页签）。裁决取**收窄**方案：只归一 ① ②（面板 / 区域可见性），③ 不动——它们描述的是**内容状态**（会话是否为空、列表是否为空、滚动位置、当前文档页签、陪伴开关）而非面板 / 区域，塞进面板注册表是类别错误，且会把本期扩到内容层（越出 M5 边界、逼近 M6/M7）。口径以**显式白名单 + 源码级测试**固化（`tests/panel_registry_contract.rs::only_derive_system_and_content_whitelist_write_display`），台账 M5-T3 的验收句据此改写。
+35. **`Slot` 集合补 `Center`**（M5）：台账 M5-T1 的列表（`Slot{Rail,SideDock,BottomDock,SettingsSection,StatusSegment,Palette,Overlay}`）早于架构 §3.1 的 2026-10-19 增补，**缺 `Center`**；按架构（`Center` 与 `SideDock`/`Overlay` 同为单例互斥槽位）与提示词「本轮只把 `Center` 槽位建模好、不接消费者」实现，首个消费者留给 F-16 的 3D 空间视图。
+36. **Bevy 0.20 不允许重复添加同一插件**（M5）：`App::add_plugins` 对已添加的插件直接 panic（`plugin was already added in application`），**不是**幂等。多个业务插件共享 `PanelsPlugin` / `VisibilityPlugin` 时必须先 `app.is_plugin_added::<T>()` 判空再添加。另：`PanelsPlugin` 用 `init_resource` 兜底 `Localizer` / `Theme` / `SplitTree`（`init_resource` **不覆盖**宿主注入的真值，故 `xgent_app` 注入的真实 `Localizer` 仍然生效）。
+37. **派生视图不可当权威状态改**（M5）：`FileDrawerOpen` / `SessionHistoryState` 现在是**派生视图**（由注册表算出），headless 测试直接 `insert_resource(FileDrawerOpen(true))` 会被派生系统覆盖 → 抽屉保持隐藏、文件树（依赖抽屉宽度有值）不渲染行。测试要开抽屉必须发 `PanelActivate { id: ids::FILE_DRAWER }`。同理打开代码文件后面板可见性比旧枚举**晚 1～2 帧**（多一跳 `OpenFileRequest → PanelActivate → 注册表`），断言要从「逐帧等于 Editor」改成「一旦可见不得再消失」（`tests/file_preview.rs`）。
+38. **提交粒度与台账 §0.3「每任务一提交」的偏差**（M5）：M5-T1～T3 共享同一批类型与消息（注册表模型 → rail / 历史迁移 → 派生可见性），拆成三条独立可编译提交需重建三个中间态，收益低于成本；实际落为 **4 条实现提交**：`0aeecc4`（T1–T3）、`0141343`（T4）、`dc22458`（T5）、`7eb83e9`（T6），每条均 `cargo test -p xgent_ui` 全绿。T4/T5/T6 三条严格按任务边界。
 
 
 ## 附：文档树变更（2026-10-16，已完成）

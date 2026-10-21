@@ -30,6 +30,7 @@
 | UI v8 M1 | 分层与模态 | ✅ | `xgent_ui/src/{layout,modal,overlay,picking,kit}.rs`：六静态层根 + `ModalStack` + `require_markers` 拾取白名单 + 抽屉统一裁决 + tooltip 顶层化；`xgent_app` 装配 `UiPickingSettings` | `design/ui-v8-layout-architecture.md`、`docs/comet/specs/ui-m1-layering/spec.md`、§5.17 |
 | UI v8 M3 | 滚动契约 / 填满契约 / 省略原语 / 虚拟列表 | ✅ | `xui/src/{scroll_frame,layout,ellipsis,virtual_list}.rs`：`ScrollFrame` 唯一可滚动入口（overflow 运行时回写）+ `region_fill()` 填满契约 + `Ellipsis`/`MidEllipsis` 省略原语（测量走 bevy 排版管线）+ `VirtualList` 不等高支持；`xgent_ui`：9 处假滚动归零、分屏三页改 `region_fill`、对话输入区自适应滚动、6 处省略截断点、文件树与会话历史虚拟化 | `plans/ui-v8-tasks.md` §M3、§5.20 |
 | UI v8 M4 | 跨平台字体与终端双宽 | ✅（macOS/Linux 硬门槛 A 待确认） | `xgent_ui/src/fonts.rs`（四槽位候选栈 + 等宽内嵌兜底）+ `xgent_terminal/src/render.rs`（`display_width`/`layout_cells` 双宽单元格模型）+ `xgent_ui/src/terminal/metrics.rs`（`MonoMetrics` 启动期实测 + 双宽校验 + `CellGrid`）+ `xgent_ui/src/terminal/output.rs`（按格定位渲染 + 实测列宽 + `legacy-terminal-layout` A/B feature） | `plans/ui-v8-tasks.md` §M4、§5.21–§5.23 |
+| UI v8 M5 | 槽位注册表与派生可见性 | ✅ | `xgent_ui/src/panels.rs`（`Slot`/`PanelDescriptor`/`PanelRegistry`/`SlotLayout` + `PanelRegister`/`PanelActivate`/`PanelDeactivate` 消息）+ `panels/visibility.rs`（`derive_panel_visibility` 唯一写面板可见性）+ `panels/tabs.rs`（槽位页签条）+ `panels/split.rs`（`SplitTree`/`Split`/`LeafSize` 分割模型）；rail 选中态从注册表派生（`ActiveActivity` 删除）；会话历史改 `Slot::Overlay` 注册面板；`SideViewContent` 枚举全量拆除 | `plans/ui-v8-tasks.md` §M5、§5.24 |
 | 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.13 |
 
 ### 1.2 非功能需求
@@ -864,9 +865,35 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **绝对定位的 run 显式禁换行**：run 挂 `TextLayout { linebreak: NoWrap }`（硬化）。实测 taffy 对**绝对定位**子节点按 max-content 定宽（不按「容器宽 − left 偏移」收缩），故 run 文本本来就不会在 run 内折行；显式 NoWrap 是不依赖这条 taffy 行为的保险——万一将来节点宽度被改成百分比/固定值，文本仍不会折成两行压到下一行。
 - **`MonoMetrics` 不能塞进 `UiFonts`**：实测要等 UI 布局管线跑起来（探针要有 `ComputedNode`），而 `UiFonts` 在 Startup 就必须可用 → 会形成「等 `UiFonts` → 等布局 → 等 `UiFonts`」的循环。故它是独立 `Resource`，由测量系统在首帧之后注入；度量就绪前终端不渲染行、也不发 PTY resize。
 - **`Visibility::Hidden` 保留布局，`Display::None` 不保留**：探针节点要用 `Visibility::Hidden`（bevy 0.20 语义），用 `Display::None` 会被布局系统跳过 → 永远测不出度量。
-- **headless 装配：装了 `WindowPlugin` 也不够**：没有渲染管线时相机 `computed.target_info` 为空 → `physical_viewport_size()` = 0 → **UI 视口宽高全 0**（不只是「视口高 0」）。解法：测试 App 建好后手动给相机塞 `RenderTargetInfo { physical_size: UVec2::new(1280, 720), scale_factor: 1.0 }`。另需 `xgent_ui::editor::EditorPlugin`（否则 `SideViewContent` 资源不存在 → 终端系统 panic）。
+- **headless 装配：装了 `WindowPlugin` 也不够**：没有渲染管线时相机 `computed.target_info` 为空 → `physical_viewport_size()` = 0 → **UI 视口宽高全 0**（不只是「视口高 0」）。解法：测试 App 建好后手动给相机塞 `RenderTargetInfo { physical_size: UVec2::new(1280, 720), scale_factor: 1.0 }`。另需 `xgent_ui::editor::EditorPlugin`（否则编辑器侧的资源不存在 → 终端系统 panic）。
 - **Bevy 系统元组上限 16**：`add_systems(Update, (a…z))` 链式元组超过 16 个会编译失败。
 - **UI 侧不再二次换行**：PTY 已被告知正确的 `cols`，由 shell 自己折行；UI 再折一次就是双重折行。超长行（PTY 未折行）会被视口裁掉——与真实终端一致，但与旧路径不同。
+
+### 5.24 槽位注册表与派生可见性（v8 M5）
+
+**问题**：界面区域此前是「closed enum + 各模块自己写 `Node.display`」——`SideViewContent` 五个变体决定右侧分屏显示什么，七个系统各自写显隐，rail 选中态独立存储（连点两次 Files 关掉抽屉后选中态会残留）。新增一个面板要改 `layout.rs` / `editor/mod.rs` 的枚举与页签条代码。
+
+**模型（`xgent_ui::panels`）**：
+
+- `Slot { Rail, Center, SideDock, BottomDock, SettingsSection, StatusSegment, Palette, Overlay }`——`Center` / `SideDock` / `Overlay` 是**单例槽位**（同槽至多一个可见）。
+- `PanelDescriptor { id, slot, title_key, icon, order, closeability, min_size, default_size, default_visible }`——`title_key` 必填（i18n 单源）。
+- `PanelRegistry`（描述符 + `PanelRuntime` 运行时状态）与 `SlotLayout`（槽位开合 + 页签条实体）。
+- 注册 / 激活 / 失活一律经 ECS 消息：`PanelRegister` / `PanelActivate` / `PanelDeactivate`（AGENTS.md §5.2）。跨插件排序用 `PanelSet::{Requests, Registry, Visibility}` 三段链。
+- `derive_panel_visibility`（`panels/visibility.rs`）是**唯一**写「面板 / 区域」`Node.display` 的系统：`PanelVisibility` 组件声明「跟随某面板」还是「跟随某槽位」。
+- rail 选中态从「注册表 ∩ 槽位可见性」派生（`PanelRegistry::active_rail`，后激活者优先）——`ActiveActivity` 已删除。
+- 会话历史不再是浮层，而是 `Slot::Overlay` 的注册面板（与文件抽屉同属单例槽位 → 不再争层级）。
+- 侧区顶部页签条由槽位布局拥有（`panels/tabs.rs`），页签项来自注册表的 `Slot::SideDock` 面板，标题取 `title_key`；编辑器内部 tab 条降级为「文档列表」，两者**不合并**（布局架构 §12 风险预案）。
+- 分割模型 `SplitTree` / `Split` / `LeafSize`（`panels/split.rs`）：`resize.rs` 遍历分割树生成分割条，**注册一个新的纵向分割不需要改 `resize.rs`**；抽屉宽度从定值 320 改为 `Min(240, Preferred(320))`、上限 480。
+
+**坑**：
+
+- **Bevy 0.20 的 `App::add_plugins` 不幂等**——重复添加同一插件会 panic（`plugin was already added in application`），不是「静默跳过」。多个业务插件共享 `PanelsPlugin` / `VisibilityPlugin` 时必须先 `app.is_plugin_added::<T>()` 判空。
+- **`init_resource` 不覆盖已有资源**：`PanelsPlugin` 用 `init_resource` 兜底 `Localizer` / `Theme` / `SplitTree`，宿主（`xgent_app`）注入的真实 `Localizer` 仍然生效。
+- **派生视图不能当权威状态改**：`FileDrawerOpen` / `SessionHistoryState` 现在由注册表算出，测试直接 `insert_resource(FileDrawerOpen(true))` 会被派生系统覆盖 → 抽屉保持隐藏、依赖抽屉宽度的文件树不渲染行。要开抽屉必须发 `PanelActivate { id: ids::FILE_DRAWER }`。
+- **消息链多一跳，可见性晚 1～2 帧**：打开代码文件经「点击 → `OpenFileRequest` → `PanelActivate` → 注册表」三跳，断言要从「逐帧等于 Editor」改成「一旦可见不得再消失」。
+- **`.display =` 的口径分三类**（2026-10-21 用户裁决）：动态面板/区域可见性（7 处）归一进派生系统；spawn 期构造默认值（3 处）改构造期字面量；**内容态可见性（5 处：欢迎空态、最近会话标题、回到底部按钮、文档页签、陪伴激活环）不动**——它们描述内容状态而非面板，塞进注册表是类别错误。白名单由 `tests/panel_registry_contract.rs` 的源码级测试固化。
+- **`EditorBackButtonMarker` 原本有两套**（编辑器顶栏 ✕ 与页签条 ✕）——M5 合一，侧区顶部只保留一个返回入口。
+- **`Slot::Center` 只建模不接消费者**：首个消费者留给 F-16 的 3D 空间视图。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
