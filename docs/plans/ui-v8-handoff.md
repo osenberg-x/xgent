@@ -7,7 +7,7 @@
 
 ## 0. 一句话现状
 
-UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）已交付**；`cargo check --workspace` 绿，`xgent_ui` lib 76 项 + `xui` 103 项测试全绿。下一期按台账顺序是 **M4 跨平台字体与终端双宽**（⚠ 硬门槛 A：三平台 `mono` 解析不到真实等宽就停止铺开）。
+UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）、M4-T1（字体候选栈与等宽内嵌兜底）、M4-T3/T4（代码类文本消费 `mono` + 中文排版约束）已交付**；`cargo check --workspace` 绿，`xgent_ui` lib 76 项 + `xui` 103 项测试全绿。**M4 只剩 M4-T2（终端双宽单元格）**，其前置的硬门槛 A（macOS/Linux 的 `mono` 启动日志确认）尚未闭环 → 闭环前不要开工。
 
 ---
 
@@ -80,7 +80,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 - `mono` 槽位已按候选栈装配（`xgent_ui::fonts::font_specs()`），**不再有** `cfg!(target_os)` 特权路径，也不再有 `Handle::default()` 兜底。
 - `MonoMetrics`、双宽单元格、`display_width()` 全部**不存在**（grep = 0）→ M4-T2 未开工。
 - 终端输出仍按 shaper 连续排版（`terminal/output.rs` 的 `font × 0.6` 估算仍在）。
-- `type_scale` 仍无 `CODE` 档、`SMALL` 仍是 12.5、`line_height` 无 `CJK` → M4-T3/T4 未开工。
+- `type_scale` 已有 `CODE` 档、`SMALL` 已 12.0、`line_height::CJK` 已 1.7（M4-T3/T4 已落地）；代码类文本已走 `mono` 槽位。
 
 ### 4.2 建议拆成 3 个 change（按风险从低到高）
 
