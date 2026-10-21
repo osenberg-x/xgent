@@ -285,3 +285,35 @@ fn legacy_column_width_estimate_is_removed() {
         "output.rs 不应再用界面正文字号（theme.font_size）估算终端尺寸"
     );
 }
+
+/// run 不得在 **run 内**折行（D-6：UI 侧不二次换行，超出视口裁掉）。
+///
+/// 绝对定位节点若被约束宽度，靠右的 run 会把文本折成两行、行高超出固定的
+/// `line_h` 压到下一行。本用例把这条不变量钉住（当前实现靠 taffy 对绝对定位
+/// 子节点的 max-content 定宽 + run 上的 `NoWrap` 双重保证）。
+#[test]
+fn long_run_does_not_wrap_inside_the_run() {
+    let mut app = terminal_app();
+    settle(&mut app);
+    let metrics = *app.world().resource::<MonoMetrics>();
+
+    // 切到终端视图（输出容器需有真实尺寸才有意义）
+    *app.world_mut().resource_mut::<SideViewContent>() = SideViewContent::Terminal;
+    // 「中」占 2 格，其后 200 个 ASCII 字符（≈1320px）远超输出容器内容盒宽
+    // （≈700px）——第二个 run 的 left 非零，正是容易在 run 内折行的位置。
+    let long = "x".repeat(200);
+    feed_output(&mut app, format!("中{long}\n").as_bytes());
+    for _ in 0..4 {
+        app.update();
+    }
+
+    let world = app.world_mut();
+    let mut q = world.query::<(&OutputCellRun, &ComputedNode)>();
+    let heights: Vec<f32> = q.iter(world).map(|(_, node)| node.size().y).collect();
+    assert!(heights.len() >= 2, "应渲染出「中」与长串两个 run");
+    assert!(
+        heights.iter().all(|h| *h <= metrics.line_height + 1.0),
+        "run 高度应保持单行（≤ {:.1}px），实得 {heights:?} —— 文本在 run 内折行了",
+        metrics.line_height
+    );
+}

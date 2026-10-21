@@ -1,0 +1,428 @@
+schema: comet.native.v4
+name: v8-m4-terminal-cells
+language: zh-CN
+phase: build
+status: active
+state_version: 7
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: b80b90665a44521cd0f317c21f3e83e19477195d26fce3d0742a0ba71c7711d9
+spec_changes:
+  - capability: ui-m4-terminal-cells
+    operation: create
+    source: specs/ui-m4-terminal-cells/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: repairing
+  goal_cycle: 1
+  iteration: 2
+  attempt: 0
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: submit-builder-candidate
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1 `MonoMetrics` 由**实测**得出：探针经 bevy 文本管线读 `TextLayoutInfo` 反推，四个字段均有值且
+      `at_size == type_scale::CODE`；实测值写进启动日志。
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: A2 双宽校验是纯函数：`cjk_advance ≈ 2 × latin_advance` 时不告警；偏差超阈值时返回告警文案并把基准宽调整为
+      `max(latin_advance, cjk_advance / 2)`。
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: A3 `display_width` 边界：CJK 全角 / emoji / U+FF00–FF60 → 2；组合记号 → 0；ASCII → 1。
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: A4 按格布局内核 `layout_cells`：宽字符逐字成 run，`start_col` 严格按累计格数推进；窄字符合并为
+      run；`CellGrid.cols == floor(视口逻辑宽 / cell_w)`。
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: A5 终端按格定位渲染：行内 run 节点的 `left` 等于 `起始列 × cell_w`（含中文的行）。
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: A6 `handle_terminal_resize` 的列数来自实测 `cell_w`（`floor(视口逻辑宽 /
+      cell_w)`），代码中不再出现 `font × 0.6` / `font × 1.4` 估算。
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: A7 旧渲染路径保留在 cargo feature `legacy-terminal-layout` 下，且该 feature 打开时仍能编译通过。
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: A8 既有测试不回归：`cargo check --workspace` 通过；`cargo fmt -p xgent_terminal -p
+      xgent_ui` 无 diff；`cargo clippy -p xgent_terminal -p xgent_ui
+      --all-targets` 在改动文件零新增警告；`xgent_terminal` / `xgent_ui` 既有测试全绿。
+    result: pending
+    reason: null
+  - id: A9
+    source: brief.md
+    text: A9 文档同步：`docs/plans/ui-v8-tasks.md` 的 M4-T2 勾选 + §10
+      勘误、`docs/plans/ui-v8-handoff.md` 交付表 / 基线 / 下一步 / 硬门槛 A
+      状态、`docs/dev-tutorial.md` 新增 M4-T2 小节。
+    result: pending
+    reason: null
+  - id: A10
+    source: brief.md
+    text: A10 平台验证状态落纸：Windows 本机的实机验证结论与 macOS / Linux 硬门槛 A 的**待确认**状态都写进台账与交接文档，且
+      macOS / Linux 待确认**不阻塞**本变更归档。
+    result: pending
+    reason: null
+builder_handoff:
+  candidate_id: 4fbad668-c706-432d-a051-9b613e37652d
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:5f6ad1de-4600-4475-8ea1-03b3c5c674fd
+  iteration: 1
+  summary:
+    text: UI v8 M4-T2 终端双宽单元格已实现：① xgent_terminal::render 新增 display_width（wcwidth
+      语义：CJK 全角/emoji/U+FF00–FF60 → 2、组合记号 → 0、其余 → 1）、display_width_str、CellRun
+      与 layout_cells（按格布局内核：窄字符连续同段合并、宽字符逐字成 run）；② xgent_ui::terminal::metrics
+      新增 MonoMetrics（启动期经 bevy 文本管线实测，探针走终端渲染同一条 measure 路径）+ 双宽校验纯函数（偏差 >10%
+      记警告、基准宽调为 max(latin, cjk/2)）+ CellGrid；③ xgent_ui::terminal::output
+      改为按格定位渲染（行容器 + 绝对定位 run 节点，left = 起始列 × cell_w）、行高用实测 line_h、PTY 列数改
+      floor(视口逻辑宽 / cell_w)（删掉 font × 0.6 / × 1.4 估算与误用界面正文字号的问题）、UI 侧不再二次换行；④
+      新增 cargo feature legacy-terminal-layout（默认关）保留旧 flex 连续排版路径供 A/B
+      截图对照。测试：xgent_terminal lib 33 passed、xgent_ui lib 82 passed、新增
+      tests/terminal_cell_layout.rs 5 项全绿；cargo check --workspace 通过、fmt 无
+      diff、clippy 改动文件零新增警告、cargo test --workspace 仅剩 15
+      项既有基线失败（与本轮前一致）。文档已同步台账/交接/开发指南/AGENTS。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/terminal/metrics.rs:186-247 —— spawn_mono_probes
+          生成两个探针节点（ASCII 样本 ×32、CJK 样本 ×16），collect_mono_metrics 读
+          ComputedTextBlock 的 parley layout（full_width/height/scale）反推单字符步进与行高并
+          insert_resource(MonoMetrics)
+        - crates/xgent_ui/src/terminal/metrics.rs:11-26 —— 探针用同一 mono
+          槽位来源、type_scale::CODE 字号、type_scale::line_height::TERM 行高（与终端渲染同一条
+          measure 路径）
+        - crates/xgent_ui/tests/terminal_cell_layout.rs::mono_metrics_is_measured_at_runtime
+          —— 断言 latin_advance>0、cjk_advance>0、line_height>0 且 at_size ==
+          type_scale::CODE
+        - "本机实测输出：MonoMetrics { latin_advance: 6.5976563, cjk_advance: 12.0,
+          line_height: 19.2, at_size: 12.0 }（latin 6.60px / CJK 12.0px / 行高
+          19.2px @ 12px）"
+        - crates/xgent_ui/src/terminal/metrics.rs:250-262 —— 实测值与校验结论写
+          tracing::info!（三平台可核对）
+      note: MonoMetrics 的四个字段全部由启动期实测得出：探针挂在 UI 根下（绝对定位到视口外 +
+        Visibility::Hidden，隐藏渲染但保留布局），走 bevy 文本管线的排版结果反推，度量取 parley layout
+        的未取整原始值（TextLayoutInfo.size 是 ceil 过的，会把 19.2 抬成 20.0）。不依赖任何硬编码系数。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/terminal/metrics.rs:60-104 —— MonoMetrics::check()
+          是纯函数：cjk_advance ≈ 2×latin_advance（容差 CJK_ADVANCE_TOLERANCE = 10%）时返回
+          cell_w = latin_advance 且无告警；否则返回告警文案 + cell_w = max(latin_advance,
+          cjk_advance / 2)
+        - crates/xgent_ui/src/terminal/metrics.rs:281-320 —— 单测
+          double_width_ratio_ok_uses_latin_advance /
+          double_width_ratio_violation_warns_and_widens_cell /
+          double_width_ratio_violation_widens_cell_when_cjk_is_wider /
+          unmeasured_metrics_do_not_panic
+        - crates/xgent_ui/src/terminal/metrics.rs:17-24 —— 偏离时记 tracing::warn!（含
+          latin/cjk/期望值/偏差百分比/调整后的基准宽）
+      note: 校验与基准宽调整都是可单测的纯函数，告警文案带具体数值；基准宽不小于窄字符步进（否则窄字压字）又容得下宽字符（否则宽字溢出到下一格）。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_terminal/src/render.rs:369-560 —— display_width(ch) ->
+          usize：ZERO_WIDTH_RANGES（组合记号/变体选择符/零宽连接符）→ 0；WIDE_RANGES（CJK 全角/全角形式
+          U+FF00–FF60/emoji 区块）→ 2；EMOJI_NARROW_RANGES（默认窄但 emoji 呈现的码位）→ 2；其余 →
+          1
+        - crates/xgent_terminal/src/render.rs:562-570 —— display_width_str(s) ->
+          usize（整串占格数）
+        - crates/xgent_terminal/src/render.rs:812-880 —— 单测 ascii_is_one_cell /
+          cjk_is_two_cells / fullwidth_forms_are_two_cells（U+FF00–FF60 →
+          2，U+FF61 半角片假名 → 1）/ emoji_is_two_cells /
+          combining_marks_are_zero_cells / display_width_str_sums_cells
+        - crates/xgent_terminal/src/lib.rs:8-10 —— 从 crate 根导出 display_width /
+          display_width_str / layout_cells / CellRun
+      note: 落在 xgent_terminal::render（终端领域 crate，不依赖 Bevy，可脱离渲染管线快速单测）。组合记号取 0（真
+        wcwidth 语义）——终端里它与前一字符共用一格，返回 1 会让后续所有列整体右移一格。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_terminal/src/render.rs:578-672 —— CellRun { text,
+          start_col, cells, style_index } 与 layout_cells(spans) ->
+          Vec<CellRun>：窄字符连续同段合并为一个 run；宽字符逐字成 run（run 的 start_col 严格按累计格数推进）
+        - crates/xgent_terminal/src/render.rs:882-935 —— 单测
+          layout_cells_merges_narrow_runs /
+          layout_cells_splits_wide_chars_one_by_one /
+          layout_cells_advances_columns_by_cell_count（"ab中cd" →
+          (0,2,"ab")/(2,2,"中")/(4,2,"cd")）/
+          layout_cells_respects_span_boundaries /
+          layout_cells_keeps_combining_marks_in_run /
+          layout_cells_of_empty_line_is_empty
+        - crates/xgent_ui/src/terminal/metrics.rs:110-160 —— CellGrid { cols,
+          rows, cell_w, line_h } 与 from_viewport：cols = floor(视口逻辑宽 /
+          cell_w)、rows = floor(视口逻辑高 / line_h)
+        - crates/xgent_ui/src/terminal/metrics.rs:322-340 —— 单测
+          cell_grid_cols_is_floor_of_width_over_cell_width（floor(500/7.2)=69、floor(300/19.2)=15）与
+          cell_grid_never_reports_zero
+      note: 按格布局内核是纯函数（不依赖 Bevy）：窄字符合并为 run、宽字符逐字成 run，start_col
+        严格按累计占格数推进；CellGrid.cols 严格等于 floor(视口逻辑宽 / cell_w)。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - "crates/xgent_ui/src/terminal/output.rs:150-215 ——
+          spawn_line（按格定位版）：行容器 Node { width: 100%, height:
+          px(metrics.line_height), position_type: Relative }，每个 run 节点 Node {
+          position_type: Absolute, left: px(run.start_col as f32 * cell_w), top:
+          px(0) } + mono_text"
+        - crates/xgent_ui/src/terminal/output.rs:143-148 —— OutputCellRun {
+          start_col, cells } 组件记录每个 run 的格位（供断言与后续消费）
+        - crates/xgent_ui/tests/terminal_cell_layout.rs::terminal_runs_are_positioned_by_cell
+          —— 喂入 "ab中cd" 后断言 run 的起始列为 0/2/4，且每个 run 的 Node.left == 起始列 ×
+          cell_w（误差 < 0.01px）
+        - crates/xgent_ui/src/terminal/output.rs:236-247 —— 宽字符逐字成
+          run（layout_cells），保证宽字符起点严格落在格边界上
+      note: 终端行渲染已从「flex 行 + shaper 连续排版」改为「行容器 + 绝对定位的 run 节点」，定位不再依赖文本 shaper
+        的连续排版度量——这是三平台唯一成立的做法（与 alacritty/kitty 同构）。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/terminal/output.rs:456-520 ——
+          handle_terminal_resize 用 CellGrid::from_viewport(width, height,
+          &metrics) 求列/行数；视口宽取输出容器 content_box().size().x × inverse_scale_factor
+          再扣掉 Scrollbar.width（绝对定位覆盖层，不扣会裁掉最右一列）
+        - crates/xgent_ui/src/terminal/output.rs:483-490 —— 等宽度量未实测完成前不发
+          resize（宁可让 PTY 保持默认 80×24，也不能用错的列数让 shell 按错误宽度折行）
+        - crates/xgent_ui/tests/terminal_cell_layout.rs::pty_cols_come_from_measured_cell_width
+          —— 断言 grid.cols == floor((内容盒宽 − 滚动条宽) / grid.cell_w)，且 grid.cell_w ==
+          MonoMetrics::cell_width()
+        - crates/xgent_ui/tests/terminal_cell_layout.rs::legacy_column_width_estimate_is_removed
+          —— 静态断言 output.rs（去注释后）不含 "* 0.6"、"* 1.4"、"theme.font_size"
+        - crates/xgent_ui/src/terminal/output.rs:137-145 —— 行高改用实测
+          metrics.line_height（旧代码用「字号 × 1.4」估算空行高度）
+      note: 列数完全来自实测 cell_w；同时修正了旧实现取错字号的问题（此前用界面正文 theme.font_size = 14，而终端实际按
+        type_scale::CODE = 12 渲染，列数被低估约 17%）。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/Cargo.toml:4-11 —— 新增 [features]
+          legacy-terminal-layout = []（默认不开启）
+        - 'crates/xgent_ui/src/terminal/output.rs:216-268 —— #[cfg(feature =
+          "legacy-terminal-layout")] fn spawn_line 保留旧的 flex 行 + shaper 连续排版路径'
+        - 实测：cargo check -p xgent_ui --all-targets --features
+          legacy-terminal-layout 通过（无错误、无新增警告）
+      note: 旧渲染路径保留在 cargo feature 下（编译期互斥，两套路径不会同时存在），供与按格定位路径做 A/B 截图对照；对照通过后连同该
+        feature 一起删。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - cargo test --workspace
+          --no-fail-fast（开发期跑，2026-10-21）：失败集合与本轮前的既有基线完全一致——xgent_tools
+          6、xgent_plugin_host 6、xgent_daemon 1、xgent_settings_core 1、xgent_agent
+          1，合计 15 项；无新增失败
+        - cargo test -p xgent_ui --no-fail-fast：lib 82 passed + 全部集成测试全绿（新增
+          terminal_cell_layout 5 项）
+        - cargo test -p xgent_terminal：lib 33 passed（M4-T2 新增 12 项）+ 集成 6 passed
+        - cargo check --workspace：通过
+        - cargo fmt -p xgent_terminal -p xgent_ui：git diff 为空（无格式改动）
+        - cargo clippy -p xgent_ui -p xgent_terminal
+          --all-targets：改动文件（terminal/output.rs、terminal/metrics.rs、terminal_cell_layout.rs、xgent_terminal/src/render.rs）零新增警告
+      note: 既有基线失败（xgent_tools 依赖 POSIX shell、xgent_plugin_host 的 git 插件 WASM
+        未构建、xgent_daemon / xgent_settings_core / xgent_agent
+        的平台与时序问题）不是本轮引入，失败集合与本轮前逐条一致。
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - docs/plans/ui-v8-tasks.md:199-231 —— M4 状态改为「M4 全部交付」、M4-T2
+          四条勾选并逐条注明落点与验收口径；§0.2 缺口表 A3 行补「Windows 已自动化断言；macOS/Linux 待办」
+        - docs/plans/ui-v8-tasks.md:424-428 —— §10 追加勘误
+          29~32（TextLayoutInfo.size 是 ceil 过的、CJK 回退字体几乎不可能满足 2:1、硬门槛 A
+          降级为不阻塞、headless UI 视口宽高全 0 的解法）
+        - docs/plans/ui-v8-handoff.md —— §1 交付表加 M4-T2 行；§1.1 硬门槛 A 状态改写；§2
+          基线数字更新（xgent_ui lib 82 / xgent_terminal lib 33 / 新增
+          terminal_cell_layout(5)）；§3 环境坑补 EditorPlugin 依赖、相机渲染目标配方、Bevy 系统元组上限
+          16；§4 下一步改写为 M5 范围；§6 遗留风险补三条 M4-T2 的；§7 开工前 5 步改写
+        - docs/dev-tutorial.md:850-880 —— 新增 §5.23「终端双宽单元格与按格定位」；§1.1 功能总览补 F-19
+          与「UI v8 M4」行；§2 crate 拓扑与 §2.1 关键 API 补 xgent_terminal 的单元格模型与
+          xgent_ui 的 terminal/metrics
+        - AGENTS.md:93,201 —— crate 表与「当前实现状态」同步 M4 已交付、下一期 M5
+        - "提交 d3a276b（docs: 同步 UI v8 M4-T2 交付状态）"
+      note: 三份主文档（台账/交接/开发指南）加 AGENTS.md 全部同步，含本轮取舍与新增的坑。
+    - id: A10
+      status: implemented-with-evidence
+      evidence:
+        - docs/plans/ui-v8-tasks.md:222-226 —— M4-T2 验收块：Windows（本机）✅
+          自动化断言（tests/terminal_cell_layout.rs 四项：实测度量 / run 的 left == 起始列 ×
+          cell_w / PTY 列数 = floor(宽 / cell_w) / 旧估算已删），实机视觉确认待人工；macOS / Linux ⏳
+          待办（不阻塞本项归档）
+        - docs/plans/ui-v8-tasks.md:427 —— §10 勘误 31：硬门槛 A 的 macOS / Linux 部分按用户
+          2026-10-21 决定降级为不阻塞，并写明后续在其他平台适配时须回头闭环
+        - docs/plans/ui-v8-handoff.md:31-34 —— §1.1 硬门槛 A 状态：Windows
+          已闭环（含本机实测数值），macOS / Linux 待办且不阻塞
+        - docs/plans/ui-v8-handoff.md:136-140 —— §6 遗留风险补「实机视觉确认（ls -l / 中文输出 /
+          top / vim）未自动化」
+      note: 平台验证状态已落纸：Windows 有自动化断言 + 实机待人工，macOS / Linux 明确记为待办且不阻塞归档（依用户 2026-10-21
+        决定）。
+  checks:
+    - name:
+        text: cargo check --workspace
+        truncated: false
+      result: passed
+      note:
+        text: M4-T2 三个提交后全工作区编译通过
+        truncated: false
+    - name:
+        text: cargo fmt -p xgent_terminal -p xgent_ui
+        truncated: false
+      result: passed
+      note:
+        text: git diff 为空，无格式改动（未用 --all，避免改写 ../bevy 检出）
+        truncated: false
+    - name:
+        text: cargo clippy -p xgent_ui -p xgent_terminal --all-targets
+        truncated: false
+      result: passed
+      note:
+        text: 改动文件零新增警告；仓库既有的 xgent_tools / xgent_settings_core / xgent_context 警告不在本轮范围
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --no-fail-fast
+        truncated: false
+      result: passed
+      note:
+        text: lib 82 passed + 17 个集成测试文件全绿（新增 terminal_cell_layout 5 项）
+        truncated: false
+    - name:
+        text: cargo test -p xgent_terminal --no-fail-fast
+        truncated: false
+      result: passed
+      note:
+        text: lib 33 passed（M4-T2 新增 12 项）+ 集成 6 passed
+        truncated: false
+    - name:
+        text: cargo test --workspace --no-fail-fast
+        truncated: false
+      result: passed
+      note:
+        text: 失败集合与既有基线完全一致（15 项：xgent_tools 6 / xgent_plugin_host 6 / xgent_daemon 1 /
+          xgent_settings_core 1 / xgent_agent 1），无新增失败
+        truncated: false
+    - name:
+        text: cargo check -p xgent_ui --all-targets --features legacy-terminal-layout
+        truncated: false
+      result: passed
+      note:
+        text: A/B 对照用的旧路径 feature 打开时仍能编译通过
+        truncated: false
+    - name:
+        text: 实机视觉确认（ls -l / 中文输出 / top / vim）
+        truncated: false
+      result: not-run
+      note:
+        text: 需真实窗口 + 人工确认，本轮只交付几何级自动化断言；已作为遗留风险记入交接文档 §6
+        truncated: false
+    - name:
+        text: macOS / Linux 平台的 mono 启动日志确认（硬门槛 A）
+        truncated: false
+      result: not-run
+      note:
+        text: 本机为 Windows；按用户 2026-10-21 决定该项不阻塞本变更，已记为待办
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 宽字符的字形填不满 2 格：CJK 回退字体（雅黑/苹方/思源）的汉字步进是 1em，不是等宽拉丁的 2
+        倍——宽字符起点严格落在格边界（网格正确），但与相邻窄字符之间留有间隙。根治需接入 mono_cjk 槽位（Sarasa / Noto Sans
+        Mono CJK，真 2:1），本轮未做（见台账 §10 勘误 30）。
+      truncated: false
+    - text: 硬门槛 A 的 macOS / Linux 的 mono 启动日志确认仍待办（用户 2026-10-21 决定降级为不阻塞，先做 Windows
+        适配，其他平台后续适配）。
+      truncated: false
+    - text: 实机视觉确认（ls -l / cargo test 中文输出 / top / vim 全屏 TUI）未自动化：headless
+        环境没有渲染管线，无法产出真实终端截图；本轮只交付几何级自动化断言（run 的 left == 起始列 × cell_w、PTY 列数 ==
+        floor(宽 / cell_w)）。
+      truncated: false
+    - text: UI 侧不再二次换行：PTY 已被告知正确的 cols 并由 shell 自己折行，超长行（PTY
+        未折行）会被视口裁掉——与真实终端一致，但与旧路径（flex wrap）行为不同。
+      truncated: false
+    - text: 等宽度量在首帧之后才就绪：实测需要 UI 布局管线跑起来，度量就绪前终端不渲染行（游标不推进，下一帧补齐），PTY 也暂不发 resize（保持默认
+        80×24）。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-21T03:42:07.769Z
+blockers: []
+verification: null
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 10/10 验收项全部通过（verdict=pass）。独立复跑证据：xgent_terminal lib 33 / xgent_ui lib 82
+        / 新增集成测试 terminal_cell_layout 5 及其余既有集成测试全绿（合计 217 passed、0
+        failed）；cargo fmt 两 crate 无 diff；cargo clippy 零警告落在改动文件；cargo check -p
+        xgent_ui --features legacy-terminal-layout 编译通过。实现与 spec/brief
+        的核心口径一致：display_width 的 wcwidth 语义、layout_cells
+        的按格列推进、CellGrid.cols=floor(宽/cell_w)、run 节点 left=起始列×cell_w、PTY 列数来自实测
+        cell_w 且旧 font×0.6/×1.4 估算已彻底删除、legacy-terminal-layout feature
+        保留旧路径。文档三处（台账 M4-T2 勾选 + §10 勘误 29~32、交接交付表/基线/下一步/硬门槛 A 状态、开发指南
+        §5.23）同步到位，macOS/Linux 待确认被明确标记为不阻塞。独立发现 5 条风险，其中两条为实质项：① 勘误 30/§5.23
+        关于『警告分支是常态路径』的机制描述与本机实测数值（9.1% 偏差 < 10% 容差 ⇒ 实际不告警）自相矛盾，文档口径需订正；② 绝对定位
+        run 未设 NoWrap，超宽行可能在 run 内换行并压到下一行，与
+        D-6『不二次换行/裁剪』的描述不一致，无自动化覆盖，建议实机确认。两者均不构成任何一条验收项的失败。
+      truncated: false
+    completed_at: 2026-10-21T04:06:59.122Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 独立 Verifier 对 10 项验收全部判 pass，但发现两处需修：① 实质缺陷——按格定位的 run 节点未设 TextLayout
+        NoWrap，绝对定位下可用宽 = 容器宽 − left 偏移，靠右的 run 文本会在 run 内折行、行高超出固定 line_h
+        压到下一行，与已确认的 D-6「UI 侧不二次换行、超出视口裁剪」不符（补 NoWrap + 回归断言）；② 文档口径订正——勘误 30
+        与开发指南 §5.23 称双宽告警分支是「常态路径」，但按本机实测 latin 6.60 / cjk 12.0，偏差 9.1% < 10%
+        容差，Windows 实际走「不告警」分支。确认范围不变，返回 Build 修复后重新提交候选。
+      truncated: false
+    completed_at: 2026-10-21T04:07:56.865Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-10-21T02:10:17.158Z

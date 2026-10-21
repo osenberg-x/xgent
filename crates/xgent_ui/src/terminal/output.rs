@@ -1,4 +1,4 @@
-//! 终端输出历史渲染：PTY 字节流 → vte 解析 → `RenderHistory` → UI。
+﻿//! 终端输出历史渲染：PTY 字节流 → vte 解析 → `RenderHistory` → UI。
 //!
 //! 详见 `docs/design/terminal-design.md` §3.4、§6。
 //!
@@ -167,6 +167,16 @@ fn spawn_line(
                     map_color(style.fg, theme),
                     type_scale::line_height::TERM,
                 ),
+                // run 显式禁换行（D-6：UI 侧不二次换行，超出视口的格子裁掉）。
+                //
+                // 实测：taffy 对**绝对定位**子节点按 max-content 定宽（不按「容器宽
+                // − left 偏移」收缩），故 run 文本本来就不会在 run 内折行；显式
+                // NoWrap 是**硬化**——不依赖上面这条 taffy 行为，万一将来节点宽度
+                // 被改成百分比/固定值，文本仍不会在 run 内折行压到下一行。
+                TextLayout {
+                    linebreak: LineBreak::NoWrap,
+                    ..default()
+                },
                 OutputSpanMarker,
                 OutputCellRun {
                     start_col: run.start_col,

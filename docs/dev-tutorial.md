@@ -860,7 +860,8 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 **坑**：
 
 - **`TextLayoutInfo.size` 是 `ceil` 过的**（12px × 1.6 行高会变成 20.0 而不是 19.2；32 个 6.6px 字符的 211.2 会变成 212）——误差会**直接**进到单元格基准宽。正确取法是 `ComputedTextBlock::buffer()` 的 parley layout 原始值（`full_width()` / `height()`），再除以 `layout.scale()`。
-- **CJK 回退字体几乎不可能满足 2:1**：雅黑 / 苹方 / 思源的汉字步进是 1em，而等宽拉丁是 0.6em → `cjk_advance ≈ 2 × latin_advance` 在三平台**都**不成立（本机实测 latin 6.60px / cjk 12.0px）。因此 C-FONT-4 的「不满足记警告」是**常态路径**；宽字符按 2 格定位（起点严格落在格边界），代价是与相邻窄字符之间留有间隙。**根治要接 `mono_cjk` 槽位**（Sarasa / Noto Sans Mono CJK，真 2:1）——本轮未做。
+- **CJK 回退字体几乎不可能满足 2:1**：雅黑 / 苹方 / 思源的汉字步进是 1em，而等宽拉丁是 0.6em → `cjk_advance ≈ 2 × latin_advance` 在三平台**都**不成立（本机实测 latin 6.60px / cjk 12.0px，2×latin = 13.2px，偏差 9%）。C-FONT-4 的校验结果因此**平台相关**：本机（9% < 10% 容差）走「不告警、cell_w = latin_advance」分支，偏差更大的平台才走「告警 + cell_w = max(latin, cjk/2)」分支。两种分支下网格都正确（宽字符起点严格落在格边界），差别只在宽字符字形填不填满那 2 格。**根治要接 `mono_cjk` 槽位**（Sarasa / Noto Sans Mono CJK，真 2:1）——本轮未做。
+- **绝对定位的 run 显式禁换行**：run 挂 `TextLayout { linebreak: NoWrap }`（硬化）。实测 taffy 对**绝对定位**子节点按 max-content 定宽（不按「容器宽 − left 偏移」收缩），故 run 文本本来就不会在 run 内折行；显式 NoWrap 是不依赖这条 taffy 行为的保险——万一将来节点宽度被改成百分比/固定值，文本仍不会折成两行压到下一行。
 - **`MonoMetrics` 不能塞进 `UiFonts`**：实测要等 UI 布局管线跑起来（探针要有 `ComputedNode`），而 `UiFonts` 在 Startup 就必须可用 → 会形成「等 `UiFonts` → 等布局 → 等 `UiFonts`」的循环。故它是独立 `Resource`，由测量系统在首帧之后注入；度量就绪前终端不渲染行、也不发 PTY resize。
 - **`Visibility::Hidden` 保留布局，`Display::None` 不保留**：探针节点要用 `Visibility::Hidden`（bevy 0.20 语义），用 `Display::None` 会被布局系统跳过 → 永远测不出度量。
 - **headless 装配：装了 `WindowPlugin` 也不够**：没有渲染管线时相机 `computed.target_info` 为空 → `physical_viewport_size()` = 0 → **UI 视口宽高全 0**（不只是「视口高 0」）。解法：测试 App 建好后手动给相机塞 `RenderTargetInfo { physical_size: UVec2::new(1280, 720), scale_factor: 1.0 }`。另需 `xgent_ui::editor::EditorPlugin`（否则 `SideViewContent` 资源不存在 → 终端系统 panic）。
