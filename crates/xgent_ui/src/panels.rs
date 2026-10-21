@@ -581,12 +581,21 @@ pub fn handle_panel_register(
 }
 
 /// 处理激活消息。
+///
+/// 激活 `Slot::SideDock` 里的面板时**展开右侧分屏**——M5 之前这段逻辑在
+/// `apply_editor_view_visibility` / `apply_terminal_view_visibility` 里（各写一遍），
+/// 现在统一在这里：打开文件、点 rail 终端钮、点页签都会把分屏带出来。
 pub fn handle_panel_activate(
     mut reader: MessageReader<PanelActivate>,
     mut registry: ResMut<PanelRegistry>,
+    mut layout: ResMut<SlotLayout>,
 ) {
     for msg in reader.read() {
+        let slot = registry.get(msg.id).map(|e| e.desc.slot);
         registry.activate(msg.id);
+        if slot == Some(Slot::SideDock) {
+            layout.set_open(Slot::SideDock, true);
+        }
     }
 }
 

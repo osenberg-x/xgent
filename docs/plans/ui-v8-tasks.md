@@ -244,7 +244,7 @@ M1 与 M2 相互独立，可并行分头推进。
 > 状态：**已交付**（Comet change `v8-m5-panel-registry`；实现提交 `0aeecc4` T1–T3、
 > `0141343` T4、`dc22458` T5、`7eb83e9` T6）。落点：`xgent_ui::panels`（模型 / 派生可见性 /
 > 槽位页签 / 分割树）、`activity_bar.rs`（rail 描述符驱动）、`session_history.rs`（注册面板）、
-> `resize.rs`（遍历分割树）、`tests/panel_registry_contract.rs`（18 项契约测试）。
+> `resize.rs`（遍历分割树）、`tests/panel_registry_contract.rs`（21 项契约测试）。
 > M5-T3 的验收口径见 §10 勘误 34（内容态可见性不进派生系统）。
 
 ### M5-T1 `PanelRegistry` 取代 closed 枚举（⚠）

@@ -290,7 +290,7 @@ fn handle_resize_drag(
         .map(|(m, _, _)| m.dir)
         .unwrap_or(1.0);
     let next = current.preferred() + delta * dir;
-    let clamped = clamp_leaf(leaf, next, main_w);
+    let clamped = clamp_leaf(leaf, axis, next, main_w);
     if clamped != current.preferred() {
         tree.set_leaf_size(leaf, current.with_current(clamped));
     }
@@ -301,16 +301,26 @@ fn handle_resize_drag(
 /// `available`：主区可用宽度。
 /// 下限取 `LeafSize::Min` 的下限；上限：抽屉有定值上限（480），其余取
 /// `available − CHAT_MIN`（不足时取下限）。
-pub fn clamp_leaf(id: &str, value: f32, available: f32) -> f32 {
+pub fn clamp_leaf(id: &str, axis: Axis, value: f32, available: f32) -> f32 {
     let min = match id {
         leaf_ids::DRAWER => size::DRAWER_W_MIN,
         _ => size::CONTEXT_W_MIN,
     };
-    let max = match id {
-        leaf_ids::DRAWER => size::DRAWER_W_MAX,
-        _ => (available - CHAT_MIN).max(min),
+    let max = match (id, axis) {
+        (leaf_ids::DRAWER, Axis::Horizontal) => size::DRAWER_W_MAX,
+        (_, Axis::Horizontal) => (available - CHAT_MIN).max(min),
+        // 纵向分割：上界同样留出主区最小高度（`CHAT_MIN` 作为纵向的最小余量）。
+        (_, Axis::Vertical) => available.max(min),
     };
     value.clamp(min, max)
+}
+
+/// 叶子的分割轴（默认横向；纵向叶子在分割树里声明时按轴取界）。
+fn axis_of(id: &str) -> Axis {
+    match id {
+        leaf_ids::DRAWER | leaf_ids::SIDE_DOCK | leaf_ids::CHAT => Axis::Horizontal,
+        _ => Axis::Vertical,
+    }
 }
 
 /// 双击手柄：复位该叶子为默认宽度（300ms 内两次按下）。
@@ -358,7 +368,7 @@ fn clamp_on_window_resize(
         if matches!(current, LeafSize::Grow(_)) {
             continue;
         }
-        let clamped = clamp_leaf(id, current.preferred(), main_w);
+        let clamped = clamp_leaf(id, axis_of(id), current.preferred(), main_w);
         if clamped != current.preferred() {
             tree.set_leaf_size(id, current.with_current(clamped));
         }
@@ -388,28 +398,34 @@ mod tests {
     #[test]
     fn drawer_respects_min() {
         assert_eq!(
-            clamp_leaf(leaf_ids::DRAWER, 100.0, 1600.0),
+            clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 100.0, 1600.0),
             size::DRAWER_W_MIN
         );
-        assert_eq!(clamp_leaf(leaf_ids::DRAWER, 300.0, 1600.0), 300.0);
+        assert_eq!(clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 300.0, 1600.0), 300.0);
     }
 
     /// 抽屉宽度上限保护：不高于 480。
     #[test]
     fn drawer_respects_max() {
         assert_eq!(
-            clamp_leaf(leaf_ids::DRAWER, 900.0, 1600.0),
+            clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 900.0, 1600.0),
             size::DRAWER_W_MAX
         );
-        assert_eq!(clamp_leaf(leaf_ids::DRAWER, 480.0, 1600.0), 480.0);
+        assert_eq!(clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 480.0, 1600.0), 480.0);
     }
 
     /// 右侧分屏上限 = available − CHAT_MIN。
     #[test]
     fn side_dock_upper_bound() {
         // available=1600：上限 1600-520=1080
-        assert_eq!(clamp_leaf(leaf_ids::SIDE_DOCK, 2000.0, 1600.0), 1080.0);
-        assert_eq!(clamp_leaf(leaf_ids::SIDE_DOCK, 720.0, 1600.0), 720.0);
+        assert_eq!(
+            clamp_leaf(leaf_ids::SIDE_DOCK, Axis::Horizontal, 2000.0, 1600.0),
+            1080.0
+        );
+        assert_eq!(
+            clamp_leaf(leaf_ids::SIDE_DOCK, Axis::Horizontal, 720.0, 1600.0),
+            720.0
+        );
     }
 
     /// 默认树：抽屉与右侧分屏各有一条手柄。

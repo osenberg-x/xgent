@@ -422,15 +422,15 @@ fn vertical_split_registers_without_touching_resize_rs() {
 #[test]
 fn drawer_width_is_clamped_to_range() {
     assert_eq!(
-        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, 100.0, 1600.0),
+        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 100.0, 1600.0),
         240.0
     );
     assert_eq!(
-        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, 900.0, 1600.0),
+        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 900.0, 1600.0),
         480.0
     );
     assert_eq!(
-        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, 320.0, 1600.0),
+        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 320.0, 1600.0),
         320.0
     );
 }
@@ -668,4 +668,42 @@ fn side_view_has_exactly_one_return_entry() {
         !editor.contains("EditorBackButtonMarker"),
         "编辑器顶栏不应再有第二个返回入口（两套标记合一）"
     );
+}
+
+/// 激活 `Slot::SideDock` 面板会**展开右侧分屏**（打开文件 / 点 rail 终端钮 /
+/// 点页签都要把分屏带出来——M5 之前这段逻辑散在两个显示系统里）。
+#[test]
+fn activating_side_dock_panel_opens_the_split() {
+    use xgent_ui::panels::{PanelActivate, PanelDeactivate, PanelRegister, PanelDescriptor};
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins).add_plugins(xgent_ui::panels::PanelsPlugin);
+
+    // 注册一个 SideDock 面板
+    let view = app.world_mut().spawn_empty().id();
+    app.world_mut().write_message(PanelRegister {
+        desc: PanelDescriptor::new(ids::EDITOR, Slot::SideDock, "panel-editor", "file", 0),
+        view: Some(view),
+    });
+    app.update();
+
+    // 先折叠分屏
+    app.world_mut()
+        .resource_mut::<SlotLayout>()
+        .set_open(Slot::SideDock, false);
+    app.update();
+    assert!(!app.world().resource::<SlotLayout>().is_open(Slot::SideDock));
+
+    // 激活面板 → 分屏展开
+    app.world_mut().write_message(PanelActivate { id: ids::EDITOR });
+    app.update();
+    assert!(
+        app.world().resource::<SlotLayout>().is_open(Slot::SideDock),
+        "激活 SideDock 面板应展开右侧分屏"
+    );
+
+    // 失活面板**不**改槽位开合（收起由返回入口 / 快捷键负责）
+    app.world_mut().write_message(PanelDeactivate { id: ids::EDITOR });
+    app.update();
+    assert!(app.world().resource::<SlotLayout>().is_open(Slot::SideDock));
 }
