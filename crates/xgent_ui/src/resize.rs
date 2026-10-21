@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
-use crate::layout::{MainAreaMarker, SideViewCollapsed};
+use crate::layout::MainAreaMarker;
 use crate::theme::size;
 
 /// 上下文面板最小宽度（单源：`theme::size`）。
@@ -86,8 +86,7 @@ impl Plugin for ResizePlugin {
                     clamp_on_window_resize,
                     responsive_collapse,
                 )
-                    .chain()
-                    .after(crate::layout::toggle_panel_visibility),
+                    .chain(),
             );
     }
 }
@@ -137,7 +136,7 @@ fn handle_resize_drag(
     motion: Res<AccumulatedMouseMotion>,
     main_q: Query<&ComputedNode, With<MainAreaMarker>>,
     handles: Query<(&ResizeEdgeMarker, &Hovered, Has<Pressed>)>,
-    side_collapsed: Res<SideViewCollapsed>,
+    layout: Res<crate::panels::SlotLayout>,
     mut q_handle_style: Query<(&ResizeEdgeMarker, &mut BackgroundColor, &mut BorderColor)>,
     theme: Res<crate::theme::Theme>,
 ) {
@@ -198,7 +197,7 @@ fn handle_resize_drag(
     let main_w = main_node.size.x * main_node.inverse_scale_factor;
 
     // 上下文面板折叠时不可拖（手柄本就隐藏），防御：跳过
-    if side_collapsed.0 {
+    if !layout.is_open(crate::panels::Slot::SideDock) {
         return;
     }
     // 手柄右移（dx>0）→ 面板变窄；钳制走纯函数（单测覆盖）
@@ -251,13 +250,13 @@ fn clamp_on_window_resize(
 /// 只自动收起、不自动展开——恢复走 rail 展开钮（M3-T5）或终端快捷键。
 fn responsive_collapse(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut side: ResMut<SideViewCollapsed>,
+    mut layout: ResMut<crate::panels::SlotLayout>,
 ) {
     let Ok(w) = windows.single() else {
         return;
     };
-    if w.width() < 1100.0 && !side.0 {
-        side.0 = true;
+    if w.width() < 1100.0 {
+        layout.set_open(crate::panels::Slot::SideDock, false);
     }
 }
 

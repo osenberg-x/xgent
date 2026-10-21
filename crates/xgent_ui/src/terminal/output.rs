@@ -483,7 +483,7 @@ pub struct TerminalResizeTracker {
 /// 视口宽取输出容器的**内容盒**宽（扣掉 8px 横向内边距），再扣掉滚动条占位
 /// （滚动条是绝对定位覆盖层，不扣会把最右一列裁掉）。
 pub fn handle_terminal_resize(
-    content: Res<crate::editor::SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     tabs: Res<TerminalTabs>,
     q_output: Query<(&ComputedNode, Option<&Scrollbar>), With<TerminalOutputMarker>>,
     metrics: Option<Res<MonoMetrics>>,
@@ -492,7 +492,7 @@ pub fn handle_terminal_resize(
     mut writer: MessageWriter<TerminalResize>,
 ) {
     // 仅终端视图激活时跟踪
-    if *content != crate::editor::SideViewContent::Terminal {
+    if !registry.is_visible(crate::panels::ids::TERMINAL) {
         return;
     }
     let Some(active_tab) = tabs.active_entity() else {

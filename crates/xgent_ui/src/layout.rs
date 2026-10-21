@@ -65,32 +65,25 @@ pub struct MainAreaMarker;
 
 /// 文件抽屉开关（v7 抽屉化：左侧 overlay，rail 文件钮 / `filepanel.toggle` 切换）。
 ///
-/// v8 M1 起由 [`crate::overlay::OverlayRegistry`] 统一裁决，本资源是派生视图。
+/// v8 M5 起由面板注册表裁决（`Slot::Overlay` 内的 `file-drawer` 面板），
+/// 本资源是**派生视图**（由 `panels::visibility::sync_file_drawer_open` 写回）。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FileDrawerOpen(pub bool);
-
-/// 右侧分屏（上下文面板）折叠状态。
-///
-/// `false`（默认）= 展开，与对话主区并排（v7）；
-/// `true` = 收起，对话主区独占。
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SideViewCollapsed(pub bool);
 
 /// 布局插件。
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
+        // 面板注册表（幂等：宿主可能已装配）
+        if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
+            app.add_plugins(crate::panels::PanelsPlugin);
+        }
         app.init_resource::<crate::theme::ThemeHandle>()
             .init_resource::<crate::theme::Theme>()
             .init_resource::<FileDrawerOpen>()
-            .init_resource::<SideViewCollapsed>()
             .init_resource::<crate::resize::PanelWidths>()
-            .add_systems(Startup, spawn_layout)
-            .add_systems(
-                Update,
-                toggle_panel_visibility.after(crate::shortcuts::handle_hotkey_triggers),
-            );
+            .add_systems(Startup, spawn_layout);
     }
 }
 
@@ -99,9 +92,11 @@ pub(crate) fn spawn_layout(
     mut commands: Commands,
     handle: Res<ThemeHandle>,
     widths: Res<crate::resize::PanelWidths>,
+    mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
     let theme = handle.theme;
     let generation = handle.generation;
+    let side_view_w = widths.side_view;
     commands.spawn(Camera2d);
 
     commands
@@ -193,32 +188,47 @@ pub(crate) fn spawn_layout(
                     ));
 
                     // 对话主区
-                    main.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            height: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            min_width: Val::ZERO,
-                            min_height: Val::ZERO,
-                            overflow: Overflow::clip(),
-                            ..default()
-                        },
-                        BackgroundColor(theme.bg),
-                        Themed {
-                            role: ThemeRole::Canvas,
-                            generation,
-                        },
-                        ChatPanelMarker,
-                    ));
+                    let chat = main
+                        .spawn((
+                            Node {
+                                flex_grow: 1.0,
+                                height: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                min_width: Val::ZERO,
+                                min_height: Val::ZERO,
+                                overflow: Overflow::clip(),
+                                ..default()
+                            },
+                            BackgroundColor(theme.bg),
+                            Themed {
+                                role: ThemeRole::Canvas,
+                                generation,
+                            },
+                            ChatPanelMarker,
+                        ))
+                        .id();
+                    // v8 M5：对话区注册为 `Slot::Center` 面板（主区默认可见）。
+                    register.write(crate::panels::PanelRegister {
+                        desc: crate::panels::PanelDescriptor::new(
+                            crate::panels::ids::CHAT,
+                            crate::panels::Slot::Center,
+                            "panel-chat",
+                            "chat",
+                            0,
+                        )
+                        .with_default_visible(),
+                        view: Some(chat),
+                    });
 
                     // 右拖拽手柄
-                    main.spawn(crate::resize::handle_bundle(
-                        crate::resize::ResizeEdge::Right,
+                    main.spawn((
+                        crate::resize::handle_bundle(crate::resize::ResizeEdge::Right),
+                        crate::panels::PanelVisibility::of_slot(crate::panels::Slot::SideDock),
                     ));
                     // 上下文面板（预览/差异/终端；默认展开，宽度走 PanelWidths）
                     main.spawn((
                         Node {
-                            width: px(widths.side_view),
+                            width: px(side_view_w),
                             height: Val::Percent(100.0),
                             flex_direction: FlexDirection::Column,
                             border: UiRect::left(px(1.0)),
@@ -234,6 +244,8 @@ pub(crate) fn spawn_layout(
                             generation,
                         },
                         SideViewMarker,
+                        // v8 M5-T3：分屏容器的显隐由派生系统统一写。
+                        crate::panels::PanelVisibility::of_slot(crate::panels::Slot::SideDock),
                     ));
                 });
 
@@ -267,30 +279,6 @@ pub(crate) fn spawn_layout(
             root.spawn((crate::kit::layer_root(z::TOOLTIP), TooltipLayer));
             root.spawn((crate::kit::layer_root(z::TOAST), ToastLayer));
         });
-}
-
-/// 上下文面板折叠状态变化时更新面板与右手柄显隐（文件抽屉显隐由 file_panel 模块自理）。
-pub(crate) fn toggle_panel_visibility(
-    side_collapsed: Res<SideViewCollapsed>,
-    mut q_side: Query<&mut Node, With<SideViewMarker>>,
-    mut q_handles: Query<(&crate::resize::ResizeEdgeMarker, &mut Node), Without<SideViewMarker>>,
-) {
-    if !side_collapsed.is_changed() {
-        return;
-    }
-    let display = if side_collapsed.0 {
-        Display::None
-    } else {
-        Display::Flex
-    };
-    if let Ok(mut node) = q_side.single_mut() {
-        node.display = display;
-    }
-    for (marker, mut node) in q_handles.iter_mut() {
-        if marker.0 == crate::resize::ResizeEdge::Right {
-            node.display = display;
-        }
-    }
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@
 //!    pty_id 经 bridge channel 回填（[`handle_pty_events`] 写 `TerminalSpawned`）
 //!
 //! close 流程（[`handle_close_tab_requests`]）：backend.kill + despawn 实体 +
-//! 更新 tabs；最后一个 tab 关 → SideViewContent=None + 收起。
+//! 更新 tabs；最后一个 tab 关 → 停用终端面板 + 收起。
 
 use std::path::PathBuf;
 
@@ -17,7 +17,6 @@ use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
-use crate::editor::SideViewContent;
 use crate::fonts::{UiFonts, mono_text};
 use crate::terminal::io::{PtyBridge, default_spawn_request, spawn_pty_session};
 use crate::terminal::{
@@ -58,7 +57,7 @@ pub fn handle_spawn_tab_requests(
     rt: Res<TerminalIoRuntime>,
     bridge: Res<PtyBridge>,
     mut commands: Commands,
-    mut content: ResMut<SideViewContent>,
+    mut activate: MessageWriter<crate::panels::PanelActivate>,
 ) {
     let (Some(handle), Some(backend)) = (rt.handle.as_ref(), rt.backend.as_ref()) else {
         tracing::warn!("终端后端未注入，无法 spawn tab");
@@ -94,8 +93,10 @@ pub fn handle_spawn_tab_requests(
             bridge.sender(),
         );
 
-        // 切到终端视图 + 展开分屏
-        *content = SideViewContent::Terminal;
+        // 切到终端面板（`Slot::SideDock`）+ 展开分屏
+        activate.write(crate::panels::PanelActivate {
+            id: crate::panels::ids::TERMINAL,
+        });
     }
 }
 
@@ -105,7 +106,7 @@ pub fn handle_close_tab_requests(
     mut tabs: ResMut<TerminalTabs>,
     rt: Res<TerminalIoRuntime>,
     q_tabs: Query<&TerminalTab>,
-    mut content: ResMut<SideViewContent>,
+    mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
     mut line_buf: ResMut<crate::terminal::input::TerminalLineBuf>,
     mut commands: Commands,
 ) {
@@ -125,9 +126,11 @@ pub fn handle_close_tab_requests(
             commands.entity(entity).despawn();
             // 关闭后无剩余标签 → 收起分屏（仅在真正关闭一个 tab 时触发，
             // 不能放在循环外每帧检查，否则 TerminalTabs 默认空时会持续
-            // 把 SideViewContent 重置为 None，覆盖编辑器/预览视图）
+            // 停用终端面板，覆盖编辑器/差异视图）
             if tabs.is_empty() {
-                *content = SideViewContent::None;
+                deactivate.write(crate::panels::PanelDeactivate {
+                    id: crate::panels::ids::TERMINAL,
+                });
             }
         }
     }

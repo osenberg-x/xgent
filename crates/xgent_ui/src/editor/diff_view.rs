@@ -15,7 +15,7 @@ use crate::fonts::{mono_text, ui_text};
 use crate::i18n::tr;
 use crate::theme::{Theme, space, type_scale};
 /// 差异页容器标记（挂 `crate::layout::SideViewMarker`，显隐由
-/// `apply_editor_view_visibility` 据 `SideViewContent::Diff` 控制）。
+/// `derive_panel_visibility` 依据注册表中的 `diff` 面板派生）。
 #[derive(Component, Default)]
 pub struct DiffViewMarker;
 
@@ -43,6 +43,7 @@ pub fn spawn_diff_view(
     q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
+    mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
     let Ok(side) = q_side.single() else {
         return;
@@ -51,16 +52,20 @@ pub fn spawn_diff_view(
         .spawn((
             // v8 M3-T3：同列有 38px 页签条，页面用 `height:100%` 会把底部顶出
             // 视口（审计 D2）。改用 `region_fill`（flex 填满剩余空间）。
-            {
-                let mut n = xui::region_fill();
-                n.width = Val::Percent(100.0);
-                n.flex_direction = FlexDirection::Column;
-                n.overflow = Overflow::clip();
-                n.display = Display::None;
-                n
+            // v8 M5-T3：初始隐藏改为构造期字面量（不再是运行时写手）。
+            Node {
+                display: Display::None,
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::clip(),
+                ..xui::region_fill()
             },
             BackgroundColor(theme.code_bg),
             DiffViewMarker,
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::DIFF,
+                crate::panels::Slot::SideDock,
+            ),
         ))
         .with_children(|view| {
             view.spawn((
@@ -79,12 +84,23 @@ pub fn spawn_diff_view(
         })
         .id();
     commands.entity(side).add_child(view);
+    // v8 M5：注册为 `Slot::SideDock` 面板。
+    register.write(crate::panels::PanelRegister {
+        desc: crate::panels::PanelDescriptor::new(
+            crate::panels::ids::DIFF,
+            crate::panels::Slot::SideDock,
+            "panel-diff",
+            "diff",
+            1,
+        ),
+        view: Some(view),
+    });
 }
 
 /// 内容切到 Diff、buffer 内容变化或激活 tab 变化时重建差异行。
 pub(crate) fn rebuild_diff_view(
     mut commands: Commands,
-    content: Res<crate::editor::SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     tabs: Res<EditorTabs>,
     buffers: Query<&EditorBuffer>,
     editors: Query<&xui::TextEditor>,
@@ -97,11 +113,12 @@ pub(crate) fn rebuild_diff_view(
     fonts: Res<crate::fonts::UiFonts>,
     loc: Res<Localizer>,
 ) {
-    if *content != crate::editor::SideViewContent::Diff {
+    let diff_active = registry.is_visible(crate::panels::ids::DIFF);
+    if !diff_active {
         return;
     }
     // 触发：切入 Diff / buffer 内容变化 / 激活 tab 变化
-    let triggered = content.is_changed()
+    let triggered = registry.is_changed()
         || tabs_changed.iter().count() > 0
         || editors_changed.iter().count() > 0;
     if !triggered {

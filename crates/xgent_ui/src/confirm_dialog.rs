@@ -478,7 +478,7 @@ fn handle_confirm_keyboard(
     mut reader: MessageReader<bevy::input::keyboard::KeyboardInput>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
     q_editable: Query<(), With<bevy::text::EditableText>>,
-    side_view: Res<crate::editor::SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     mut commands: Commands,
     mut writer: MessageWriter<ConfirmDecisionMessage>,
     // InputFocus 的唯一访问（读 get / 写 set 同参数；Res + ResMut 同资源是 B0002 冲突）
@@ -520,7 +520,7 @@ fn handle_confirm_keyboard(
             K::Enter => {
                 // 焦点在文本输入框：Enter 语义属于输入框，不触发决策
                 let in_editable = focus.get().is_some_and(|f| q_editable.contains(f));
-                let terminal_active = *side_view == crate::editor::SideViewContent::Terminal;
+                let terminal_active = registry.is_visible(crate::panels::ids::TERMINAL);
                 if in_editable || terminal_active {
                     continue;
                 }

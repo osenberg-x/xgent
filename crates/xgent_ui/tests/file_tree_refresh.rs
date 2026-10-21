@@ -76,17 +76,27 @@ fn file_tree_shows_top_level_files() {
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() })
-        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
-        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+        .insert_resource(ProjectRoot { path: root.clone() });
 
     // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
     // 虚拟列表因视口高 0 而不渲染任何行）
     app.world_mut().spawn(Camera::default());
+    // v8 M5：抽屉是注册面板，打开它要发面板消息（`FileDrawerOpen` 是派生视图）。
+    // 抽屉可见 → 宽度有值 → 虚拟列表才有可见区间、文件树才渲染行。
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
 
     // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
     // 虚拟列表因视口高 0 而不渲染任何行）
     app.world_mut().spawn(Camera::default());
+    // v8 M5：抽屉是注册面板，打开它要发面板消息（`FileDrawerOpen` 是派生视图）。
+    // 抽屉可见 → 宽度有值 → 虚拟列表才有可见区间、文件树才渲染行。
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
 
     // 跑 Startup + 几帧 Update 让 rebuild_file_tree 执行
     for _ in 0..5 {
@@ -139,13 +149,17 @@ fn file_tree_refreshes_on_file_changed_event() {
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() })
-        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
-        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+        .insert_resource(ProjectRoot { path: root.clone() });
 
     // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
     // 虚拟列表因视口高 0 而不渲染任何行）
     app.world_mut().spawn(Camera::default());
+    // v8 M5：抽屉是注册面板，打开它要发面板消息（`FileDrawerOpen` 是派生视图）。
+    // 抽屉可见 → 宽度有值 → 虚拟列表才有可见区间、文件树才渲染行。
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
 
     for _ in 0..5 {
         app.update();
@@ -220,13 +234,17 @@ fn expanded_dirs_preserved_across_rebuild() {
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() })
-        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
-        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+        .insert_resource(ProjectRoot { path: root.clone() });
 
     // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
     // 虚拟列表因视口高 0 而不渲染任何行）
     app.world_mut().spawn(Camera::default());
+    // v8 M5：抽屉是注册面板，打开它要发面板消息（`FileDrawerOpen` 是派生视图）。
+    // 抽屉可见 → 宽度有值 → 虚拟列表才有可见区间、文件树才渲染行。
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
 
     for _ in 0..5 {
         app.update();
@@ -313,13 +331,17 @@ fn ignored_dirs_excluded_from_tree() {
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() })
-        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
-        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+        .insert_resource(ProjectRoot { path: root.clone() });
 
     // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
     // 虚拟列表因视口高 0 而不渲染任何行）
     app.world_mut().spawn(Camera::default());
+    // v8 M5：抽屉是注册面板，打开它要发面板消息（`FileDrawerOpen` 是派生视图）。
+    // 抽屉可见 → 宽度有值 → 虚拟列表才有可见区间、文件树才渲染行。
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
 
     for _ in 0..5 {
         app.update();
@@ -387,13 +409,17 @@ fn selected_marker_preserved_across_rebuild() {
         ))
         .insert_resource(Strings(Box::new(NoopStrings)))
         .init_resource::<Localizer>()
-        .insert_resource(ProjectRoot { path: root.clone() })
-        // 打开抽屉：文件树是虚拟列表，抽屉隐藏（视口高 0）时不渲染任何行
-        .insert_resource(xgent_ui::layout::FileDrawerOpen(true));
+        .insert_resource(ProjectRoot { path: root.clone() });
 
     // 相机：UI 布局需要渲染目标尺寸（无相机时视口高 0，抽屉高度为 0，
     // 虚拟列表因视口高 0 而不渲染任何行）
     app.world_mut().spawn(Camera::default());
+    // v8 M5：抽屉是注册面板，打开它要发面板消息（`FileDrawerOpen` 是派生视图）。
+    // 抽屉可见 → 宽度有值 → 虚拟列表才有可见区间、文件树才渲染行。
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
 
     for _ in 0..5 {
         app.update();

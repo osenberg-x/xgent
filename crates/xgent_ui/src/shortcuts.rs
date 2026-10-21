@@ -11,8 +11,8 @@ use xui::command_palette::CommandPaletteState;
 use xui::hotkeys::{Hotkey, HotkeyRegistry};
 use xui::shortcuts::HotkeyTriggered;
 
+use crate::editor::EditorView;
 use crate::editor::tabs::{CloseTabRequest, CycleTabRequest};
-use crate::editor::{EditorView, SideViewContent};
 use crate::i18n::tr;
 
 /// 快捷键插件。
@@ -119,19 +119,26 @@ pub fn register_xgent_hotkeys(mut reg: ResMut<HotkeyRegistry>, loc: Res<Localize
 }
 
 /// 订阅 HotkeyTriggered，据 id 执行业务。
+///
+/// Bevy 的系统参数上限是 16 个；本系统的消息写入器较多，故用
+/// [`ParamSet`] 归并为一个参数。
 pub(crate) fn handle_hotkey_triggers(
     mut reader: MessageReader<HotkeyTriggered>,
     mut palette: ResMut<CommandPaletteState>,
-    mut abort_writer: MessageWriter<AbortMessage>,
-    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
-    mut side_view: ResMut<crate::layout::SideViewCollapsed>,
+    mut msgs: ParamSet<(
+        MessageWriter<AbortMessage>,
+        MessageWriter<crate::overlay::DrawerToggle>,
+        MessageWriter<crate::panels::PanelActivate>,
+        MessageWriter<crate::panels::PanelDeactivate>,
+        MessageWriter<CycleTabRequest>,
+        MessageWriter<CloseTabRequest>,
+        MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
+    )>,
+    mut layout: ResMut<crate::panels::SlotLayout>,
     mut view: ResMut<EditorView>,
-    mut content: ResMut<SideViewContent>,
-    mut cycle_writer: MessageWriter<CycleTabRequest>,
-    mut close_tab_writer: MessageWriter<CloseTabRequest>,
+    registry: Res<crate::panels::PanelRegistry>,
     editor_tabs: Res<crate::editor::tabs::EditorTabs>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
-    mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
     modal: Option<Res<crate::modal::ModalStack>>,
     modal_esc: Option<Res<crate::modal::ModalEscConsumed>>,
@@ -148,29 +155,37 @@ pub(crate) fn handle_hotkey_triggers(
         match ev.id.as_str() {
             "chat.abort" => {
                 // 终端视图激活时，Esc 退出终端视图（不中断对话）
-                if *content == SideViewContent::Terminal {
-                    *content = SideViewContent::None;
-                    side_view.0 = true;
+                if registry.is_visible(crate::panels::ids::TERMINAL) {
+                    msgs.p3().write(crate::panels::PanelDeactivate {
+                        id: crate::panels::ids::TERMINAL,
+                    });
+                    layout.set_open(crate::panels::Slot::SideDock, false);
                 } else if *view == EditorView::Editor {
                     // 编辑器视图激活时，Esc 优先退出编辑器视图而非中断对话
                     *view = EditorView::Chat;
                 } else {
-                    abort_writer.write(AbortMessage);
+                    msgs.p0().write(AbortMessage);
                 }
             }
             "terminal.toggle" => {
-                if *content == SideViewContent::Terminal {
-                    *content = SideViewContent::None;
-                    side_view.0 = true;
+                if registry.is_visible(crate::panels::ids::TERMINAL) {
+                    msgs.p3().write(crate::panels::PanelDeactivate {
+                        id: crate::panels::ids::TERMINAL,
+                    });
+                    layout.set_open(crate::panels::Slot::SideDock, false);
                 } else {
-                    *content = SideViewContent::Terminal;
+                    msgs.p2().write(crate::panels::PanelActivate {
+                        id: crate::panels::ids::TERMINAL,
+                    });
+                    layout.set_open(crate::panels::Slot::SideDock, true);
                     // 无 tab 时首次唤起自动 spawn 一个（对齐设计 §3.5）
                     if terminal_tabs.is_empty() {
                         let cwd = project_root
                             .as_deref()
                             .map(|r| r.path.clone())
                             .unwrap_or_else(std::env::temp_dir);
-                        terminal_spawn.write(crate::terminal::tabs::SpawnTabRequest { cwd });
+                        msgs.p6()
+                            .write(crate::terminal::tabs::SpawnTabRequest { cwd });
                     }
                 }
             }
@@ -180,18 +195,24 @@ pub(crate) fn handle_hotkey_triggers(
             }
             "filepanel.toggle" => {
                 // v8 M1：与 rail / 「+ 添加」走同一条消息，互斥由 OverlayRegistry 裁决。
-                drawer_toggle.write(crate::overlay::DrawerToggle(
+                msgs.p1().write(crate::overlay::DrawerToggle(
                     crate::overlay::OverlayId::FileDrawer,
                 ));
             }
             "sideview.toggle" => {
                 // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）
-                if !side_view.0 && *content == SideViewContent::Editor {
-                    *content = SideViewContent::None;
-                    side_view.0 = true;
+                if layout.is_open(crate::panels::Slot::SideDock)
+                    && registry.is_visible(crate::panels::ids::EDITOR)
+                {
+                    msgs.p3().write(crate::panels::PanelDeactivate {
+                        id: crate::panels::ids::EDITOR,
+                    });
+                    layout.set_open(crate::panels::Slot::SideDock, false);
                 } else {
-                    *content = SideViewContent::Editor;
-                    side_view.0 = false;
+                    msgs.p2().write(crate::panels::PanelActivate {
+                        id: crate::panels::ids::EDITOR,
+                    });
+                    layout.set_open(crate::panels::Slot::SideDock, true);
                 }
             }
             "input.focus" => {}
@@ -200,29 +221,30 @@ pub(crate) fn handle_hotkey_triggers(
             // buffer 显隐，漏写会打开「容器可见但全部 buffer 隐藏」的空白预览页
             "editor.view" => {
                 *view = EditorView::Editor;
-                *content = SideViewContent::Editor;
-                side_view.0 = false;
+                msgs.p2().write(crate::panels::PanelActivate {
+                    id: crate::panels::ids::EDITOR,
+                });
+                layout.set_open(crate::panels::Slot::SideDock, true);
             }
             "chat.view" => {
                 // 聚焦会话区：收起上下文面板；同步 view 保证 Esc（chat.abort）
                 // 的 view 判断与可见状态一致，否则 Esc 被静默吞掉一次
                 *view = EditorView::Chat;
-                *content = SideViewContent::None;
-                side_view.0 = true;
+                layout.set_open(crate::panels::Slot::SideDock, false);
             }
             "editor.close_tab" => {
                 // 关闭当前激活标签（此前是空操作，× 按钮是唯一关闭入口）
                 if let Some(active) = editor_tabs.active
                     && let Some(&entity) = editor_tabs.tabs.get(active)
                 {
-                    close_tab_writer.write(CloseTabRequest {
+                    msgs.p5().write(CloseTabRequest {
                         entity,
                         force: false,
                     });
                 }
             }
             "editor.cycle_tab" => {
-                cycle_writer.write(CycleTabRequest { forward: true });
+                msgs.p4().write(CycleTabRequest { forward: true });
             }
             _ => {}
         }

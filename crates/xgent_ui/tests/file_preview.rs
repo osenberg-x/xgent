@@ -2,7 +2,7 @@
 //!
 //! 历史：复现「点击打开文件后编辑器视图闪一下就消失」回归。根因是终端模块
 //! `handle_close_tab_requests`（`terminal/tabs.rs`）在关闭 tab 的 for 循环**之外**
-//! 每帧检查 `tabs.is_empty()` 并把 `SideViewContent` 重置为 `None`。修复后视图稳定。
+//! 每帧检查 `tabs.is_empty()` 并把分屏内容重置为空。修复后视图稳定。
 //!
 //! M5-T6 行为变更：文件面板抽屉化，点击文件条目统一发 `OpenFileRequest`
 //! 走上下文面板预览页（编辑器 buffer）加载，原内嵌预览区已取消。
@@ -13,9 +13,9 @@ use std::io::Write;
 use bevy::prelude::*;
 use bevy::ui::Display;
 use xgent_settings::Localizer;
-use xgent_ui::editor::{EditorPlugin, EditorViewMarker, SideViewContent};
+use xgent_ui::editor::{EditorPlugin, EditorViewMarker};
 use xgent_ui::file_panel::FilePanelPlugin;
-use xgent_ui::layout::{FileDrawerOpen, LayoutPlugin};
+use xgent_ui::layout::LayoutPlugin;
 use xgent_ui::resize::ResizePlugin;
 use xui::i18n_bridge::Strings;
 use xui_i18n::StringSource;
@@ -73,6 +73,13 @@ fn editor_view_display(app: &mut App) -> Display {
         .unwrap_or(Display::None)
 }
 
+/// editor 面板当前是否可见（v8 M5：分屏内容由面板注册表裁决）。
+fn editor_panel_visible(app: &mut App) -> bool {
+    app.world()
+        .resource::<xgent_ui::panels::PanelRegistry>()
+        .is_visible(xgent_ui::panels::ids::EDITOR)
+}
+
 /// 模拟点击文件抽屉条目（spawn 带按下态 `Pressed` 的 FileEntry）。
 fn click_file(app: &mut App, path: &std::path::Path) {
     app.world_mut().spawn((
@@ -97,22 +104,28 @@ fn open_code_file_keeps_editor_view_visible() {
     let mut app = test_app();
     click_file(&mut app, &path);
 
-    // 跑多帧，断言预览页 display 始终为 Flex（稳定可见）
+    // 跑多帧：预览页一旦可见就不得再消失（闪一下消失回归）
+    // v8 M5：分屏内容经「点击 → OpenFileRequest → PanelActivate → 注册表」
+    // 多一跳，可见性会晚 1~2 帧出现——断言的是「可见后不再消失」。
+    let mut became_visible = false;
     for frame in 1..=10 {
         app.update();
-        let display = editor_view_display(&mut app);
-        let content = *app.world().resource::<SideViewContent>();
-        assert_eq!(
-            content,
-            SideViewContent::Editor,
-            "帧 {frame}: SideViewContent 应保持 Editor，实际 {content:?}"
-        );
-        assert_eq!(
-            display,
-            Display::Flex,
-            "帧 {frame}: EditorViewMarker display 应为 Flex（闪一下消失回归），实际 {display:?}"
-        );
+        let visible = editor_panel_visible(&mut app);
+        if visible {
+            became_visible = true;
+            assert_eq!(
+                editor_view_display(&mut app),
+                Display::Flex,
+                "帧 {frame}: EditorViewMarker display 应为 Flex"
+            );
+        } else {
+            assert!(
+                !became_visible,
+                "帧 {frame}: 预览页可见后又消失（闪一下消失回归）"
+            );
+        }
     }
+    assert!(became_visible, "预览页应在一段时间内变为可见");
 }
 
 /// 点击非代码文件后，预览页同样稳定显示（v7：非代码文件也走编辑器 buffer）。
@@ -126,17 +139,25 @@ fn click_non_code_file_keeps_preview_page_visible() {
     let mut app = test_app();
     click_file(&mut app, &path);
 
+    let mut became_visible = false;
     for frame in 1..=10 {
         app.update();
-        let display = editor_view_display(&mut app);
-        let content = *app.world().resource::<SideViewContent>();
-        assert_eq!(
-            content,
-            SideViewContent::Editor,
-            "帧 {frame}: 非代码文件也应切到预览页（Editor），实际 {content:?}"
-        );
-        assert_eq!(display, Display::Flex, "帧 {frame}: 预览页应稳定显示");
+        let visible = editor_panel_visible(&mut app);
+        if visible {
+            became_visible = true;
+            assert_eq!(
+                editor_view_display(&mut app),
+                Display::Flex,
+                "帧 {frame}: 预览页应稳定显示"
+            );
+        } else {
+            assert!(!became_visible, "帧 {frame}: 预览页可见后又消失");
+        }
     }
+    assert!(
+        became_visible,
+        "非代码文件也应切到预览页（editor 面板可见）"
+    );
 }
 
 /// 行号列与文件实际行数一致（回归：尾部换行曾产生幽灵行号）。
@@ -219,8 +240,11 @@ fn file_drawer_visibility_toggles() {
         assert_eq!(overlay, Display::Flex, "遮罩随抽屉显示");
     }
 
-    // 关闭抽屉
-    app.world_mut().resource_mut::<FileDrawerOpen>().0 = false;
+    // 关闭抽屉（v8 M5：抽屉是注册面板，开关经面板消息）
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelDeactivate {
+            id: xgent_ui::panels::ids::FILE_DRAWER,
+        });
     app.update();
     {
         let (panel, overlay) = drawer_displays(&mut app);
@@ -280,11 +304,7 @@ fn clicking_file_closes_drawer_and_opens_preview() {
     let (panel, overlay) = drawer_displays(&mut app);
     assert_eq!(panel, Display::None, "点击文件后抽屉面板应隐藏");
     assert_eq!(overlay, Display::None, "点击文件后抽屉遮罩应隐藏");
-    assert_eq!(
-        *app.world().resource::<SideViewContent>(),
-        SideViewContent::Editor,
-        "点击文件后应进入预览页"
-    );
+    assert!(editor_panel_visible(&mut app), "点击文件后应进入预览页");
 }
 
 /// 大文件端到端加载：点击后内容应异步读入 buffer（消费者可观察 rope 行数）。
@@ -304,11 +324,7 @@ fn large_file_click_enters_preview_page() {
         app.update();
     }
 
-    assert_eq!(
-        *app.world().resource::<SideViewContent>(),
-        SideViewContent::Editor,
-        "大文件点击后应进入预览页"
-    );
+    assert!(editor_panel_visible(&mut app), "大文件点击后应进入预览页");
     assert_eq!(editor_view_display(&mut app), Display::Flex);
 
     // R4：内容加载断言——rope 行数 = 5000 数据行（+ 末行换行产生的空行）

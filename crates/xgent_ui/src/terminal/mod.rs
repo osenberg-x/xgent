@@ -8,7 +8,7 @@
 //! - PTY IO 桥接（ECS Messages → async backend，[`io`] 模块）
 //! - 输出历史渲染（vte 解析 → `RenderHistory` → 虚拟滚动，[`output`] 模块）
 //! - UI 侧行编辑（光标/Backspace/Enter，[`input`] 模块）
-//! - 视图切换（[`crate::editor::SideViewContent::Terminal`] 互斥子视图）
+//! - 视图切换（终端是 `Slot::SideDock` 的注册面板，与编辑器/差异互斥）
 //!
 //! # 输入模式
 //!
@@ -32,7 +32,6 @@ use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
-use crate::editor::SideViewContent;
 use crate::fonts::{UiFonts, mono_text};
 use crate::i18n::tr;
 use crate::theme::{Theme, px, space, type_scale};
@@ -42,8 +41,7 @@ use xui::scroll_frame::ScrollFrame;
 
 /// 终端视图容器标记（挂于 [`crate::layout::SideViewMarker`] 下，初始隐藏）。
 ///
-/// 显隐由 [`apply_terminal_view_visibility`] 据 [`SideViewContent`] 统一写，
-/// 避免多系统并发写同一 `Node.display`（B0001）。
+/// 显隐由 `derive_panel_visibility` 依据注册表中的 `terminal` 面板派生。
 #[derive(Component, Default)]
 pub struct TerminalViewMarker;
 
@@ -200,8 +198,15 @@ impl Plugin for TerminalPlugin {
             .add_message::<io::TerminalResize>()
             .add_message::<io::TerminalSpawned>()
             .add_message::<io::TerminalOutputChunk>()
-            .add_message::<io::TerminalExited>()
-            .init_resource::<TerminalTabs>()
+            .add_message::<io::TerminalExited>();
+        // 面板注册表（幂等：宿主可能已装配）
+        if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
+            app.add_plugins(crate::panels::PanelsPlugin);
+        }
+        if !app.is_plugin_added::<crate::panels::visibility::VisibilityPlugin>() {
+            app.add_plugins(crate::panels::visibility::VisibilityPlugin);
+        }
+        app.init_resource::<TerminalTabs>()
             .init_resource::<TerminalIoRuntime>()
             .init_resource::<input::TerminalLineBuf>()
             .init_resource::<output::TerminalResizeTracker>()
@@ -225,7 +230,6 @@ impl Plugin for TerminalPlugin {
                     output::handle_terminal_resize,
                     io::handle_terminal_resize,
                     output::append_output_chunks,
-                    apply_terminal_view_visibility,
                     tabs::rebuild_terminal_tabs,
                     input::handle_terminal_keyboard,
                     input::update_input_line,
@@ -238,6 +242,7 @@ impl Plugin for TerminalPlugin {
                 )
                     .chain(),
             )
+            .add_systems(Update, apply_terminal_view_focus)
             // 等宽度量实测：探针生成（首帧）+ 读探针排版结果（须在 bevy 文本排版之后）
             .add_systems(Update, metrics::spawn_mono_probes)
             .add_systems(
@@ -249,36 +254,55 @@ impl Plugin for TerminalPlugin {
 
 /// 启动时在右侧分屏容器内 spawn 终端视图（初始隐藏）。
 ///
-/// 终端视图是右侧分屏的内容之一（与编辑器/文件预览互斥）；分屏本身由
+/// 终端视图是右侧分屏的内容之一（与编辑器/差异互斥）；分屏本身由
 /// [`crate::layout::SideViewMarker`] 容器承载，展开/收起由
-/// [`crate::layout::SideViewCollapsed`] 统一控制。
+/// [`crate::panels::SlotLayout`] 的 `Slot::SideDock` 统一控制。
 fn spawn_terminal_view(
     mut commands: Commands,
     q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
     fonts: Res<UiFonts>,
+    mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
     let Ok(side) = q_side.single() else {
         return;
     };
-    commands.entity(side).with_children(|p| {
-        // 终端视图容器：初始隐藏（由 apply_terminal_view_visibility 据 SideViewContent 切换）
-        // v8 M3-T3：同列有 38px 页签条，页面用 `height:100%` 会把底部状态条顶出
-        // 视口（审计 D2：永久掉出 38px）。改用 `region_fill`（flex 填满剩余空间）。
-        p.spawn((
-            {
-                let mut n = xui::region_fill();
-                n.width = Val::Percent(100.0);
-                n.flex_direction = FlexDirection::Column;
-                n.overflow = Overflow::clip();
-                n.display = Display::None;
-                n
+    // 终端视图容器：初始隐藏（由 `derive_panel_visibility` 据注册表派生）
+    // v8 M3-T3：同列有 38px 页签条，页面用 `height:100%` 会把底部状态条顶出
+    // 视口（审计 D2：永久掉出 38px）。改用 `region_fill`（flex 填满剩余空间）。
+    // v8 M5-T3：初始隐藏改为构造期字面量（不再是运行时写手）。
+    let terminal_view = commands
+        .spawn((
+            Node {
+                display: Display::None,
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::clip(),
+                ..xui::region_fill()
             },
             BackgroundColor(theme.bg),
             TerminalViewMarker,
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::TERMINAL,
+                crate::panels::Slot::SideDock,
+            ),
         ))
-        .with_children(|view| {
+        .id();
+    commands.entity(side).add_child(terminal_view);
+    // v8 M5：注册为 `Slot::SideDock` 面板。
+    register.write(crate::panels::PanelRegister {
+        desc: crate::panels::PanelDescriptor::new(
+            crate::panels::ids::TERMINAL,
+            crate::panels::Slot::SideDock,
+            "panel-terminal",
+            "terminal",
+            2,
+        ),
+        view: Some(terminal_view),
+    });
+    commands.entity(terminal_view).with_children(|view| {
+        {
             // tv-head：标题 + tab 条 + 新建/清屏/关闭
             view.spawn((
                 Node {
@@ -471,53 +495,39 @@ fn spawn_terminal_view(
                     TerminalStatusBarMarker,
                 ));
             });
-        });
+        }
     });
 }
 
-/// 据 [`SideViewContent`] 切换 [`TerminalViewMarker`] 显隐，并展开分屏。
-///
-/// 与 [`crate::editor::apply_editor_view_visibility`] 对称——本系统只写
-/// `TerminalViewMarker` 的 `Node.display`，不碰编辑器/预览容器（由编辑器模块
-/// 自管），避免 B0001 跨系统可变访问冲突。
-///
-/// 切到终端视图时清除 `InputFocus`，使终端独占键盘（`handle_terminal_keyboard`
+/// 终端面板激活时清除 `InputFocus`，使终端独占键盘（`handle_terminal_keyboard`
 /// 在无焦点时才捕获），避免与对话输入区同步输入。
-pub fn apply_terminal_view_visibility(
-    content: Res<SideViewContent>,
-    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
+///
+/// 显隐本身由 `derive_panel_visibility` 统一派生（v8 M5-T3），本系统只负责
+/// 键盘焦点的移交。
+pub fn apply_terminal_view_focus(
+    registry: Res<crate::panels::PanelRegistry>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
-    mut q: Query<&mut Node, With<TerminalViewMarker>>,
 ) {
-    // Terminal 时展开分屏（与编辑器模块的展开逻辑各自独立触发，幂等）
-    if *content == SideViewContent::Terminal && collapsed.0 {
-        collapsed.0 = false;
-    }
-    // 切到终端视图时清除焦点，让终端捕获键盘
-    if content.is_changed() && *content == SideViewContent::Terminal {
+    if registry.is_changed() && registry.is_visible(crate::panels::ids::TERMINAL) {
         focus.clear();
-    }
-    let display = if *content == SideViewContent::Terminal {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    for mut node in &mut q {
-        if node.display != display {
-            node.display = display;
-        }
     }
 }
 
 /// 处理 ✕ 关闭分屏按钮：切回对话 + 收起分屏。
 fn handle_close_button(
     q_btn: Query<(), (With<TerminalCloseButtonMarker>, Added<Pressed>)>,
-    mut content: ResMut<SideViewContent>,
-    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
+    mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
+    mut activate: MessageWriter<crate::panels::PanelActivate>,
+    mut layout: ResMut<crate::panels::SlotLayout>,
 ) {
     for _ in q_btn.iter() {
-        *content = SideViewContent::None;
-        collapsed.0 = true;
+        deactivate.write(crate::panels::PanelDeactivate {
+            id: crate::panels::ids::TERMINAL,
+        });
+        activate.write(crate::panels::PanelActivate {
+            id: crate::panels::ids::CHAT,
+        });
+        layout.set_open(crate::panels::Slot::SideDock, false);
     }
 }
 

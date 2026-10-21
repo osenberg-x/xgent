@@ -168,7 +168,7 @@ pub fn handle_open_file_requests(
     mut q_pending: Query<&mut crate::editor::io::FileReadPending>,
     q_area: Query<Entity, With<crate::editor::EditorAreaMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
-    mut content: ResMut<crate::editor::SideViewContent>,
+    mut activate: MessageWriter<crate::panels::PanelActivate>,
     editor_theme: Res<xui::text_editor::render::EditorTheme>,
     theme: Res<crate::theme::Theme>,
     mut commands: Commands,
@@ -285,9 +285,11 @@ pub fn handle_open_file_requests(
             }
             tabs.open(buffer_entity);
         }
-        // 切换到编辑器视图 + 分屏内容为编辑器
+        // 切换到编辑器视图 + 激活编辑器面板（`Slot::SideDock`）
         *view = crate::editor::EditorView::Editor;
-        *content = crate::editor::SideViewContent::Editor;
+        activate.write(crate::panels::PanelActivate {
+            id: crate::panels::ids::EDITOR,
+        });
     }
 }
 /// 处理关闭标签请求：despawn buffer 实体，更新 tabs。
@@ -303,7 +305,7 @@ pub fn handle_close_tab_requests(
     q_buffers: Query<&crate::editor::buffer::EditorBuffer>,
     q_dialog: Query<Entity, With<DirtyCloseDialogMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
-    mut content: ResMut<crate::editor::SideViewContent>,
+    mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
     rt: ResMut<crate::editor::io::EditorIoRuntime>,
     theme: Res<crate::theme::Theme>,
     loc: Res<xgent_settings::Localizer>,
@@ -325,10 +327,12 @@ pub fn handle_close_tab_requests(
         rt.cancel_pending_writes(req.entity);
         if let Some((entity, _)) = tabs.close(req.entity) {
             commands.entity(entity).despawn();
-            // 无剩余标签 → 收起分屏 + 清空内容
+            // 无剩余标签 → 收起分屏 + 停用编辑器面板
             if tabs.is_empty() {
                 *view = crate::editor::EditorView::Chat;
-                *content = crate::editor::SideViewContent::None;
+                deactivate.write(crate::panels::PanelDeactivate {
+                    id: crate::panels::ids::EDITOR,
+                });
             }
         }
     }

@@ -119,14 +119,21 @@ impl Plugin for FilePanelPlugin {
             .init_resource::<SelectedFilePath>()
             .init_resource::<FileTreeDirty>()
             .init_resource::<ExpandedDirs>()
-            .init_resource::<FileTreeItems>()
+            .init_resource::<FileTreeItems>();
+        // 面板注册表（幂等：宿主可能已装配）
+        if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
+            app.add_plugins(crate::panels::PanelsPlugin);
+        }
+        if !app.is_plugin_added::<crate::panels::visibility::VisibilityPlugin>() {
+            app.add_plugins(crate::panels::visibility::VisibilityPlugin);
+        }
+        app
             // FileChangedEvent 由 EditorPlugin 注册，此处幂等再注册确保独立可用
             .add_message::<crate::editor::conflict::FileChangedEvent>()
             .add_systems(Startup, spawn_file_panel.after(crate::layout::spawn_layout))
             .add_systems(
                 Update,
                 (
-                    handle_drawer_visibility,
                     handle_drawer_overlay_click,
                     handle_file_click,
                     handle_dir_click,
@@ -136,6 +143,10 @@ impl Plugin for FilePanelPlugin {
                 )
                     .chain()
                     .before(update_file_entry_style),
+            )
+            .add_systems(
+                Update,
+                sync_file_drawer_open.in_set(crate::panels::PanelSet::Visibility),
             );
     }
 }
@@ -149,13 +160,14 @@ fn spawn_file_panel(
     q_root: Query<Entity, With<UiRoot>>,
     theme: Res<Theme>,
     loc: Res<xgent_settings::Localizer>,
+    mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
     let Ok(root) = q_root.single() else {
         return;
     };
-    commands.entity(root).with_children(|root| {
-        // 遮罩（点击关闭抽屉；初始隐藏）
-        root.spawn((
+    // 遮罩（点击关闭抽屉；初始隐藏）
+    let scrim = commands
+        .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 top: px(0.0),
@@ -170,9 +182,17 @@ fn spawn_file_panel(
             Button,
             Hovered::default(),
             FileDrawerOverlayMarker,
-        ));
-        // 抽屉面板（左侧贴齐，surface 底 + 右边框；初始隐藏）
-        root.spawn((
+            // v8 M5-T3：抽屉遮罩的显隐由派生系统统一写。
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::FILE_DRAWER,
+                crate::panels::Slot::Overlay,
+            ),
+        ))
+        .id();
+    commands.entity(root).add_child(scrim);
+    // 抽屉面板（左侧贴齐，surface 底 + 右边框；初始隐藏）
+    let panel = commands
+        .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 top: px(0.0),
@@ -195,77 +215,88 @@ fn spawn_file_panel(
             // 否则点面板空白处会穿透到遮罩、误触「点外关闭」。
             bevy::picking::Pickable::default(),
             FilePanelMarker,
+            // v8 M5-T3：抽屉面板的显隐由派生系统统一写。
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::FILE_DRAWER,
+                crate::panels::Slot::Overlay,
+            ),
         ))
-        .with_children(|p| {
-            // 标题头：资源管理器
-            p.spawn((
+        .id();
+    commands.entity(root).add_child(panel);
+    // v8 M5：注册为 `Slot::Overlay` 面板（与会话历史同属单例槽位）。
+    register.write(crate::panels::PanelRegister {
+        desc: crate::panels::PanelDescriptor::new(
+            crate::panels::ids::FILE_DRAWER,
+            crate::panels::Slot::Overlay,
+            "panel-file-drawer",
+            "folder",
+            0,
+        ),
+        view: Some(panel),
+    });
+    commands.entity(panel).with_children(|p| {
+        // 标题头：资源管理器
+        p.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::all(px(space::MD)),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                border: UiRect::bottom(px(1.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(theme.surface),
+            BorderColor::all(theme.border),
+        ))
+        .with_children(|head| {
+            // 标题（资源管理器，大写小字体）
+            head.spawn(crate::fonts::ui_text(
+                crate::i18n::tr(&loc, "file-panel-title").to_uppercase(),
+                crate::theme::type_scale::MICRO,
+                510,
+                theme.text_dim,
+                crate::theme::type_scale::line_height::UI,
+            ));
+        });
+        // 文件树区（可滚动 + 虚拟化，独占抽屉）
+        // v8 M3-T6：只渲染可见行（行数多时不再一次性 spawn 几千个节点）。
+        // 可见区间由 xui::VirtualList 计算，占位块撑出列表总高度。
+        // 树的最小高度：窗口极矮时（headless 装配无渲染目标，视口高 0）
+        // 树仍是可滚的，而不是 0 高（虚拟列表没有视口就不渲染任何行）。
+        let mut tree_frame = xui::ScrollFrame::vertical();
+        tree_frame.style().min_height = px(FILE_TREE_MIN_H);
+        p.spawn((
+            tree_frame,
+            xui::VirtualList::new(0, FILE_TREE_ROW_H),
+            FileTreeMarker,
+        ))
+        .with_children(|c| {
+            // 占位块：高度 = 总行数 × 行高（撑出滚动范围）
+            c.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    padding: UiRect::all(px(space::MD)),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    border: UiRect::bottom(px(1.0)),
-                    flex_shrink: 0.0,
+                    height: px(0.0),
                     ..default()
                 },
-                BackgroundColor(theme.surface),
-                BorderColor::all(theme.border),
-            ))
-            .with_children(|head| {
-                // 标题（资源管理器，大写小字体）
-                head.spawn(crate::fonts::ui_text(
-                    crate::i18n::tr(&loc, "file-panel-title").to_uppercase(),
-                    crate::theme::type_scale::MICRO,
-                    510,
-                    theme.text_dim,
-                    crate::theme::type_scale::line_height::UI,
-                ));
-            });
-            // 文件树区（可滚动 + 虚拟化，独占抽屉）
-            // v8 M3-T6：只渲染可见行（行数多时不再一次性 spawn 几千个节点）。
-            // 可见区间由 xui::VirtualList 计算，占位块撑出列表总高度。
-            // 树的最小高度：窗口极矮时（headless 装配无渲染目标，视口高 0）
-            // 树仍是可滚的，而不是 0 高（虚拟列表没有视口就不渲染任何行）。
-            let mut tree_frame = xui::ScrollFrame::vertical();
-            tree_frame.style().min_height = px(FILE_TREE_MIN_H);
-            p.spawn((
-                tree_frame,
-                xui::VirtualList::new(0, FILE_TREE_ROW_H),
-                FileTreeMarker,
-            ))
-            .with_children(|c| {
-                // 占位块：高度 = 总行数 × 行高（撑出滚动范围）
-                c.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: px(0.0),
-                        ..default()
-                    },
-                    FileTreeSpacerMarker,
-                ));
-            });
+                FileTreeSpacerMarker,
+            ));
         });
     });
 }
 
-/// 抽屉显隐随 `FileDrawerOpen` 切换（遮罩与面板一起）。
+/// 派生视图：文件抽屉开关（由注册表派生，非独立存储的权威状态）。
 ///
-/// 只在状态变化时写 `Node.display`，避免每帧 mutation 触发 change detection。
-fn handle_drawer_visibility(
-    open: Res<FileDrawerOpen>,
-    mut q_overlay: Query<&mut Node, With<FileDrawerOverlayMarker>>,
-    mut q_panel: Query<&mut Node, (With<FilePanelMarker>, Without<FileDrawerOverlayMarker>)>,
+/// v8 M5：抽屉是 `Slot::Overlay` 的注册面板，开关状态由注册表算出。
+pub fn sync_file_drawer_open(
+    registry: Res<crate::panels::PanelRegistry>,
+    layout: Res<crate::panels::SlotLayout>,
+    mut file: ResMut<FileDrawerOpen>,
 ) {
-    if !open.is_changed() {
-        return;
-    }
-    let display = if open.0 { Display::Flex } else { Display::None };
-    for mut node in q_overlay.iter_mut() {
-        node.display = display;
-    }
-    for mut node in q_panel.iter_mut() {
-        node.display = display;
+    let want = layout.is_panel_visible(&registry, crate::panels::ids::FILE_DRAWER);
+    if file.0 != want {
+        file.0 = want;
     }
 }
 
@@ -630,7 +661,7 @@ fn mark_file_tree_dirty_on_fs_change(
 /// 处理文件条目点击：发 `OpenFileRequest`，由上下文面板预览页加载（v7 行为变更）。
 ///
 /// 原内嵌预览区已取消——代码/非代码文件统一走编辑器 buffer 加载：
-/// `handle_open_file_requests` 会切 `SideViewContent::Editor` 并展开分屏。
+/// `handle_open_file_requests` 会激活 `editor` 面板并展开分屏。
 /// 点击后同时关闭抽屉（方案 §8.7：浏览→点文件→context 预览打开）。
 ///
 /// 选中态（`FileSelectedMarker`）由本系统维护；条目背景色由

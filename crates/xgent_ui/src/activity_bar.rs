@@ -1,5 +1,10 @@
 //! 图标轨（v7）：左侧 52px 导航——对话 / 文件 / 历史 | 终端 | 展开面板 · 陪伴。
 //!
+//! v8 M5：轨项由**面板注册表**驱动（`Slot::Rail` 的注册项），选中态**从
+//! 「注册表 ∩ 槽位可见性」派生**（[`PanelRegistry::active_rail`]）——不再有
+//! 独立的 `ActiveActivity` 存储，连点同一项两次把面板关掉后，选中态自然回落
+//! （修 D4）。
+//!
 //! v7 重构（方案 §8.3）：矢量图标 + tooltip + `accent_bg` 激活态 + 左侧 3px
 //! 竖条；历史入口自顶栏迁入；编辑器入口移除（预览归上下文面板页签，M5-T1）；
 //! 陪伴按钮为全界面唯一暖色例外（ADR-0014 裁剪#3，宠物本体 P1）。
@@ -11,33 +16,23 @@ use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
-use crate::layout::{ActivityBarMarker, SideViewCollapsed};
+use crate::layout::ActivityBarMarker;
+use crate::panels::{
+    PanelActivate, PanelDeactivate, PanelRegistry, RailAction, Slot, SlotLayout, ids,
+};
 use crate::status_bar::CompanionOn;
 use crate::theme::{Theme, size, space};
 
-/// 图标轨项类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ActivityKind {
-    /// 对话（默认视图）
-    #[default]
-    Chat,
-    /// 文件抽屉
-    Files,
-    /// 会话历史抽屉
-    History,
-    /// 终端
-    Terminal,
+/// 图标轨项标记（携带该 rail 入口的面板 id）。
+#[derive(Component, Debug, Clone)]
+pub struct RailItemMarker {
+    /// rail 入口自身的面板 id（`Slot::Rail`）。
+    pub id: &'static str,
 }
 
-/// 图标轨项标记。
+/// 图标轨项容器标记（轨项按钮由注册表派生，动态重建于其内）。
 #[derive(Component, Default)]
-pub struct ActivityItemMarker {
-    pub kind: ActivityKind,
-}
-
-/// 当前活跃的图标轨项。
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ActiveActivity(pub ActivityKind);
+pub struct RailItemsMarker;
 
 /// 「展开面板」按钮标记（面板折叠/响应式收起时显示）。
 #[derive(Component, Default)]
@@ -56,97 +51,64 @@ pub struct ActivityBarPlugin;
 
 impl Plugin for ActivityBarPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActiveActivity>()
-            .add_systems(
-                Startup,
-                spawn_activity_bar.after(crate::layout::spawn_layout),
-            )
-            .add_systems(
-                Update,
-                (
-                    handle_rail_click,
-                    update_active_indicators,
-                    update_expand_visibility,
-                    update_companion_visual,
-                    companion_ring_system,
-                ),
-            );
+        // 面板注册表（幂等：宿主可能已装配）
+        if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
+            app.add_plugins(crate::panels::PanelsPlugin);
+        }
+        if !app.is_plugin_added::<crate::panels::visibility::VisibilityPlugin>() {
+            app.add_plugins(crate::panels::visibility::VisibilityPlugin);
+        }
+        app.add_systems(
+            Startup,
+            spawn_activity_bar.after(crate::layout::spawn_layout),
+        )
+        .add_systems(
+            Update,
+            (
+                sync_rail_items,
+                handle_rail_click,
+                update_active_indicators,
+                update_companion_visual,
+                companion_ring_system,
+            ),
+        );
     }
 }
 
-/// 单个轨上按钮（40×40、圆角 6、ghost hover、tooltip）。
-fn rail_button(
-    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
-    kit: &UiKit,
-    kind: ActivityKind,
-    icon_name: &str,
-    tip: &str,
-) -> Entity {
-    p.spawn((
-        Button,
-        Hovered::default(),
-        Node {
-            width: px(size::ICON_BTN),
-            height: px(size::ICON_BTN),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            border_radius: BorderRadius::all(px(6.0)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BackgroundColor(Color::NONE),
-        BorderColor::all(Color::NONE),
-        HoverTint::ghost(kit.theme),
-        Tooltip {
-            text: tip.to_string(),
-        },
-        ActivityItemMarker { kind },
-    ))
-    .with_children(|b| {
-        b.spawn(icon(kit.icons, icon_name, 20.0, kit.theme.text_muted));
-    })
-    .id()
-}
-
-/// 启动时在图标轨内 spawn：对话 / 文件 / 历史 | 终端 | spacer | 展开面板 · 陪伴。
+/// 启动时在图标轨内 spawn：轨项容器 + spacer + 展开面板 · 陪伴。
+///
+/// 轨项按钮本身由 [`sync_rail_items`] 从注册表生成（注册表在别的模块的
+/// Startup 里填充，轨项无法在 Startup 里可靠排序）。
 fn spawn_activity_bar(
     mut commands: Commands,
     q_bar: Query<Entity, With<ActivityBarMarker>>,
     theme: Res<Theme>,
     icons: Res<IconAssets>,
-    fonts: Res<crate::fonts::UiFonts>,
 ) {
     let Ok(bar) = q_bar.single() else {
         return;
     };
-    let kit = UiKit {
-        theme: &theme,
-        icons: &icons,
-        fonts: &fonts,
-    };
-
     let mut companion_star: Option<Entity> = None;
     commands.entity(bar).with_children(|p| {
-        rail_button(p, &kit, ActivityKind::Chat, "chat", "对话");
-        rail_button(p, &kit, ActivityKind::Files, "folder", "文件");
-        rail_button(p, &kit, ActivityKind::History, "clock", "历史会话");
-        // 分隔线
+        // 轨项容器（按钮由注册表派生）
         p.spawn((
             Node {
-                width: px(24.0),
-                height: px(1.0),
-                margin: UiRect::vertical(px(space::SM)),
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: px(space::XS),
+                flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(theme.border),
+            RailItemsMarker,
         ));
-        rail_button(p, &kit, ActivityKind::Terminal, "terminal", "终端");
         // spacer
         p.spawn((Node {
             flex_grow: 1.0,
             ..default()
         },));
-        // 展开面板钮（面板折叠/响应式收起时显示，update_expand_visibility 控制）
+        // 展开面板钮（面板折叠/响应式收起时显示；显隐由派生系统按
+        // `Slot::SideDock` 的开合状态写）
         p.spawn((
             Button,
             Hovered::default(),
@@ -167,6 +129,7 @@ fn spawn_activity_bar(
                 text: "展开面板".to_string(),
             },
             ExpandPanelButtonMarker,
+            crate::panels::PanelVisibility::of_slot(Slot::SideDock),
         ))
         .with_children(|b| {
             b.spawn(icon(&icons, "panel-right", 20.0, theme.text_muted));
@@ -211,6 +174,99 @@ fn spawn_activity_bar(
     }
 }
 
+/// 轨项按钮（40×40、圆角 6、ghost hover、tooltip）。
+fn rail_button(
+    p: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    kit: &UiKit,
+    id: &'static str,
+    icon_name: &str,
+    tip: String,
+) -> Entity {
+    p.spawn((
+        Button,
+        Hovered::default(),
+        Node {
+            width: px(size::ICON_BTN),
+            height: px(size::ICON_BTN),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            border_radius: BorderRadius::all(px(6.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+        BorderColor::all(Color::NONE),
+        HoverTint::ghost(kit.theme),
+        Tooltip { text: tip },
+        RailItemMarker { id },
+    ))
+    .with_children(|b| {
+        b.spawn(icon(kit.icons, icon_name, 20.0, kit.theme.text_muted));
+    })
+    .id()
+}
+
+/// 注册表变化时重建轨项按钮（轨项 = `Slot::Rail` 的注册面板）。
+pub fn sync_rail_items(
+    registry: Res<PanelRegistry>,
+    theme: Res<Theme>,
+    icons: Res<IconAssets>,
+    fonts: Res<crate::fonts::UiFonts>,
+    loc: Res<xgent_settings::Localizer>,
+    mut commands: Commands,
+    q_container: Query<Entity, With<RailItemsMarker>>,
+    q_items: Query<Entity, With<RailItemMarker>>,
+    mut signature: Local<Vec<&'static str>>,
+) {
+    let wanted: Vec<&'static str> = registry.iter_rail().map(|e| e.desc.id).collect();
+    if wanted == *signature {
+        return;
+    }
+    *signature = wanted.clone();
+    let Ok(container) = q_container.single() else {
+        return;
+    };
+    for entity in q_items.iter() {
+        commands.entity(entity).despawn();
+    }
+    let kit = UiKit {
+        theme: &theme,
+        icons: &icons,
+        fonts: &fonts,
+    };
+    for entry in registry.iter_rail() {
+        let Some(rail) = entry.desc.rail else {
+            continue;
+        };
+        // 分隔线（由描述符声明，不在代码里硬编码分组）
+        if rail.divider_before {
+            commands.entity(container).with_children(|p| {
+                p.spawn((
+                    Node {
+                        width: px(24.0),
+                        height: px(1.0),
+                        margin: UiRect::vertical(px(space::SM)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.border),
+                ));
+            });
+        }
+        // tooltip 取被驱动面板的 `title_key`（i18n 单源）
+        let tip = registry
+            .get(rail.target)
+            .map(|t| crate::i18n::tr(&loc, t.desc.title_key))
+            .unwrap_or_else(|| entry.desc.id.to_string());
+        let icon_name = registry
+            .get(rail.target)
+            .map(|t| t.desc.icon)
+            .unwrap_or(entry.desc.icon);
+        commands.entity(container).with_children(|p| {
+            rail_button(p, &kit, entry.desc.id, icon_name, tip);
+        });
+    }
+}
+
 /// 陪伴激活环节点标记。
 #[derive(Component, Default)]
 pub struct CompanionRingMarker;
@@ -244,64 +300,53 @@ fn companion_ring_system(
     }
 }
 
-/// 处理图标轨点击：切换面板/视图/抽屉。
+/// 处理图标轨点击：按描述符驱动目标面板（消息）。
 fn handle_rail_click(
-    q_items: Query<&ActivityItemMarker, Added<Pressed>>,
+    q_items: Query<&RailItemMarker, Added<Pressed>>,
     q_expand: Query<(), (With<ExpandPanelButtonMarker>, Added<Pressed>)>,
     q_companion: Query<(), (With<CompanionButtonMarker>, Added<Pressed>)>,
-    mut active: ResMut<ActiveActivity>,
-    overlay: Res<crate::overlay::OverlayRegistry>,
-    mut drawer_toggle: MessageWriter<crate::overlay::DrawerToggle>,
-    mut side_collapsed: ResMut<SideViewCollapsed>,
-    mut content: ResMut<crate::editor::SideViewContent>,
+    registry: Res<PanelRegistry>,
+    mut activate: MessageWriter<PanelActivate>,
+    mut deactivate: MessageWriter<PanelDeactivate>,
+    mut layout: ResMut<SlotLayout>,
     terminal_tabs: Res<crate::terminal::TerminalTabs>,
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
     mut companion: ResMut<CompanionOn>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     for item in q_items.iter() {
-        match item.kind {
-            ActivityKind::Chat => {
-                // 对话为默认视图：关闭当前打开的可覆盖层（若有）。
-                if let Some(open) = overlay.open() {
-                    drawer_toggle.write(crate::overlay::DrawerToggle(open));
-                }
-                active.0 = ActivityKind::Chat;
+        let Some(entry) = registry.get(item.id) else {
+            continue;
+        };
+        let Some(rail) = entry.desc.rail else {
+            continue;
+        };
+        match rail.action {
+            // 回到主区：激活目标面板（`Slot::Center` 的面板被激活时，注册表
+            // 自动让所有可覆盖层面板失活）。
+            RailAction::FocusMain => {
+                activate.write(PanelActivate { id: rail.target });
             }
-            ActivityKind::Files => {
-                drawer_toggle.write(crate::overlay::DrawerToggle(
-                    crate::overlay::OverlayId::FileDrawer,
-                ));
-                active.0 = ActivityKind::Files;
-            }
-            ActivityKind::History => {
-                drawer_toggle.write(crate::overlay::DrawerToggle(
-                    crate::overlay::OverlayId::HistoryDrawer,
-                ));
-                active.0 = ActivityKind::History;
-            }
-            ActivityKind::Terminal => {
-                if *content == crate::editor::SideViewContent::Terminal {
-                    *content = crate::editor::SideViewContent::None;
-                    side_collapsed.0 = true;
+            // 切换目标面板的可见性。
+            RailAction::Toggle => {
+                if registry.is_visible(rail.target) {
+                    deactivate.write(PanelDeactivate { id: rail.target });
                 } else {
-                    *content = crate::editor::SideViewContent::Terminal;
-                    side_collapsed.0 = false;
-                    if terminal_tabs.is_empty() {
+                    if rail.target == ids::TERMINAL && terminal_tabs.is_empty() {
                         let cwd = project_root
                             .as_deref()
                             .map(|r| r.path.clone())
                             .unwrap_or_else(std::env::temp_dir);
                         terminal_spawn.write(crate::terminal::tabs::SpawnTabRequest { cwd });
                     }
-                    active.0 = ActivityKind::Terminal;
+                    activate.write(PanelActivate { id: rail.target });
                 }
             }
         }
     }
-    // 展开面板钮：恢复折叠的上下文面板
+    // 展开面板钮：恢复折叠的上下文面板（`Slot::SideDock` 展开）
     for _ in q_expand.iter() {
-        side_collapsed.0 = false;
+        layout.set_open(Slot::SideDock, true);
     }
     // 陪伴开关
     for _ in q_companion.iter() {
@@ -310,23 +355,27 @@ fn handle_rail_click(
 }
 
 /// 活跃项视觉：`accent_bg` 底 + `accent_interactive` 图标 + 左侧 3px 圆角竖条。
+///
+/// 选中态由 [`PanelRegistry::active_rail`] **派生**（不再独立存储）。
 fn update_active_indicators(
-    active: Res<ActiveActivity>,
+    registry: Res<PanelRegistry>,
+    layout: Res<SlotLayout>,
     theme: Res<Theme>,
     mut q: Query<(
-        &ActivityItemMarker,
+        &RailItemMarker,
         &mut Node,
         &mut BackgroundColor,
         &mut BorderColor,
         &Children,
     )>,
-    mut q_icon: Query<&mut ImageNode, Without<ActivityItemMarker>>,
+    mut q_icon: Query<&mut ImageNode, Without<RailItemMarker>>,
 ) {
-    if !active.is_changed() && !theme.is_changed() {
+    if !registry.is_changed() && !layout.is_changed() && !theme.is_changed() {
         return;
     }
+    let active = registry.active_rail(&layout);
     for (item, mut node, mut bg, mut border, children) in q.iter_mut() {
-        let is_active = item.kind == active.0;
+        let is_active = active == Some(item.id);
         bg.0 = if is_active {
             theme.accent_bg
         } else {
@@ -354,23 +403,6 @@ fn update_active_indicators(
                 img.color = icon_color;
             }
         }
-    }
-}
-
-/// 「展开面板」钮随面板折叠态显隐。
-fn update_expand_visibility(
-    side_collapsed: Res<SideViewCollapsed>,
-    mut q: Query<&mut Node, With<ExpandPanelButtonMarker>>,
-) {
-    if !side_collapsed.is_changed() {
-        return;
-    }
-    for mut node in q.iter_mut() {
-        node.display = if side_collapsed.0 {
-            Display::Flex
-        } else {
-            Display::None
-        };
     }
 }
 
@@ -403,39 +435,65 @@ fn update_companion_visual(
     }
 }
 
+/// 轨项的可见性由注册表派生（`Slot::Rail` 恒开），选中态由
+/// [`PanelRegistry::active_rail`] 派生。
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panels::{PanelDescriptor, ids};
 
-    /// v8 M1 回归：抽屉互斥由 `OverlayRegistry` 单一裁决——打开文件抽屉会关闭历史抽屉。
+    /// v8 M5 回归：内置 rail 入口的描述符自洽——目标面板 id 合法、顺序递增、
+    /// tooltip 的 `title_key` 与目标面板一致。
     #[test]
-    fn drawers_are_mutually_exclusive_via_overlay() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::layout::FileDrawerOpen>()
-            .init_resource::<crate::session_history::SessionHistoryState>()
-            .add_plugins(crate::overlay::OverlayPlugin);
+    fn builtin_rail_descriptors_are_consistent() {
+        let entries = crate::panels::builtin_rail_panels();
+        assert_eq!(entries.len(), 4);
+        let mut last_order = i16::MIN;
+        for entry in &entries {
+            assert_eq!(entry.slot, Slot::Rail);
+            assert!(entry.order > last_order, "rail 顺序应递增");
+            last_order = entry.order;
+            let rail = entry.rail.expect("rail 入口必须有目标");
+            assert!(!rail.target.is_empty());
+        }
+        // 文件 / 历史入口驱动 Overlay 槽位的两个面板
+        let files = entries
+            .iter()
+            .find(|e| e.id == ids::RAIL_FILES)
+            .expect("应有文件入口");
+        assert_eq!(files.rail.map(|r| r.target), Some(ids::FILE_DRAWER));
+    }
 
-        app.world_mut().write_message(crate::overlay::DrawerToggle(
-            crate::overlay::OverlayId::HistoryDrawer,
-        ));
-        app.update();
-        assert!(
-            app.world()
-                .resource::<crate::session_history::SessionHistoryState>()
-                .open
+    /// v8 M5 回归：rail 选中态**从注册表派生**——目标面板不可见时选中态回落到
+    /// 对话（不残留）。
+    #[test]
+    fn rail_selection_is_derived_and_falls_back() {
+        let mut registry = PanelRegistry::default();
+        for desc in crate::panels::builtin_rail_panels() {
+            registry.register(desc, None);
+        }
+        registry.register(
+            PanelDescriptor::new(ids::CHAT, Slot::Center, "panel-chat", "chat", 0)
+                .with_default_visible(),
+            None,
         );
+        registry.register(
+            PanelDescriptor::new(
+                ids::FILE_DRAWER,
+                Slot::Overlay,
+                "panel-file-drawer",
+                "folder",
+                0,
+            ),
+            None,
+        );
+        let layout = SlotLayout::default();
 
-        app.world_mut().write_message(crate::overlay::DrawerToggle(
-            crate::overlay::OverlayId::FileDrawer,
-        ));
-        app.update();
-        assert!(app.world().resource::<crate::layout::FileDrawerOpen>().0);
-        assert!(
-            !app.world()
-                .resource::<crate::session_history::SessionHistoryState>()
-                .open,
-            "文件抽屉打开时历史抽屉应被关闭"
-        );
+        assert_eq!(registry.active_rail(&layout), Some(ids::RAIL_CHAT));
+        registry.activate(ids::FILE_DRAWER);
+        assert_eq!(registry.active_rail(&layout), Some(ids::RAIL_FILES));
+        // 关掉抽屉 → 选中态回落到对话（连点两次 Files 不残留）
+        registry.deactivate(ids::FILE_DRAWER);
+        assert_eq!(registry.active_rail(&layout), Some(ids::RAIL_CHAT));
     }
 }

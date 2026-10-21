@@ -56,15 +56,12 @@ pub enum EditorView {
     Editor,
 }
 
-/// 右侧分屏内容类型：编辑器视图 / 文件预览 / 终端 / 无（收起）。
+/// 右侧分屏内容类型（**迁移 shim**，M5-T1 引入、M5-T6 拆除）。
 ///
-/// 由 [`crate::file_panel::handle_file_click`]（Editor/Preview）与终端模块
-/// （Terminal，`Ctrl+`` / rail 终端钮）设置；[`apply_editor_view_visibility`]
-/// 统一据它切换 `EditorViewMarker` 与 `FilePreviewMarker` 的显隐，避免多系统
-/// 并发写同一组件（B0001）。终端容器（`TerminalViewMarker`）的显隐由终端模块
-/// 自身的 `apply_terminal_view_visibility` 系统[^1]据本 Resource 切换。
-///
-/// [^1]: `crate::terminal::apply_terminal_view_visibility`
+/// v8 M5 起分屏内容由**面板注册表**（`crate::panels`）裁决：右侧分屏是
+/// `Slot::SideDock` 槽位，editor / preview / diff / terminal 各自是注册面板。
+/// 本枚举**仅保留**给迁移 shim 使用（`crate::panels::shim` 的「枚举 → 描述符
+/// 一次性映射」），产品代码不再读写它——M5-T6 连同枚举一并删除。
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideViewContent {
     /// 无内容（分屏收起或初始）
@@ -74,7 +71,7 @@ pub enum SideViewContent {
     Editor,
     /// 文件预览（非代码文件）
     Preview,
-    /// 差异视图（buffer vs 磁盘，M5-T4）
+    /// 差异视图（buffer vs 磁盘）
     Diff,
     /// 终端视图（多 tab PTY）
     Terminal,
@@ -89,6 +86,13 @@ pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        // 面板注册表（幂等：宿主可能已装配）
+        if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
+            app.add_plugins(crate::panels::PanelsPlugin);
+        }
+        if !app.is_plugin_added::<crate::panels::visibility::VisibilityPlugin>() {
+            app.add_plugins(crate::panels::visibility::VisibilityPlugin);
+        }
         app.add_message::<OpenFileRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<CycleTabRequest>()
@@ -105,21 +109,10 @@ impl Plugin for EditorPlugin {
             .init_resource::<EditorIoRuntime>()
             .init_resource::<EditorStateSnapshot>()
             .add_systems(Update, sync_editor_theme.before(xui::TextEditorUpdateSet))
-            .add_systems(
-                Update,
-                (
-                    handle_page_tab_click,
-                    update_page_tab_indicators,
-                    diff_view::rebuild_diff_view,
-                ),
-            )
+            .add_systems(Update, (diff_view::rebuild_diff_view,))
             .add_systems(
                 Startup,
-                (
-                    spawn_editor_view,
-                    spawn_page_tabs,
-                    diff_view::spawn_diff_view,
-                )
+                (spawn_editor_view, diff_view::spawn_diff_view)
                     .after(crate::layout::spawn_layout)
                     .chain(),
             )
@@ -142,14 +135,11 @@ impl Plugin for EditorPlugin {
                     (
                         apply_file_read_results,
                         handle_pending_goto,
-                        apply_editor_view_visibility,
                         update_buffer_visibility,
                         sync_dirty_state,
                         update_editor_state_snapshot,
                         rebuild_editor_tabs,
                         handle_editor_tab_click,
-                        // 编辑器/预览顶栏与页签条的「返回对话」按钮（此前
-                        // 定义了系统却从未注册，按钮点击无响应）
                         handle_back_button_click,
                         handle_file_changed,
                         handle_conflict_decision,
@@ -172,6 +162,7 @@ fn spawn_editor_view(
     mut commands: Commands,
     q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
     theme: Res<Theme>,
+    mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
     let Ok(side) = q_side.single() else {
         return;
@@ -179,19 +170,33 @@ fn spawn_editor_view(
     // 编辑器视图容器：作为分屏内容，初始隐藏（由 buffer 显隐 + 分屏显隐共同决定）
     // v8 M3-T3：同列还有 38px 页签条，页面若用 `height:100%` 会把底部顶出视口
     // （审计 D2：终端状态条永久掉出 38px）。改用 `region_fill`（flex 填满剩余空间）。
-    let mut view_node = xui::region_fill();
-    view_node.width = Val::Percent(100.0);
-    view_node.flex_direction = FlexDirection::Column;
-    view_node.overflow = Overflow::clip();
-    view_node.display = Display::None;
+    // v8 M5-T3：初始隐藏改为**构造期字面量**（不再是运行时写手）；
+    // 之后的显隐由 `derive_panel_visibility` 依据注册表派生。
+    let view_node = Node {
+        display: Display::None,
+        width: Val::Percent(100.0),
+        flex_direction: FlexDirection::Column,
+        overflow: Overflow::clip(),
+        ..xui::region_fill()
+    };
     let editor_view = commands
-        .spawn((view_node, BackgroundColor(theme.code_bg), EditorViewMarker))
+        .spawn((
+            view_node,
+            BackgroundColor(theme.code_bg),
+            EditorViewMarker,
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::EDITOR,
+                crate::panels::Slot::SideDock,
+            ),
+        ))
         .with_children(|p| {
-            // 顶部栏：tab 条（EditorTabBarMarker，动态 spawn tab 项）+ spacer + ✕ 关分屏
+            // 顶部栏：**文档列表**（打开的代码文件）+ spacer。
+            // v8 M5-T4：这里的 ✕ 返回入口被移除——侧区顶部只保留**一个**返回入口
+            // （槽位页签条上的 `EditorBackBsttonMarker`）。
             p.spawn((
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(crate::theme::size::EDITOR_TABS_H),
+                    height: px(crate::theme::size::EDITOR_TABS_H),
                     align_items: AlignItems::Center,
                     flex_direction: FlexDirection::Row,
                     border: UiRect::bottom(px(1.0)),
@@ -201,7 +206,7 @@ fn spawn_editor_view(
                 BorderColor::all(theme.border),
             ))
             .with_children(|bar| {
-                // tab 条容器（动态 spawn tab 项，见 rebuild_editor_tabs）
+                // 文档列表容器（动态 spawn tab 项，见 rebuild_editor_tabs）
                 bar.spawn((
                     Node {
                         flex_grow: 1.0,
@@ -248,6 +253,17 @@ fn spawn_editor_view(
         })
         .id();
     commands.entity(side).add_child(editor_view);
+    // v8 M5：注册为 `Slot::SideDock` 面板（页签标题取 `title_key`）。
+    register.write(crate::panels::PanelRegister {
+        desc: crate::panels::PanelDescriptor::new(
+            crate::panels::ids::EDITOR,
+            crate::panels::Slot::SideDock,
+            "panel-editor",
+            "file",
+            0,
+        ),
+        view: Some(editor_view),
+    });
 }
 
 /// 把 xgent_ui [`Theme`]（用户/系统可配的单一字号源）同步到 xui [`EditorTheme`]。
@@ -290,7 +306,7 @@ fn sync_editor_theme(
     editor_theme.punc = Some(theme.punc);
     editor_theme.plain = Some(theme.code_text);
 }
-/// 返回对话按钮标记。
+/// 返回对话按钮标记（v8 M5-T4 前有两套；本期先保留编辑器侧这一套）。
 #[derive(Component, Default)]
 pub struct EditorBackButtonMarker;
 
@@ -329,31 +345,6 @@ pub fn handle_editor_save_requests(
         });
     }
 }
-/// 据右侧分屏内容（`SideViewContent`）切换 `EditorViewMarker` 的显隐，并展开分屏。
-///
-/// `EditorViewMarker` 即 v7 上下文面板的「预览页」主体（M5-T2 归一）；由本系统
-/// 统一写 `Node.display`，避免多系统并发写同一组件（B0001）。
-pub fn apply_editor_view_visibility(
-    content: Res<SideViewContent>,
-    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
-    mut q: Query<&mut Node, With<EditorViewMarker>>,
-) {
-    // 有内容时展开分屏；None 时不主动收（收起由返回按钮/Ctrl+\ 触发）
-    if *content != SideViewContent::None && collapsed.0 {
-        collapsed.0 = false;
-    }
-    let editor_display = if *content == SideViewContent::Editor {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    for mut node in &mut q {
-        if node.display != editor_display {
-            node.display = editor_display;
-        }
-    }
-}
-
 /// 切换到编辑器视图。
 pub fn switch_to_editor_view(mut view: ResMut<EditorView>) {
     *view = EditorView::Editor;
@@ -364,23 +355,11 @@ pub fn switch_to_chat_view(mut view: ResMut<EditorView>) {
     *view = EditorView::Chat;
 }
 
-/// 处理返回对话按钮点击：切回对话视图 + 收起右侧分屏 + 清空分屏内容。
-pub fn handle_back_button_click(
-    q_btn: Query<(), (With<EditorBackButtonMarker>, Added<Pressed>)>,
-    mut view: ResMut<EditorView>,
-    mut content: ResMut<SideViewContent>,
-    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
-) {
-    for _ in q_btn.iter() {
-        *view = EditorView::Chat;
-        *content = SideViewContent::None;
-        collapsed.0 = true;
-    }
-}
 /// 解决"打开第二个文件时旧内容仍显示"——多标签下所有 buffer 都挂在
 /// `EditorAreaMarker` 下，需显式控制各自 `Display`。
-/// 编辑器视图整体隐藏时（`EditorView::Chat`），所有 buffer 也隐藏
-/// （由容器 `Display::None` 级联，但显式设置更稳）。
+///
+/// **内容态可见性**（当前文档页签），不属于面板 / 区域可见性——按 M5-T3 的
+/// 确认口径保留在各自模块，不并入 `derive_panel_visibility`。
 pub fn update_buffer_visibility(
     tabs: Res<EditorTabs>,
     view: Res<EditorView>,
@@ -634,9 +613,9 @@ pub fn handle_pending_goto(
     }
 }
 
-// ===== 上下文面板页签（M5-T1）=====
+// ===== 上下文面板页签（M5-T4：本期仍留在编辑器侧，下一期迁到槽位布局）=====
 
-/// 页签页类型（映射 `SideViewContent`：Editor/Preview 归一为预览页）。
+/// 页签页类型（映射注册表面板 id）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SideViewPage {
     Preview,
@@ -736,39 +715,38 @@ fn spawn_page_tabs(
     commands.entity(side).insert_children(0, &[bar]);
 }
 
-/// 页签点击：切 `SideViewContent` 并展开面板。
+/// 页签点击：激活对应面板（消息）。
 fn handle_page_tab_click(
     q: Query<&PageTabMarker, (Added<Pressed>, With<Button>)>,
-    mut content: ResMut<SideViewContent>,
-    mut collapsed: ResMut<crate::layout::SideViewCollapsed>,
+    mut activate: MessageWriter<crate::panels::PanelActivate>,
 ) {
     for tab in q.iter() {
-        *content = match tab.page {
-            SideViewPage::Preview => SideViewContent::Editor,
-            SideViewPage::Diff => SideViewContent::Diff,
-            SideViewPage::Terminal => SideViewContent::Terminal,
+        let id = match tab.page {
+            SideViewPage::Preview => crate::panels::ids::EDITOR,
+            SideViewPage::Diff => crate::panels::ids::DIFF,
+            SideViewPage::Terminal => crate::panels::ids::TERMINAL,
         };
-        collapsed.0 = false;
+        activate.write(crate::panels::PanelActivate { id });
     }
 }
 
-/// 页签指示器：active 页 `accent_interactive` 文字 + 底部 2px 交互色线。
+/// 页签指示器：当前可见的面板页签用 `accent_interactive` 文字 + 底部 2px 线。
 fn update_page_tab_indicators(
-    content: Res<SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     theme: Res<Theme>,
     mut q: Query<(&PageTabMarker, &mut TextColor, &mut Node, &mut BorderColor), With<Button>>,
 ) {
-    if !content.is_changed() && !theme.is_changed() {
+    if !registry.is_changed() && !theme.is_changed() {
         return;
     }
-    let active_page = match *content {
-        SideViewContent::Editor | SideViewContent::Preview => SideViewPage::Preview,
-        SideViewContent::Diff => SideViewPage::Diff,
-        SideViewContent::Terminal => SideViewPage::Terminal,
-        SideViewContent::None => return,
-    };
+    let active_id = registry.visible_in_slot(crate::panels::Slot::SideDock);
     for (tab, mut color, mut node, mut border) in q.iter_mut() {
-        let is_active = tab.page == active_page;
+        let page_id = match tab.page {
+            SideViewPage::Preview => crate::panels::ids::EDITOR,
+            SideViewPage::Diff => crate::panels::ids::DIFF,
+            SideViewPage::Terminal => crate::panels::ids::TERMINAL,
+        };
+        let is_active = active_id == Some(page_id);
         let want_color = if is_active {
             theme.accent_interactive
         } else {
@@ -786,5 +764,24 @@ fn update_page_tab_indicators(
         } else {
             Color::NONE
         });
+    }
+}
+
+/// 处理返回对话按钮点击：收起右侧分屏并回到主区对话。
+pub fn handle_back_button_click(
+    q_btn: Query<(), (With<EditorBackButtonMarker>, Added<Pressed>)>,
+    registry: Res<crate::panels::PanelRegistry>,
+    mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
+    mut activate: MessageWriter<crate::panels::PanelActivate>,
+    mut layout: ResMut<crate::panels::SlotLayout>,
+    mut view: ResMut<EditorView>,
+) {
+    for _ in q_btn.iter() {
+        for entry in registry.iter_slot(crate::panels::Slot::SideDock) {
+            deactivate.write(crate::panels::PanelDeactivate { id: entry.desc.id });
+        }
+        layout.set_open(crate::panels::Slot::SideDock, false);
+        activate.write(crate::panels::PanelActivate { id: crate::panels::ids::CHAT });
+        *view = EditorView::Chat;
     }
 }

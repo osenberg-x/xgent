@@ -7,7 +7,6 @@
 
 use bevy::prelude::*;
 use xgent_settings::Localizer;
-use xgent_ui::editor::SideViewContent;
 use xgent_ui::layout::LayoutPlugin;
 use xgent_ui::terminal::TerminalPlugin;
 use xgent_ui::terminal::io::TerminalOutputChunk;
@@ -205,7 +204,11 @@ fn pty_cols_come_from_measured_cell_width() {
     let metrics = *app.world().resource::<MonoMetrics>();
 
     // 切到终端视图（resize 只在终端激活时跟踪；分屏展开与布局需要几帧）
-    *app.world_mut().resource_mut::<SideViewContent>() = SideViewContent::Terminal;
+    // v8 M5：终端是 `Slot::SideDock` 的注册面板，激活它才会渲染并跟踪尺寸
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::TERMINAL,
+        });
     feed_output(&mut app, b"ready\n");
     for _ in 0..6 {
         app.update();
@@ -313,7 +316,11 @@ fn long_run_does_not_wrap_inside_the_run() {
     let metrics = *app.world().resource::<MonoMetrics>();
 
     // 切到终端视图（输出容器需有真实尺寸才有意义）
-    *app.world_mut().resource_mut::<SideViewContent>() = SideViewContent::Terminal;
+    // v8 M5：终端是 `Slot::SideDock` 的注册面板，激活它才会渲染并跟踪尺寸
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate {
+            id: xgent_ui::panels::ids::TERMINAL,
+        });
     // 「中」占 2 格，其后 200 个 ASCII 字符（≈1320px）远超输出容器内容盒宽
     // （≈700px）——第二个 run 的 left 非零，正是容易在 run 内折行的位置。
     let long = "x".repeat(200);

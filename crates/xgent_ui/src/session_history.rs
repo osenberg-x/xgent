@@ -55,6 +55,10 @@ pub struct SessionListMarker;
 #[derive(Component, Default)]
 pub struct SessionListSpacerMarker;
 
+/// 会话列表空态文案标记。
+#[derive(Component, Default)]
+pub struct SessionListEmptyMarker;
+
 /// 会话列表行标记（虚拟列表的行，携带数据下标）。
 #[derive(Component)]
 pub struct SessionListRow {
@@ -76,17 +80,32 @@ pub struct SessionHistoryPlugin;
 impl Plugin for SessionHistoryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SessionHistoryState>()
-            .init_resource::<CachedSessionList>()
-            .add_systems(Update, session_history_overlay_systems)
-            .add_systems(
-                Update,
-                handle_session_list_results.after(xgent_agent::agent_loop::agent_poll_system),
-            )
-            .add_systems(
-                Update,
-                handle_restore_results.after(xgent_agent::agent_loop::agent_poll_system),
-            )
-            .add_systems(Update, sync_session_list_rows);
+            .init_resource::<CachedSessionList>();
+        // 面板注册表（幂等：宿主可能已装配）
+        if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
+            app.add_plugins(crate::panels::PanelsPlugin);
+        }
+        if !app.is_plugin_added::<crate::panels::visibility::VisibilityPlugin>() {
+            app.add_plugins(crate::panels::visibility::VisibilityPlugin);
+        }
+        app.add_systems(
+            Startup,
+            spawn_session_history.after(crate::layout::spawn_layout),
+        )
+        .add_systems(Update, session_history_overlay_systems)
+        .add_systems(
+            Update,
+            handle_session_list_results.after(xgent_agent::agent_loop::agent_poll_system),
+        )
+        .add_systems(
+            Update,
+            handle_restore_results.after(xgent_agent::agent_loop::agent_poll_system),
+        )
+        .add_systems(Update, sync_session_list_rows)
+        .add_systems(
+            Update,
+            sync_session_history_open.in_set(crate::panels::PanelSet::Visibility),
+        );
     }
 }
 
@@ -94,12 +113,17 @@ impl Plugin for SessionHistoryPlugin {
 ///
 /// 可见区间由 `xui::VirtualList` 每帧算出；本系统把区间外的行 despawn、把缺失
 /// 的行 spawn。会话数据来自 [`CachedSessionList`]。
+///
+/// v8 M5：面板常驻后，**空态文案**与**占位块**也由本系统维护（不再随开关
+/// 重建整个面板）。
 fn sync_session_list_rows(
     cached: Res<CachedSessionList>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
     mut q_list: Query<(Entity, &mut xui::VirtualList), With<SessionListMarker>>,
     q_rows: Query<(Entity, &SessionListRow), With<SessionListRow>>,
+    q_empty: Query<Entity, With<SessionListEmptyMarker>>,
+    mut q_spacer: Query<(Entity, &mut Node), With<SessionListSpacerMarker>>,
     mut commands: Commands,
 ) {
     let Ok((list_entity, mut list)) = q_list.single_mut() else {
@@ -109,6 +133,60 @@ fn sync_session_list_rows(
     if list.item_count != total {
         list.item_count = total;
     }
+
+    // 空态：列表为空时显示文案，非空时移除。
+    let empty_present = !q_empty.is_empty();
+    if total == 0 {
+        if !empty_present {
+            commands.entity(list_entity).with_children(|list| {
+                list.spawn((
+                    Node {
+                        padding: UiRect::all(Val::Px(space::XL)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    ui_text(
+                        tr(&loc, "history-empty"),
+                        type_scale::BODY_SM,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),
+                    SessionListEmptyMarker,
+                ));
+            });
+        }
+    } else {
+        for entity in q_empty.iter() {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    // 占位块：撑出列表总高度（否则滚动条只反映已渲染的行）
+    let spacer_h = px(total as f32 * SESSION_ROW_H);
+    if total == 0 {
+        for (entity, _) in q_spacer.iter() {
+            commands.entity(entity).despawn();
+        }
+    } else if let Ok((entity, mut node)) = q_spacer.single_mut() {
+        if node.height != spacer_h {
+            node.height = spacer_h;
+        }
+        let _ = entity;
+    } else {
+        commands.entity(list_entity).with_children(|list| {
+            list.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: spacer_h,
+                    ..default()
+                },
+                SessionListSpacerMarker,
+            ));
+        });
+    }
+
     let first = list.first_visible;
     let last = (first + list.visible_count).min(total);
 
@@ -135,47 +213,48 @@ fn sync_session_list_rows(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// 派生视图：会话历史面板开关（由注册表派生）。
+pub fn sync_session_history_open(
+    registry: Res<crate::panels::PanelRegistry>,
+    layout: Res<crate::panels::SlotLayout>,
+    mut history: ResMut<SessionHistoryState>,
+) {
+    let want = layout.is_panel_visible(&registry, crate::panels::ids::SESSION_HISTORY);
+    if history.open != want {
+        history.open = want;
+    }
+}
+
 fn session_history_overlay_systems(
-    theme: Res<Theme>,
-    loc: Res<Localizer>,
-    cached: Res<CachedSessionList>,
-    mut commands: Commands,
-    q_overlay: Query<(Option<&Hovered>, Entity), With<SessionHistoryOverlayMarker>>,
+    registry: Res<crate::panels::PanelRegistry>,
     q_overlay_pressed: Query<(), (With<SessionHistoryOverlayMarker>, Added<Pressed>)>,
     q_restore: Query<&SessionRestoreButtonMarker, Added<Pressed>>,
     q_close: Query<(), (With<SessionHistoryCloseMarker>, Added<Pressed>)>,
     mut restore_writer: MessageWriter<RestoreSessionMessage>,
-    mut history_state: ResMut<SessionHistoryState>,
+    mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
     mut list_writer: MessageWriter<ListSessionsMessage>,
 ) {
-    // 存在性检查（R1 修复：不用 Changed 闸门做存在性判断——交互组件仅在悬停/点击
-    // 变化帧有变更，未动鼠标时 Changed 过滤为空会误判「不存在」每帧重复
-    // spawn；关闭时同样误判跳过 despawn 留下全屏僵尸遮罩锁死 UI）
-    let existing: Vec<Entity> = q_overlay.iter().map(|(_, e)| e).collect();
-    let exists = !existing.is_empty();
+    // v8 M5：历史面板是 `Slot::Overlay` 的**注册面板**，显隐由注册表裁决
+    // （与文件抽屉同属单例槽位，二者不再争层级）。
+    let visible = registry.is_visible(crate::panels::ids::SESSION_HISTORY);
 
-    // 打开时 spawn overlay（若不存在）
-    if history_state.open && !exists {
+    // 打开时拉取会话列表
+    if visible && registry.is_changed() {
         list_writer.write(ListSessionsMessage);
-        spawn_overlay(&mut commands, &theme, &loc, &cached);
-    }
-
-    // 关闭时 despawn overlay
-    if !history_state.open && exists {
-        for entity in existing {
-            commands.entity(entity).despawn();
-        }
     }
 
     // 遮罩点击关闭（点在面板外 = overlay 根节点收到按下；仅 Added 帧检查）
     for _ in q_overlay_pressed.iter() {
-        history_state.open = false;
+        deactivate.write(crate::panels::PanelDeactivate {
+            id: crate::panels::ids::SESSION_HISTORY,
+        });
     }
 
     // 处理关闭按钮
     for _ in q_close.iter() {
-        history_state.open = false;
+        deactivate.write(crate::panels::PanelDeactivate {
+            id: crate::panels::ids::SESSION_HISTORY,
+        });
     }
 
     // 处理恢复按钮点击
@@ -183,18 +262,29 @@ fn session_history_overlay_systems(
         restore_writer.write(RestoreSessionMessage {
             session_id: marker.session_id.clone(),
         });
-        history_state.open = false;
+        deactivate.write(crate::panels::PanelDeactivate {
+            id: crate::panels::ids::SESSION_HISTORY,
+        });
     }
 }
 
-/// 生成会话历史 overlay 面板。
-fn spawn_overlay(
-    commands: &mut Commands,
-    theme: &Theme,
-    loc: &Localizer,
-    cached: &CachedSessionList,
+/// 启动时 spawn 会话历史面板（遮罩 + 左抽屉），并注册为 `Slot::Overlay` 面板。
+///
+/// v8 M5：面板**常驻**（不再按开关 spawn/despawn），显隐由
+/// `derive_panel_visibility` 依据注册表派生；与文件抽屉同属 `Slot::Overlay`
+/// 单例槽位，二者不再争层级。
+fn spawn_session_history(
+    mut commands: Commands,
+    q_root: Query<Entity, With<crate::layout::UiRoot>>,
+    theme: Res<Theme>,
+    loc: Res<Localizer>,
+    mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
-    commands
+    let Ok(root) = q_root.single() else {
+        return;
+    };
+    // 遮罩（覆盖全窗，点击关闭）
+    let overlay = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
@@ -202,6 +292,7 @@ fn spawn_overlay(
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
+                display: Display::None,
                 ..default()
             },
             BackgroundColor(theme.overlay),
@@ -209,113 +300,110 @@ fn spawn_overlay(
             Button,
             Hovered::default(),
             SessionHistoryOverlayMarker,
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::SESSION_HISTORY,
+                crate::panels::Slot::Overlay,
+            ),
         ))
-        .with_children(|overlay| {
-            // 左抽屉面板（M6-T4：复用 M5-T6 drawer 结构：320px/surface/右边框）
-            overlay
-                .spawn((
+        .id();
+    commands.entity(root).add_child(overlay);
+
+    // 左抽屉面板（复用 drawer 结构：surface 底 + 右边框）
+    let panel = commands
+        .spawn((
+            Node {
+                width: Val::Px(crate::theme::size::DRAWER_W),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                border: UiRect::right(Val::Px(1.0)),
+                // v8 M3-T2：抽屉外壳只做硬裁（不是滚动容器）；
+                // 真正滚动的是下面的会话列表。
+                overflow: Overflow::clip(),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(theme.surface),
+            BorderColor::all(theme.line),
+            // 0.20 指针事件会冒泡到 Button 祖先：面板消费 PointerPress，
+            // 点面板不会误触遮罩关闭（等价旧 FocusPolicy::Block）
+            crate::kit::block_press_bubbling(),
+            // 同上：面板需 Pickable 才能接住点击，避免穿透到遮罩。
+            bevy::picking::Pickable::default(),
+            crate::panels::PanelVisibility::of_panel(
+                crate::panels::ids::SESSION_HISTORY,
+                crate::panels::Slot::Overlay,
+            ),
+        ))
+        .id();
+    commands.entity(overlay).add_child(panel);
+
+    commands.entity(panel).with_children(|panel| {
+        // 标题栏
+        panel
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(space::MD)),
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(theme.border),
+            ))
+            .with_children(|head| {
+                head.spawn(ui_text(
+                    tr(&loc, "history-title"),
+                    type_scale::H3,
+                    590,
+                    theme.text,
+                    type_scale::line_height::UI,
+                ));
+                head.spawn((
+                    Button,
+                    Hovered::default(),
                     Node {
-                        width: Val::Px(crate::theme::size::DRAWER_W),
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        border: UiRect::right(Val::Px(1.0)),
-                        // v8 M3-T2：抽屉外壳只做硬裁（不是滚动容器）；
-                        // 真正滚动的是下面的会话列表。
-                        overflow: Overflow::clip(),
+                        width: Val::Px(crate::theme::size::ICON_SM),
+                        height: Val::Px(crate::theme::size::ICON_SM),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    BackgroundColor(theme.surface),
-                    BorderColor::all(theme.line),
-                    // 0.20 指针事件会冒泡到 Button 祖先：面板消费 PointerPress，
-                    // 点面板不会误触遮罩关闭（等价旧 FocusPolicy::Block）
-                    crate::kit::block_press_bubbling(),
-                    // 同上：面板需 Pickable 才能接住点击，避免穿透到遮罩。
-                    bevy::picking::Pickable::default(),
-                ))
-                .with_children(|panel| {
-                    // 标题栏
-                    panel
-                        .spawn((
-                            Node {
-                                width: Val::Percent(100.0),
-                                padding: UiRect::all(Val::Px(space::MD)),
-                                flex_direction: FlexDirection::Row,
-                                justify_content: JustifyContent::SpaceBetween,
-                                align_items: AlignItems::Center,
-                                border: UiRect::bottom(Val::Px(1.0)),
-                                ..default()
-                            },
-                            BorderColor::all(theme.border),
-                        ))
-                        .with_children(|head| {
-                            head.spawn(ui_text(
-                                tr(loc, "history-title"),
-                                type_scale::H3,
-                                590,
-                                theme.text,
-                                type_scale::line_height::UI,
-                            ));
-                            head.spawn((
-                                Button,
-                                Hovered::default(),
-                                Node {
-                                    width: Val::Px(crate::theme::size::ICON_SM),
-                                    height: Val::Px(crate::theme::size::ICON_SM),
-                                    align_items: AlignItems::Center,
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                },
-                                ui_text(
-                                    tr(loc, "history-close"),
-                                    type_scale::BODY,
-                                    400,
-                                    theme.text_dim,
-                                    type_scale::line_height::UI,
-                                ),
-                                SessionHistoryCloseMarker,
-                            ));
-                        });
+                    ui_text(
+                        tr(&loc, "history-close"),
+                        type_scale::BODY,
+                        400,
+                        theme.text_dim,
+                        type_scale::line_height::UI,
+                    ),
+                    SessionHistoryCloseMarker,
+                ));
+            });
 
-                    // 会话列表
-                    // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定，滚轮真的能滚）。
-                    // v8 M3-T6：虚拟化——只渲染可见行，占位块撑出总高度。
-                    panel
-                        .spawn((
-                            xui::ScrollFrame::vertical(),
-                            xui::VirtualList::new(cached.sessions.len(), SESSION_ROW_H),
-                            SessionListMarker,
-                        ))
-                        .with_children(|list| {
-                            if cached.sessions.is_empty() {
-                                list.spawn((
-                                    Node {
-                                        padding: UiRect::all(Val::Px(space::XL)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        ..default()
-                                    },
-                                    ui_text(
-                                        tr(loc, "history-empty"),
-                                        type_scale::BODY_SM,
-                                        400,
-                                        theme.text_muted,
-                                        type_scale::line_height::UI,
-                                    ),
-                                ));
-                            } else {
-                                // 占位块：撑出列表总高度
-                                list.spawn((
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        height: px(cached.sessions.len() as f32 * SESSION_ROW_H),
-                                        ..default()
-                                    },
-                                    SessionListSpacerMarker,
-                                ));
-                            }
-                        });
-                });
-        });
+        // 会话列表
+        // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定，滚轮真的能滚）。
+        // v8 M3-T6：虚拟化——只渲染可见行，占位块撑出总高度。
+        // v8 M5：空态文案由 `sync_session_list_rows` 按数据维护
+        // （面板常驻，不再随开关重建）。
+        panel.spawn((
+            xui::ScrollFrame::vertical(),
+            xui::VirtualList::new(0, SESSION_ROW_H),
+            SessionListMarker,
+        ));
+    });
+
+    // v8 M5：注册为 `Slot::Overlay` 面板（与文件抽屉同属单例槽位）。
+    register.write(crate::panels::PanelRegister {
+        desc: crate::panels::PanelDescriptor::new(
+            crate::panels::ids::SESSION_HISTORY,
+            crate::panels::Slot::Overlay,
+            "panel-session-history",
+            "clock",
+            1,
+        ),
+        view: Some(panel),
+    });
 }
 
 /// 生成单个会话条目。
@@ -425,22 +513,13 @@ fn format_timestamp(ms: u64) -> String {
     }
 }
 
-/// 订阅 SessionListMessage，更新缓存并重建面板。
+/// 订阅 SessionListMessage，更新缓存。
 fn handle_session_list_results(
     mut reader: MessageReader<SessionListMessage>,
     mut cached: ResMut<CachedSessionList>,
-    state: Res<SessionHistoryState>,
-    mut commands: Commands,
-    q_overlay: Query<Entity, With<SessionHistoryOverlayMarker>>,
 ) {
     for ev in reader.read() {
         cached.sessions = ev.sessions.clone();
-    }
-    // 如果面板打开且缓存更新了，despawn 旧面板（下帧自动重建）
-    if state.open && !q_overlay.is_empty() && cached.is_changed() {
-        for entity in q_overlay.iter() {
-            commands.entity(entity).despawn();
-        }
     }
 }
 
@@ -593,70 +672,53 @@ fn spawn_history_message_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xui::i18n_bridge::Strings;
-    use xui_i18n::StringSource;
+    use crate::panels::{PanelDescriptor, PanelRegistry, Slot, ids};
 
-    /// 空 StringSource（测试不关心 i18n 文案）。
-    struct NoopStrings;
-    impl StringSource for NoopStrings {
-        fn get(&self, key: &str, _args: &[(&str, String)]) -> String {
-            key.to_string()
-        }
-        fn current_lang(&self) -> &str {
-            "zh-CN"
-        }
-    }
-
-    /// 最小 App：R1-P0 回归——overlay 生命周期不依赖交互状态变化。
-    fn test_app() -> App {
+    /// v8 M5 回归：历史面板是 `Slot::Overlay` 的**注册面板**，与文件抽屉同属
+    /// 单例槽位——二者同一时刻至多一个可见（不再争层级）。
+    #[test]
+    fn history_and_file_drawer_share_one_exclusive_slot() {
         let mut app = App::new();
         app.add_plugins(bevy::app::ScheduleRunnerPlugin::default())
             .init_resource::<Theme>()
             .init_resource::<Localizer>()
             .init_resource::<CachedSessionList>()
             .init_resource::<SessionHistoryState>()
-            .insert_resource(Strings(Box::new(NoopStrings)))
             .add_message::<ListSessionsMessage>()
             .add_message::<RestoreSessionMessage>()
-            .add_systems(Update, session_history_overlay_systems);
-        app
-    }
-
-    fn overlay_count(app: &mut App) -> usize {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<Entity, With<SessionHistoryOverlayMarker>>();
-        q.iter(app.world()).count()
-    }
-
-    /// R1-P0 回归：打开后不动鼠标（无交互状态变化），overlay 不应重复 spawn；
-    /// 关闭后不应残留僵尸遮罩。
-    #[test]
-    fn overlay_lifecycle_without_interaction_changes() {
-        let mut app = test_app();
-        app.world_mut().resource_mut::<SessionHistoryState>().open = true;
-        app.update();
-        assert_eq!(overlay_count(&mut app), 1, "打开后应有 1 个 overlay");
-
-        // 旧 bug：Changed 过滤使存在性检查误判「不存在」，
-        // 每帧重复 spawn（跑 5 帧应恒为 1，旧实现会递增到 6）
-        for _ in 0..5 {
-            app.update();
+            .add_plugins(crate::panels::PanelsPlugin);
+        {
+            let mut registry = app.world_mut().resource_mut::<PanelRegistry>();
+            registry.register(
+                PanelDescriptor::new(ids::FILE_DRAWER, Slot::Overlay, "t", "folder", 0),
+                None,
+            );
+            registry.register(
+                PanelDescriptor::new(ids::SESSION_HISTORY, Slot::Overlay, "t", "clock", 1),
+                None,
+            );
         }
-        assert_eq!(
-            overlay_count(&mut app),
-            1,
-            "不动鼠标跑多帧 overlay 不应重复 spawn（R1-P0 回归）"
-        );
 
-        // 关闭：despawn 不应被 Changed 过滤跳过（旧 bug 残留僵尸遮罩）
-        app.world_mut().resource_mut::<SessionHistoryState>().open = false;
+        // 打开历史面板
+        app.world_mut().write_message(crate::panels::PanelActivate {
+            id: ids::SESSION_HISTORY,
+        });
         app.update();
-        assert_eq!(overlay_count(&mut app), 0, "关闭后 overlay 应被清除");
+        {
+            let registry = app.world().resource::<PanelRegistry>();
+            assert!(registry.is_visible(ids::SESSION_HISTORY));
+            assert!(!registry.is_visible(ids::FILE_DRAWER));
+        }
 
-        // 再开：恰好 1 个
-        app.world_mut().resource_mut::<SessionHistoryState>().open = true;
+        // 再打开文件抽屉 → 历史面板自动失活（单例槽位）
+        app.world_mut().write_message(crate::panels::PanelActivate {
+            id: ids::FILE_DRAWER,
+        });
         app.update();
-        assert_eq!(overlay_count(&mut app), 1, "重开后应恰有 1 个 overlay");
+        {
+            let registry = app.world().resource::<PanelRegistry>();
+            assert!(registry.is_visible(ids::FILE_DRAWER));
+            assert!(!registry.is_visible(ids::SESSION_HISTORY));
+        }
     }
 }

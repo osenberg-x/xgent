@@ -20,7 +20,6 @@ use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 
-use crate::editor::SideViewContent;
 use crate::terminal::io::TerminalInput;
 use crate::terminal::{
     TerminalInputCaretMarker, TerminalInputMarker, TerminalTab, TerminalTabStatus, TerminalTabs,
@@ -72,14 +71,14 @@ impl TerminalLineBuf {
 pub fn handle_terminal_keyboard(
     mut reader: MessageReader<bevy::input::keyboard::KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
-    content: Res<SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     focus: Res<bevy::input_focus::InputFocus>,
     tabs: Res<TerminalTabs>,
     mut buf: ResMut<TerminalLineBuf>,
     mut input_writer: MessageWriter<TerminalInput>,
 ) {
     // 仅终端视图激活时捕获
-    if *content != SideViewContent::Terminal {
+    if !registry.is_visible(crate::panels::ids::TERMINAL) {
         return;
     }
     // 有输入框聚焦时不捕获（焦点互斥）
@@ -177,10 +176,10 @@ pub fn handle_terminal_keyboard(
 /// 文本节点自身只存 `chars[..pos]`，`chars[pos..]` 由独立的「光标后」节点存。
 pub fn update_input_line(
     buf: Res<TerminalLineBuf>,
-    content: Res<SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     mut q: Query<&mut Text, With<TerminalInputMarker>>,
 ) {
-    if !content.is_changed() && !buf.is_changed() {
+    if !registry.is_changed() && !buf.is_changed() {
         return;
     }
     let pos = buf.pos.min(buf.chars.len());
@@ -199,10 +198,10 @@ pub struct TerminalInputAfterMarker;
 /// 光标后文本渲染。
 pub fn update_input_after(
     buf: Res<TerminalLineBuf>,
-    content: Res<SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     mut q: Query<&mut Text, With<TerminalInputAfterMarker>>,
 ) {
-    if !content.is_changed() && !buf.is_changed() {
+    if !registry.is_changed() && !buf.is_changed() {
         return;
     }
     let pos = buf.pos.min(buf.chars.len());
@@ -220,14 +219,14 @@ pub fn update_input_after(
 /// （shell 结束，无输入意义）时隐藏。光标字符始终存在（占位稳定），
 /// 闪烁用透明度切换。
 pub fn update_input_caret(
-    content: Res<SideViewContent>,
+    registry: Res<crate::panels::PanelRegistry>,
     tabs: Res<TerminalTabs>,
     q_tabs: Query<&TerminalTab>,
     time: Res<Time>,
     theme: Res<crate::theme::Theme>,
     mut q_caret: Query<&mut TextColor, With<TerminalInputCaretMarker>>,
 ) {
-    let active = *content == SideViewContent::Terminal
+    let active = registry.is_visible(crate::panels::ids::TERMINAL)
         && tabs
             .active_entity()
             .and_then(|e| q_tabs.get(e).ok())

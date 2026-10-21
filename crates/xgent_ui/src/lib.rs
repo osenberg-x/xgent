@@ -25,6 +25,7 @@ pub mod kit;
 pub mod layout;
 pub mod modal;
 pub mod overlay;
+pub mod panels;
 pub mod picking;
 pub mod resize;
 pub mod session_history;
@@ -67,6 +68,8 @@ impl Plugin for XgentUiPlugin {
         ))
         .add_plugins((
             cursor::CursorStylePlugin,
+            panels::PanelsPlugin,
+            panels::visibility::VisibilityPlugin,
             session_history::SessionHistoryPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
