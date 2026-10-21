@@ -1,13 +1,13 @@
 ---
-generated_from_state_version: 9
+generated_from_state_version: 11
 ---
 
 # 验证
 
 ## 当前结果
 
-- 结果: **验收通过，需要你确认**
-- 验证情况: **已完成检查，但需要你确认验证结果**
+- 结果: **已归档**
+- 验证情况: **已完成检查，验证结果已确认**
 - 目标周期: 1
 - 迭代: 2
 - 验证器尝试次数: 1
@@ -50,7 +50,7 @@ generated_from_state_version: 9
 
 ## 阻塞项
 
-- **user**: The generic Skill bridge cannot prove an independent Verifier execution; user confirmation is required before Archive. — next: `await-user`
+_无。_
 
 ## 风险与跳过的工作
 
