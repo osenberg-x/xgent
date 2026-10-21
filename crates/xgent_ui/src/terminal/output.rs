@@ -1,4 +1,4 @@
-﻿//! 终端输出历史渲染：PTY 字节流 → vte 解析 → `RenderHistory` → UI。
+//! 终端输出历史渲染：PTY 字节流 → vte 解析 → `RenderHistory` → UI。
 //!
 //! 详见 `docs/design/terminal-design.md` §3.4、§6。
 //!

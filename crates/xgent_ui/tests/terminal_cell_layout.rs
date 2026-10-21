@@ -12,7 +12,9 @@ use xgent_ui::layout::LayoutPlugin;
 use xgent_ui::terminal::TerminalPlugin;
 use xgent_ui::terminal::io::TerminalOutputChunk;
 use xgent_ui::terminal::metrics::{CellGrid, MonoMetrics};
-use xgent_ui::terminal::output::{OutputCellRun, RenderHistory};
+#[cfg(not(feature = "legacy-terminal-layout"))]
+use xgent_ui::terminal::output::OutputCellRun;
+use xgent_ui::terminal::output::RenderHistory;
 use xgent_ui::terminal::{TerminalTab, TerminalTabStatus, TerminalTabs};
 use xgent_ui::theme::type_scale;
 use xui::i18n_bridge::Strings;
@@ -148,6 +150,10 @@ fn feed_output(app: &mut App, bytes: &[u8]) -> bevy::ecs::entity::Entity {
 }
 
 /// 终端行内 run 节点必须按「起始列 × 单元格宽」定位（A5）。
+///
+/// 旧路径（cargo feature `legacy-terminal-layout`）不 spawn `OutputCellRun`，
+/// 本用例只对按格定位路径有意义。
+#[cfg(not(feature = "legacy-terminal-layout"))]
 #[test]
 fn terminal_runs_are_positioned_by_cell() {
     let mut app = terminal_app();
@@ -266,10 +272,15 @@ fn output_line_height_uses_measured_line_height() {
 #[test]
 fn legacy_column_width_estimate_is_removed() {
     let src = include_str!("../src/terminal/output.rs");
+    assert!(
+        !src.starts_with('\u{feff}'),
+        "output.rs 不应带 UTF-8 BOM（会污染首行的注释过滤）"
+    );
     // 去掉注释行：文档注释里会提到「被删除的系数」，不能误伤。
     let code: String = src
         .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
+        .map(|line| line.trim_start().trim_start_matches('\u{feff}'))
+        .filter(|line| !line.starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
@@ -291,6 +302,10 @@ fn legacy_column_width_estimate_is_removed() {
 /// 绝对定位节点若被约束宽度，靠右的 run 会把文本折成两行、行高超出固定的
 /// `line_h` 压到下一行。本用例把这条不变量钉住（当前实现靠 taffy 对绝对定位
 /// 子节点的 max-content 定宽 + run 上的 `NoWrap` 双重保证）。
+///
+/// 旧路径（cargo feature `legacy-terminal-layout`）不 spawn `OutputCellRun`，
+/// 本用例只对按格定位路径有意义。
+#[cfg(not(feature = "legacy-terminal-layout"))]
 #[test]
 fn long_run_does_not_wrap_inside_the_run() {
     let mut app = terminal_app();
