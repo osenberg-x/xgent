@@ -90,7 +90,7 @@ cargo clippy --workspace          # lint
 | xgent_tools | lib | xgent_core, settings_core | Tool trait + 安全策略 + 执行器（不依赖 Bevy） |
 | xgent_context | lib | xgent_core, settings_core | ContextProvider trait + 方案 A 检索（不依赖 Bevy） |
 | xgent_agent | lib | core, provider, tools, context, settings | agent loop + ECS 桥接 |
-| xgent_terminal | lib | xgent_core, settings_core | PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte）（不依赖 Bevy，UI 侧进程） |
+| xgent_terminal | lib | xgent_core, settings_core | PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte）+ 双宽单元格模型（display_width / layout_cells）（不依赖 Bevy，UI 侧进程） |
 | xui | lib | bevy, xui_i18n | 通用 Bevy UI 组件库（可独立发布，不依赖任何 xgent_*） |
 | xgent_ui | lib | xui, core, settings, agent, terminal | XGent 业务 UI（对话/工具/文件面板/终端等） |
 | xgent_app | bin | all UI-side | UI 进程入口：组装插件、daemon 拉起、IPC 客户端、项目打开 |
@@ -198,7 +198,7 @@ xgent_app → 组装所有 UI 侧 crate
 ## 7. 当前实现状态
 项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。13 个 crate，`cargo check --workspace` 通过，约 5 万行 Rust（`crates/**/*.rs`）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型）、R3-5（Markdown 渲染）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**已交付 M1（分层/拾取/模态）、M2（主题权威/令牌/密度/hover）、M3（滚动契约 `ScrollFrame`、填满契约 `region_fill`、省略原语 `Ellipsis`、虚拟列表 `VirtualList`），下一期 M4（跨平台字体与终端双宽）；台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**已交付 M1（分层/拾取/模态）、M2（主题权威/令牌/密度/hover）、M3（滚动契约 `ScrollFrame`、填满契约 `region_fill`、省略原语 `Ellipsis`、虚拟列表 `VirtualList`）、**M4（跨平台字体装配 + 终端双宽单元格 `MonoMetrics`/`display_width`/按格定位）**，下一期 M5（槽位注册表与派生可见性，⚠ 最大改动面）；台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
 
 ---
 

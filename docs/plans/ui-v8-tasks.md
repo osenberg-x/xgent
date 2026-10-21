@@ -37,7 +37,7 @@ M1 与 M2 相互独立，可并行分头推进。
 |:---|:---|:---|:---|
 | A1 | P0 | M4-T1/T3 | 三平台 `mono` 实测为等宽 + 日志可核对 |
 | A2 | P1 | M2-T6 | 主窗有确定性默认尺寸（DPI 感知） |
-| A3 | P0 | M4-T2 | 中文 `ls -l` 三平台列对齐 |
+| A3 | P0 | M4-T2 | 中文 `ls -l` 三平台列对齐（Windows 已自动化断言；macOS/Linux 待办，见 §10 勘误 31） |
 | B1 | P0 | M1-T1/T2/T3 | 业务代码零裸 `GlobalZIndex(` |
 | B2 | P1 | M1-T4 | 抽屉互斥经消息裁决，单一路径 |
 | B3 | P1 | M1-T5 | tooltip 右缘不裁、不出窗 |
@@ -198,7 +198,8 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## M4 跨平台字体与终端双宽（修 A1/A3，⚠ 硬门槛 A）
 
-> 状态：**M4-T1 已交付**（Comet change `v8-m4-font-assembly`）；M4-T2/T3/T4 未开工。
+> 状态：**M4 全部交付**（M4-T1 `v8-m4-font-assembly`、M4-T2 `v8-m4-terminal-cells`、M4-T3/T4 `v8-m4-mono-typography`）。
+> 硬门槛 A 的 macOS / Linux 启动日志确认**仍待办**（用户 2026-10-21 决定：先做 Windows 适配，其他平台后续）。
 > 台账与勘误见本文 §10。
 
 ### M4-T1 字体装配层（三平台一阶）
@@ -208,15 +209,21 @@ M1 与 M2 相互独立，可并行分头推进。
 - [x] `tracing::info!` 输出实际命中家族与来源（C-FONT-2）。
 - **验收（硬门槛 A）**：三平台各启动一次，日志显示 `mono` 解析到真实等宽字体（非 Inter）；不过则停止铺开并升级处理。
   - Windows（本机）：✅ `tests/font_slots.rs::mono_resolves_to_real_monospace_on_this_machine` 断言本机解析到真等宽（家族 ≠ Inter）。
-  - macOS / Linux：⏳ 需在对应平台各启动一次确认同一行日志（本变更无法在本机覆盖）。
+  - macOS / Linux：⏳ 需在对应平台各启动一次确认同一行日志（**M4-T2 起不阻塞**，见 §10 勘误 31）。
 
 ### M4-T2 终端双宽单元格（⚠ 最大改动面）
-- [ ] `MonoMetrics { latin_advance, cjk_advance, line_height, at_size }` 启动期实测；校验 `cjk_advance ≈ 2×latin_advance`，不满足记警告并调基准（C-FONT-4）。
-- [ ] `display_width(char) -> usize`（wcwidth 语义：CJK 全角 / emoji / U+FF00–FF60 → 2）。
-- [ ] 终端排版改为按格数 × `cell_w` **手工定位**，不再依赖 shaper 连续排版；`terminal/output.rs:380` 的 `font × 0.6` 估算随之删除。
-- [ ] 保留旧路径在 feature flag 下做 A/B 截图对照，通过后再删。
+- [x] `MonoMetrics { latin_advance, cjk_advance, line_height, at_size }` 启动期实测；校验 `cjk_advance ≈ 2×latin_advance`，不满足记警告并调基准（C-FONT-4）。
+  - 实现在 `xgent_ui::terminal::metrics`：探针节点走 bevy 文本管线（终端渲染同一条 measure 路径）反推步进与行高；校验与基准宽调整是纯函数。
+- [x] `display_width(char) -> usize`（wcwidth 语义：CJK 全角 / emoji / U+FF00–FF60 → 2；组合记号 → 0）。
+  - 实现在 `xgent_terminal::render`（终端领域 crate，无 Bevy 依赖），附 `display_width_str` 与 `layout_cells`（按格布局内核）。
+- [x] 终端排版改为按格数 × `cell_w` **手工定位**，不再依赖 shaper 连续排版；`terminal/output.rs` 的 `font × 0.6` 估算随之删除。
+  - 行渲染改为「行容器 + 绝对定位的 run 节点」（`left = 起始列 × cell_w`）；PTY 的列数改为 `floor(视口逻辑宽 / cell_w)`。
+- [x] 保留旧路径在 feature flag 下做 A/B 截图对照，通过后再删。
+  - cargo feature `legacy-terminal-layout`（默认不开启）保留旧的 flex 连续排版路径。
 - **验收**：三平台跑 `ls -l` / `cargo test` 中文输出 / `top`，列对齐正确；`vim` 全屏 TUI 不乱行。
-- 前置：硬门槛 A 的 macOS/Linux 启动日志确认（见 M4-T1 验收）。
+  - Windows（本机）：✅ 自动化断言（`tests/terminal_cell_layout.rs`：实测度量 / run 的 `left == 起始列 × cell_w` / PTY 列数 = `floor(宽 / cell_w)` / 旧估算已删）；实机视觉确认待人工过一遍。
+  - macOS / Linux：⏳ 待办（不阻塞本项归档，见 §10 勘误 31）。
+- 前置：硬门槛 A 的 macOS/Linux 启动日志确认（见 M4-T1 验收）——**已按用户决定降级为不阻塞**。
 
 ### M4-T3 代码与行号消费 `mono`
 - [x] 行号列、diff 行、工具卡参数摘要走等宽（`mono_text` / `ellipsis_mono_text`）；禁止用 `ui_text` 冒充等宽。
@@ -410,6 +417,10 @@ M1 与 M2 相互独立，可并行分头推进。
 26. **bevy 0.20 逐 span 解析字体来源**（M4-T3 修复轮）：只给**根 Text** 实体设 `TextFont.font` 对字形**无效**——根 Text 为空会被排版管线跳过，真正承载字形的 `TextSpan` 各自解析自己的 `TextFont`。因此代码正文与高亮层的**每个 span** 都必须自带字体来源（`virtual_render.rs` / `render.rs` 的 span spawn 处）。这是「行号列换了等宽、代码列仍是比例字体 → 两列不同源」的根因。
 27. **消息正文有三条渲染路径**（M4-T4 修复轮）：流式助手正文、**固化副本**（`finalize_on_done`）、**会话历史回看**。只改流式路径会出现「流式 1.7 → 完成 1.6」的行高跳变，且历史回看又是 1.6 → 三条路径都要走 `line_height::for_text`。
 28. **非整数 DPI 下的视觉对齐仍需真实窗口**（M4-T3）：代码侧只能保证行号列与代码正文同源同字体（等宽 → 数字等宽）；「125%/150% 缩放下行号列与代码列仍对齐」这一**视觉**判据需真实窗口 + 非整数 DPI 才能确认。
+29. **等宽度量不能读 `TextLayoutInfo.size`**（M4-T2）：`TextLayoutInfo.size` 是 `ceil` 过的物理像素（12px × 1.6 行高会被抬成 **20.0** 而不是 19.2；32 个 6.6px 字符的 211.2 会变成 212）。误差会**直接**进到单元格基准宽与行高上。正确取法是 `ComputedTextBlock::buffer()` 的 parley layout 原始值（`full_width()` / `height()`），再除以 `layout.scale()` 还原逻辑像素。
+30. **CJK 回退字体几乎不可能满足 2:1**（M4-T2）：微软雅黑 / 苹方 / 思源黑体的**汉字**步进是 1em，而等宽拉丁是 0.6em——`cjk_advance ≈ 2 × latin_advance` 在三平台**都**不成立（实测本机通用等宽：latin 6.60px / cjk 12.0px，2×latin = 13.2px，偏差 9%）。因此 C-FONT-4 的「不满足记警告并调基准宽」是**常态路径**而非异常分支：基准宽取 `max(latin_advance, cjk_advance / 2)`，宽字符仍按 2 格定位（起点严格落在格边界），代价是与相邻窄字符之间留有间隙。⚠ 推论：**`mono_cjk` 槽位（Sarasa / Noto Sans Mono CJK）才是真正 2:1 的等宽 CJK**，本轮未接入（见 §M4-T2 非目标）。
+31. **硬门槛 A 的 macOS / Linux 部分降级为不阻塞**（M4-T2，用户 2026-10-21 决定）：M4-T2 的按格定位依赖「`mono` 是真等宽」这一前提，但该前提只在 Windows 上确认过。用户决定「不要阻塞于 macOS/Linux 下的运行结果，可以优先做 Windows 的适配，后面再适配其他平台」→ macOS / Linux 的 `mono` 启动日志确认与实机验证**记为待办**，不阻塞 M4-T2 归档。后续在其他平台适配时须回头确认该项。
+32. **headless 集成测试里 UI 视口恒为 0**（M4-T2）：没有渲染管线时相机的 `computed.target_info` 为空 → `physical_viewport_size()` 返回 0 → UI 根节点尺寸 0 → 所有子节点尺寸 0（与 §10 勘误 15 同一个坑，但更隐蔽：不是「视口高 0」而是**宽高全 0**）。解法：测试 App 建好后手动给相机塞一个 `RenderTargetInfo { physical_size: UVec2::new(1280, 720), scale_factor: 1.0 }`，UI 才有非零视口，终端的列数/行数才可断言。
 
 
 ## 附：文档树变更（2026-10-16，已完成）
