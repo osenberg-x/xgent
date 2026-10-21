@@ -582,7 +582,8 @@ fn spawn_history_message_row(
                             type_scale::BODY,
                             400,
                             text_color,
-                            type_scale::line_height::BODY,
+                            // v8 M4-T4：历史消息正文按内容选行高档（中文 1.7）
+                            type_scale::line_height::for_text(text),
                         ));
                     });
             });

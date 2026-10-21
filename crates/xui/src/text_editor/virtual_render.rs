@@ -263,6 +263,7 @@ pub fn update_virtual_lines(
                 end,
                 &theme,
                 theme.text,
+                &theme.font,
                 FontSize::Px(theme.font_size),
                 line_height,
             );
@@ -288,6 +289,7 @@ fn rebuild_visible_spans(
     end: usize,
     theme: &EditorTheme,
     default_color: Color,
+    font: &FontSource,
     font_size: FontSize,
     line_height_px: f32,
 ) {
@@ -333,6 +335,9 @@ fn rebuild_visible_spans(
                 commands.entity(text_entity).with_child((
                     TextSpan::new(s),
                     TextFont {
+                        // v8 M4-T3：bevy 逐 span 解析字体来源——只给根 Text 设字体
+                        // 不影响字形（根 Text 为空会被跳过），span 必须自带。
+                        font: font.clone(),
                         font_size,
                         ..default()
                     },
@@ -355,6 +360,8 @@ fn rebuild_visible_spans(
         commands.entity(text_entity).with_child((
             TextSpan::new(buf),
             TextFont {
+                // v8 M4-T3：同上，span 自带字体来源。
+                font: font.clone(),
                 font_size,
                 ..default()
             },
@@ -403,6 +410,7 @@ mod tests {
             2,
             &crate::text_editor::render::EditorTheme::default(),
             Color::WHITE,
+            &FontSource::default(),
             FontSize::Px(12.5),
             19.0,
         );
@@ -430,6 +438,7 @@ mod tests {
             3,
             &crate::text_editor::render::EditorTheme::default(),
             Color::WHITE,
+            &FontSource::default(),
             FontSize::Px(12.5),
             19.0,
         );
@@ -559,6 +568,7 @@ mod tests {
             2,
             &crate::text_editor::render::EditorTheme::default(),
             Color::WHITE,
+            &FontSource::default(),
             FontSize::Px(12.5),
             19.0,
         );
@@ -605,6 +615,7 @@ mod tests {
             3,
             &crate::text_editor::render::EditorTheme::default(),
             Color::WHITE,
+            &FontSource::default(),
             FontSize::Px(12.5),
             19.0,
         );

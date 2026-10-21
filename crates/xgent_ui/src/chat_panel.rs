@@ -660,7 +660,9 @@ fn finalize_on_done(
                             font,
                             400,
                             theme.text_dim,
-                            type_scale::line_height::BODY,
+                            // v8 M4-T4：固化副本与流式正文同档（中文 1.7 / 拉丁 1.6），
+                            // 否则流式时 1.7、完成后 1.6 → 行高跳变。
+                            type_scale::line_height::for_text(&content),
                         ),));
                     });
                 // 操作栏（右上常显：复制到剪贴板；v7.1 悬停显隐留 span 重构）

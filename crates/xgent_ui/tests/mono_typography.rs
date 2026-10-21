@@ -5,7 +5,7 @@
 //! 中文侧：展示级负字距会让 CJK 挤成一团；消息正文固定 1.6 行高在长段中文下偏挤。
 
 use bevy::prelude::*;
-use bevy::text::{FontSource, LineHeight, TextFont};
+use bevy::text::{FontSource, TextFont};
 use xgent_ui::fonts::{UiFonts, display_spacing, has_cjk};
 
 /// 造一个可辨识的等宽槽位来源（便于断言「用的是 mono 而不是默认句柄」）。
@@ -18,22 +18,13 @@ fn distinctive_mono() -> UiFonts {
     }
 }
 
-/// 空 StringSource（测试不关心 i18n 文案）。
-struct NoopStrings;
-impl xui_i18n::StringSource for NoopStrings {
-    fn get(&self, key: &str, _args: &[(&str, String)]) -> String {
-        key.to_string()
-    }
-    fn current_lang(&self) -> &str {
-        "zh-CN"
-    }
-}
-
 /// A1 编辑器代码正文走 `mono` 槽位。
 ///
-/// 两端分别验证（接线是两行，用源码断言守住比整套编辑器 IO 流程更稳）：
+/// 三处接线分别验证：
 /// ① 注入端——`sync_editor_theme` 把 `UiFonts.mono` 写进 `EditorTheme.font`；
-/// ② 消费端——虚拟渲染按 `EditorTheme.font` 设置代码文本的 `TextFont.font`。
+/// ② 根文本端——虚拟渲染按 `EditorTheme.font` 设置代码文本 `TextFont.font`；
+/// ③ **span 端**——bevy 0.20 逐 span 解析字体来源：根 Text 为空会被跳过，
+///    真正承载字形的 `TextSpan` 必须**自带**字体来源（只设根 Text 不生效）。
 #[test]
 fn editor_code_text_uses_mono_slot() {
     let editor_src = include_str!("../src/editor/mod.rs");
@@ -49,6 +40,16 @@ fn editor_code_text_uses_mono_slot() {
     assert!(
         virtual_render_src.contains("text_font.font = theme.font.clone()"),
         "主题变化时代码文本的字体来源必须跟随更新"
+    );
+    // ③ span 自带字体（这是「只设根 Text 无效」的根因）
+    assert!(
+        virtual_render_src.contains("font: font.clone()"),
+        "代码 span 必须自带字体来源（bevy 逐 span 解析字体）"
+    );
+    let render_src = include_str!("../../xui/src/text_editor/render.rs");
+    assert!(
+        render_src.contains("font: theme.font.clone()"),
+        "高亮层 span 必须自带字体来源"
     );
 }
 
@@ -144,6 +145,24 @@ fn body_line_height_follows_content_language() {
         line_height::for_text("混合 mixed 正文"),
         1.7,
         "含中文即按中文档"
+    );
+}
+
+/// A6 附：正文的三条渲染路径（流式助手正文、固化副本、会话历史）都用内容选档。
+///
+/// 只改流式路径会让「流式 1.7 → 完成 1.6」出现行高跳变，且历史消息回看又是 1.6。
+#[test]
+fn all_message_body_paths_use_content_tier() {
+    let chat_src = include_str!("../src/chat_panel.rs");
+    let occurrences = chat_src.matches("line_height::for_text(").count();
+    assert!(
+        occurrences >= 2,
+        "对话面板的正文路径（流式 + 固化副本）都应用 for_text（实测 {occurrences} 处）"
+    );
+    let history_src = include_str!("../src/session_history.rs");
+    assert!(
+        history_src.contains("line_height::for_text("),
+        "会话历史的消息正文也应按内容选档"
     );
 }
 

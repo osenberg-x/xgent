@@ -85,7 +85,17 @@ pub fn sync_highlight_layer(
                 }
                 let segment = full[s.start..end].to_string();
                 let color = theme.span_color(s.kind);
-                p.spawn((TextSpan::new(segment), TextColor(color)));
+                // v8 M4-T3：bevy 逐 span 解析字体来源——span 必须自带字体，
+                // 只给根 Text 设不生效（根 Text 为空会被跳过）。
+                p.spawn((
+                    TextSpan::new(segment),
+                    TextFont {
+                        font: theme.font.clone(),
+                        font_size: FontSize::Px(theme.font_size),
+                        ..default()
+                    },
+                    TextColor(color),
+                ));
             }
         });
     }

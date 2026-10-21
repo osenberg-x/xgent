@@ -843,6 +843,8 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **`sync_editor_theme` 多了一个资源依赖**：`UiFonts`。headless 测试若只 `init_resource::<Theme>()`，该系统会报「Resource does not exist」→ 主题同步静默失效（`tests/editor_theme_sync.rs` 已补 `UiFonts::fallback()`）。
 - **等宽槽位是 `FontSource` 不是 `Handle<Font>`**：M4-T1 之后槽位解析结果可能是「家族名」也可能是「内嵌句柄」，统一用 `FontSource` 表达。
 - **行号列与代码列必须同源**：只把代码正文换成等宽而忘了行号列，数字仍不等宽 → 错位依旧。
+- **bevy 逐 span 解析字体来源**：只给**根 Text** 实体设 `TextFont.font` 对字形**无效**（根 Text 为空会被排版管线跳过），真正承载字形的 `TextSpan` 各自解析自己的 `TextFont` → **每个 span 都要自带字体来源**（`xui/src/text_editor/{virtual_render,render}.rs` 的 span spawn 处）。这是「行号列换了等宽、代码列仍是比例字体」的根因。
+- **消息正文有三条渲染路径**：流式助手正文、固化副本（`finalize_on_done`）、会话历史回看。只改流式路径会出现「流式 1.7 → 完成 1.6」的行高跳变。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
