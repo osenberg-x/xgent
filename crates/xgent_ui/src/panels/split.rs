@@ -200,6 +200,23 @@ impl SplitTree {
         out
     }
 
+    /// 叶子所在分割节点的轴（沿该轴排布）。
+    ///
+    /// 轴向**取自分割树**而非按 id 猜——新增叶子（无论横纵）都自动得到正确的轴。
+    pub fn leaf_axis(&self, id: &str) -> Option<Axis> {
+        fn find(split: &Split, id: &str, parent: Option<Axis>) -> Option<Axis> {
+            match split {
+                Split::Leaf { id: leaf_id, .. } => {
+                    (*leaf_id == id).then_some(parent.unwrap_or(Axis::Horizontal))
+                }
+                Split::Splitter { axis, children, .. } => {
+                    children.iter().find_map(|c| find(c, id, Some(*axis)))
+                }
+            }
+        }
+        self.root.as_ref().and_then(|r| find(r, id, None))
+    }
+
     /// 取叶子的尺寸策略。
     pub fn leaf_size(&self, id: &str) -> Option<LeafSize> {
         fn find(split: &Split, id: &str) -> Option<LeafSize> {

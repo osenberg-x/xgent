@@ -298,9 +298,12 @@ fn handle_resize_drag(
 
 /// 叶子尺寸钳制（纯函数，单测覆盖边界）。
 ///
-/// `available`：主区可用宽度。
+/// `available`：该轴方向上的可用尺寸（横向 = 主区可用宽度，纵向 = 主区可用高度）。
 /// 下限取 `LeafSize::Min` 的下限；上限：抽屉有定值上限（480），其余取
 /// `available − CHAT_MIN`（不足时取下限）。
+///
+/// ⚠ 上下界按**叶子 id**取（尺寸策略：抽屉 240–480、其余用上下文面板的界），
+/// 这与「按分割拓扑特判」不同——新增叶子时其界应在此表中补一行。
 pub fn clamp_leaf(id: &str, axis: Axis, value: f32, available: f32) -> f32 {
     let min = match id {
         leaf_ids::DRAWER => size::DRAWER_W_MIN,
@@ -313,14 +316,6 @@ pub fn clamp_leaf(id: &str, axis: Axis, value: f32, available: f32) -> f32 {
         (_, Axis::Vertical) => available.max(min),
     };
     value.clamp(min, max)
-}
-
-/// 叶子的分割轴（默认横向；纵向叶子在分割树里声明时按轴取界）。
-fn axis_of(id: &str) -> Axis {
-    match id {
-        leaf_ids::DRAWER | leaf_ids::SIDE_DOCK | leaf_ids::CHAT => Axis::Horizontal,
-        _ => Axis::Vertical,
-    }
 }
 
 /// 双击手柄：复位该叶子为默认宽度（300ms 内两次按下）。
@@ -368,7 +363,8 @@ fn clamp_on_window_resize(
         if matches!(current, LeafSize::Grow(_)) {
             continue;
         }
-        let clamped = clamp_leaf(id, axis_of(id), current.preferred(), main_w);
+        let axis = tree.leaf_axis(id).unwrap_or(Axis::Horizontal);
+        let clamped = clamp_leaf(id, axis, current.preferred(), main_w);
         if clamped != current.preferred() {
             tree.set_leaf_size(id, current.with_current(clamped));
         }

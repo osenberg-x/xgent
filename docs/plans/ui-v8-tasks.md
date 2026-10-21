@@ -270,7 +270,7 @@ M1 与 M2 相互独立，可并行分头推进。
 ### M5-T5 分割模型（修 D6）
 - [x] `SplitTree/Split/LeafSize` + `resize.rs` 从单字段（`resize.rs:47-50,205`）改为遍历生成分割条。
 - [x] `DRAWER_W` 从定值 320（`theme.rs:236`）改为 `Min(240, Preferred(320))`、上限 480。
-- **验收**：抽屉可拖宽；可注册纵向分割而无需改 `resize.rs`。✅ 单测（手柄遍历 / 宽度钳制）+ 源码级断言（`resize.rs` 无按分割 id 的特判）。
+- **验收**：抽屉可拖宽；可注册纵向分割而无需改 `resize.rs`。✅ 单测（手柄遍历 / 宽度钳制）+ 源码级断言（`resize.rs` 不含按**分割拓扑**的特判：手柄遍历与轴向取自分割树，尺寸上下界按叶子 id 取尺寸策略）。
 
 ### M5-T6 移除 `SideViewContent` 枚举
 - [x] shim 拆除，所有既有面板（editor/preview/diff/terminal）为原生注册项。
