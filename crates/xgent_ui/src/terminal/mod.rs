@@ -21,6 +21,7 @@
 
 pub mod input;
 pub mod io;
+pub mod metrics;
 pub mod output;
 pub mod tabs;
 
@@ -235,6 +236,12 @@ impl Plugin for TerminalPlugin {
                     input::update_input_caret,
                 )
                     .chain(),
+            )
+            // 等宽度量实测：探针生成（首帧）+ 读探针排版结果（须在 bevy 文本排版之后）
+            .add_systems(Update, metrics::spawn_mono_probes)
+            .add_systems(
+                PostUpdate,
+                metrics::collect_mono_metrics.after(bevy::ui::UiSystems::PostLayout),
             );
     }
 }
