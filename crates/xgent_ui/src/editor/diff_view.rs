@@ -11,7 +11,7 @@ use xgent_settings::Localizer;
 use crate::diff::{DiffKind, line_diff};
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::tabs::EditorTabs;
-use crate::fonts::ui_text;
+use crate::fonts::{mono_text, ui_text};
 use crate::i18n::tr;
 use crate::theme::{Theme, space, type_scale};
 /// 差异页容器标记（挂 `crate::layout::SideViewMarker`，显隐由
@@ -94,6 +94,7 @@ pub(crate) fn rebuild_diff_view(
     rows: Query<(), With<DiffLineRowMarker>>,
     empties: Query<(), With<DiffEmptyMarker>>,
     theme: Res<Theme>,
+    fonts: Res<crate::fonts::UiFonts>,
     loc: Res<Localizer>,
 ) {
     if *content != crate::editor::SideViewContent::Diff {
@@ -180,10 +181,11 @@ pub(crate) fn rebuild_diff_view(
                 DiffLineRowMarker,
             ))
             .with_children(|row| {
-                row.spawn(ui_text(
+                // v8 M4-T3：diff 行走等宽（此前是 ui_text + 等宽字号 = 比例字体冒充等宽）
+                row.spawn(mono_text(
+                    &fonts,
                     line.text.clone(),
-                    type_scale::MONO,
-                    400,
+                    type_scale::CODE,
                     fg,
                     type_scale::line_height::CTRL,
                 ));

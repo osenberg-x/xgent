@@ -216,15 +216,16 @@ M1 与 M2 相互独立，可并行分头推进。
 - [ ] 终端排版改为按格数 × `cell_w` **手工定位**，不再依赖 shaper 连续排版；`terminal/output.rs:380` 的 `font × 0.6` 估算随之删除。
 - [ ] 保留旧路径在 feature flag 下做 A/B 截图对照，通过后再删。
 - **验收**：三平台跑 `ls -l` / `cargo test` 中文输出 / `top`，列对齐正确；`vim` 全屏 TUI 不乱行。
+- 前置：硬门槛 A 的 macOS/Linux 启动日志确认（见 M4-T1 验收）。
 
 ### M4-T3 代码与行号消费 `mono`
-- [ ] 行号、diff 行、代码块、chips 中代码全部走 `mono_text`；禁止用 `ui_text` 冒充等宽。
-- [ ] `type_scale` 新增 `CODE` 档、`line_height::CJK = 1.7`；`SMALL 12.5 → 12`（消除半像素模糊）。
+- [x] 行号、diff 行、代码块、chips 中代码全部走 `mono_text`；禁止用 `ui_text` 冒充等宽。
+- [x] `type_scale` 新增 `CODE` 档、`line_height::CJK = 1.7`；`SMALL 12.5 → 12`（消除半像素模糊）。
 - **验收**：`theme.rs` 测试更新令牌断言；行号列与代码列在 125%/150% 缩放下仍对齐。
 
 ### M4-T4 中文排版约束
-- [ ] 展示级负字距只作用拉丁段，中文不挤（设计系统 1.4）。
-- [ ] 换行走已落地的 CJK 分词（R3-8），禁整句单 token。
+- [x] 展示级负字距只作用拉丁段，中文不挤（设计系统 1.4）。
+- [x] 换行走已落地的 CJK 分词（R3-8），禁整句单 token。
 - **验收**：中英混排标题与正文无豆腐块、无异常挤靠。
 
 ---
@@ -399,6 +400,11 @@ M1 与 M2 相互独立，可并行分头推进。
 18. **`ui` 槽位不能带字体句柄**（M4-T1）：`xgent_ui::fonts::ui_text` 不接收 `UiFonts`（约 50 处调用点），所以 `ui` 槽位只能继续用**默认字体资产**（`Handle::default()` → 内嵌 Inter Variable），CJK 靠 parley 的系统回退承担。设计系统的 `ui_cjk` 槽位本轮只做**解析与日志**（保证 CJK 可用性可核对），专用 CJK 表面留给 M4-T4。
 19. **`UiFonts.mono` 的类型从 `Handle<Font>` 变成 `FontSource`**（M4-T1）：候选栈的解析结果不是单一资产而是「家族名或内嵌句柄」，只能用 `FontSource` 表达；`mono_text` / `mono_text_weighted` 的调用点不变（`FontSource` 直接进 `TextFont.font`）。headless 装配用 `UiFonts::fallback()`（等宽与 CJK 走系统通用族）。
 20. **硬门槛 A 的跨平台部分无法在本机验证**（M4-T1）：本机（Windows）可用 `tests/font_slots.rs::mono_resolves_to_real_monospace_on_this_machine` 断言解析到真等宽；macOS / Linux 的同一行启动日志需在对应平台各启动一次确认（台账 M4-T1 验收已标注为待确认）。
+21. **`type_scale::MONO` 只改了字号、没改字体**（M4-T3）：编辑器代码正文、行号列、diff 行、工具卡参数摘要此前**全都用比例字体渲染**（等宽字号 + Inter 字体）→ 行号数字宽度不等 → 行号列与代码列错位。M4-T3 已让这四处走 `mono` 槽位（`EditorTheme.font` 注入 + `mono_text`/`ellipsis_mono_text` 构造器）。
+22. **`EditorTheme` 需要携带字体来源**（M4-T3）：它此前只有颜色与字号，代码正文因此落回默认字体。新增 `EditorTheme.font: FontSource`，由 `sync_editor_theme` 注入 `UiFonts.mono`；`sync_editor_theme` 由此多依赖一个 `UiFonts` 资源（headless 测试需 `UiFonts::fallback()`，否则系统报缺资源）。
+23. **代码档用改名而非新增**（M4-T3）：台账写「新增 `CODE` 档」，实现为把 `MONO` **改名**为 `CODE`——原 `MONO` 的三个使用点（确认弹窗 diff 行、diff 视图行、终端输出）全是代码场景，留两个同值常量只会让人随便挑一个用。
+24. **中文判定用「含任一 CJK 码位」**（M4-T4）：负字距一旦作用在 CJK 上就会挤成一团；用占比阈值会漏掉「一句中文带一个英文词」的混排串。行高档按**文本内容**判定（不按 UI 语言设置）——同一会话中英混排，按语言选档会出现两种行高。
+25. **`CODE` 档的 Compact −1 未做**（M4-T3）：密度系统按 M2b 纪律**只缩间距**、不缩字号；字号缩放要另立机制（否则密度档与字号档两套系数互相干扰）。
 
 
 ## 附：文档树变更（2026-10-16，已完成）

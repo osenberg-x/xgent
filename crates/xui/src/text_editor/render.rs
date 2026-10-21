@@ -16,6 +16,7 @@
 //! 行号与光标条两种模式都渲染。
 
 use bevy::prelude::*;
+use bevy::text::FontSource;
 
 use crate::text_editor::highlight::{HighlightSpan, SpanKind};
 use crate::text_editor::{HighlightCache, TextEditor};
@@ -89,7 +90,7 @@ pub fn sync_highlight_layer(
         });
     }
 }
-/// 编辑器主题（颜色 + 字号 + 行高比 + 语法色），由宿主注入。xui 不依赖 xgent_ui 的 Theme。
+/// 编辑器主题（颜色 + 字号 + 行高比 + 字体来源 + 语法色），由宿主注入。xui 不依赖 xgent_ui 的 Theme。
 #[derive(Resource, Debug, Clone)]
 pub struct EditorTheme {
     /// 主文本色
@@ -98,6 +99,11 @@ pub struct EditorTheme {
     pub text_dim: Color,
     /// 字体大小（逻辑像素）
     pub font_size: f32,
+    /// 代码字体来源（v8 M4-T3）。
+    ///
+    /// 代码正文必须走**等宽**槽位（`mono`）——否则数字宽度不等，行号列与代码列
+    /// 错位。缺省是默认字体句柄（比例字体），宿主应注入解析后的 `mono` 槽位。
+    pub font: FontSource,
     /// 行高比（line_height = font_size × 此值）。
     ///
     /// 对齐 zed `buffer_line_height = comfortable`（≈1.5）：1.5 是主流代码编辑器
@@ -121,6 +127,7 @@ impl Default for EditorTheme {
             text: Color::WHITE,
             text_dim: Color::srgb(0.62, 0.64, 0.68),
             font_size: 14.0,
+            font: FontSource::default(),
             line_height_ratio: 1.5,
             kw: None,
             fn_: None,

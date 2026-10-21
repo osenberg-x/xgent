@@ -274,7 +274,7 @@ fn show_on_request(
                                         mono_text_weighted(
                                             &fonts,
                                             format!("{prefix}{}", line.text),
-                                            type_scale::MONO,
+                                            type_scale::CODE,
                                             400,
                                             color,
                                             type_scale::line_height::CTRL,

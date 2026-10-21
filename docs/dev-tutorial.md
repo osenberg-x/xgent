@@ -819,6 +819,31 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **查家族存在性要先取快照**：`collection.family_id(name)` / `family_names()` 都要 `&mut` → 先 `family_names().map(String::from).collect()` 再用闭包查。
 - `UiFonts.mono` 的类型是 `FontSource`（候选栈解析结果），不是 `Handle<Font>`；headless 装配用 `UiFonts::fallback()`。
 
+### 5.22 代码类文本消费 mono 与中文排版（v8 M4-T3/T4）
+
+**问题**：`type_scale::MONO` 只改了**字号**、没改**字体**——编辑器代码正文、行号列、diff 行、工具卡参数摘要四处**全都用比例字体（Inter）渲染**，等于「用 `ui_text` 冒充等宽」。行号是数字，比例字体下数字宽度不等 → **行号列与代码列错位**。
+
+**M4-T3 的四个接线点**：
+
+- `xui::text_editor::EditorTheme` 新增 `font: FontSource`（此前只有颜色与字号，代码正文因此落回默认字体）；`xgent_ui::editor::sync_editor_theme` 注入 `UiFonts.mono`；`xui::text_editor::virtual_render` 创建/更新代码文本 `TextFont` 时带上它。
+- 编辑器行号列（`xgent_ui/src/editor/tabs.rs`）：行号实体的 `TextFont` 用 `editor_theme.font`（与代码正文同源）。
+- diff 行（`xgent_ui/src/editor/diff_view.rs`）：`ui_text` → `mono_text`。
+- 工具卡参数摘要（`xgent_ui/src/tool_panel.rs`）：`ellipsis_text` → `ellipsis_mono_text`（参数是路径/正则这类代码文本）。
+
+**字号阶梯**：`SMALL 12.5 → 12`（半像素在非整数 DPI 缩放下产生不稳定模糊，12.5 与 12 视觉差不可辨）；`MONO` **改名**为 `CODE`（三个使用点全是代码场景，留两个同值常量只会让人乱挑）；新增 `line_height::CJK = 1.7`。
+
+**M4-T4 的中文约束**：
+
+- `xgent_ui::fonts::display_spacing(text)`：文本含任一 CJK 码位 → 字距 `0`（CJK 无字距概念，负值会让中文挤成一团），纯拉丁 → 展示级 `−0.29`。welcome 标题改用它。
+- `xgent_ui::theme::type_scale::line_height::for_text(text)`：含 CJK → `CJK`（1.7），否则 `BODY`（1.6）。对话消息正文（用户消息 + 流式助手正文）按**文本内容**选档——同一会话中英混排，按 UI 语言设置选档会出现两种行高。
+- 检索链路的 CJK 二元组切分（R3-8，`xgent_context`）已落地，本轮只做回归确认。
+
+**坑**：
+
+- **`sync_editor_theme` 多了一个资源依赖**：`UiFonts`。headless 测试若只 `init_resource::<Theme>()`，该系统会报「Resource does not exist」→ 主题同步静默失效（`tests/editor_theme_sync.rs` 已补 `UiFonts::fallback()`）。
+- **等宽槽位是 `FontSource` 不是 `Handle<Font>`**：M4-T1 之后槽位解析结果可能是「家族名」也可能是「内嵌句柄」，统一用 `FontSource` 表达。
+- **行号列与代码列必须同源**：只把代码正文换成等宽而忘了行号列，数字仍不等宽 → 错位依旧。
+
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 
 

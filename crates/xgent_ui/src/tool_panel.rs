@@ -84,6 +84,7 @@ fn spawn_tool_card(
     mut reader: MessageReader<ToolCallMessage>,
     q_list: Query<Entity, With<MessageListMarker>>,
     theme: Res<Theme>,
+    fonts: Res<crate::fonts::UiFonts>,
     icons: Res<crate::kit::IconAssets>,
     loc: Res<Localizer>,
     mut commands: Commands,
@@ -169,6 +170,7 @@ fn spawn_tool_card(
                             // 参数摘要
                             // v8 M3-T5：摘要过长时省略（不再手工截 50 字，
                             // 审计 E6：手工截断与真实宽度无关）。
+                            // v8 M4-T3：参数是路径/正则这类代码文本 → 走等宽。
                             header.spawn((
                                 Node {
                                     flex_grow: 1.0,
@@ -178,10 +180,10 @@ fn spawn_tool_card(
                                     overflow: Overflow::clip(),
                                     ..default()
                                 },
-                                crate::fonts::ellipsis_text(
+                                crate::fonts::ellipsis_mono_text(
+                                    &fonts,
                                     summary,
                                     type_scale::CAPTION,
-                                    400,
                                     theme.text_muted,
                                     type_scale::line_height::UI,
                                 ),

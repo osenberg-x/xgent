@@ -21,7 +21,8 @@
 
 use bevy::prelude::*;
 use bevy::text::{
-    FontFeatureTag, FontFeatures, FontSize, FontWeight, GenericFontFamily, LineHeight,
+    FontFeatureTag, FontFeatures, FontSize, FontWeight, GenericFontFamily, LetterSpacing,
+    LineHeight,
 };
 
 use bevy::text::FontSource;
@@ -329,6 +330,35 @@ fn inter_font_features() -> FontFeatures {
         .build()
 }
 
+/// 判断文本是否含 CJK 码位。
+///
+/// v8 M4-T4：用于「负字距不作用中文」「正文行高按语言选档」两处判定。
+/// 判定范围覆盖 CJK 统一表意文字与扩展 A、全角标点与假名。
+pub fn has_cjk(text: &str) -> bool {
+    text.chars().any(|c| {
+        let cp = c as u32;
+        (0x3000..=0x303F).contains(&cp)      // CJK 标点
+            || (0x3040..=0x30FF).contains(&cp)  // 假名
+            || (0x3400..=0x4DBF).contains(&cp)  // 扩展 A
+            || (0x4E00..=0x9FFF).contains(&cp)  // 基本区
+            || (0xF900..=0xFAFF).contains(&cp)  // 兼容表意
+            || (0x20000..=0x2FA1F).contains(&cp) // 扩展 B~F
+            || (0xFF00..=0xFF60).contains(&cp) // 全角形式
+    })
+}
+
+/// 展示级标题的字距规则（v8 M4-T4）。
+///
+/// 负字距只作用拉丁段：文本含 CJK 时返回 0（CJK 无字距概念，负值会让中文挤成
+/// 一团），纯拉丁才施加展示级负字距。
+pub fn display_spacing(text: &str) -> LetterSpacing {
+    if has_cjk(text) {
+        LetterSpacing::Px(0.0)
+    } else {
+        LetterSpacing::Px(-0.29)
+    }
+}
+
 /// UI 文本构造器（Inter，随全局默认）——全部业务文本经此，禁止裸拼 `TextFont`。
 ///
 /// `size`/`line_height` 取 [`crate::theme::type_scale`] 档位；`weight` 用
@@ -420,6 +450,35 @@ pub fn ellipsis_path_text(
             font_size: FontSize::Px(size),
             weight: FontWeight(weight),
             font_features: inter_font_features(),
+            ..default()
+        },
+        TextColor(color),
+        LineHeight::RelativeToFont(line_height),
+        TextLayout {
+            linebreak: LineBreak::NoWrap,
+            ..default()
+        },
+        xui::Ellipsis::mid(source),
+    )
+}
+
+/// 单行省略文本构造器（等宽版：中段省略，路径类）。
+///
+/// v8 M4-T3：代码类文本（路径 / 正则 / 参数）必须走**等宽**槽位——比例字体的
+/// 字符宽度不等，路径对齐与列对齐都不可靠。
+pub fn ellipsis_mono_text(
+    fonts: &UiFonts,
+    source: impl Into<String>,
+    size: f32,
+    color: Color,
+    line_height: f32,
+) -> impl Bundle {
+    let source = source.into();
+    (
+        Text::new(source.clone()),
+        TextFont {
+            font: fonts.mono.clone(),
+            font_size: FontSize::Px(size),
             ..default()
         },
         TextColor(color),

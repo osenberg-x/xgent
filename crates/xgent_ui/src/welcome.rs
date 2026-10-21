@@ -125,6 +125,7 @@ fn spawn_welcome(
                 ),
             ));
             // 标题 / 副标题
+            // v8 M4-T4：展示级负字距只作用拉丁段（含中文则不施加）。
             w.spawn((
                 ui_text(
                     tr(&loc, "welcome-title").to_string(),
@@ -133,7 +134,7 @@ fn spawn_welcome(
                     theme.text,
                     type_scale::line_height::TIGHT,
                 ),
-                LetterSpacing::Px(-0.29),
+                crate::fonts::display_spacing(&tr(&loc, "welcome-title")),
             ));
             w.spawn((ui_text(
                 tr(&loc, "welcome-sub").to_string(),

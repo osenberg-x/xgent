@@ -1,0 +1,99 @@
+schema: comet.native.v4
+name: v8-m4-mono-typography
+language: zh-CN
+phase: build
+status: active
+state_version: 3
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: fb3168e11514f624e7d57d3b8a8290d7e7df807ef7a9e7009f019aa6e5801076
+spec_changes:
+  - capability: ui-m4-mono-typography
+    operation: create
+    source: specs/ui-m4-mono-typography/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: building
+  goal_cycle: 1
+  iteration: 1
+  attempt: 0
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: submit-builder-candidate
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1 编辑器代码正文使用 `mono` 槽位：`sync_editor_theme` 运行后 `EditorTheme.font` 等于
+      `UiFonts.mono`；虚拟渲染创建的代码文本 `TextFont.font` 等于该值。
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: A2 编辑器行号列使用 `mono`：打开文件后行号实体的 `TextFont.font` 等于 `UiFonts.mono`（与代码列同源 →
+      数字等宽 → 行号与代码列对齐）。
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: A3 diff 行与工具卡参数摘要使用 `mono`：两处文本的 `TextFont.font` 等于 `UiFonts.mono`。
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: A4 令牌：`type_scale::SMALL == 12.0`、`type_scale::CODE ==
+      12.0`、`type_scale::line_height::CJK == 1.7`。
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: A5 展示级负字距不作用中文：`display_spacing` 对含 CJK 的文本返回 0、对纯拉丁返回 −0.29；welcome
+      标题接线到该函数。
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: A6 消息正文行高按语言选档：`line_height::for_text` 对含 CJK 的文本返回 1.7、对拉丁返回 1.6。
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: A7 检索链路 CJK 分词未被破坏：中文问句仍抽出二元组（`xgent_context` 既有单测通过）。
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: A8 既有测试不回归：`xgent_ui` lib 76 项与既有集成测试全绿，`xui` 全绿；`cargo check --workspace`
+      与 clippy 通过、fmt 无 diff。
+    result: pending
+    reason: null
+  - id: A9
+    source: brief.md
+    text: A9 文档同步：`docs/plans/ui-v8-tasks.md` 的 M4-T3/M4-T4 勾选 + §10
+      勘误、`docs/dev-tutorial.md` 新增小节、`docs/plans/ui-v8-handoff.md` 交付表与下一步。
+    result: pending
+    reason: null
+builder_handoff: null
+blockers: []
+verification: null
+history: []
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-10-20T10:52:14.132Z

@@ -267,16 +267,19 @@ fn spawn_editor_view(
 /// 跑在 `xui::TextEditorUpdateSet` 之前，确保 `update_virtual_lines` 读到最新值。
 fn sync_editor_theme(
     theme: Res<Theme>,
+    fonts: Res<crate::fonts::UiFonts>,
     mut editor_theme: ResMut<xui::text_editor::render::EditorTheme>,
 ) {
-    // 仅在 Theme 变化时写（避免每帧无谓 mutation 触发 change detection）。
-    if !theme.is_changed() && !editor_theme.is_added() {
+    // 仅在 Theme 变化（或等宽槽位变化）时写（避免每帧无谓 mutation 触发 change detection）。
+    if !theme.is_changed() && !editor_theme.is_added() && fonts.mono == editor_theme.font {
         return;
     }
     editor_theme.font_size = (theme.font_size - 1.5).max(10.0);
     editor_theme.line_height_ratio = 1.55;
     editor_theme.text = theme.text;
     editor_theme.text_dim = theme.text_dim;
+    // v8 M4-T3：代码正文走等宽槽位（比例字体的数字宽度不等 → 行号列与代码列错位）。
+    editor_theme.font = fonts.mono.clone();
     // 语法色注入（v7 冷调低饱和；xui 侧 None 类别回落内置映射）
     editor_theme.kw = Some(theme.kw);
     editor_theme.fn_ = Some(theme.fn_);

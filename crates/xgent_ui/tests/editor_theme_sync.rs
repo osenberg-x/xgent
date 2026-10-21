@@ -19,7 +19,9 @@ fn make_app() -> App {
         .add_plugins(xgent_ui::layout::LayoutPlugin)
         .add_plugins(EditorPlugin)
         .init_resource::<Theme>()
-        .init_resource::<xgent_settings::Localizer>();
+        .init_resource::<xgent_settings::Localizer>()
+        // v8 M4-T3：sync_editor_theme 还会把 mono 槽位注入 EditorTheme.font
+        .insert_resource(xgent_ui::fonts::UiFonts::fallback());
     // 缺 ProjectRoot 等 app 级资源的系统在 minimal 集下会报错，
     // 降级为 warn 不影响本测试关注的 EditorTheme 同步逻辑。
     app.set_error_handler(bevy::ecs::error::warn);

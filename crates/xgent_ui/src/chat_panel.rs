@@ -11,7 +11,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::text::{EditableText, TextLayoutInfo};
+use bevy::text::{EditableText, LineHeight, TextLayoutInfo};
 use bevy::ui::Pressed;
 use bevy::ui_widgets::{Button, TextInput};
 
@@ -540,12 +540,13 @@ fn spawn_user_message(
                                 type_scale::line_height::UI,
                             ),));
                             // 正文
+                            // v8 M4-T4：正文行高按内容选档（中文 1.7 / 拉丁 1.6）
                             body.spawn((ui_text(
                                 ev.text.clone(),
                                 font,
                                 400,
                                 theme.text,
-                                type_scale::line_height::BODY,
+                                type_scale::line_height::for_text(&ev.text),
                             ),));
                         });
                 });
@@ -560,9 +561,9 @@ fn spawn_user_message(
 /// 先弹掉，避免光标字符被埋进正文（会污染历史副本与复制内容）。
 fn accumulate_delta(
     mut reader: MessageReader<DeltaMessage>,
-    mut q: Query<&mut Text, With<CurrentAssistantText>>,
+    mut q: Query<(&mut Text, &mut LineHeight), With<CurrentAssistantText>>,
 ) {
-    let Ok(mut text) = q.single_mut() else {
+    let Ok((mut text, mut line_height)) = q.single_mut() else {
         return;
     };
     for ev in reader.read() {
@@ -570,6 +571,11 @@ fn accumulate_delta(
             text.0.pop();
         }
         text.0.push_str(&ev.text);
+        // v8 M4-T4：流式正文按内容选行高档（中文 1.7 / 拉丁 1.6）。
+        let want = LineHeight::RelativeToFont(type_scale::line_height::for_text(&text.0));
+        if *line_height != want {
+            *line_height = want;
+        }
     }
 }
 /// Done 时把当前助手消息固化为历史副本节点，并清空当前节点。

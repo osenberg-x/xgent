@@ -202,6 +202,9 @@ pub fn handle_open_file_requests(
                     Text::new(String::new()),
                     // M6-T6 例外：editor_theme 动态字号（编辑器正文 -1.5，经 sync_editor_theme 跟随 Theme）
                     TextFont {
+                        // v8 M4-T3：行号列与代码正文同源（等宽）——比例字体的数字
+                        // 宽度不等，行号列会与代码列错位。
+                        font: editor_theme.font.clone(),
                         font_size: FontSize::Px(editor_theme.font_size),
                         ..default()
                     },

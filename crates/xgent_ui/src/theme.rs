@@ -312,15 +312,18 @@ pub mod type_scale {
     /// 次要正文/按钮
     pub const BODY_SM: f32 = 13.0;
     /// 工具名/按钮小字/pill
-    pub const SMALL: f32 = 12.5;
+    pub const SMALL: f32 = 12.0;
     /// chips/参数/代码
     pub const CAPTION: f32 = 12.0;
     /// 时间戳/元信息/kbd
     pub const MICRO: f32 = 11.0;
     /// 大写分区标签/徽标
     pub const TINY: f32 = 10.0;
-    /// 代码（终端另 -2）
-    pub const MONO: f32 = 12.0;
+    /// 代码（编辑器代码正文 / 行号 / diff 行 / 终端输出）
+    ///
+    /// v8 M4-T3：代码字号独立成档，使代码与界面字号解耦（原 `MONO` 的三个使用点
+    /// 全是代码场景，直接改名而非留两个同值常量）。
+    pub const CODE: f32 = 12.0;
 
     /// 行高档（配合字号使用；原型正文 1.6、UI 1.4-1.5、代码 1.5）
     pub mod line_height {
@@ -332,8 +335,24 @@ pub mod type_scale {
         pub const CTRL: f32 = 1.5;
         /// 正文
         pub const BODY: f32 = 1.6;
+        /// 中文正文（CJK 密排可读性低于拉丁，1.6 在长段中文下偏挤）
+        pub const CJK: f32 = 1.7;
         /// 终端
         pub const TERM: f32 = 1.6;
+
+        /// 按**文本内容**选正文行高档：含 CJK → `CJK`（1.7），否则 `BODY`（1.6）。
+        ///
+        /// v8 M4-T4：按文本内容而非 UI 语言设置判定——同一条会话里中英文消息混排，
+        /// 按语言选档会让一条会话出现两种行高。纯 ASCII 快速路径。
+        pub fn for_text(text: &str) -> f32 {
+            if text.is_ascii() {
+                BODY
+            } else if crate::fonts::has_cjk(text) {
+                CJK
+            } else {
+                BODY
+            }
+        }
     }
 }
 

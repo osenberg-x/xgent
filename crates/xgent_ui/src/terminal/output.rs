@@ -133,7 +133,7 @@ fn spawn_line(
                 mono_text(
                     fonts,
                     span.text.clone(),
-                    type_scale::MONO,
+                    type_scale::CODE,
                     map_color(span.style.fg, theme),
                     type_scale::line_height::TERM,
                 ),

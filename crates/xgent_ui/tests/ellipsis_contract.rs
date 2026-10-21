@@ -217,7 +217,11 @@ fn six_truncation_points_use_ellipsis() {
     ];
     let consumers = sources
         .iter()
-        .filter(|(_, src)| src.contains("ellipsis_text(") || src.contains("ellipsis_path_text("))
+        .filter(|(_, src)| {
+            src.contains("ellipsis_text(")
+                || src.contains("ellipsis_path_text(")
+                || src.contains("ellipsis_mono_text(")
+        })
         .count();
     assert!(consumers >= 6, "省略消费者应 ≥ 6 处（实测 {consumers}）");
 }

@@ -176,6 +176,7 @@ pub fn update_virtual_lines(
                         // 行号"的根因。超宽行由 buffer 容器 overflow:Hidden 裁剪。
                         TextLayout::linebreak(LineBreak::NoWrap),
                         TextFont {
+                            font: theme.font.clone(),
                             font_size: FontSize::Px(theme.font_size),
                             ..default()
                         },
@@ -221,6 +222,10 @@ pub fn update_virtual_lines(
             let target_fs = FontSize::Px(theme.font_size);
             if text_font.font_size != target_fs {
                 text_font.font_size = target_fs;
+            }
+            // 字体来源同样跟随 EditorTheme（v8 M4-T3：代码正文必须走等宽槽位）。
+            if text_font.font != theme.font {
+                text_font.font = theme.font.clone();
             }
             if *line_h != LineHeight::Px(line_height) {
                 *line_h = LineHeight::Px(line_height);
