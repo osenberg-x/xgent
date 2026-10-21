@@ -13,4 +13,7 @@ pub use backend::{
     ShellSpec, SpawnRequest, TerminalBackend, TerminalError, TerminalEvent, TerminalId,
 };
 pub use local_pty::LocalPtyBackend;
-pub use render::{Color, RenderLine, SpanStyle, StyledSpan, TerminalParser};
+pub use render::{
+    CellRun, Color, RenderLine, SpanStyle, StyledSpan, TerminalParser, display_width,
+    display_width_str, layout_cells,
+};

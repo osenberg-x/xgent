@@ -361,6 +361,275 @@ fn parse_extended_color<'a>(
     }
 }
 
+// ============================================================================
+// v8 M4-T2：双宽单元格模型
+// ============================================================================
+//
+// 终端输出此前按「shaper 连续排版」渲染：每行是一个 flex 行，span 里的字符由
+// 文本管线连续排布。比例字体 + 拉丁/CJK 两条回退链拼接时，**没有共享的连续
+// 排版度量**可言——中文输出必然与列对齐错开。
+//
+// 这里引入显式的单元格模型：
+// - [`display_width`]：一个字符占几格（wcwidth 语义）。
+// - [`layout_cells`]：把带样式的 span 序列切成「起始列 + 占格数」的 run 序列，
+//   渲染层据此按格手工定位（`left = 起始列 × cell_w`），不再依赖连续排版。
+
+/// 零宽码位（组合记号、变体选择符、零宽连接/分隔符等）。
+///
+/// 这些字符在终端里与**前一个**字符共用一格，故占 0 格。
+const ZERO_WIDTH_RANGES: &[(u32, u32)] = &[
+    (0x0300, 0x036F), // 组合附加符号
+    (0x0483, 0x0489), // 西里尔组合记号
+    (0x0591, 0x05BD), // 希伯来文标记
+    (0x05BF, 0x05BF),
+    (0x05C1, 0x05C2),
+    (0x05C4, 0x05C5),
+    (0x05C7, 0x05C7),
+    (0x0610, 0x061A), // 阿拉伯文标记
+    (0x064B, 0x065F),
+    (0x0670, 0x0670),
+    (0x06D6, 0x06DC),
+    (0x06DF, 0x06E4),
+    (0x06E7, 0x06E8),
+    (0x06EA, 0x06ED),
+    (0x0711, 0x0711),
+    (0x0730, 0x074A),
+    (0x07A6, 0x07B0),
+    (0x07EB, 0x07F3),
+    (0x0816, 0x0819),
+    (0x081B, 0x0823),
+    (0x0825, 0x0827),
+    (0x0829, 0x082D),
+    (0x0859, 0x085B),
+    (0x08D3, 0x08E1),
+    (0x08E3, 0x0903),
+    (0x093A, 0x094F), // 天城文标记
+    (0x0951, 0x0957),
+    (0x0962, 0x0963),
+    (0x0981, 0x0983),
+    (0x09BC, 0x09CD),
+    (0x0A01, 0x0A03),
+    (0x0A3C, 0x0A4D),
+    (0x0E31, 0x0E31),
+    (0x0E34, 0x0E3A),
+    (0x0E47, 0x0E4E),
+    (0x135D, 0x135F),
+    (0x1AB0, 0x1AFF),   // 组合记号扩展
+    (0x1DC0, 0x1DFF),   // 组合记号补充
+    (0x200B, 0x200F),   // 零宽空格 / ZWNJ / ZWJ / LRM / RLM
+    (0x202A, 0x202E),   // 双向控制符
+    (0x2060, 0x2064),   // 单词连接符等
+    (0x20D0, 0x20F0),   // 符号组合记号
+    (0xFE00, 0xFE0F),   // 变体选择符
+    (0xFE20, 0xFE2F),   // 组合半符号
+    (0xFEFF, 0xFEFF),   // 零宽不换行空格
+    (0xE0100, 0xE01EF), // 变体选择符补充
+];
+
+/// 双宽码位（East Asian Wide / Fullwidth + emoji 呈现）。
+const WIDE_RANGES: &[(u32, u32)] = &[
+    (0x1100, 0x115F), // 谚文字母
+    (0x2E80, 0x2E99), // CJK 部首补充
+    (0x2E9B, 0x2EF3),
+    (0x2F00, 0x2FD5), // 康熙部首
+    (0x2FF0, 0x2FFB), // 表意文字描述字符
+    (0x3000, 0x303E), // CJK 符号与标点（U+303F 除外）
+    (0x3041, 0x3096), // 平假名
+    (0x3099, 0x30FF), // 片假名
+    (0x3105, 0x312F), // 注音符号
+    (0x3131, 0x318E), // 谚文兼容字母
+    (0x3190, 0x31E3), // 汉字注音 / 部首扩展 / CJK 笔画
+    (0x31F0, 0x321E), // 片假名拼音扩展 / 带圈汉字
+    (0x3220, 0x3247),
+    (0x3250, 0x4DBF), // 带圈 CJK + CJK 扩展 A
+    (0x4E00, 0xA48C), // CJK 统一表意文字 + 彝文
+    (0xA490, 0xA4C6), // 彝文部首
+    (0xA960, 0xA97C), // 谚文字母扩展 A
+    (0xAC00, 0xD7A3), // 谚文音节
+    (0xF900, 0xFAFF), // CJK 兼容表意文字
+    (0xFE10, 0xFE19), // 竖排标点
+    (0xFE30, 0xFE52), // CJK 兼容形式
+    (0xFE54, 0xFE66),
+    (0xFE68, 0xFE6B),
+    (0xFF00, 0xFF60), // 全角形式（含全角空格）
+    (0xFFE0, 0xFFE6), // 全角符号
+    (0x16FE0, 0x16FE4),
+    (0x17000, 0x18AFF), // 西夏文
+    (0x1B000, 0x1B2FF), // 假名补充
+    (0x1F200, 0x1F251), // 带圈表意文字补充
+    (0x1F300, 0x1F64F), // 杂项符号与图形 / 表情
+    (0x1F680, 0x1F6FF), // 交通与地图符号
+    (0x1F900, 0x1F9FF), // 补充符号与图形
+    (0x1FA70, 0x1FAFF), // 符号与图形扩展 A
+    (0x1FC00, 0x1FFFD), // 符号与图形扩展 B
+    (0x20000, 0x3FFFD), // CJK 扩展 B 及以后
+];
+
+/// 「默认窄、但 emoji 呈现时为宽」的码位（经典 wcwidth emoji 扩展表）。
+///
+/// 这些码位在多数终端里按 **2 格**处理（带 VS16 的 emoji 序列、以及本身就有
+/// emoji 呈现的字形）。
+const EMOJI_NARROW_RANGES: &[(u32, u32)] = &[
+    (0x231A, 0x231B), // ⌚⌛
+    (0x23E9, 0x23EC),
+    (0x23F0, 0x23F0),
+    (0x23F3, 0x23F3),
+    (0x25FD, 0x25FE),
+    (0x2614, 0x2615),
+    (0x2648, 0x2653),
+    (0x267F, 0x267F),
+    (0x2693, 0x2693),
+    (0x26A1, 0x26A1),
+    (0x26AA, 0x26AB),
+    (0x26BD, 0x26BE),
+    (0x26C4, 0x26C5),
+    (0x26CE, 0x26CE),
+    (0x26D4, 0x26D4),
+    (0x26EA, 0x26EA),
+    (0x26F2, 0x26F3),
+    (0x26F5, 0x26F5),
+    (0x26FA, 0x26FA),
+    (0x26FD, 0x26FD),
+    (0x2705, 0x2705),
+    (0x270A, 0x270B),
+    (0x2728, 0x2728),
+    (0x274C, 0x274C),
+    (0x274E, 0x274E),
+    (0x2753, 0x2755),
+    (0x2757, 0x2757),
+    (0x2795, 0x2797),
+    (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50),
+    (0x2B55, 0x2B55),
+];
+
+/// 码位是否落在给定区间表内。
+fn in_ranges(cp: u32, ranges: &[(u32, u32)]) -> bool {
+    ranges
+        .binary_search_by(|&(lo, hi)| {
+            if cp < lo {
+                std::cmp::Ordering::Greater
+            } else if cp > hi {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
+/// 字符占用的终端格数（wcwidth 语义）。
+///
+/// - **2**：CJK 全角、emoji、全角形式（U+FF00–FF60）。
+/// - **0**：组合记号 / 变体选择符 / 零宽连接符（与前一字符共用一格）。
+/// - **1**：其余（ASCII、希腊文、西里尔文等窄字符）。
+///
+/// 说明：U+FE0F（VS16）本身零宽；其**前**字符的宽度按自身判定，不做「emoji
+/// 呈现序列升级」——终端里 `❤` 与 `❤️` 的宽度因此可能不同。
+pub fn display_width(ch: char) -> usize {
+    let cp = ch as u32;
+    if in_ranges(cp, ZERO_WIDTH_RANGES) {
+        return 0;
+    }
+    if in_ranges(cp, WIDE_RANGES) || in_ranges(cp, EMOJI_NARROW_RANGES) {
+        return 2;
+    }
+    1
+}
+
+/// 整串占用的格数。
+pub fn display_width_str(s: &str) -> usize {
+    s.chars().map(display_width).sum()
+}
+
+/// 按格定位的一个文本 run。
+///
+/// 渲染层据此把该 run 放到 `left = start_col × cell_w` 的位置——**定位不再
+/// 依赖文本 shaper 的连续排版度量**。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellRun {
+    /// 文本内容。
+    pub text: String,
+    /// 起始列（0 起的格号）。
+    pub start_col: usize,
+    /// 本 run 占用的格数。
+    pub cells: usize,
+    /// 所属 span 的下标（样式索引；渲染层据此取前景色）。
+    pub style_index: usize,
+}
+
+/// 把带样式的 span 序列切成按格定位的 run 序列。
+///
+/// 规则：
+/// - **窄字符**（1 格）连续且同 span 的相邻字符合并为一个 run——等宽字体下
+///   连续排版与按格定位等价，合并可显著减少节点数。
+/// - **宽字符**（2 格）**逐字**成 run：CJK 回退字体多为比例字体（汉字步进
+///   1em，而等宽拉丁步进 0.6em），连续排版与「2 格」并不等价；逐字定位才能
+///   保证宽字符的起点严格落在格边界上。
+/// - **零宽字符**（组合记号等）并入当前 run，不推进列号。
+pub fn layout_cells(spans: &[StyledSpan]) -> Vec<CellRun> {
+    let mut runs: Vec<CellRun> = Vec::new();
+    let mut col: usize = 0;
+    // 当前待合并的 run（窄字符连续段）。
+    let mut cur: Option<CellRun> = None;
+
+    for (style_index, span) in spans.iter().enumerate() {
+        for ch in span.text.chars() {
+            let w = display_width(ch);
+            if w == 0 {
+                // 零宽：并入当前 run（没有则丢弃——行首的孤立组合记号无依附对象）
+                if let Some(run) = cur.as_mut() {
+                    run.text.push(ch);
+                }
+                continue;
+            }
+            if w == 2 {
+                // 宽字符：逐字成 run，先结掉当前窄字符段
+                if let Some(run) = cur.take() {
+                    runs.push(run);
+                }
+                runs.push(CellRun {
+                    text: ch.to_string(),
+                    start_col: col,
+                    cells: 2,
+                    style_index,
+                });
+                col += 2;
+                continue;
+            }
+            // 窄字符：与当前段合并或另起一段
+            match cur.as_mut() {
+                Some(run) if run.style_index == style_index => {
+                    run.text.push(ch);
+                    run.cells += 1;
+                }
+                _ => {
+                    if let Some(run) = cur.take() {
+                        runs.push(run);
+                    }
+                    cur = Some(CellRun {
+                        text: ch.to_string(),
+                        start_col: col,
+                        cells: 1,
+                        style_index,
+                    });
+                }
+            }
+            col += 1;
+        }
+        // span 结束：样式边界 → 结段
+        if let Some(run) = cur.take() {
+            runs.push(run);
+        }
+    }
+    if let Some(run) = cur.take() {
+        runs.push(run);
+    }
+    runs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,5 +835,143 @@ mod tests {
         let lines = p.feed(b"\x1b[38:5:46;1mbold_green\n");
         assert_eq!(lines[0].spans[0].style.fg, Some(Color::Indexed(46)));
         assert!(lines[0].spans[0].style.bold);
+    }
+
+    // ===== v8 M4-T2：双宽单元格模型 =====
+
+    /// 构造一个 span（默认样式）。
+    fn span(text: &str) -> StyledSpan {
+        StyledSpan {
+            text: text.into(),
+            style: SpanStyle::default(),
+        }
+    }
+
+    #[test]
+    fn ascii_is_one_cell() {
+        assert_eq!(display_width('a'), 1);
+        assert_eq!(display_width('Z'), 1);
+        assert_eq!(display_width(' '), 1);
+        assert_eq!(display_width('0'), 1);
+        assert_eq!(display_width('~'), 1);
+    }
+
+    #[test]
+    fn cjk_is_two_cells() {
+        // CJK 统一表意文字
+        assert_eq!(display_width('中'), 2);
+        assert_eq!(display_width('文'), 2);
+        // 扩展 A
+        assert_eq!(display_width('\u{3400}'), 2);
+        // 扩展 B（U+20000）
+        assert_eq!(display_width('\u{20000}'), 2);
+        // 平假名 / 片假名 / 谚文
+        assert_eq!(display_width('あ'), 2);
+        assert_eq!(display_width('ア'), 2);
+        assert_eq!(display_width('한'), 2);
+        // CJK 标点（U+3001 顿号）
+        assert_eq!(display_width('\u{3001}'), 2);
+    }
+
+    #[test]
+    fn fullwidth_forms_are_two_cells() {
+        // U+FF00–FF60 → 2（台账/设计系统口径）
+        assert_eq!(display_width('\u{FF00}'), 2, "全角空格");
+        assert_eq!(display_width('\u{FF01}'), 2, "全角 !");
+        assert_eq!(display_width('\u{FF21}'), 2, "全角 A");
+        assert_eq!(display_width('\u{FF5E}'), 2, "全角 ~");
+        assert_eq!(display_width('\u{FF60}'), 2, "全角 「右括号」区上界");
+        // U+FF61 是半角片假名 → 1
+        assert_eq!(display_width('\u{FF61}'), 1, "半角片假名应为 1");
+    }
+
+    #[test]
+    fn emoji_is_two_cells() {
+        assert_eq!(display_width('😀'), 2, "U+1F600 表情");
+        assert_eq!(display_width('🚀'), 2, "U+1F680 交通符号");
+        assert_eq!(display_width('⚡'), 2, "U+26A1 emoji 窄表");
+        assert_eq!(display_width('⭐'), 2, "U+2B50");
+    }
+
+    #[test]
+    fn combining_marks_are_zero_cells() {
+        // U+0301 组合锐音符 → 与前一字符共用一格
+        assert_eq!(display_width('\u{0301}'), 0);
+        // 变体选择符
+        assert_eq!(display_width('\u{FE0F}'), 0);
+        // 零宽连接符
+        assert_eq!(display_width('\u{200D}'), 0);
+        // 零宽空格
+        assert_eq!(display_width('\u{200B}'), 0);
+    }
+
+    #[test]
+    fn display_width_str_sums_cells() {
+        assert_eq!(display_width_str("abc"), 3);
+        assert_eq!(display_width_str("中文"), 4);
+        assert_eq!(display_width_str("a中b"), 4);
+        assert_eq!(display_width_str("e\u{0301}"), 1, "组合记号不占格");
+        assert_eq!(display_width_str(""), 0);
+    }
+
+    #[test]
+    fn layout_cells_merges_narrow_runs() {
+        let runs = layout_cells(&[span("ls -l")]);
+        assert_eq!(runs.len(), 1, "连续窄字符应合并为一个 run");
+        assert_eq!(runs[0].text, "ls -l");
+        assert_eq!(runs[0].start_col, 0);
+        assert_eq!(runs[0].cells, 5);
+    }
+
+    #[test]
+    fn layout_cells_splits_wide_chars_one_by_one() {
+        let runs = layout_cells(&[span("中文")]);
+        assert_eq!(runs.len(), 2, "宽字符逐字成 run");
+        assert_eq!(runs[0].text, "中");
+        assert_eq!(runs[0].start_col, 0);
+        assert_eq!(runs[0].cells, 2);
+        assert_eq!(runs[1].text, "文");
+        assert_eq!(runs[1].start_col, 2, "第二个宽字符应落在第 2 格");
+        assert_eq!(runs[1].cells, 2);
+    }
+
+    #[test]
+    fn layout_cells_advances_columns_by_cell_count() {
+        // "ab中cd" → a(0) b(1) 中(2..3) c(4) d(5)
+        let runs = layout_cells(&[span("ab中cd")]);
+        let cols: Vec<(usize, usize, &str)> = runs
+            .iter()
+            .map(|r| (r.start_col, r.cells, r.text.as_str()))
+            .collect();
+        assert_eq!(
+            cols,
+            vec![(0, 2, "ab"), (2, 2, "中"), (4, 2, "cd")],
+            "窄字符合并、宽字符独立，列号按累计格数推进"
+        );
+    }
+
+    #[test]
+    fn layout_cells_respects_span_boundaries() {
+        let runs = layout_cells(&[span("ab"), span("中")]);
+        assert_eq!(runs.len(), 2, "样式边界 → 分 run");
+        assert_eq!(runs[0].text, "ab");
+        assert_eq!(runs[0].style_index, 0);
+        assert_eq!(runs[1].text, "中");
+        assert_eq!(runs[1].style_index, 1);
+        assert_eq!(runs[1].start_col, 2, "跨 span 的列号继续累计");
+    }
+
+    #[test]
+    fn layout_cells_keeps_combining_marks_in_run() {
+        let runs = layout_cells(&[span("e\u{0301}f")]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "e\u{0301}f");
+        assert_eq!(runs[0].cells, 2, "组合记号不占格");
+    }
+
+    #[test]
+    fn layout_cells_of_empty_line_is_empty() {
+        assert!(layout_cells(&[]).is_empty());
+        assert!(layout_cells(&[span("")]).is_empty());
     }
 }
