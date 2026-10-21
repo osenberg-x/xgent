@@ -674,10 +674,11 @@ fn side_view_has_exactly_one_return_entry() {
 /// 点页签都要把分屏带出来——M5 之前这段逻辑散在两个显示系统里）。
 #[test]
 fn activating_side_dock_panel_opens_the_split() {
-    use xgent_ui::panels::{PanelActivate, PanelDeactivate, PanelRegister, PanelDescriptor};
+    use xgent_ui::panels::{PanelActivate, PanelDeactivate, PanelDescriptor, PanelRegister};
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins).add_plugins(xgent_ui::panels::PanelsPlugin);
+    app.add_plugins(MinimalPlugins)
+        .add_plugins(xgent_ui::panels::PanelsPlugin);
 
     // 注册一个 SideDock 面板
     let view = app.world_mut().spawn_empty().id();
@@ -695,7 +696,8 @@ fn activating_side_dock_panel_opens_the_split() {
     assert!(!app.world().resource::<SlotLayout>().is_open(Slot::SideDock));
 
     // 激活面板 → 分屏展开
-    app.world_mut().write_message(PanelActivate { id: ids::EDITOR });
+    app.world_mut()
+        .write_message(PanelActivate { id: ids::EDITOR });
     app.update();
     assert!(
         app.world().resource::<SlotLayout>().is_open(Slot::SideDock),
@@ -703,7 +705,8 @@ fn activating_side_dock_panel_opens_the_split() {
     );
 
     // 失活面板**不**改槽位开合（收起由返回入口 / 快捷键负责）
-    app.world_mut().write_message(PanelDeactivate { id: ids::EDITOR });
+    app.world_mut()
+        .write_message(PanelDeactivate { id: ids::EDITOR });
     app.update();
     assert!(app.world().resource::<SlotLayout>().is_open(Slot::SideDock));
 }

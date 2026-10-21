@@ -401,7 +401,10 @@ mod tests {
             clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 100.0, 1600.0),
             size::DRAWER_W_MIN
         );
-        assert_eq!(clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 300.0, 1600.0), 300.0);
+        assert_eq!(
+            clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 300.0, 1600.0),
+            300.0
+        );
     }
 
     /// 抽屉宽度上限保护：不高于 480。
@@ -411,7 +414,10 @@ mod tests {
             clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 900.0, 1600.0),
             size::DRAWER_W_MAX
         );
-        assert_eq!(clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 480.0, 1600.0), 480.0);
+        assert_eq!(
+            clamp_leaf(leaf_ids::DRAWER, Axis::Horizontal, 480.0, 1600.0),
+            480.0
+        );
     }
 
     /// 右侧分屏上限 = available − CHAT_MIN。
