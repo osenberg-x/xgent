@@ -19,7 +19,7 @@
 //! 的循环。故 `MonoMetrics` 是独立 `Resource`，由测量系统在首帧之后注入。
 
 use bevy::prelude::*;
-use bevy::text::{ComputedTextBlock, FontSize, LineHeight, TextFont};
+use bevy::text::{ComputedTextBlock, FontSize, FontSource, LineHeight, TextFont};
 
 use crate::fonts::UiFonts;
 use crate::theme::{px, type_scale};
@@ -252,6 +252,7 @@ pub fn spawn_mono_probes(
 pub fn collect_mono_metrics(
     q_probes: Query<(&MonoProbe, &ComputedTextBlock)>,
     existing: Option<Res<MonoMetrics>>,
+    fonts: Option<Res<UiFonts>>,
     mut commands: Commands,
 ) {
     if existing.is_some() {
@@ -293,11 +294,17 @@ pub fn collect_mono_metrics(
         at_size: type_scale::CODE,
     };
     let check = metrics.check();
+    // 家族名一并打进日志：三平台核对时「家族 + 四个数值 + 校验结论」同在一行，
+    // 不必再跨两条日志对照（M4-T1 的槽位日志另有一条）。
+    let family = fonts
+        .as_ref()
+        .map(|f| mono_family_label(&f.mono))
+        .unwrap_or_else(|| "未知".to_string());
     match &check.warning {
         Some(warning) => {
-            tracing::warn!("终端等宽度量：{warning}");
+            tracing::warn!("终端等宽度量（{family}）：{warning}");
             tracing::info!(
-                "终端等宽度量：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px",
+                "终端等宽度量（{family}）：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px",
                 metrics.latin_advance,
                 metrics.cjk_advance,
                 metrics.line_height,
@@ -307,7 +314,7 @@ pub fn collect_mono_metrics(
         }
         None => {
             tracing::info!(
-                "终端等宽度量：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px（双宽比例正常）",
+                "终端等宽度量（{family}）：latin={:.3}px cjk={:.3}px 行高={:.3}px 字号={:.1}px 单元格宽={:.3}px（双宽比例正常）",
                 metrics.latin_advance,
                 metrics.cjk_advance,
                 metrics.line_height,
@@ -317,6 +324,19 @@ pub fn collect_mono_metrics(
         }
     }
     commands.insert_resource(metrics);
+}
+
+/// 等宽槽位的家族标签（写日志用）。
+///
+/// `FontSource` 有三种形态：家族名（系统命中）、内嵌资产句柄、通用族兜底——日志
+/// 要能区分，否则三平台核对时分不清「真等宽家族」与「通用族兜底」。
+pub fn mono_family_label(source: &FontSource) -> String {
+    match source {
+        FontSource::Family(name) => name.to_string(),
+        FontSource::Handle(_) => "内嵌资产（句柄）".to_string(),
+        FontSource::Generic(generic) => format!("{generic:?}"),
+        _ => "未知来源".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -385,5 +405,24 @@ mod tests {
         let grid = CellGrid::from_viewport(0.0, 0.0, &m);
         assert_eq!(grid.cols, 1);
         assert_eq!(grid.rows, 1);
+    }
+
+    /// 家族标签要能区分「系统家族 / 内嵌句柄 / 通用族兜底」（日志核对用）。
+    #[test]
+    fn family_label_distinguishes_sources() {
+        assert_eq!(
+            mono_family_label(&FontSource::Family("Cascadia Mono".into())),
+            "Cascadia Mono"
+        );
+        assert_eq!(
+            mono_family_label(&FontSource::Generic(
+                bevy::text::GenericFontFamily::Monospace
+            )),
+            "Monospace"
+        );
+        assert!(
+            mono_family_label(&FontSource::Handle(Handle::default())).contains("内嵌"),
+            "句柄来源应标为内嵌资产"
+        );
     }
 }

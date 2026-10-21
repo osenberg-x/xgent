@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b / M3 已交付**（M1/M2 经 Comet change 归档；M3 直接以提交落地：`19fff0a` T1/T2、`3acbb17` T3、`663d1ad` T4/T5、`f5c4e32` T6），**M4 起未开工**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落的勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 / M4 已交付**（M1/M2/M4 经 Comet change 归档；M3 直接以提交落地：`19fff0a` T1/T2、`3acbb17` T3、`663d1ad` T4/T5、`f5c4e32` T6；M4 见 §M4），**下一期 M5（槽位注册表与派生可见性）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落的勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
