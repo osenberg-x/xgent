@@ -312,7 +312,7 @@ fn spawn_session_history(
     let panel = commands
         .spawn((
             Node {
-                width: Val::Px(crate::theme::size::DRAWER_W),
+                width: Val::Px(crate::theme::size::DRAWER_W_PREFERRED),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 border: UiRect::right(Val::Px(1.0)),

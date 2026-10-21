@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use xgent_ui::panels::ids;
+use xgent_ui::panels::split::{Axis, LeafSize, Split, SplitTree, leaf_ids};
 use xgent_ui::panels::{
     Closeability, PanelDescriptor, PanelRegistry, PanelSet, Slot, SlotLayout, builtin_rail_panels,
 };
@@ -352,6 +353,87 @@ fn overlay_slot_is_exclusive() {
 }
 
 // ===== 5. 分割树遍历 =====
+
+/// 分割树遍历：手柄数量、每条手柄调整的叶子、叶子尺寸写回。
+#[test]
+fn split_tree_traversal() {
+    let tree = SplitTree::default();
+    let handles = tree.handles();
+    assert_eq!(handles.len(), 2, "默认树：抽屉 ↔ 对话、对话 ↔ 右侧分屏");
+    assert_eq!(handles[0].axis, Axis::Horizontal);
+    assert_eq!(handles[0].before, leaf_ids::DRAWER);
+    assert_eq!(handles[1].after, leaf_ids::SIDE_DOCK);
+    assert_eq!(handles[0].adjustable_leaf(&tree), Some(leaf_ids::DRAWER));
+    assert_eq!(handles[1].adjustable_leaf(&tree), Some(leaf_ids::SIDE_DOCK));
+    // 叶子尺寸写回
+    let mut tree = tree;
+    assert!(tree.set_leaf_size(leaf_ids::DRAWER, LeafSize::Min(240.0, 400.0)));
+    assert_eq!(
+        tree.leaf_size(leaf_ids::DRAWER),
+        Some(LeafSize::Min(240.0, 400.0))
+    );
+}
+
+/// 注册一个**纵向分割**不需要改 `resize.rs`——遍历逻辑是通用的。
+#[test]
+fn vertical_split_registers_without_touching_resize_rs() {
+    // 构造一棵含纵向分割的树（模拟「侧区内部上下分割」）
+    let tree = SplitTree {
+        root: Some(Split::Splitter {
+            axis: Axis::Horizontal,
+            children: vec![
+                Split::Leaf {
+                    id: leaf_ids::CHAT,
+                    size: LeafSize::Grow(1.0),
+                },
+                Split::Splitter {
+                    axis: Axis::Vertical,
+                    children: vec![
+                        Split::Leaf {
+                            id: "side-upper",
+                            size: LeafSize::Grow(1.0),
+                        },
+                        Split::Leaf {
+                            id: "side-lower",
+                            size: LeafSize::Grow(1.0),
+                        },
+                    ],
+                    handles: vec![xgent_ui::panels::split::HandleState { target: 0 }],
+                },
+            ],
+            handles: vec![xgent_ui::panels::split::HandleState { target: 0 }],
+        }),
+    };
+    let handles = tree.handles();
+    assert_eq!(handles.len(), 2, "横向 1 条 + 纵向 1 条");
+    assert!(
+        handles.iter().any(|h| h.axis == Axis::Vertical),
+        "纵向分割应产出一条纵向手柄"
+    );
+    // `resize.rs` 不含任何按面板 id 的特判分支（通用遍历）
+    let resize_src = read(&repo_root().join("crates/xgent_ui/src/resize.rs"));
+    assert!(
+        !resize_src.contains("side-upper") && !resize_src.contains("side-lower"),
+        "resize.rs 不得出现按分割 id 的特判（通用遍历）"
+    );
+}
+
+/// 抽屉宽度钳制在 [240, 480]。
+#[test]
+fn drawer_width_is_clamped_to_range() {
+    assert_eq!(
+        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, 100.0, 1600.0),
+        240.0
+    );
+    assert_eq!(
+        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, 900.0, 1600.0),
+        480.0
+    );
+    assert_eq!(
+        xgent_ui::resize::clamp_leaf(leaf_ids::DRAWER, 320.0, 1600.0),
+        320.0
+    );
+}
 
 // ===== 6. i18n 页签标题 =====
 

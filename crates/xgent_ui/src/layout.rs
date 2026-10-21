@@ -82,7 +82,6 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<crate::theme::ThemeHandle>()
             .init_resource::<crate::theme::Theme>()
             .init_resource::<FileDrawerOpen>()
-            .init_resource::<crate::resize::PanelWidths>()
             .add_systems(Startup, spawn_layout);
     }
 }
@@ -91,12 +90,16 @@ impl Plugin for LayoutPlugin {
 pub(crate) fn spawn_layout(
     mut commands: Commands,
     handle: Res<ThemeHandle>,
-    widths: Res<crate::resize::PanelWidths>,
+    tree: Res<crate::panels::split::SplitTree>,
     mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
     let theme = handle.theme;
     let generation = handle.generation;
-    let side_view_w = widths.side_view;
+    // 右侧分屏的初始宽度取自分割树（v8 M5：宽度由分割树驱动）。
+    let side_view_w = tree
+        .leaf_size(crate::panels::split::leaf_ids::SIDE_DOCK)
+        .map(|s| s.preferred())
+        .unwrap_or(size::CONTEXT_W_DEFAULT);
     commands.spawn(Camera2d);
 
     commands
@@ -205,6 +208,9 @@ pub(crate) fn spawn_layout(
                                 generation,
                             },
                             ChatPanelMarker,
+                            crate::resize::SplitLeafMarker {
+                                id: crate::panels::split::leaf_ids::CHAT,
+                            },
                         ))
                         .id();
                     // v8 M5：对话区注册为 `Slot::Center` 面板（主区默认可见）。
@@ -220,12 +226,8 @@ pub(crate) fn spawn_layout(
                         view: Some(chat),
                     });
 
-                    // 右拖拽手柄
-                    main.spawn((
-                        crate::resize::handle_bundle(crate::resize::ResizeEdge::Right),
-                        crate::panels::PanelVisibility::of_slot(crate::panels::Slot::SideDock),
-                    ));
-                    // 上下文面板（预览/差异/终端；默认展开，宽度走 PanelWidths）
+                    // 右拖拽手柄（v8 M5：由 `resize::sync_split_handles` 遍历分割树生成）
+                    // 上下文面板（预览/差异/终端；默认展开，宽度走分割树）
                     main.spawn((
                         Node {
                             width: px(side_view_w),
@@ -246,6 +248,10 @@ pub(crate) fn spawn_layout(
                         SideViewMarker,
                         // v8 M5-T3：分屏容器的显隐由派生系统统一写。
                         crate::panels::PanelVisibility::of_slot(crate::panels::Slot::SideDock),
+                        // v8 M5-T5：宽度由分割树的 `side-dock` 叶子驱动。
+                        crate::resize::SplitLeafMarker {
+                            id: crate::panels::split::leaf_ids::SIDE_DOCK,
+                        },
                     ));
                 });
 

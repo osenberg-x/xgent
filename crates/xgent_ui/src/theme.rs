@@ -241,8 +241,12 @@ pub mod size {
     pub const CHAT_MIN: f32 = 520.0;
     /// 上下文面板页签条高度
     pub const CONTEXT_TABS_H: f32 = 38.0;
-    /// 抽屉宽度
-    pub const DRAWER_W: f32 = 320.0;
+    /// 抽屉首选宽度（v8 M5：`Min(240, Preferred(320))` 的 Preferred 部分）
+    pub const DRAWER_W_PREFERRED: f32 = 320.0;
+    /// 抽屉最小宽度（v8 M5：分割树的 `Min` 下限）
+    pub const DRAWER_W_MIN: f32 = 240.0;
+    /// 抽屉最大宽度（v8 M5：拖拽上限）
+    pub const DRAWER_W_MAX: f32 = 480.0;
     /// 拖拽分隔条宽度
     pub const RESIZER_W: f32 = 6.0;
     /// 文件面板宽度（过渡期；M5 抽屉化后删除）

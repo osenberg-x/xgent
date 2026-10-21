@@ -15,6 +15,7 @@ use bevy::math::Vec2;
 use bevy::prelude::*;
 
 pub mod shim;
+pub mod split;
 pub mod tabs;
 pub mod visibility;
 
@@ -478,6 +479,8 @@ impl Plugin for PanelsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PanelRegistry>()
             .init_resource::<SlotLayout>()
+            // 分割树（区域尺寸的声明式描述；`resize` 消费它生成分割条）。
+            .init_resource::<split::SplitTree>()
             // 页签标题要 i18n 语料；宿主（xgent_app）会用真实 Localizer 覆盖。
             .init_resource::<xgent_settings::Localizer>()
             // 页签样式要主题令牌（与 ThemePlugin 同一默认值，init 不覆盖）。

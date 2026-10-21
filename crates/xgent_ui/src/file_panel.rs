@@ -198,7 +198,7 @@ fn spawn_file_panel(
                 top: px(0.0),
                 left: px(0.0),
                 bottom: px(0.0),
-                width: px(crate::theme::size::DRAWER_W),
+                width: px(crate::theme::size::DRAWER_W_PREFERRED),
                 flex_direction: FlexDirection::Column,
                 border: UiRect::right(px(1.0)),
                 overflow: Overflow::clip(),
@@ -220,6 +220,10 @@ fn spawn_file_panel(
                 crate::panels::ids::FILE_DRAWER,
                 crate::panels::Slot::Overlay,
             ),
+            // v8 M5-T5：抽屉宽度由分割树的 `drawer` 叶子驱动（可拖宽）。
+            crate::resize::SplitLeafMarker {
+                id: crate::panels::split::leaf_ids::DRAWER,
+            },
         ))
         .id();
     commands.entity(root).add_child(panel);
