@@ -3,7 +3,7 @@ name: v8-m5-panel-registry
 language: zh-CN
 phase: verify
 status: await-user
-state_version: 17
+state_version: 21
 brief: brief.md
 document_constraints_version: 2
 shape_confirmation_hash: 2c0ea4bf3cf3dd6a343b84df84cfef98267711a50abc9a86723bd504213efa68
@@ -19,15 +19,14 @@ workspace:
 loop:
   stage: await-user
   goal_cycle: 1
-  iteration: 4
+  iteration: 5
   attempt: 1
   retry_epoch: 0
   failed_iteration_count: 2
   no_progress_count: 0
   execution_failure_count: 0
-  previous_unresolved_ids:
-    - A11
-  next_action: resolve-verifier-blocker
+  previous_unresolved_ids: []
+  next_action: confirm-skill-coordinated-pass
 acceptance:
   - id: A1
     source: brief.md
@@ -37,16 +36,15 @@ acceptance:
       排序）；`PanelRegister` / `PanelActivate` / `PanelDeactivate` 是 ECS `Message`。
     result: passed
     reason:
-      text: "Slot 恰含 8 变体（crates/xgent_ui/src/panels.rs:51-68:
-        Rail/Center/SideDock/BottomDock/SettingsSection/StatusSegment/Palette/O\
-        verlay）；PanelDescriptor.title_key 为非 Option 的必填字段（panels.rs:114）且是
-        PanelDescriptor::new 的必填位置参数（panels.rs:133-139）；PanelRegistry 支持按 id
-        查询（panels.rs:236 get）与按槽位查询并按 (order,id) 升序（panels.rs:256-264
-        iter_slot）、iter_rail（:267）；PanelRegister/PanelActivate/PanelDeactivate 均
-        derive(Message)（panels.rs:456/465/472）并经 add_message
-        注册（panels.rs:505-507）。源码级：契约测试 slot_covers_eight_slots /
-        descriptor_maps_to_slot / every_builtin_panel_has_a_unique_descriptor
-        全部通过。"
+      text: "Slot 恰含 8
+        变体（Rail/Center/SideDock/BottomDock/SettingsSection/StatusSegment/Palett\
+        e/Overlay，crates/xgent_ui/src/panels.rs:51-68）；PanelDescriptor.title_ke\
+        y: &'static str 必填非 Option（panels.rs:114,133-152）；PanelRegistry 为
+        Resource，get(id) panels.rs:236、iter_slot 按 (order,id) 升序
+        panels.rs:256-264；PanelRegister/PanelActivate/PanelDeactivate 均
+        #[derive(Message)]（panels.rs:456/465/472）并 add_message
+        注册（panels.rs:505-507）；业务侧注册/激活只经 MessageWriter（grep 全仓：非 panels.rs 的
+        .register()/.activate() 调用全部落在 #[cfg(test)] 块内）"
       truncated: false
   - id: A2
     source: brief.md
@@ -56,14 +54,13 @@ acceptance:
       `match`。
     result: passed
     reason:
-      text: 自 grep：crates/ 内 SideViewContent
-        仅出现在契约测试自身的断言文本（crates/xgent_ui/tests/panel_registry_contract.rs:501
-        等，该文件在扫描时自我排除），生产代码零引用；layout.rs 全文只引用 ids::CHAT 一处（layout.rs:218 注册
-        Center 面板）且无任何按面板 id 的 match/if 分派，editor/mod.rs 亦无（仅 editor/mod.rs:212
-        一条
-        PanelRegister）。北极星成立：editor/mod.rs:212、editor/diff_view.rs:88、terminal/mod.rs:294
-        各自「一条 PanelRegister + 描述符 + 视图模块」即接入；槽位页签由注册表自动生成（panels/tabs.rs:112-159
-        sync_slot_tab_bar），新增面板不需改 layout.rs/editor/mod.rs。
+      text: grep 确认 crates/xgent_ui/src/layout.rs 与 editor/mod.rs 均无
+        SideViewContent；layout.rs 无任何面板 id 字面量分支（仅 leaf_ids::CHAT 分割叶与自身
+        PanelRegister）；editor/mod.rs 只在自身注册处引用 ids::EDITOR，无按 id 的 match/if
+        分派；新增 SideDock 面板 = 描述符 + 视图模块 + 一条 PanelRegister 即被自动接入：页签由
+        registry.iter_slot(Slot::SideDock) 生成、标题取
+        title_key（panels/tabs.rs:112-132），点击发
+        PanelActivate（tabs.rs:163-170），激活时自动展开分屏（panels.rs:596-598）
       truncated: false
   - id: A3
     source: brief.md
@@ -71,13 +68,11 @@ acceptance:
       两次关闭抽屉后，rail 上不残留 Files 选中态。
     result: passed
     reason:
-      text: ActiveActivity 资源已删除：全仓仅剩 activity_bar.rs:5 的一处叙述性注释，无类型/字段/使用点；rail 选中态由
-        PanelRegistry::active_rail 派生（panels.rs:342-360：遍历 iter_rail ∩
-        layout.is_panel_visible(target)，取 activated_seq 最大者）；rail 视觉读
-        active_rail（activity_bar.rs:378 update_active_indicators）。连点 Files
-        两次：Toggle 写 PanelDeactivate（activity_bar.rs:334-336）→ 抽屉不可见 → rail-files
-        被 active_rail 跳过 → 回落到 rail-chat（panels.rs:657-680 单测 + 契约测试
-        rail_selection_falls_back_after_toggling_drawer 均验证）。
+      text: ActiveActivity/ActivityKind 已从代码删除（全仓 grep 仅余 activity_bar.rs:5
+        的说明性注释）；选中态由 PanelRegistry::active_rail 从「注册表 ∩
+        槽位可见性」派生（panels.rs:342-360），UI 侧只读该结果（activity_bar.rs:378）；rail 项由注册表
+        Slot::Rail 描述符生成（activity_bar.rs:212-269）；连点 Files 开→关后回落
+        chat：panels.rs:658-680 与 tests/panel_registry_contract.rs:290-319 双重断言
       truncated: false
   - id: A4
     source: brief.md
@@ -85,15 +80,14 @@ acceptance:
       由自建浮层改为注册面板（`Slot::Overlay`），与文件抽屉同属单例槽位，二者同一时刻至多一个可见（不再争层级）。
     result: passed
     reason:
-      text: session_history 已改为常驻注册面板：spawn_session_history 注册
-        desc=Slot::Overlay（session_history.rs:397-406），遮罩与抽屉均挂
+      text: session_history 改为注册面板：PanelRegister{SESSION_HISTORY,
+        Slot::Overlay}（session_history.rs:397-401），遮罩与面板挂
         PanelVisibility::of_panel(SESSION_HISTORY,
-        Overlay)（:303/:332），显隐由派生系统写；互斥由
-        Slot::Overlay.is_exclusive（panels.rs:73）+ PanelRegistry::activate
-        的同槽自动失活（panels.rs:293-300）保证，两个抽屉同用 kit::drawer_z()
-        同层，不再争层级；SessionHistoryState.open 降为派生视图（sync_session_history_open,
-        :217-226）。契约测试 overlay_slot_is_exclusive 与单测
-        history_and_file_drawer_share_one_exclusive_slot 通过。
+        Slot::Overlay)（session_history.rs:303-306, 332-335），面板常驻不再按开关
+        spawn/despawn（session_history.rs:271-275），SessionHistoryState.open
+        变为派生视图（session_history.rs:217-226）；Overlay 为单例槽位（panels.rs:73），activate
+        自动失活同槽兄弟（panels.rs:293-300），overlay.rs:56-70 把 DrawerToggle 转成面板消息；互斥断言见
+        overlay.rs:91-133 与 tests/panel_registry_contract.rs:323-353
       truncated: false
   - id: A5
     source: brief.md
@@ -106,22 +100,24 @@ acceptance:
       最近会话标题、`editor/mod.rs` 编辑器文档页签），白名单以源码级测试固化且逐条注明属内容态而非面板态。
     result: passed
     reason:
-      text: "我自行 grep `\\.display\\s*=` 于 crates/xgent_ui/src 得 7
-        处命中：panels/visibility.rs:39（派生系统）+ 5 处内容态（chat_panel.rs:1054
-        update_back_to_bottom、activity_bar.rs:292
-        companion_ring_system、welcome.rs:190 toggle_welcome、welcome.rs:223
-        rebuild_recent_sessions、editor/mod.rs:328 update_buffer_visibility）+ 1 处
-        chat_panel.rs:1052 只读比较。逐个读 enclosing fn
-        后确认与契约测试白名单（tests/panel_registry_contract.rs:191-222）逐条一致，无遗漏/无多放行。7
-        处原动态写手全部并入：layout.rs:251（分屏容器；原右手柄已由 resize::sync_split_handles
-        绝对定位生成，不再有 display
-        写手）、file_panel.rs:186/219（遮罩+抽屉）、activity_bar.rs:134（展开钮用
-        PanelVisibility::of_closed_slot → invert_slot，仅在 Slot::SideDock 关闭时
-        Display::Flex，展开时
-        None，语义与旧「分屏折叠才显示」一致）、editor/mod.rs:163、terminal/mod.rs:286、diff_view.r\
-        s:65。3 处 spawn
-        期默认值确为构造期字面量（editor/mod.rs:152、editor/diff_view.rs:57、terminal/mod.rs:2\
-        78 display: Display::None）。5 处内容态写手按 2026-10-21 用户裁决保持原状。"
+      text: "我自行 grep 全部 .display = 写点，crates/xgent_ui/src 仅 6
+        处：panels/visibility.rs:39（派生系统
+        derive_panel_visibility，唯一面板/区域写手，panels/visibility.rs:23-42）+ 5
+        处内容态白名单（chat_panel.rs:1054
+        update_back_to_bottom=滚动位置；activity_bar.rs:292
+        companion_ring_system=陪伴开关；editor/mod.rs:328
+        update_buffer_visibility=当前文档页签；welcome.rs:190
+        toggle_welcome=会话是否为空；welcome.rs:223
+        rebuild_recent_sessions=最近会话列表是否为空）——逐条核实语义属实；原 7
+        处动态面板/区域写手已归一：layout.rs:251 of_slot(SideDock)、file_panel.rs:186/219
+        of_panel(FILE_DRAWER,Overlay)、activity_bar.rs:134
+        of_closed_slot(SideDock)、editor/mod.rs:163-166
+        of_panel(EDITOR)、terminal/mod.rs:286-289 of_panel(TERMINAL)；3 处 spawn
+        期默认值改构造期字面量 editor/mod.rs:152 / editor/diff_view.rs:57 /
+        terminal/mod.rs:278（均 display: Display::None）；展开钮仅在 SideDock
+        关闭时可见（panels.rs:446-452 invert_slot + visibility.rs:32-35），契约测试
+        tests/panel_registry_contract.rs:615-656
+        断言；白名单以源码级测试固化并逐条注明内容态（tests/panel_registry_contract.rs:188-261）"
       truncated: false
   - id: A6
     source: brief.md
@@ -129,15 +125,14 @@ acceptance:
       `EditorBackButtonMarker` 只定义一次（源码级断言）。
     result: passed
     reason:
-      text: 槽位页签条唯一：SlotTabBarMarker（panels/tabs.rs:38）由 spawn_slot_tab_bar 作为侧区分屏容器的
-        child 0 插入（panels/tabs.rs:44-72），实体记入
-        SlotLayout::set_tab_bar（panels.rs:407）；页签项由 sync_slot_tab_bar 从注册表
-        Slot::SideDock 生成（:112-159）。EditorBackButtonMarker
-        全仓仅一处定义（panels/tabs.rs:34；仓库内其余命中均为测试断言与文档），editor/mod.rs 顶栏的第二个 ✕
-        已删（editor/mod.rs:169-196 只剩 EditorTabBarMarker
-        文档列表条，语义未与槽位页签合并）。返回入口真的接线：handle_back_button_click（panels/tabs.rs:206-224）对
-        Added<Pressed> 反应 → 失活全部 SideDock 面板 + layout.set_open(SideDock,false) +
-        激活 CHAT → derive_panel_visibility 令分屏容器 display=None，侧区确实关闭。
+      text: EditorBackButtonMarker 全仓唯一定义 crates/xgent_ui/src/panels/tabs.rs:34，且唯一
+        spawn 点 tabs.rs:96（由 spawn_slot_tab_bar
+        生成并作为页签条最后一个子节点，tabs.rs:44-100）；编辑器顶栏 ✕ 已移除，editor/mod.rs:172-196 的顶栏只保留
+        EditorTabBarMarker 文档列表（rebuild_editor_tabs 填
+        EditorTabMarker{buffer}），与槽位页签不合并；页签条由 SlotLayout 拥有（tabs.rs:72
+        layout.set_tab_bar）并由 panels/tabs.rs::sync_slot_tab_bar
+        渲染（tabs.rs:103-160）；返回入口确实接线：handle_back_button_click（tabs.rs:206-224）失活
+        SideDock 面板 + 关闭槽位 + 激活 chat
       truncated: false
   - id: A7
     source: brief.md
@@ -146,20 +141,14 @@ acceptance:
       Preferred(320))`、上限 480，且**可拖宽**并被钳制在 `[240, 480]`。
     result: passed
     reason:
-      text: SplitTree/Split/LeafSize/HandleState 建模于
-        crates/xgent_ui/src/panels/split.rs:13-236；resize.rs
-        改为遍历树生成分割条（resize.rs:124-169 sync_split_handles 走 tree.handles() 的通用
-        DFS，含纵向子分割），注册一个新纵向分割不需要改 resize.rs（新 id 在 axis_of 落到 _=>Vertical
-        默认分支、clamp_leaf 落到通用分支）。按轴：写尺寸按 SplitLeafMarker.axis 分别写
-        width/height（resize.rs:194-198）、拖动按手柄轴取
-        delta.x/delta.y（resize.rs:260-268）、钳制按轴取界 clamp_leaf(id, axis, value,
-        available)（resize.rs:304-316）。抽屉：默认树 leaf
-        Min(240,320)（split.rs:157），DRAWER_W_MIN/MAX=240/480（theme.rs:245-249），拖拽写回
-        with_current 后 preferred() 生效（resize.rs:292-296 +
-        apply_split_sizes），抽屉被钳在 [240,480]（契约测试 drawer_width_is_clamped_to_range
-        + resize.rs 单测 drawer_respects_min/max）。附带风险：resize.rs 仍有按 id 的 match
-        分支（clamp_leaf 的 min、axis_of、handle_double_click_reset），台账「resize.rs 无按分割
-        id 的特判」措辞偏强（见 risks）。
+      text: SplitTree/Split/LeafSize 已建模（panels/split.rs:22-253，默认树
+        drawer=Min(240,320)/chat=Grow/side-dock=Min(380,720)，split.rs:150-175）；resize.rs
+        改为遍历分割树生成分割条（sync_split_handles resize.rs:124-169），注册纵向分割无需改
+        resize.rs（契约测试 tests/panel_registry_contract.rs:379-419 断言 resize.rs
+        无按分割 id 特判）；抽屉 theme.rs:245/247/249 = PREFERRED 320 / MIN 240 / MAX
+        480，clamp_leaf 钳制在 [240,480]（resize.rs:307-319，测试
+        tests/panel_registry_contract.rs:423-436）；轴向感知贯穿：写尺寸按轴（resize.rs:195-197）、拖动位移按轴取分量（resize.rs:265-268）、钳制按轴（resize.rs:312-317）、叶子轴向取自分割树
+        SplitTree::leaf_axis（split.rs:206-218，用于 resize.rs:366），不再按 id 猜轴
       truncated: false
   - id: A8
     source: brief.md
@@ -167,13 +156,11 @@ acceptance:
       SideViewContent`）；editor / preview / diff / terminal 全部为原生注册项。
     result: passed
     reason:
-      text: SideViewContent 类型本身与 shim 文件在 M5-T6 提交 7eb83e9 中一并删除（git show
-        7eb83e9：crates/xgent_ui/src/panels/shim.rs 74 行删除、editor/mod.rs 删 17
-        行）；我自行 grep 全仓 crates/
-        仅命中契约测试自身的断言文本（tests/panel_registry_contract.rs:501-508，扫描时排除该文件），生产代码零引用。editor/preview/diff/terminal
-        均为原生注册项：editor/mod.rs:212（editor）、editor/diff_view.rs:88（diff）、terminal/mod.rs:294（terminal），加
-        layout.rs:218（chat）；每个 id 在注册表中有唯一描述符（ids 模块 panels.rs:22-44，10 个 id
-        互不相同）。
+      text: 全仓 grep crates/ 下 SideViewContent
+        仅命中断言文件自身（tests/panel_registry_contract.rs，该测试第 497-499 行显式排除自身后断言零引用，第
+        477-511 行）；源码零引用，enum
+        定义已删除；editor/diff/terminal/chat/file-drawer/session-history
+        均为原生注册项：editor/mod.rs:212-221、editor/diff_view.rs:88-97、terminal/mod.rs:294-303、layout.rs:218-228、file_panel.rs:232-241、session_history.rs:397-401
       truncated: false
   - id: A9
     source: brief.md
@@ -181,15 +168,13 @@ acceptance:
       loc;` 被删除；**英文语料**下页签显示英文（自动化断言：切 `en-US` 后取到的页签标题不含 CJK 码位）。
     result: passed
     reason:
-      text: 页签标题取自描述符 title_key：sync_slot_tab_bar 用 tr(&loc,
-        e.desc.title_key)（panels/tabs.rs:129-132）；`let _ = loc;` 在 crates/
-        内已零命中；两种语料齐备 6 个 panel-* key（xgent_settings/locales/zh-CN/main.ftl:8-13
-        与 en-US/main.ftl:8-13，en-US 值为 Chat/Files/Session
-        History/Terminal/Preview/Diff，无 CJK），契约测试
-        english_corpus_has_english_panel_titles 断言 6 个 key 的 en-US 值非空且无 CJK
-        码位、zh-CN 齐备；Localizer::get 只按当前 bundle 取值、缺 key 回退为 key
-        本身（xgent_settings/src/localizer.rs:108-131），故运行时切 en-US 必得英文。轻微偏差见
-        risks（断言落在 .ftl 语料层而非「切语言后取渲染标题」）。
+      text: 页签标题取描述符 title_key 经 fluent 语料渲染（panels/tabs.rs:129-132 tr(&loc,
+        e.desc.title_key)）；editor/mod.rs 已完全不含 Localizer，let _ = loc; 已删除（grep
+        无命中）；xgent_settings/locales/{zh-CN,en-US}/main.ftl 均补齐 6 个 panel-*
+        key，英文语料值为 Chat/Files/Session History/Terminal/Preview/Diff，无 CJK
+        码位，契约测试 tests/panel_registry_contract.rs:442-471
+        断言（且同时校验中文语料齐备）；Localizer::get
+        走同一份内嵌语料（xgent_settings/src/localizer.rs:18-19,108-131），故 en-US 下页签必为英文
       truncated: false
   - id: A10
     source: brief.md
@@ -198,14 +183,12 @@ acceptance:
       后该一致性由注册表本身承担（每个既有面板在注册表中有唯一描述符）。
     result: passed
     reason:
-      text: shim 生命周期符合 Spec：M5-T1..T5 期间存在 crates/xgent_ui/src/panels/shim.rs（0aeecc4
-        引入 74 行，纯映射函数），M5-T6 提交 7eb83e9
-        随枚举一并拆除（当前文件不存在，Test-Path=False）。拆除后一致性由注册表承担：chat/editor/diff/terminal/file-drawer/session-history
-        六个内容面板各有一条唯一
-        PanelRegister（layout.rs:218、editor/mod.rs:212、editor/diff_view.rs:88、terminal/mod.rs:294、file_panel.rs:232、session_history.rs:397）+
-        4 个 rail 入口（panels.rs:539-571 builtin_rail_panels），id 互不重复；契约测试
-        every_builtin_panel_has_a_unique_descriptor / descriptor_maps_to_slot
-        验证。
+      text: M5-T6 已拆 shim，SideViewContent 类型本身不存在（见 A8）；一致性改由注册表承担：运行时注册表含 4 个 rail
+        入口（panels.rs:539-571）+ 6
+        个内容面板（chat/file-drawer/session-history/editor/diff/terminal），id 唯一且
+        title_key 非空；契约测试 tests/panel_registry_contract.rs:154-177
+        断言每个既有面板有唯一描述符且 title_key 必填，panels.rs:213-233 的 register 对重复 id
+        只补视图实体不重置运行时状态
       truncated: false
   - id: A11
     source: brief.md
@@ -213,27 +196,18 @@ acceptance:
       diff；`cargo clippy -p xgent_ui --all-targets` 在改动文件零新增警告；`cargo test
       --workspace` 的失败集合**不超出**既有 15 项基线（`xgent_tools` 6 / `xgent_plugin_host` 6
       / `xgent_daemon` 1 / `xgent_settings_core` 1 / `xgent_agent` 1）。
-    result: blocked
+    result: passed
     reason:
-      text: 【实质已核实通过，阻塞为 Runtime 检查门禁产物，非候选缺陷】A11 的三项子判据全部成立：① cargo check --workspace
-        通过（Runtime 8418695b check-workspace exit 0）；② cargo fmt -p xgent_ui 无
-        diff（8418695b fmt 日志为空、exit 0）；③ cargo clippy -p xgent_ui --all-targets
-        exit 0 且改动文件零新增警告（仅 xgent_ui 既有的 settings_panel_values /
-        settings_input_focus 两个测试文件有告警，均非本变更改动文件）。工作区测试失败集合我另请 Runtime 在
-        HEAD=558104d 实测两条：f33a92af-test-workspace-baseline-log 得 15
-        项，**逐项等于**既有基线（xgent_agent 1 + xgent_daemon 1 + xgent_plugin_host 3+3 +
-        xgent_settings_core 1 + xgent_tools 6），另一条同命令得 14 项（xgent_daemon 1
-        未复现，属已记录时序 flake），**无任何基线外新失败**。阻塞原因：我在本轮亲自请求的检查
-        test-workspace-head（argv = cmd /c set CARGO_PROFILE_DEV_DEBUG=0&& set
-        CARGO_PROFILE_TEST_DEBUG=0&& cargo test --workspace --no-fail-fast）因仓库既有
-        15 项基线失败而 exit 101、记录为 status=failed；Runtime 的门禁是「所有 check 记录皆 passed
-        才允许 verdict=pass」，且 check
-        记录的命令指纹（executable+argv+cwd+timeout+repeatable）不可改（同 id 换 argv 会被
-        Runtime 拒为 conflicting commands），因此该 failed 记录在本 attempt 内无法被改成
-        passed。解决路径（不需改任何代码）：由控制器走 resolve-verifier-blocker 起新 attempt（新 attempt
-        的本地执行只含候选自带的 fmt/clippy/test-ui/check-workspace 四条、全 passed），或由 Builder
-        在候选检查计划里放一条基线容错的 workspace 测试命令。本判定按「A11 无法在本 attempt 内终局化」记为
-        blocked，其验收实质（失败集合 ⊆ 15 项基线）已核实成立。
+      text: 复用候选自带的 4 条 PASSING Runtime
+        记录（.comet/runtime/native/changes/v8-m5-panel-registry/logs/checks/5e62a5d5-*，最新一轮）：fmt.log
+        0 字节（无 diff）、clippy.log 无任何指向 M5
+        改动文件（panels*/activity_bar/layout/file_panel/session_history/overlay/resize/editor*/terminal*/panel_registry_contract）的告警、check-workspace.log
+        以 Finished dev profile 收尾无 error、test-ui.log 显示 xgent_ui lib 95 passed /
+        panel_registry_contract 21 passed 且 19 个集成套件全绿；workspace
+        失败集对照（f33a92af-*-test-workspace-baseline-log.log）：xgent_agent 1 +
+        xgent_daemon 1 + xgent_plugin_host 3+3 + xgent_settings_core 1 +
+        xgent_tools 6 = 恰好 15 项既有基线，xgent_ui/xui/xgent_terminal
+        无失败，故不构成回归（按指令未再请求 workspace 级 cargo test）
       truncated: false
   - id: A12
     source: brief.md
@@ -243,34 +217,35 @@ acceptance:
       + 一条文档提交 + 一条 `chore(native): archive v8-m5-panel-registry`。"
     result: passed
     reason:
-      text: 三处文档均记录 M5：台账 §M5 六任务逐条勾选 + 状态行（docs/plans/ui-v8-tasks.md:242-278）、§10
-        新增勘误 34-39（:432-438，含 .display= 口径裁决、Slot::Center、add_plugins
-        不幂等、派生视图、提交粒度偏差、交接 §4.1/§4.2 订正）；交接 §1 交付表 M5
-        行（docs/plans/ui-v8-handoff.md:29）、§2 基线（:45 xgent_ui lib 95、:48
-        panel_registry_contract 21，与 Runtime 日志实测一致）、§4.0 M5 落点速查（:86-95）、§4.1
-        改写为 M6 起点事实、§4.2 改写为 M6 任务表（过时的 M5-T5「拖拽排序 + 面板宽度持久化」判据已消失）、§5 下一步 M6，节序
-        §0→§9 正常；开发指南新增 §5.24（docs/dev-tutorial.md:872-897：模型/取舍/坑）+ §1.1
-        功能行（:33）。提交粒度偏差（4 条实现提交而非 6 条按任务提交）已在台账 §10 勘误 38 披露但未经用户对已确认 brief
-        的复确认，按可接受风险处理、不单独据此判负（见 risks）；交接 §0 仍写「下一期是 M5」为遗留文档瑕疵（见 risks）。
+      text: "三处文档确实记录 M5：docs/plans/ui-v8-tasks.md §M5 六个任务逐条 [x]（242-278 行）+ §10 勘误
+        34-39；docs/plans/ui-v8-handoff.md §1 交付表行（29）、§2 基线（44-60）、§4.0 M5
+        落点速查（84-95）、§4.1/§4.2 已改写为 M6 口径（103-126）、节序恢复
+        §4→§5→§6→§7→§8→§9；docs/dev-tutorial.md 功能表行（33）+ §5.24
+        槽位注册表与派生可见性（872-897，含模型与 8 条坑）。数字经我独立复核属实：crates/xgent_ui/src 内 #[test]
+        合计 95、tests/panel_registry_contract.rs 21；交接 §0 已不再称「下一期是 M5」，改为「M5
+        已收口，下一期是 M6（Transcript 有序树 + Markdown + 输入区）」（handoff:10）。提交粒度为 4
+        条实现提交（0aeecc4 T1–T3 / 0141343 T4 / dc22458 T5 / 7eb83e9 T6）+ 3 条复验修复 + 1
+        条文档 + 1 条 rustfmt，非 6 条按任务提交——该偏差已在台账 §10 勘误 38 显式披露并给出理由（T1–T3
+        共享同一批类型与消息，拆三条独立可编译提交收益低于成本；T4/T5/T6 严格按任务边界），不判为实质缺漏"
       truncated: false
 builder_handoff:
-  candidate_id: 1fdcedc5-37a8-4cf3-b3ed-a4031cce699c
+  candidate_id: 5779dd56-bad0-4b34-a191-d9289a79d8d1
   identity_provider: skill-coordinated
-  builder_execution_ref: skill-coordinated:builder:fe78a22f-695f-4f46-9acf-1c7074dab7ee
-  iteration: 4
+  builder_execution_ref: skill-coordinated:builder:14eccdbe-ed00-4993-bf00-e637899e9ed9
+  iteration: 5
   summary:
-    text: M5 槽位注册表与派生可见性全部落地（台账 §M5 六个任务），并修复两轮独立 Verifier 复验发现的缺陷：轮一（A5 展开钮语义反转 /
-      A6 侧区缺唯一返回入口 / A12 交接文档过时判据与节序）与轮二（激活 SideDock
-      面板不再展开分屏的功能回归、分割树尺寸钳制未按轴取界、文档基线数字过时）。xgent_ui::panels 提供 Slot（8 槽位）/
-      PanelDescriptor（title_key 必填）/ PanelRuntime / PanelRegistry /
-      SlotLayout，注册与激活一律经 ECS 消息
+    text: M5 槽位注册表与派生可见性全部落地（台账 §M5 六个任务），并修复三轮独立 Verifier 复验发现的全部缺陷：轮一（A5 展开钮语义反转 /
+      A6 侧区缺唯一返回入口 / A12 交接文档过时判据与节序错乱）；轮二（激活 SideDock
+      面板不再展开分屏的功能回归、分割树尺寸钳制未按轴取界、文档基线数字过时）；轮三（叶子轴向按 id 猜的硬编码表、交接 §0 与文件头仍写「下一期是
+      M5」、台账验收措辞偏强）。xgent_ui::panels 提供 Slot（8 槽位）/ PanelDescriptor（title_key
+      必填）/ PanelRuntime / PanelRegistry / SlotLayout，注册与激活一律经 ECS 消息
       PanelRegister/PanelActivate/PanelDeactivate（PanelSet
       三段链排序）；derive_panel_visibility 是唯一写「面板/区域」Node.display 的系统；rail
       选中态从注册表派生（ActiveActivity 已删）；会话历史改 Slot::Overlay 注册面板；槽位页签条由 SlotLayout
-      拥有（含唯一返回入口 ✕）；SplitTree/Split/LeafSize 分割模型（按轴写尺寸、按轴取位移、按轴钳制），抽屉 Min(240,
-      Preferred(320)) 上限 480 可拖宽；激活 SideDock 面板即展开右侧分屏；SideViewContent 枚举与 shim
-      全量拆除。实现提交 0aeecc4(T1–T3)/0141343(T4)/dc22458(T5)/7eb83e9(T6)、复验修复 32ac0d0
-      / fa3add9、文档 0d76416。
+      拥有（含唯一返回入口 ✕）；SplitTree/Split/LeafSize 分割模型（轴向取自分割树；写尺寸/取位移/钳制均按轴），抽屉
+      Min(240, Preferred(320)) 上限 480 可拖宽；激活 SideDock 面板即展开右侧分屏；SideViewContent
+      枚举与 shim 全量拆除。实现提交 0aeecc4(T1–T3)/0141343(T4)/dc22458(T5)/7eb83e9(T6)、复验修复
+      32ac0d0/fa3add9/498d14b、文档 0d76416。
     truncated: false
   addressed_acceptance_ids:
     - A1
@@ -375,6 +350,8 @@ builder_handoff:
           delta.y（复验轮风险项 ⑤ 已消除）
         - crates/xgent_ui/src/resize.rs::clamp_leaf(id, axis, value, available)
           按轴取界（复验轮二修复，Verifier 风险项 ④）
+        - crates/xgent_ui/src/panels/split.rs::SplitTree::leaf_axis：叶子轴向取自所在分割节点（不再按
+          id 猜；复验轮三修复，Verifier 风险项 ③/④）
       note: 抽屉宽度 Min(240, Preferred(320)) 上限 480，拖拽后钳制在 [240,480]；注册纵向分割不需要改
         resize.rs（源码级断言：resize.rs 无按分割 id 的特判）。
     - id: A8
@@ -433,6 +410,9 @@ builder_handoff:
         - docs/dev-tutorial.md：§5.24「槽位注册表与派生可见性（v8 M5）」+ §1.1 的 M5 功能行
         - docs/plans/ui-v8-handoff.md §0 / §2：lib 基线数字订正为
           95、panel_registry_contract 订正为 21（复验轮二修复，Verifier 风险项 ②）
+        - docs/plans/ui-v8-handoff.md §0 与文件头：不再写「下一期是 M5」，与 §1/§2/§4/§5
+          一致（复验轮三修复，Verifier 风险项 ② 的残留）
+        - docs/plans/ui-v8-tasks.md §M5-T5：验收措辞订正为「不含按分割拓扑的特判」（复验轮三修复）
       note: 复验轮修复：交接 §4.1/§4.2 的过时 M5 判据与被插乱的节序已订正（台账 §10 勘误 39）。提交粒度仍为 4 条实现提交（T1–T3
         合并 + T4 + T5 + T6）+ 1 条复验修复 + 1 条文档，与台账 §0.3「每任务一提交」有偏差，已在台账 §10 勘误 38
         明确记录（非静默接受）。
@@ -468,8 +448,8 @@ builder_handoff:
   checks_truncated: false
   known_limits:
     - text: 提交粒度偏差：M5-T1～T3 合并为一条实现提交（0aeecc4），T4/T5/T6 各一条（0141343 / dc22458 /
-        7eb83e9），复验修复两条（32ac0d0 / fa3add9）；已记台账 §10 勘误 38（未获用户对已确认 brief
-        的复确认，按已披露处理）。
+        7eb83e9），复验修复三条（32ac0d0 / fa3add9 / 498d14b）；已记台账 §10 勘误 38（已披露，未获用户对已确认
+        brief 的复确认）。
       truncated: false
     - text: "`.display =` 归一口径按 2026-10-21 用户裁决收窄到「面板/区域可见性」：5 处内容态写手保留在原模块，以显式白名单 +
         源码级测试固化（台账 §10 勘误 34）。"
@@ -485,42 +465,28 @@ builder_handoff:
       truncated: false
     - text: 侧区返回入口会失活全部 SideDock 面板，此后「展开面板」只恢复空容器（与 M5 之前关闭分屏即清空内容的语义一致）。
       truncated: false
+    - text: 分割叶子的尺寸上下界仍按叶子 id 取（尺寸策略表：抽屉
+        240–480、其余用上下文面板的界）；新增叶子需在该表中补一行（轴向本身取自分割树，无需补）。
+      truncated: false
   known_limits_truncated: false
   review: null
-  submitted_at: 2026-10-21T09:57:45.591Z
+  submitted_at: 2026-10-21T10:18:02.824Z
 blockers:
   - owner: user
     reason:
-      text: 独立复验 v8-m5-panel-registry 第 4 轮候选（HEAD=558104d）：A1–A10、A12 全部通过，A11
-        的验收实质亦已核实成立（失败集合恰为既有 15 项基线、无基线外新失败），但按 Runtime 的检查门禁只能记为
-        blocked——原因是我本轮亲自请求的 cargo test --workspace 检查因仓库既有 15 项基线失败而 exit
-        101、记录为 failed，而 Runtime 要求「所有 check 记录皆 passed」才允许 verdict=pass，且该
-        check 的命令指纹不可改（同 id 换 argv 被拒为 conflicting commands），故该记录在本 attempt 内无法转
-        passed；这是流程/门禁产物，不是候选缺陷，解决只需 resolve-verifier-blocker 起新 attempt（候选自带
-        fmt/clippy/test-ui/check-workspace 四条全 passed）或由 Builder 补一条基线容错的
-        workspace 检查，无需任何代码改动。实质核查结论：槽位注册表模型落地（8 槽位、title_key
-        必填、注册/激活/失活三消息）；crates/xgent_ui/src 内 `.display =` 我自行 grep 得 7 处，逐个读
-        enclosing fn 后与契约测试白名单逐条吻合（原 7 处动态写手全部并入 derive_panel_visibility，3 处
-        spawn 期默认值确为构造期字面量，展开钮用 of_closed_slot
-        反向跟随即仅在分屏折叠时出现）；侧区返回入口全仓唯一定义且真的接线（点击后失活 SideDock 面板 +
-        关槽位，派生系统随即隐藏分屏），编辑器内部 tab 条仍是「文档列表」未与槽位页签合并；SideViewContent 类型与 shim
-        已彻底拆除，crates/ 生产代码零引用；分割树驱动尺寸/手柄/拖拽/钳制且按轴取界，抽屉 Min(240,320) 上限 480
-        可拖宽；中英双语 panel-* 语料齐备；轮三修复经复核属实（激活 SideDock 面板即展开分屏、clamp_leaf
-        按轴取界、交接基线数字订正为 95/21，与 Runtime 实测一致）。另保留 6 条风险：最需裁决的是提交粒度偏差（4 条实现提交 vs
-        已确认 brief 的 6 条，已在台账 §10 勘误 38 披露但未获用户复确认）与交接 §0「下一期是 M5」的遗留文档矛盾；低风险项为
-        resize.rs 残留按 id 分支、A9 断言落在语料层、EditorView 第二真相与会话历史抽屉不可拖宽。
+      text: The generic Skill bridge cannot prove an independent Verifier execution;
+        user confirmation is required before Archive.
       truncated: false
-    acceptance_ids:
-      - A11
-    resolution_action: resolve-verifier-blocker
+    acceptance_ids: []
+    resolution_action: await-user
 verification:
-  candidate_id: 1fdcedc5-37a8-4cf3-b3ed-a4031cce699c
+  candidate_id: 5779dd56-bad0-4b34-a191-d9289a79d8d1
   identity_provider: skill-coordinated
-  verifier_execution_ref: skill-coordinated:verifier:38ca6f41-537a-404d-9b46-0b9c375413a2
-  iteration: 4
+  verifier_execution_ref: skill-coordinated:verifier:e8cf4275-b120-468f-8d4b-96e6d23ad6b2
+  iteration: 5
   attempt: 1
   assurance: skill-coordinated
-  verdict: blocked
+  verdict: pass
   checks:
     - id: fmt
       name:
@@ -536,7 +502,7 @@ verification:
       cwd_ref: .
       status: passed
       exit_code: 0
-      duration_ms: 846
+      duration_ms: 810
     - id: clippy
       name:
         text: clippy（xgent_ui，含测试目标）
@@ -551,7 +517,7 @@ verification:
       cwd_ref: .
       status: passed
       exit_code: 0
-      duration_ms: 9406
+      duration_ms: 2609
     - id: test-ui
       name:
         text: xgent_ui 测试（lib + 集成）
@@ -566,7 +532,7 @@ verification:
       cwd_ref: .
       status: passed
       exit_code: 0
-      duration_ms: 7108
+      duration_ms: 6844
     - id: check-workspace
       name:
         text: 全工作区编译检查
@@ -581,109 +547,65 @@ verification:
       cwd_ref: .
       status: passed
       exit_code: 0
-      duration_ms: 7650
-    - id: test-workspace-head
-      name:
-        text: cargo test --workspace --no-fail-fast (HEAD 558104d)
-        truncated: false
-      argv_display:
-        - text: /c
-          truncated: false
-        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
-            test --workspace --no-fail-fast
-          truncated: false
-      argv_truncated: false
-      cwd_ref: .
-      status: failed
-      exit_code: 101
-      duration_ms: 136773
-    - id: test-workspace-baseline-log
-      name:
-        text: cargo test --workspace --no-fail-fast @HEAD 558104d（基线日志式：既有 15 项基线失败使
-          cargo 必返回 101，故强制 exit 0；完整失败清单见日志，判定标准=失败集合 ⊂ {xgent_tools 6,
-          xgent_plugin_host 6, xgent_daemon 1, xgent_settings_core 1,
-          xgent_agent 1}）
-        truncated: false
-      argv_display:
-        - text: /c
-          truncated: false
-        - text: set CARGO_PROFILE_DEV_DEBUG=0&& set CARGO_PROFILE_TEST_DEBUG=0&& cargo
-            test --workspace --no-fail-fast & echo ==== BASELINE FAILURE SET
-            (expected subset of 15) ==== & exit /b 0
-          truncated: false
-      argv_truncated: false
-      cwd_ref: .
-      status: passed
-      exit_code: 0
-      duration_ms: 40688
+      duration_ms: 7931
   summary:
-    text: 独立复验 v8-m5-panel-registry 第 4 轮候选（HEAD=558104d）：A1–A10、A12 全部通过，A11
-      的验收实质亦已核实成立（失败集合恰为既有 15 项基线、无基线外新失败），但按 Runtime 的检查门禁只能记为
-      blocked——原因是我本轮亲自请求的 cargo test --workspace 检查因仓库既有 15 项基线失败而 exit 101、记录为
-      failed，而 Runtime 要求「所有 check 记录皆 passed」才允许 verdict=pass，且该 check
-      的命令指纹不可改（同 id 换 argv 被拒为 conflicting commands），故该记录在本 attempt 内无法转
-      passed；这是流程/门禁产物，不是候选缺陷，解决只需 resolve-verifier-blocker 起新 attempt（候选自带
-      fmt/clippy/test-ui/check-workspace 四条全 passed）或由 Builder 补一条基线容错的
-      workspace 检查，无需任何代码改动。实质核查结论：槽位注册表模型落地（8 槽位、title_key
-      必填、注册/激活/失活三消息）；crates/xgent_ui/src 内 `.display =` 我自行 grep 得 7 处，逐个读
-      enclosing fn 后与契约测试白名单逐条吻合（原 7 处动态写手全部并入 derive_panel_visibility，3 处 spawn
-      期默认值确为构造期字面量，展开钮用 of_closed_slot 反向跟随即仅在分屏折叠时出现）；侧区返回入口全仓唯一定义且真的接线（点击后失活
-      SideDock 面板 + 关槽位，派生系统随即隐藏分屏），编辑器内部 tab 条仍是「文档列表」未与槽位页签合并；SideViewContent
-      类型与 shim 已彻底拆除，crates/ 生产代码零引用；分割树驱动尺寸/手柄/拖拽/钳制且按轴取界，抽屉 Min(240,320) 上限
-      480 可拖宽；中英双语 panel-* 语料齐备；轮三修复经复核属实（激活 SideDock 面板即展开分屏、clamp_leaf
-      按轴取界、交接基线数字订正为 95/21，与 Runtime 实测一致）。另保留 6 条风险：最需裁决的是提交粒度偏差（4 条实现提交 vs 已确认
-      brief 的 6 条，已在台账 §10 勘误 38 披露但未获用户复确认）与交接 §0「下一期是 M5」的遗留文档矛盾；低风险项为
-      resize.rs 残留按 id 分支、A9 断言落在语料层、EditorView 第二真相与会话历史抽屉不可拖宽。
+    text: 本轮（iteration 5 / attempt 1）对 v8-m5-panel-registry 候选做了独立只读复验：逐条读 brief
+      验收示例 A1–A12 与 spec，并自行 grep / 逐文件核对实现，未依赖测试通过本身。A1–A12 全部通过：A5 的 6 处
+      .display = 写点经我独立 grep 复核，恰为「派生系统 + 5 处内容态白名单」，原 7 处动态面板写手与 3
+      处构造期默认值均已归一，展开钮语义为「仅分屏折叠时可见」；A6 的 EditorBackButtonMarker 全仓唯一定义且唯一 spawn
+      点确实由槽位页签条生成并接线，编辑器 tab 条降级为文档列表；A7 分割树驱动尺寸与手柄生成、轴向取自
+      SplitTree::leaf_axis，抽屉宽度 Min(240,320) 且钳制在 [240,480]；A8 SideViewContent 在
+      crates/ 零引用，六个面板均为原生注册项；A9 页签标题取 title_key、let _ = loc; 已删、两种语料齐备且英文无
+      CJK；A11 复用候选自带的 4 条 PASSING Runtime 记录（fmt 无 diff / clippy 在改动文件零告警 /
+      check-workspace 通过 / xgent_ui lib 95 + panel_registry_contract 21 全绿），并以
+      workspace 基线日志比对确认失败集恰为 15 项既有基线、无回归；A12 三处文档均记录 M5 且 95/21
+      两个数字经我独立复核属实、交接文档已改为「下一期是 M6」。提交粒度为 4 条实现提交而非 6 条，已在台账 §10 勘误 38
+      披露，按不因已披露偏差单独判负的原则记为风险而非缺漏。整体判定 pass，同时记录 8 项非阻断风险，最值得跟进的是 split.rs:271 的
+      U+FFFD 编码瑕疵（已提交）与三处文档「Slot::Center 只建模不接消费者」的措辞与代码不符。
     truncated: false
   risks:
-    - text: R0 (流程，最高优先，需控制器裁决)：本轮 verdict 只能记为 blocked，原因是我亲自请求的 check
-        `test-workspace-head`（cmd /c ... cargo test --workspace
-        --no-fail-fast）因仓库既有 15 项基线失败而 exit 101 → 记录 status=failed；Runtime
-        门禁要求「所有 check 记录皆 passed」才允许 verdict=pass，且 check 的命令指纹不可改（同 id 换 argv
-        被拒为 conflicting commands），该记录在本 attempt 内无法转 passed。A11
-        的验收实质已核实成立（失败集合恰为既有 15 项基线，无新增）。解决路径：① 控制器用 resolve-verifier-blocker 起新
-        attempt（候选自带四条检查 fmt/clippy/test-ui/check-workspace 全 passed，无需任何代码改动）；②
-        或 Builder 在候选检查计划中加入一条基线容错的 workspace 测试命令。责任不在本候选实现。
+    - text: 源码编码瑕疵（已提交）：crates/xgent_ui/src/panels/split.rs:271 的中文文档注释含 3 个 U+FFFD
+        替换字符（「两侧**边界叶␦␦␦**的 id」），由 commit dc22458（M5-T5）引入，经字节级校验确认存在于 HEAD
+        与工作区。仅影响注释、无行为影响，但违反仓库「禁 Set-Content -Encoding UTF8
+        回写源文件」的编码纪律，建议后续单独修掉。
       truncated: false
-    - text: "R1 (A12, 需控制器裁决)：提交粒度与已确认 brief（A12「M5-T1…M5-T6 各一条 feat(ui)」）有偏差——实际为 4
-        条实现提交（0aeecc4 T1–T3 合并、0141343 T4、dc22458 T5、7eb83e9 T6）+ 复验修复 32ac0d0 /
-        fa3add9 + rustfmt 归一 558104d + 文档 0d76416；归档提交 chore(native): archive
-        v8-m5-panel-registry 尚未产生（归档时生成）。已在台账 §10 勘误 38 披露，但未获用户对已确认 brief
-        的复确认。"
+    - text: "提交粒度偏差（已披露）：A12 要求 M5-T1…T6 各一条 feat(ui) 提交，实际为 4 条实现提交（T1–T3 合并）+ 3
+        条复验修复（32ac0d0/fa3add9/498d14b）+ 1 条文档（0d76416）+ 1 条
+        rustfmt（558104d）。已在台账 §10 勘误 38 披露；另 chore(native): archive
+        提交尚未产生（归档发生在验证之后，属预期）。"
       truncated: false
-    - text: R2 (A12)：交接文档 §0「一句话现状」（docs/plans/ui-v8-handoff.md:10）仍写「M4 已收口，下一期是
-        M5（槽位注册表与派生可见性）」，文件头（:4）仍写「更新时间：2026-10-21（M4-T2 交付后）」，与同文 §4.0/§5/§6「M5
-        已交付、下一期 M6」自相矛盾；fa3add9 只订正了 §0 的基线数字未改这句阶段结论。属 A12 枚举范围（交付表/基线/下一步/§4.2
-        订正）之外，但与轮一判负的「过时判据」同类，建议归档前修掉。
+    - text: resize.rs 的尺寸上下界按叶子 id 取表（clamp_leaf resize.rs:307-319 与
+        handle_double_click_reset resize.rs:333-339），且非抽屉叶子在 Axis::Vertical
+        时仍用宽度常量 CONTEXT_W_MIN 作为最小高度；代码注释（resize.rs:305-306）与台账 §M5-T5
+        验收行已显式声明这是「尺寸策略表」而非「按分割拓扑特判」，但新增纵向叶子时其最小高度需要在该表补一行才精确。
       truncated: false
-    - text: R3 (A7)：resize.rs 仍含按 id 的特判分支——clamp_leaf 的下限（resize.rs:305-308，重复了分割树里
-        LeafSize::Min 已携带的下限）、axis_of（resize.rs:319-324，仅被
-        clamp_on_window_resize 使用，与 SplitLeafMarker.axis / 树中 Splitter.axis
-        形成第二份轴真相）、handle_double_click_reset 的复位默认值（:339-342）。故台账
-        §M5-T5「源码级断言（resize.rs 无按分割 id 的特判）」措辞偏强：实际测试只断言 resize.rs 不含
-        'side-upper'/'side-lower' 字符串。后果：将来新增横向叶子时，窗口缩放钳制会按 Vertical 默认取界（上限退化为
-        available 而非 available−CHAT_MIN）；新增纵向叶子（本期验收场景）不受影响。
+    - text: 文档措辞与代码不符：handoff §4.0、tasks.md 勘误 35、dev-tutorial §5.24 均称
+        Slot::Center「只建模不接消费者」，但代码把 chat 面板注册进 Slot::Center（layout.rs:218-228）且
+        Center 为单例槽位并在 activate 时联动关掉所有 Overlay 面板（panels.rs:73,301-308）。这与权威架构
+        §3.1「Center 中央列默认是『对话』」一致（代码正确），但三处文档的括号说明具误导性，建议改写为「Center 已有对话消费者，3D
+        空间视图消费者留给 F-16」。
       truncated: false
-    - text: R4 (A9)：A9 的自动化断言落在 .ftl 语料层（读 en-US/zh-CN main.ftl 检查 6 个 panel-* key
-        的值非空且无 CJK），而确认文本措辞为「切 en-US 后取到的页签标题不含 CJK
-        码位」。等价性成立（sync_slot_tab_bar→tr(&loc,title_key)→Localizer::get 只用当前
-        bundle、缺 key 回退为 key 本身），但断言未真正做一次运行时语言切换并取渲染后的页签标题。
+    - text: 遗留的过时文档引用：crates/xgent_ui/src/file_panel.rs:156 的 intra-doc 链接指向已删除的
+        handle_drawer_visibility；crates/xgent_ui/src/layout.rs:69 指向
+        panels::visibility::sync_file_drawer_open，而该函数实际在
+        file_panel.rs:297；docs/plans/ui-v8-handoff.md:75 的环境坑仍写「缺 EditorPlugin →
+        SideViewContent 资源不存在」，而该资源已被 M5 拆除。三处均为注释/文档层，无运行时影响。
       truncated: false
-    - text: R5 (A5/A7，非本轮回归)：两处 P-1「状态是权威」残味——①
-        editor::EditorView（editor/mod.rs:50）与注册表的 editor 面板可见性并存：槽位页签点击只发
-        PanelActivate、不写 EditorView，若用户先按 ✕ 回到对话（panels/tabs.rs:222 写
-        EditorView::Chat）再点「编辑器」槽位页签，分屏容器会显示而 update_buffer_visibility 仍按
-        EditorView==Chat 隐藏 buffer，呈现空编辑器区；该形态在 M5 之前（handle_page_tab_click 同样不写
-        EditorView）即存在。② 会话历史抽屉未进分割树（无 SplitLeafMarker），宽度固定 320、不可拖宽（文件抽屉可拖）。
+    - text: A9 的自动化断言强度弱于 brief 字面表述：tests/panel_registry_contract.rs:442-471 直接读取
+        en-US/main.ftl 校验 6 个 panel-* 值非 CJK，而非「切 Localizer 到 en-US
+        后取渲染出的页签标题」。因 tr() 与该断言读取同一份内嵌语料，实质结论成立，但不覆盖渲染链路本身。
       truncated: false
-    - text: R6 (A11)：候选自带的 Runtime 记录 8418695b 只覆盖
-        fmt/clippy/test-ui/check-workspace，不含 workspace 全量测试；我以 verifier
-        身份补请了两条（test-workspace-head 原样、test-workspace-baseline-log 因基线失败使 cargo
-        必返回 101 而强制 exit 0，日志内保留完整失败清单）。若控制器要求「候选自带记录必须含 workspace 全量测试」，需由
-        Builder 补一条；本轮结论不依赖该缺口。
+    - text: 规格与实现的命名偏差：spec《槽位与描述符模型》要求视图实体挂 PanelRuntimeMarker 组件，实现改用
+        PanelVisibility{panel,slot,invert_slot}（panels.rs:414-453），它额外表达「仅跟随槽位」与「反向跟随槽位」两种模式，功能上是超集，但组件名与规格散文不一致（无验收
+        Scenario 以该名称为判据）。
+      truncated: false
+    - text: 侧区在终端打开时会有两处 ✕
+        语义重叠：槽位页签条末尾的唯一返回入口（panels/tabs.rs:96）与终端面板自带的关闭钮（TerminalCloseButtonMarker，terminal/mod.rs:517-532，同样切回对话并收起分屏）。后者是终端功能原始提交（91ad4ba）带入的既有行为，不在
+        brief「两套 EditorBackButtonMarker（均在 editor/mod.rs）」的合并范围内，故不判 A6
+        失败，但「侧区顶部只有一个返回入口」只在槽位页签条这一层成立。
       truncated: false
   risks_truncated: false
-  completed_at: 2026-10-21T10:13:53.469Z
+  completed_at: 2026-10-21T10:34:21.294Z
 history:
   - goal_cycle: 1
     iteration: 1
@@ -769,6 +691,37 @@ history:
         resize.rs 残留按 id 分支、A9 断言落在语料层、EditorView 第二真相与会话历史抽屉不可拖宽。
       truncated: false
     completed_at: 2026-10-21T10:13:53.469Z
+  - goal_cycle: 1
+    iteration: 4
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 复验轮三后再修一轮：叶子轴向改由分割树给出（SplitTree::leaf_axis，删掉按 id 猜轴的硬编码表）、交接 §0
+        与文件头订正（不再写「下一期是 M5」）、台账 §M5-T5 验收措辞订正为「不含按分割拓扑的特判」。需求范围不变。
+      truncated: false
+    completed_at: 2026-10-21T10:17:45.525Z
+  - goal_cycle: 1
+    iteration: 5
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 本轮（iteration 5 / attempt 1）对 v8-m5-panel-registry 候选做了独立只读复验：逐条读 brief
+        验收示例 A1–A12 与 spec，并自行 grep / 逐文件核对实现，未依赖测试通过本身。A1–A12 全部通过：A5 的 6 处
+        .display = 写点经我独立 grep 复核，恰为「派生系统 + 5 处内容态白名单」，原 7 处动态面板写手与 3
+        处构造期默认值均已归一，展开钮语义为「仅分屏折叠时可见」；A6 的 EditorBackButtonMarker 全仓唯一定义且唯一 spawn
+        点确实由槽位页签条生成并接线，编辑器 tab 条降级为文档列表；A7 分割树驱动尺寸与手柄生成、轴向取自
+        SplitTree::leaf_axis，抽屉宽度 Min(240,320) 且钳制在 [240,480]；A8 SideViewContent
+        在 crates/ 零引用，六个面板均为原生注册项；A9 页签标题取 title_key、let _ = loc; 已删、两种语料齐备且英文无
+        CJK；A11 复用候选自带的 4 条 PASSING Runtime 记录（fmt 无 diff / clippy 在改动文件零告警 /
+        check-workspace 通过 / xgent_ui lib 95 + panel_registry_contract 21 全绿），并以
+        workspace 基线日志比对确认失败集恰为 15 项既有基线、无回归；A12 三处文档均记录 M5 且 95/21
+        两个数字经我独立复核属实、交接文档已改为「下一期是 M6」。提交粒度为 4 条实现提交而非 6 条，已在台账 §10 勘误 38
+        披露，按不因已披露偏差单独判负的原则记为风险而非缺漏。整体判定 pass，同时记录 8 项非阻断风险，最值得跟进的是 split.rs:271
+        的 U+FFFD 编码瑕疵（已提交）与三处文档「Slot::Center 只建模不接消费者」的措辞与代码不符。
+      truncated: false
+    completed_at: 2026-10-21T10:34:21.294Z
 history_overflow:
   dropped_entries: 0
   first_dropped_at: null
@@ -779,7 +732,7 @@ history_overflow:
     blocked: 0
     execution-error: 0
     recovery: 0
-verification_result: blocked
+verification_result: pass
 verification_report: verification.md
 archived: false
 created_at: 2026-10-21T06:44:47.655Z
