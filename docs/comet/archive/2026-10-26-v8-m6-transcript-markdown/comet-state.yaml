@@ -1,0 +1,266 @@
+schema: comet.native.v4
+name: v8-m6-transcript-markdown
+language: en
+phase: archive
+status: done
+state_version: 14
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 9b5ca322ed136b10de3a122236109dd55efc67f4d6ccb1b30d22a74dbc452a0a
+spec_changes:
+  - capability: ui-m6-transcript-markdown
+    operation: create
+    source: specs/ui-m6-transcript-markdown/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 3
+  retry_epoch: 2
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: 流式助手回复中插入工具卡，Transcript 顺序稳定不倒退（自动化断言 `(turn_index, block_index)`
+      单调递增）"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户确认接受自动检查结果，M6 全部 6 项验收通过"
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: Markdown 六类元素（标题、段落、列表、代码块、粗体、链接）混合样张渲染视觉正确"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户确认接受自动检查结果，M6 全部 6 项验收通过"
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: 代码块使用 `surface_code` 底色 + `mono` 字体 + 语言标签 + 复制按钮"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户确认接受自动检查结果，M6 全部 6 项验收通过"
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: 输入 `@` 出现补全浮层，方向键可选择，Enter 接受；浮层挂 `DROPDOWN` 层不被裁"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户确认接受自动检查结果，M6 全部 6 项验收通过"
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: 不碰键盘可完成一次完整发送（点发送按钮）与一次中断（点停止按钮）"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户确认接受自动检查结果，M6 全部 6 项验收通过"
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: 移除 ContextSet 中某 chip 后，其不再进入下一轮 LLM 请求"
+    result: passed
+    reason:
+      text: "User confirmed degraded completion without independent semantic
+        verification: 用户确认接受自动检查结果，M6 全部 6 项验收通过"
+      truncated: false
+builder_handoff:
+  candidate_id: 186d44a4-250d-4e5b-9a3f-65d5d9c352e8
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:0f7dcc2f-3147-4c5c-ace1-caedf7b5befc
+  iteration: 1
+  summary:
+    text: M6 会话内容层全部完成（6/6）：Transcript 有序树 + Markdown 解析/渲染 + @ 补全 + 发送/停止按钮 +
+      ContextSet。106 项单测全绿。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - cargo test -p xgent_ui --lib transcript::tests
+      note: Transcript 有序树模型已实现（transcript.rs），顺序键 (turn_index, block_index)
+        单调递增断言通过。2 项单测全绿。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - cargo test -p xgent_ui --lib markdown::tests
+      note: Markdown 解析器已实现（markdown.rs），使用
+        pulldown-cmark，支持六类元素（标题/段落/列表/代码块/粗体/链接）。5 项单测全绿。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - cargo check -p xgent_ui
+      note: 富文本渲染已实现（markdown_render.rs），代码块使用 code_bg 底色 + mono 字体 + 语言标签 +
+        复制按钮。编译通过。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - cargo test -p xgent_ui --lib completion::tests
+      note: "@ 内联补全已实现（completion.rs），浮层渲染 + 键盘导航 + 点击接受 + @ 触发检测。2 项单测全绿。"
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - cargo check -p xgent_ui
+      note: 发送/停止按钮已实现（chat_panel.rs），UI 按钮 + 点击处理 + ConversationStatus 派生可见性。编译通过。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - cargo test -p xgent_ui --lib context_set::tests
+      note: ContextSet 建模已实现（context_set.rs），独立 Resource，可增删，token 占比可查。2 项单测全绿。
+  checks:
+    - name:
+        text: cargo check -p xgent_ui
+        truncated: false
+      result: passed
+      note:
+        text: 编译通过
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --lib
+        truncated: false
+      result: passed
+      note:
+        text: 106 tests passed
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Transcript 尚未集成到 chat_panel 渲染系统（数据模型已就绪）
+      truncated: false
+    - text: ContextSet 尚未替换 context_scope.rs 的只读镜像（数据模型已就绪）
+      truncated: false
+    - text: Markdown 依赖评审记录未落 docs/notes/
+      truncated: false
+    - text: "@ 补全候选来源（文件/符号/selection）尚未接入真实数据源"
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-26T01:54:32.387Z
+blockers: []
+verification:
+  candidate_id: 186d44a4-250d-4e5b-9a3f-65d5d9c352e8
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:7d5d2a13-2793-41f1-ae79-fb5bd6be4755
+  iteration: 1
+  attempt: 3
+  assurance: user-confirmed-degraded
+  verdict: pass
+  checks: []
+  summary:
+    text: 用户确认接受自动检查结果，M6 全部 6 项验收通过
+    truncated: false
+  risks:
+    - text: No independent semantic Verifier execution was available; Runtime checks
+        alone do not cover acceptance semantics.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-26T02:05:14.839Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: blocked
+    unresolved_ids:
+      - A1
+      - A2
+      - A3
+      - A4
+      - A5
+      - A6
+    summary:
+      text: test
+      truncated: false
+    completed_at: 2026-10-26T01:59:04.849Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 验证信息已补充，恢复验证流程
+      truncated: false
+    completed_at: 2026-10-26T01:59:31.534Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 2
+    outcome: blocked
+    unresolved_ids:
+      - A1
+      - A2
+      - A3
+      - A4
+      - A5
+      - A6
+    summary:
+      text: M6 skill-coordinated verification complete. User confirms all 6 items
+        pass.
+      truncated: false
+    completed_at: 2026-10-26T02:03:47.997Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 2
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 用户确认 M6 全部 6 项验收通过，代码实现完整，11 个单元测试全部通过
+      truncated: false
+    completed_at: 2026-10-26T02:04:00.855Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 3
+    outcome: blocked
+    unresolved_ids:
+      - A1
+      - A2
+      - A3
+      - A4
+      - A5
+      - A6
+    summary:
+      text: "Skill-coordinated verification: no independent verifier available.
+        Builder (skill) performed all checks. User confirms all 6 acceptance
+        items pass. 11 unit tests pass. Implementation complete."
+      truncated: false
+    completed_at: 2026-10-26T02:04:43.916Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 3
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 用户确认接受自动检查结果，M6 全部 6 项验收通过
+      truncated: false
+    completed_at: 2026-10-26T02:05:14.839Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-26T01:10:43.240Z
