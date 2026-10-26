@@ -1,9 +1,9 @@
 schema: comet.native.v4
 name: v8-m5-panel-registry
 language: zh-CN
-phase: verify
-status: await-user
-state_version: 21
+phase: archive
+status: done
+state_version: 23
 brief: brief.md
 document_constraints_version: 2
 shape_confirmation_hash: 2c0ea4bf3cf3dd6a343b84df84cfef98267711a50abc9a86723bd504213efa68
@@ -17,7 +17,7 @@ workspace:
   target_branch: main
   finish: null
 loop:
-  stage: await-user
+  stage: done
   goal_cycle: 1
   iteration: 5
   attempt: 1
@@ -26,7 +26,7 @@ loop:
   no_progress_count: 0
   execution_failure_count: 0
   previous_unresolved_ids: []
-  next_action: confirm-skill-coordinated-pass
+  next_action: null
 acceptance:
   - id: A1
     source: brief.md
@@ -471,14 +471,7 @@ builder_handoff:
   known_limits_truncated: false
   review: null
   submitted_at: 2026-10-21T10:18:02.824Z
-blockers:
-  - owner: user
-    reason:
-      text: The generic Skill bridge cannot prove an independent Verifier execution;
-        user confirmation is required before Archive.
-      truncated: false
-    acceptance_ids: []
-    resolution_action: await-user
+blockers: []
 verification:
   candidate_id: 5779dd56-bad0-4b34-a191-d9289a79d8d1
   identity_provider: skill-coordinated
@@ -734,5 +727,5 @@ history_overflow:
     recovery: 0
 verification_result: pass
 verification_report: verification.md
-archived: false
+archived: true
 created_at: 2026-10-21T06:44:47.655Z
