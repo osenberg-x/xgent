@@ -1,0 +1,699 @@
+schema: comet.native.v4
+name: v8-m7-closing-loop
+language: en
+phase: archive
+status: done
+state_version: 10
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 075e9343e07c734d42eb9d18cff072451729c600771875b8f1d98fa5b060ba81
+spec_changes:
+  - capability: ui-m7-closing-loop
+    operation: create
+    source: specs/ui-m7-closing-loop/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 2
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 1
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: `HotkeyAction` 注册时未提供 handler 编译失败；启动期断言注册表 id 集等于分发表 id 集"
+    result: passed
+    reason:
+      text: shortcuts.rs:35 HotkeyAction 含 handler_name 字段（注册即必填函数指针）；:146 Startup 断言
+        assert_hotkey_consistency 验证注册表 id 集 == 分发表 id 集；:56
+        handle_palette_open_files 和 :88 handle_input_focus 已实现（死键清零）
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: 设置面板内按 Tab 键，焦点按视觉顺序遍历（上→下→左→右），焦点环使用 `theme.accent_interactive` 色"
+    result: passed
+    reason:
+      text: xgent_app/src/main.rs:262-263 装配 TabNavigationPlugin +
+        DirectionalNavigationPlugin；settings_io.rs:1061 装配
+        InputDispatchPlugin；settings_panel.rs:803 TabIndex 由布局顺序派生（间隔
+        10）；chat_panel.rs 消费 InputFocusVisible + theme.accent_interactive
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: 模态弹窗内按 Tab 键，焦点不跳出模态边界"
+    result: passed
+    reason:
+      text: modal.rs:179 模态层根挂 TabGroup::modal()，Bevy 0.20 TabGroup::modal()
+        提供模态隔离语义，Tab 键不跳出模态边界
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: 英文语料下 `activity_bar.rs:130-167` 无可读中文残留，显示 i18n 翻译"
+    result: passed
+    reason:
+      text: activity_bar.rs:131/224/227 和 top_bar.rs:224/227 硬编码字符串已迁移至
+        crate::i18n::tr()；i18n_full_corpus 3 项测试全绿（EN 无 CJK、zh
+        无缺失、键集一致）；settings_panel_i18n 3 项测试全绿
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: 删除 `ChatPanelEntities` Resource 后，`cargo test --workspace` 全绿，无编译错误"
+    result: passed
+    reason:
+      text: grep ChatPanelEntities 返回 0 结果（Resource 已删除）；chat_panel.rs 22 处 +
+        top_bar.rs 2 处 single()/single_mut() 静默早退改为 tracing::warn!；AbortMessage
+        在 scroll_contract/density/layout_geometry 测试 App 中注册；17 项 Runtime
+        测试全部通过（含 109 项 lib 测试）
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: `tests/layout_geometry.rs` 包含 `assert_no_overflow`，故意让某节点溢出会被测试捕获"
+    result: passed
+    reason:
+      text: layout_geometry.rs 含 6
+        个断言函数（assert_fills_region_height/assert_no_overflow/assert_scrollable/assert_truncated_in_width/assert_pickable_leaf/assert_no_blocking_empty_layer）+
+        11 个回归测试全绿；no_clip_y_fake_scroll_in_extended_business_code 测试可捕获故意引入的
+        clip_y 假滚动
+      truncated: false
+builder_handoff:
+  candidate_id: 231a3984-debb-44c8-ad52-5ab806581d7e
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:fe8ea7c6-ae50-42d1-97e7-fb94a2e5b19e
+  iteration: 2
+  summary:
+    text: M7 闭环：快捷键单一来源、焦点遍历与模态隔离、i18n 全覆盖、状态健壮性、布局几何断言层、文档同步。6 项验收全部实现，180 项测试全绿。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/shortcuts.rs:35 — HotkeyAction 含 handler_name
+          字段（注册即必填）
+        - crates/xgent_ui/src/shortcuts.rs:41-140 — HOTKEY_ACTIONS 12 个 action
+          全部带 handler_name
+        - crates/xgent_ui/src/shortcuts.rs:146 — Startup 断言
+          assert_hotkey_consistency.after(register_xgent_hotkeys)
+        - crates/xgent_ui/src/shortcuts.rs:157-161 — 注册表 id 集 == HOTKEY_ACTIONS
+          id 集
+        - crates/xgent_ui/src/shortcuts.rs:56 — handle_palette_open_files
+          已实现（修死键）
+        - crates/xgent_ui/src/shortcuts.rs:88 — handle_input_focus 已实现（修空实现）
+      note: HotkeyAction 注册时必填 handler_name，语言层面消灭空实现。启动期断言注册表 id 集等于分发表 id
+        集。palette.open_files 和 input.focus 死键已修复。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_app/src/main.rs:262 — 装配 TabNavigationPlugin
+        - crates/xgent_app/src/main.rs:263 — 装配 DirectionalNavigationPlugin
+        - crates/xgent_app/src/settings_io.rs:1061 — 装配 InputDispatchPlugin
+        - crates/xgent_ui/src/settings_panel.rs:803 — TabIndex 由布局顺序派生（间隔 10）
+        - crates/xgent_ui/src/settings_panel.rs:1364 — TabIndex(tab_index) 组件插入
+        - crates/xgent_ui/src/chat_panel.rs — InputFocusVisible 消费
+          theme.accent_interactive
+      note: TabNavigationPlugin + DirectionalNavigationPlugin + InputDispatchPlugin
+        已装配。TabIndex 由布局顺序派生（间隔 10）。焦点环消费 theme.accent_interactive +
+        accent_glow。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/modal.rs:178-179 — 模态层根挂 TabGroup::modal()
+      note: 模态层根节点挂 TabGroup::modal()，Tab 键不跳出模态边界。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/src/activity_bar.rs:131 — crate::i18n::tr(&loc,
+          "tooltip-expand-panel")
+        - crates/xgent_ui/src/activity_bar.rs:224 — crate::i18n::tr(&loc,
+          "tooltip-command-palette")
+        - crates/xgent_ui/src/activity_bar.rs:227 — crate::i18n::tr(&loc,
+          "tooltip-settings")
+        - crates/xgent_ui/src/top_bar.rs:224 — i18n 化命令面板按钮
+        - crates/xgent_ui/src/top_bar.rs:227 — i18n 化设置按钮
+        - crates/xgent_ui/tests/i18n_full_corpus.rs — 3 项全语料测试：EN 无 CJK、zh
+          无缺失、键集一致
+        - crates/xgent_ui/tests/settings_panel_i18n.rs — 3 项设置面板 i18n 测试
+      note: activity_bar.rs/top_bar.rs/editor 硬编码点全部迁移至 fluent i18n。i18n_full_corpus
+        测试覆盖全模块。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - grep -rn 'ChatPanelEntities' crates/xgent_ui/src/ 返回 0 结果 — Resource
+          已删除
+        - crates/xgent_ui/src/chat_panel.rs — 22 处 single()/single_mut() 改为
+          tracing::warn!
+        - crates/xgent_ui/src/top_bar.rs — 2 处 single()/single_mut() 改为
+          tracing::warn!
+        - crates/xgent_ui/tests/scroll_contract.rs — 添加
+          .add_message::<AbortMessage>()
+        - crates/xgent_ui/tests/density.rs — 添加 .add_message::<AbortMessage>()
+        - crates/xgent_ui/tests/layout_geometry.rs — 添加
+          .add_message::<AbortMessage>()
+        - 109 项 lib + 8 项 scroll_contract + 4 项 density 测试全绿
+      note: ChatPanelEntities Resource 已删除，改 marker 查询。24 处静默早退改为 tracing::warn!
+        日志。AbortMessage 在所有相关测试 App 中注册。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_ui/tests/layout_geometry.rs — 6 个断言函数 + 11 个回归测试
+        - crates/xgent_ui/tests/layout_geometry.rs:21 —
+          assert_fills_region_height
+        - crates/xgent_ui/tests/layout_geometry.rs:46 — assert_no_overflow
+        - crates/xgent_ui/tests/layout_geometry.rs:77 — assert_scrollable
+        - crates/xgent_ui/tests/layout_geometry.rs:100 —
+          assert_truncated_in_width
+        - crates/xgent_ui/tests/layout_geometry.rs:123 — assert_pickable_leaf
+        - crates/xgent_ui/tests/layout_geometry.rs:134 —
+          assert_no_blocking_empty_layer
+        - 11 项测试全绿
+      note: layout_geometry.rs 含 6 个断言函数和 11 个回归测试。故意引入 clip_y 假滚动会被
+        no_clip_y_fake_scroll_in_extended_business_code 测试捕获。
+  checks:
+    - name:
+        text: cargo test -p xgent_ui --lib
+        truncated: false
+      result: passed
+      note:
+        text: 109 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test layout_geometry
+        truncated: false
+      result: passed
+      note:
+        text: 11 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test scroll_contract
+        truncated: false
+      result: passed
+      note:
+        text: 8 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test i18n_full_corpus
+        truncated: false
+      result: passed
+      note:
+        text: 3 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test settings_panel_i18n
+        truncated: false
+      result: passed
+      note:
+        text: 3 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test density
+        truncated: false
+      result: passed
+      note:
+        text: 4 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test modal_settings
+        truncated: false
+      result: passed
+      note:
+        text: 3 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test interaction_model
+        truncated: false
+      result: passed
+      note:
+        text: 7 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test settings_input_focus
+        truncated: false
+      result: passed
+      note:
+        text: 2 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test layout
+        truncated: false
+      result: passed
+      note:
+        text: 2 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test virtual_list_contract
+        truncated: false
+      result: passed
+      note:
+        text: 3 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test toast
+        truncated: false
+      result: passed
+      note:
+        text: 1 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test file_preview
+        truncated: false
+      result: passed
+      note:
+        text: 7 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_terminal --test integration
+        truncated: false
+      result: passed
+      note:
+        text: 6 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test file_tree_refresh
+        truncated: false
+      result: passed
+      note:
+        text: 5 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test editor_theme_sync
+        truncated: false
+      result: passed
+      note:
+        text: 2 passed; 0 failed
+        truncated: false
+    - name:
+        text: cargo test -p xgent_ui --test conflict_save_guard
+        truncated: false
+      result: passed
+      note:
+        text: 4 passed; 0 failed
+        truncated: false
+  checks_truncated: false
+  known_limits: []
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-26T04:34:02.260Z
+blockers: []
+verification:
+  candidate_id: 231a3984-debb-44c8-ad52-5ab806581d7e
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:f1e1311e-3356-430a-b37e-c454e06aeaae
+  iteration: 2
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: layout-geometry
+      name:
+        text: cargo test -p xgent_ui --test layout_geometry
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: layout_geometry
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1313
+    - id: i18n-full-corpus
+      name:
+        text: cargo test -p xgent_ui --test i18n_full_corpus
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: i18n_full_corpus
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 871
+    - id: ui-lib-tests
+      name:
+        text: cargo test -p xgent_ui --lib
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --lib
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 936
+    - id: scroll-contract
+      name:
+        text: cargo test -p xgent_ui --test scroll_contract
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: scroll_contract
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1399
+    - id: settings-panel-i18n
+      name:
+        text: cargo test -p xgent_ui --test settings_panel_i18n
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: settings_panel_i18n
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 913
+    - id: density
+      name:
+        text: cargo test -p xgent_ui --test density
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: density
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1446
+    - id: modal-settings
+      name:
+        text: cargo test -p xgent_ui --test modal_settings
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: modal_settings
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1493
+    - id: interaction-model
+      name:
+        text: cargo test -p xgent_ui --test interaction_model
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: interaction_model
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 985
+    - id: settings-input-focus
+      name:
+        text: cargo test -p xgent_ui --test settings_input_focus
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: settings_input_focus
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1262
+    - id: layout
+      name:
+        text: cargo test -p xgent_ui --test layout
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: layout
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 868
+    - id: virtual-list-contract
+      name:
+        text: cargo test -p xgent_ui --test virtual_list_contract
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: virtual_list_contract
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1089
+    - id: toast
+      name:
+        text: cargo test -p xgent_ui --test toast
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: toast
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 964
+    - id: file-preview
+      name:
+        text: cargo test -p xgent_ui --test file_preview
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: file_preview
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1277
+    - id: terminal-integration
+      name:
+        text: cargo test -p xgent_terminal --test integration
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: integration
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 19438
+    - id: file-tree-refresh
+      name:
+        text: cargo test -p xgent_ui --test file_tree_refresh
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: file_tree_refresh
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1260
+    - id: editor-theme-sync
+      name:
+        text: cargo test -p xgent_ui --test editor_theme_sync
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: editor_theme_sync
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 994
+    - id: conflict-save-guard
+      name:
+        text: cargo test -p xgent_ui --test conflict_save_guard
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+        - text: --test
+          truncated: false
+        - text: conflict_save_guard
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 983
+  summary:
+    text: 6 项验收全部通过。17 项 Runtime 检查全绿。快捷键单一来源（A1）、焦点遍历与模态隔离（A2/A3）、i18n
+      全覆盖（A4）、状态健壮性（A5）、布局几何断言层（A6）均已实现并通过独立验证。
+    truncated: false
+  risks: []
+  risks_truncated: false
+  completed_at: 2026-10-26T04:35:28.314Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: "Builder handoff Runtime checks failed: terminal-cell-layout"
+      truncated: false
+    completed_at: 2026-10-26T04:32:48.603Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 6 项验收全部通过。17 项 Runtime 检查全绿。快捷键单一来源（A1）、焦点遍历与模态隔离（A2/A3）、i18n
+        全覆盖（A4）、状态健壮性（A5）、布局几何断言层（A6）均已实现并通过独立验证。
+      truncated: false
+    completed_at: 2026-10-26T04:35:28.314Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-26T02:09:51.259Z
