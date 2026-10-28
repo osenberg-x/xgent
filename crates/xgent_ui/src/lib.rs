@@ -12,8 +12,10 @@
 pub mod activity_bar;
 pub mod chat_panel;
 pub mod command_palette;
+pub mod completion;
 pub mod confirm_dialog;
 pub mod context_scope;
+pub mod context_set;
 pub mod cursor;
 pub mod density;
 pub mod diff;
@@ -23,6 +25,8 @@ pub mod fonts;
 pub mod i18n;
 pub mod kit;
 pub mod layout;
+pub mod markdown;
+pub mod markdown_render;
 pub mod modal;
 pub mod overlay;
 pub mod panels;
@@ -36,6 +40,7 @@ pub mod terminal;
 pub mod theme;
 pub mod tool_panel;
 pub mod top_bar;
+pub mod transcript;
 pub mod undo;
 pub mod welcome;
 

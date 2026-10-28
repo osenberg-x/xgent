@@ -26,6 +26,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 parking_lot = { workspace = true }
+pulldown-cmark = { workspace = true }
 
 crossbeam-channel = { workspace = true }
 [dev-dependencies]

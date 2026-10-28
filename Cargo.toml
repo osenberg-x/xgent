@@ -55,6 +55,8 @@ ropey = "1.6"
 portable-pty = "0.9"
 # ANSI 转义序列解析（终端输出渲染 F-19）
 vte = "0.15"
+# Markdown 解析（M6-T2 会话内容 Markdown 渲染）
+pulldown-cmark = "0.12"
 # WASM 组件模型运行时（插件系统，见 docs/design/plugin-system-design.md）
 # 偏差修正：用 wasmtime 29（非设计文档 §12.3 的 27），对齐 Zed 实测版本
 wasmtime = { version = "29", features = ["component-model", "async"] }
