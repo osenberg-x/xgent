@@ -190,7 +190,8 @@ fn spawn_palette_overlay(commands: &mut Commands, theme: &Theme, _loc: &Localize
                         ChatInput::single_line(),
                         AutoFocus,
                         // 点击重新聚焦（0.20 点击聚焦须 TabIndex）
-                        TabIndex(0),
+                        // v8 M7-T2：布局顺序派生（命令面板唯一输入）
+                        TabIndex(10),
                         PaletteInputMarker,
                         // 文本输入 → 竖线 I-beam 指针
                         crate::cursor::CursorStyle::Text,

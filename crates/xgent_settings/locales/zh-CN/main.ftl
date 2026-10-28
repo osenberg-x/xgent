@@ -218,3 +218,9 @@ settings-fetch-models-needs-fields = 需要填写 Provider ID 和 API Base
 settings-model-list-empty = （无模型）
 settings-report-sep = ；
 settings-field-anthropic-only = 仅 Anthropic provider 发送该字段；其他类型下改动不影响请求
+
+# --- v8 M7-T3：硬编码 tooltip 与错误文案迁移 ---
+tooltip-expand-panel = 展开面板
+tooltip-command-palette = 命令面板
+tooltip-settings = 设置
+editor-read-cancelled = 读取任务取消

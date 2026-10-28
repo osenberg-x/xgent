@@ -14,6 +14,7 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
+use xgent_settings::Localizer;
 
 use crate::kit::{HoverTint, IconAssets, Tooltip, UiKit, icon};
 use crate::layout::ActivityBarMarker;
@@ -83,6 +84,7 @@ fn spawn_activity_bar(
     mut commands: Commands,
     q_bar: Query<Entity, With<ActivityBarMarker>>,
     theme: Res<Theme>,
+    loc: Res<Localizer>,
     icons: Res<IconAssets>,
 ) {
     let Ok(bar) = q_bar.single() else {
@@ -126,7 +128,7 @@ fn spawn_activity_bar(
             BorderColor::all(Color::NONE),
             HoverTint::ghost(&theme),
             Tooltip {
-                text: "展开面板".to_string(),
+                text: crate::i18n::tr(&loc, "tooltip-expand-panel"),
             },
             ExpandPanelButtonMarker,
             // v8 M5-T3：展开钮是**恢复入口**——分屏折叠时才出现（反向跟随

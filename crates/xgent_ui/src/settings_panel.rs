@@ -800,6 +800,8 @@ fn spawn_panel(
 
                 // ── Provider ─────────────────────────────────
                 section(card, theme, loc, "settings-section-provider");
+                // v8 M7-T2：TabIndex 由布局顺序派生（间隔 10）
+                let mut tab_counter = 10i32;
                 spawn_labelled_input(
                     card,
                     theme,
@@ -809,7 +811,9 @@ fn spawn_panel(
                     &pid,
                     ProviderIdInput,
                     false,
+                    tab_counter,
                 );
+                tab_counter += 10;
                 spawn_kind_row(card, theme, loc, &pc.kind);
                 spawn_labelled_input(
                     card,
@@ -820,7 +824,9 @@ fn spawn_panel(
                     &pc.api_base,
                     ApiBaseInput,
                     false,
+                    tab_counter,
                 );
+                tab_counter += 10;
                 spawn_labelled_input(
                     card,
                     theme,
@@ -830,7 +836,9 @@ fn spawn_panel(
                     &pc.api_key,
                     ApiKeyInput,
                     true,
+                    tab_counter,
                 );
+                tab_counter += 10;
                 let model = pc
                     .model_overrides
                     .get("default")
@@ -845,7 +853,9 @@ fn spawn_panel(
                     &model,
                     ModelInput,
                     false,
+                    tab_counter,
                 );
+                tab_counter += 10;
                 // 模型列表：v8 M3-T2——此前只有 max_height:150 且完全没有
                 // ScrollPosition，条目一多就被硬裁（审计 C2：可达末项）。
                 let mut model_list = xui::ScrollFrame::vertical();
@@ -853,7 +863,8 @@ fn spawn_panel(
                 model_list.style().max_height = px(150.0);
                 card.spawn((model_list, ModelListContainerMarker));
                 for f in provider_num_fields(&pc) {
-                    spawn_num_field(card, theme, loc, font, &f, true);
+                    spawn_num_field(card, theme, loc, font, &f, true, tab_counter);
+                    tab_counter += 10;
                 }
 
                 // ── 工具策略 ─────────────────────────────────
@@ -880,7 +891,8 @@ fn spawn_panel(
                         .into_iter()
                         .filter(|f| f.key.starts_with(prefix))
                     {
-                        spawn_num_field(card, theme, loc, font, &f, false);
+                        spawn_num_field(card, theme, loc, font, &f, false, tab_counter);
+                        tab_counter += 10;
                     }
                 }
 
@@ -1135,6 +1147,7 @@ fn spawn_labelled_input(
     value: &str,
     marker: impl Bundle,
     with_fetch: bool,
+    tab_index: i32,
 ) {
     p.spawn(ui_text(
         tr(loc, label_key),
@@ -1151,7 +1164,7 @@ fn spawn_labelled_input(
             ..default()
         },))
             .with_children(|row| {
-                row.spawn(text_input_node(theme, font, value, marker));
+                row.spawn(text_input_node(theme, font, value, marker, tab_index));
                 row.spawn((
                     Button,
                     Hovered::default(),
@@ -1171,7 +1184,7 @@ fn spawn_labelled_input(
                 ));
             });
     } else {
-        p.spawn(text_input_node(theme, font, value, marker));
+        p.spawn(text_input_node(theme, font, value, marker, tab_index));
     }
 }
 
@@ -1183,6 +1196,7 @@ fn spawn_num_field(
     font: f32,
     f: &NumField,
     global: bool,
+    tab_index: i32,
 ) {
     p.spawn(ui_text(
         tr(loc, f.label_key),
@@ -1208,6 +1222,7 @@ fn spawn_num_field(
             mode: f.mode,
             max: f.max,
         },
+        tab_index,
     ));
     if let Some(note) = f.note_key {
         p.spawn(ui_text(
@@ -1321,7 +1336,13 @@ fn stored_state(executor: &ToolExecutor, tool_id: &str, stored: &ToolPolicyConfi
 /// [`ui_text`] 会额外插入 `Text::new("")`，被 `measure_text_system` 当静态
 /// 文本节点测量，与输入框自身的 `TextInputMeasure` 冲突。故保留显式
 /// `TextFont::from_font_size`（构造器式写法，非裸字面量）。
-fn text_input_node(theme: &Theme, font: f32, value: &str, marker: impl Bundle) -> impl Bundle {
+fn text_input_node(
+    theme: &Theme,
+    font: f32,
+    value: &str,
+    marker: impl Bundle,
+    tab_index: i32,
+) -> impl Bundle {
     (
         Node {
             padding: UiRect::all(px(space::SM)),
@@ -1339,7 +1360,8 @@ fn text_input_node(theme: &Theme, font: f32, value: &str, marker: impl Bundle) -
         crate::cursor::CursorHit::default(),
         // 0.20 起点击聚焦只认 TabIndex（PointerFocusPlugin 的 AcquireFocus 解析器）：
         // 缺它则点击输入框会把焦点清到窗口，键盘事件无处投递 → 无法输入
-        TabIndex(0),
+        // v8 M7-T2：由布局顺序派生（间隔 10），废除全 0
+        TabIndex(tab_index),
         EditableText::new(value),
         TextInput,
     )

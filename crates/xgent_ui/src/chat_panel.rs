@@ -27,6 +27,7 @@ use crate::i18n::tr;
 use crate::kit::{HoverTint, icon};
 use crate::layout::ChatPanelMarker;
 use crate::theme::{Theme, radius, size, space, type_scale};
+use tracing;
 /// 历史消息容器（消息列表，可滚动）。
 #[derive(Component, Default)]
 pub struct MessageListMarker;
@@ -101,25 +102,20 @@ pub struct ConversationInfoMarker;
 #[derive(Component, Default)]
 pub struct TokenHintMarker;
 
-/// 对话面板关键实体句柄（启动时填充）。
-#[derive(Resource, Default)]
-pub struct ChatPanelEntities {
-    pub message_list: Option<Entity>,
-    pub current_text: Option<Entity>,
-    /// 输入框的**文本节点**（持有 `EditableText`，提交事件的来源）。
-    pub input: Option<Entity>,
-    /// 输入卡外框（边框变色 / 焦点环挂在这里）。
-    pub input_card: Option<Entity>,
-    /// 回到底部浮钮（M4-T3）。
-    pub back_to_bottom: Option<Entity>,
-}
+/// M6-T5：发送按钮标记。
+#[derive(Component, Default)]
+pub struct SendButtonMarker;
+
+/// M6-T5：停止按钮标记。
+#[derive(Component, Default)]
+pub struct StopButtonMarker;
 
 /// 对话面板插件。
 pub struct ChatPanelPlugin;
 
 impl Plugin for ChatPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ChatPanelEntities>()
+        app.init_resource::<crate::transcript::Transcript>()
             .add_systems(Startup, spawn_chat_panel.after(crate::layout::spawn_layout))
             .add_systems(
                 Update,
@@ -128,7 +124,12 @@ impl Plugin for ChatPanelPlugin {
                     update_back_to_bottom,
                     handle_qa_chips,
                     update_msg_actions,
+                    update_action_buttons,
                 ),
+            )
+            .add_systems(
+                Update,
+                (handle_send_button_click, handle_stop_button_click),
             )
             // v8 M3-T3：光标行跟随 + 可视行数自适应（要拿到本帧最新的布局与光标矩形）
             .add_systems(
@@ -172,9 +173,9 @@ pub(crate) fn spawn_chat_panel(
     q_panel: Query<Entity, With<ChatPanelMarker>>,
     theme: Res<Theme>,
     loc: Res<xgent_settings::Localizer>,
-    mut entities: ResMut<ChatPanelEntities>,
 ) {
     let Ok(panel) = q_panel.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
 
@@ -264,7 +265,8 @@ pub(crate) fn spawn_chat_panel(
                             ChatInput::multiline(),
                             AutoFocus,
                             // 点击重新聚焦（AutoFocus 只在 spawn 时生效；0.20 点击聚焦须 TabIndex）
-                            TabIndex(0),
+                            // v8 M7-T2：布局顺序派生（对话区唯一输入）
+                            TabIndex(10),
                             ChatInputMarker,
                             // 没有 `Text` 组件时，require_markers 下必须自带
                             // Pickable 才收得到点击（否则点不进而无法聚焦）。
@@ -335,7 +337,7 @@ pub(crate) fn spawn_chat_panel(
                         type_scale::line_height::UI,
                     ),));
                 });
-            // 右侧 tokenhint + 发送按钮
+            // 右侧 tokenhint + 发送/停止按钮
             meta.spawn((Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -353,6 +355,53 @@ pub(crate) fn spawn_chat_panel(
                         ),
                         TokenHintMarker,
                     ));
+                    // M6-T5：发送按钮（accent 色）
+                    right.spawn((
+                        Button,
+                        Hovered::default(),
+                        Node {
+                            width: px(32.0),
+                            height: px(32.0),
+                            border_radius: BorderRadius::all(px(6.0)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BackgroundColor(theme.accent),
+                        SendButtonMarker,
+                    )).with_children(|btn| {
+                        btn.spawn(ui_text(
+                            "↑",
+                            type_scale::BODY,
+                            600,
+                            theme.accent_text,
+                            type_scale::line_height::UI,
+                        ));
+                    });
+                    // M6-T5：停止按钮（流式中显示，st_running 色）
+                    right.spawn((
+                        Button,
+                        Hovered::default(),
+                        Node {
+                            width: px(32.0),
+                            height: px(32.0),
+                            border_radius: BorderRadius::all(px(6.0)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            display: Display::None,
+                            ..default()
+                        },
+                        BackgroundColor(theme.st_running),
+                        StopButtonMarker,
+                    )).with_children(|btn| {
+                        btn.spawn(ui_text(
+                            "■",
+                            type_scale::BODY,
+                            600,
+                            theme.accent_text,
+                            type_scale::line_height::UI,
+                        ));
+                    });
                 });
         })
         .id();
@@ -460,33 +509,32 @@ pub(crate) fn spawn_chat_panel(
         .add_child(message_list)
         .add_child(inputbar)
         .add_child(back_to_bottom);
-
-    entities.message_list = Some(message_list);
-    entities.current_text = Some(current_text);
-    entities.input = Some(input_text_entity);
-    entities.input_card = Some(input_card);
-    entities.back_to_bottom = Some(back_to_bottom);
 }
 
 /// 用户提交输入时，在消息列表中 spawn 用户消息（全宽行式布局）。
 fn spawn_user_message(
     mut reader: MessageReader<ChatInputSubmitted>,
-    entities: Res<ChatPanelEntities>,
     theme: Res<Theme>,
     loc: Res<xgent_settings::Localizer>,
     mut commands: Commands,
+    q_list: Query<Entity, With<MessageListMarker>>,
+    q_current: Query<Entity, With<CurrentAssistantText>>,
+    q_input: Query<Entity, With<ChatInputMarker>>,
 ) {
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
-    let Some(current) = entities.current_text else {
+    let Ok(current) = q_current.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
+    let input_entity = q_input.single().ok();
     let font = theme.font_size;
     for ev in reader.read() {
         // 只渲染 chat 输入框自己的提交（命令面板复用 ChatInput，其提交
         // 不是聊天消息）——与 forward_input_submission 同一守卫
-        if Some(ev.entity) != entities.input {
+        if Some(ev.entity) != input_entity {
             continue;
         }
         if ev.text.is_empty() {
@@ -564,6 +612,7 @@ fn accumulate_delta(
     mut q: Query<(&mut Text, &mut LineHeight), With<CurrentAssistantText>>,
 ) {
     let Ok((mut text, mut line_height)) = q.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     for ev in reader.read() {
@@ -581,17 +630,20 @@ fn accumulate_delta(
 /// Done 时把当前助手消息固化为历史副本节点，并清空当前节点。
 fn finalize_on_done(
     mut reader: MessageReader<DoneMessage>,
-    entities: Res<ChatPanelEntities>,
     q: Query<&Text, With<CurrentAssistantText>>,
     mut commands: Commands,
     theme: Res<Theme>,
     loc: Res<xgent_settings::Localizer>,
     icons: Res<crate::kit::IconAssets>,
+    q_list: Query<Entity, With<MessageListMarker>>,
+    q_current: Query<Entity, With<CurrentAssistantText>>,
 ) {
-    let Some(current) = entities.current_text else {
+    let Ok(current) = q_current.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     if reader.read().next().is_none() {
@@ -701,6 +753,7 @@ fn on_error(
     loc: Res<xgent_settings::Localizer>,
 ) {
     let Ok(entity) = q.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     for ev in reader.read() {
@@ -748,6 +801,7 @@ fn show_retry_status(
     loc: Res<xgent_settings::Localizer>,
 ) {
     let Ok(entity) = q.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     for ev in reader.read() {
@@ -777,12 +831,13 @@ fn show_retry_status(
 /// 压缩触发后在消息列表插入一条 dim 提示。
 fn show_compacted_notice(
     mut reader: MessageReader<CompactedMessage>,
-    entities: Res<ChatPanelEntities>,
     mut commands: Commands,
     theme: Res<Theme>,
     loc: Res<xgent_settings::Localizer>,
+    q_list: Query<Entity, With<MessageListMarker>>,
 ) {
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     for ev in reader.read() {
@@ -824,21 +879,24 @@ pub fn forward_input_submission(
     mut reader: MessageReader<ChatInputSubmitted>,
     mut user_writer: MessageWriter<UserInputMessage>,
     mut steering_writer: MessageWriter<SteeringMessage>,
-    entities: Res<ChatPanelEntities>,
     conv: Res<Conversation>,
     time: Res<Time>,
     mut commands: Commands,
+    q_input: Query<Entity, With<ChatInputMarker>>,
+    q_card: Query<Entity, With<ChatInputCardMarker>>,
 ) {
+    let input_entity = q_input.single().ok();
+    let card_entity = q_card.single().ok();
     for ev in reader.read() {
         // 只消费 chat 输入框自己的提交：命令面板输入框复用 ChatInput，
         // 其 Enter（执行命令）也会发 ChatInputSubmitted——不过滤会把查询串
         // 当用户消息发给 agent 并渲染到对话流（同一次 Enter 双触发）。
-        if Some(ev.entity) != entities.input {
+        if Some(ev.entity) != input_entity {
             continue;
         }
         if ev.text.is_empty() {
             // 红边闪烁标记挂在外框上（边框在外框，文本节点在框内滚动）。
-            if let Some(card) = entities.input_card {
+            if let Some(card) = card_entity {
                 commands.entity(card).insert(InputBusyMarker {
                     started_at: time.elapsed().as_secs_f64(),
                 });
@@ -867,6 +925,7 @@ fn update_input_border(
     mut q: Query<(Entity, &mut BorderColor, Option<&InputBusyMarker>), With<ChatInputBorderMarker>>,
 ) {
     let Ok((entity, mut border, busy)) = q.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let now = time.elapsed().as_secs_f64();
@@ -904,6 +963,7 @@ fn update_streaming_cursor(
     mut q: Query<&mut Text, With<CurrentAssistantText>>,
 ) {
     let Ok(mut text) = q.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let is_busy =
@@ -926,17 +986,19 @@ fn update_streaming_cursor(
 /// 收到 SessionClearedMessage 时清空消息列表的所有子节点。
 fn clear_on_new_session(
     mut reader: MessageReader<SessionClearedMessage>,
-    entities: Res<ChatPanelEntities>,
     theme: Res<Theme>,
     mut commands: Commands,
+    q_list: Query<Entity, With<MessageListMarker>>,
+    q_current: Query<Entity, With<CurrentAssistantText>>,
 ) {
     if reader.read().next().is_none() {
         return;
     }
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
-    if let Some(cur) = entities.current_text {
+    if let Ok(cur) = q_current.single() {
         commands
             .entity(list)
             .detach_children(&[cur])
@@ -960,6 +1022,7 @@ fn update_token_hint(
         return;
     }
     let Ok(mut text) = q.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let label = match conv.status {
@@ -979,9 +1042,11 @@ fn update_token_hint(
 /// 输入卡 focus 环（M4-T7）：聚焦时 `Outline` 3px `accent_glow` + 边框 `accent_interactive`。
 ///
 /// v8 M3-T3：焦点环画在**外框**上（文本节点在框内滚动，环跟着文本走会抖）。
+/// v8 M7-T2：配合 `InputFocusVisible` 只在键盘导航时显形（鼠标点击不显示焦点环）。
 fn update_input_focus_ring(
     mut commands: Commands,
     focus: Res<InputFocus>,
+    focus_visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
     theme: Res<Theme>,
     q_input: Query<Entity, With<ChatInputMarker>>,
     q_card: Query<Entity, With<ChatInputCardMarker>>,
@@ -989,16 +1054,21 @@ fn update_input_focus_ring(
     q_outline: Query<Option<&Outline>, With<ChatInputCardMarker>>,
 ) {
     let Ok(entity) = q_input.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let Ok(card) = q_card.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let focused = focus.get() == Some(entity);
+    // v8 M7-T2：焦点环只在键盘导航时显示（InputFocusVisible 默认为 false，Tab 键时置 true）
+    let visible = focus_visible.as_ref().is_some_and(|v| v.0);
+    let show_ring = focused && visible;
     let Ok(border) = q_border.get(card) else {
         return;
     };
-    let line = if focused {
+    let line = if show_ring {
         theme.accent_interactive
     } else {
         theme.border
@@ -1007,7 +1077,7 @@ fn update_input_focus_ring(
     if *border != want_border {
         commands.entity(card).insert(want_border);
     }
-    let want_outline = focused.then_some(Outline {
+    let want_outline = show_ring.then_some(Outline {
         width: Val::Px(crate::theme::size::SCROLLBAR_W),
         offset: Val::Px(0.0),
         color: theme.accent_glow,
@@ -1033,15 +1103,18 @@ fn update_input_focus_ring(
 
 /// 回到底部浮钮（M4-T3）：上滚（scroll.y > 1）显现；点击回底。
 fn update_back_to_bottom(
-    entities: Res<ChatPanelEntities>,
     mut q_scroll: Query<&mut ScrollPosition, With<MessageListMarker>>,
     mut q_node: Query<&mut Node, With<BackToBottomMarker>>,
     q_btn: Query<(), (With<BackToBottomMarker>, Added<Pressed>)>,
+    q_list: Query<Entity, With<MessageListMarker>>,
+    q_back: Query<Entity, With<BackToBottomMarker>>,
 ) {
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
-    let Some(btn) = entities.back_to_bottom else {
+    let Ok(btn) = q_back.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let Ok(mut scroll) = q_scroll.get_mut(list) else {
@@ -1061,20 +1134,18 @@ fn update_back_to_bottom(
 /// qa chips 点击（M4-T8）：清空输入框并填入提示词。
 fn handle_qa_chips(
     mut q: Query<&QaChipMarker, (Added<Pressed>, With<Button>)>,
-    entities: Res<ChatPanelEntities>,
     loc: Res<xgent_settings::Localizer>,
     mut q_input: Query<&mut EditableText, With<ChatInputMarker>>,
 ) {
-    let Some(input) = entities.input else {
+    let Ok(mut editable) = q_input.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     for marker in q.iter_mut() {
-        if let Ok(mut editable) = q_input.get_mut(input) {
-            editable.clear();
-            editable.queue_edit(bevy::text::TextEdit::Insert(
-                crate::i18n::tr(&loc, marker.key).to_string().into(),
-            ));
-        }
+        editable.clear();
+        editable.queue_edit(bevy::text::TextEdit::Insert(
+            crate::i18n::tr(&loc, marker.key).to_string().into(),
+        ));
     }
 }
 
@@ -1120,12 +1191,14 @@ fn update_input_scroll_to_caret(
     mut q_scroll: Query<(&mut ScrollPosition, &ComputedNode), With<ChatInputScrollMarker>>,
 ) {
     let Ok(info) = q_text.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let Some((_blink, caret)) = info.cursor else {
         return;
     };
     let Ok((mut scroll, computed)) = q_scroll.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     // `TextLayoutInfo` 的尺寸与光标矩形都是物理像素；`ScrollPosition` 是逻辑像素。
@@ -1158,5 +1231,51 @@ fn update_msg_actions(
         toast.write(crate::kit::ToastMessage {
             text: crate::i18n::tr(&loc, "toast-copied"),
         });
+    }
+}
+
+/// M6-T5：更新发送/停止按钮可见性（按 ConversationStatus 派生）。
+fn update_action_buttons(
+    conv: Res<xgent_agent::Conversation>,
+    mut q_send: Query<&mut Node, (With<SendButtonMarker>, Without<StopButtonMarker>)>,
+    mut q_stop: Query<&mut Node, (With<StopButtonMarker>, Without<SendButtonMarker>)>,
+) {
+    let is_busy = matches!(
+        conv.status,
+        xgent_agent::ConversationStatus::Thinking
+            | xgent_agent::ConversationStatus::Streaming
+            | xgent_agent::ConversationStatus::ToolRunning
+    );
+    for mut node in q_send.iter_mut() {
+        node.display = if is_busy { Display::None } else { Display::Flex };
+    }
+    for mut node in q_stop.iter_mut() {
+        node.display = if is_busy { Display::Flex } else { Display::None };
+    }
+}
+
+/// M6-T5：处理发送按钮点击。
+fn handle_send_button_click(
+    mut q: Query<&mut SendButtonMarker, Added<Pressed>>,
+    mut messages: MessageWriter<xui::input::ChatInputSubmitted>,
+    q_input: Query<(Entity, &EditableText), With<ChatInputMarker>>,
+) {
+    for _marker in q.iter_mut() {
+        if let Ok((entity, editable)) = q_input.single() {
+            let text = editable.editor.text().to_string();
+            if !text.trim().is_empty() {
+                messages.write(xui::input::ChatInputSubmitted { text, entity });
+            }
+        }
+    }
+}
+
+/// M6-T5：处理停止按钮点击。
+fn handle_stop_button_click(
+    mut q: Query<&mut StopButtonMarker, Added<Pressed>>,
+    mut commands: MessageWriter<xgent_agent::AbortMessage>,
+) {
+    for _marker in q.iter_mut() {
+        commands.write(xgent_agent::AbortMessage);
     }
 }

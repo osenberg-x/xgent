@@ -14,7 +14,6 @@ use tokio::sync::oneshot;
 use xgent_agent::{Conversation, ConversationStatus};
 use xgent_tools::{SkipReason, UndoReport};
 
-use crate::chat_panel::ChatPanelEntities;
 use crate::i18n::{tr, tr_with};
 use crate::kit::ToastMessage;
 
@@ -273,11 +272,11 @@ fn skip_reason(loc: &xgent_settings::Localizer, reason: SkipReason) -> String {
 /// 把详情画进对话流（与压缩提示同一形状：居中 muted 小字）。
 fn append_undo_notice(
     mut reader: MessageReader<UndoNoticeMessage>,
-    entities: Res<ChatPanelEntities>,
     mut commands: Commands,
     theme: Res<crate::theme::Theme>,
+    q_list: Query<Entity, With<crate::chat_panel::MessageListMarker>>,
 ) {
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
         return;
     };
     for ev in reader.read() {

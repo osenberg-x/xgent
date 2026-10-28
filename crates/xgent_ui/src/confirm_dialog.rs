@@ -57,7 +57,7 @@ fn show_on_request(
     loc: Res<Localizer>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
-    chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
     mut modal_push: Option<MessageWriter<crate::modal::ModalPush>>,
     mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
@@ -95,12 +95,13 @@ fn show_on_request(
             ConfirmDialogMarker,
         ))
         .id();
+    let opener_input = q_chat_input.single().ok();
     if let Some(modal_push) = modal_push.as_mut() {
         modal_push.write(crate::modal::ModalPush {
             id: "confirm",
             entity: dialog_focus,
             dismiss: crate::modal::Dismiss::NotDismissable,
-            opener_focus: chat_entities.input,
+            opener_focus: opener_input,
         });
     }
     focus.set(dialog_focus, bevy::input_focus::FocusCause::Navigated);
@@ -378,19 +379,20 @@ fn hide_on_decision(
     mut commands: Commands,
     mut writer: MessageWriter<ConfirmDecisionMessage>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
-    chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
     mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     let Ok(dialog) = q_dialog.single() else {
         return;
     };
+    let input_entity = q_chat_input.single().ok();
     let mut close = |decision: ConfirmDecision| {
         writer.write(ConfirmDecisionMessage { decision });
         close_dialog(
             &mut commands,
             dialog,
             &mut focus,
-            &chat_entities,
+            input_entity,
             &mut modal_pop,
         );
     };
@@ -411,7 +413,7 @@ fn close_dialog(
     commands: &mut Commands,
     dialog: Entity,
     focus: &mut bevy::input_focus::InputFocus,
-    chat_entities: &crate::chat_panel::ChatPanelEntities,
+    input_entity: Option<Entity>,
     modal_pop: &mut Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     if let Some(modal_pop) = modal_pop.as_mut() {
@@ -419,7 +421,7 @@ fn close_dialog(
             id: Some("confirm"),
         });
     }
-    if let Some(input) = chat_entities.input {
+    if let Some(input) = input_entity {
         focus.set(input, bevy::input_focus::FocusCause::Navigated);
     } else {
         focus.clear();
@@ -440,7 +442,7 @@ fn close_on_settled(
     mut reader: MessageReader<xgent_agent::ToolResultMessage>,
     q_dialog: Query<Entity, With<ConfirmDialogMarker>>,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
-    chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
     mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
     if reader.read().next().is_none() {
@@ -449,11 +451,12 @@ fn close_on_settled(
     let Ok(dialog) = q_dialog.single() else {
         return;
     };
+    let input_entity = q_chat_input.single().ok();
     close_dialog(
         &mut commands,
         dialog,
         &mut focus,
-        &chat_entities,
+        input_entity,
         &mut modal_pop,
     );
 }
@@ -483,7 +486,7 @@ fn handle_confirm_keyboard(
     mut writer: MessageWriter<ConfirmDecisionMessage>,
     // InputFocus 的唯一访问（读 get / 写 set 同参数；Res + ResMut 同资源是 B0002 冲突）
     mut focus: ResMut<bevy::input_focus::InputFocus>,
-    chat_entities: Res<crate::chat_panel::ChatPanelEntities>,
+    q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
     modal: Option<Res<crate::modal::ModalStack>>,
     mut modal_pop: Option<MessageWriter<crate::modal::ModalPop>>,
 ) {
@@ -498,6 +501,7 @@ fn handle_confirm_keyboard(
     if !on_top {
         return;
     }
+    let input_entity = q_chat_input.single().ok();
     for ev in reader.read() {
         if ev.state != bevy::input::ButtonState::Pressed {
             continue;
@@ -512,7 +516,7 @@ fn handle_confirm_keyboard(
                     &mut commands,
                     dialog,
                     &mut focus,
-                    &chat_entities,
+                    input_entity,
                     &mut modal_pop,
                 );
                 return;
@@ -531,7 +535,7 @@ fn handle_confirm_keyboard(
                     &mut commands,
                     dialog,
                     &mut focus,
-                    &chat_entities,
+                    input_entity,
                     &mut modal_pop,
                 );
                 return;

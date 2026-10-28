@@ -500,6 +500,7 @@ fn chat_app() -> App {
         .add_message::<CompactedMessage>()
         .add_message::<SessionClearedMessage>()
         .add_message::<xgent_agent::BoundedMessage>()
+        .add_message::<xgent_agent::AbortMessage>()
         .add_message::<xgent_ui::kit::ToastMessage>()
         .add_message::<xui::input::ChatInputSubmitted>()
         .add_plugins(xgent_ui::layout::LayoutPlugin)

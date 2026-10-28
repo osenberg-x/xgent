@@ -8,6 +8,7 @@
 //! - 出栈时把 `InputFocus` 还原到该层打开前的实体。
 
 use bevy::input::ButtonInput;
+use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 
@@ -172,7 +173,11 @@ fn apply_modal_push(
         let depth = stack.len() as i32;
         commands
             .entity(push.entity)
-            .insert(GlobalZIndex(z::MODAL_BASE + depth * z::MODAL_STRIDE));
+            .insert((
+                GlobalZIndex(z::MODAL_BASE + depth * z::MODAL_STRIDE),
+                // v8 M7-T2：模态层根挂 TabGroup::modal()，Tab 键不跳出模态
+                TabGroup::modal(),
+            ));
         stack.layers.push(ModalLayer {
             id: push.id,
             entity: push.entity,

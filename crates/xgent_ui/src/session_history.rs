@@ -526,15 +526,16 @@ fn handle_session_list_results(
 /// 订阅 SessionRestoredMessage，通知 UI 重建消息列表。
 fn handle_restore_results(
     mut reader: MessageReader<SessionRestoredMessage>,
-    entities: Res<crate::chat_panel::ChatPanelEntities>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
     mut commands: Commands,
+    q_list: Query<Entity, With<crate::chat_panel::MessageListMarker>>,
+    q_current: Query<Entity, With<crate::chat_panel::CurrentAssistantText>>,
 ) {
-    let Some(list) = entities.message_list else {
+    let Ok(list) = q_list.single() else {
         return;
     };
-    let Some(cur) = entities.current_text else {
+    let Ok(cur) = q_current.single() else {
         return;
     };
     for ev in reader.read() {

@@ -20,6 +20,7 @@ use crate::kit::{HoverTint, IconAssets, UiKit, icon};
 use crate::layout::TopBarMarker;
 use crate::theme::{Theme, radius};
 use crate::theme::{size, space, type_scale};
+use tracing;
 
 use xgent_agent::Conversation;
 
@@ -86,6 +87,7 @@ fn spawn_top_bar(
     project: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     let Ok(bar) = q_bar.single() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     let kit = UiKit {
@@ -219,10 +221,10 @@ fn spawn_top_bar(
         });
 
         // ⑧ 命令面板图标钮
-        palette_btn = Some(kit.icon_button(p, "command", "命令面板"));
+        palette_btn = Some(kit.icon_button(p, "command", &crate::i18n::tr(&loc, "tooltip-command-palette")));
 
         // ⑨ 设置图标钮（常驻入口，rail 不放设置）
-        settings_btn = Some(kit.icon_button(p, "gear", "设置"));
+        settings_btn = Some(kit.icon_button(p, "gear", &crate::i18n::tr(&loc, "tooltip-settings")));
     });
     // 标记插入（闭包外，避免与 with_children 的 commands 可变借用冲突）
     if let Some(e) = new_session_btn {
@@ -291,6 +293,7 @@ fn update_provider_label(
         return;
     }
     let Ok(mut text) = q.single_mut() else {
+        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     text.0 = if info.id.is_empty() {

@@ -258,6 +258,9 @@ fn main() {
         crate::config_bridge::ConfigBridgePlugin,
         crate::settings_io::SettingsIoPlugin,
         crate::fs_event_bridge::FsEventBridgePlugin,
+        // v8 M7-T2：Tab/方向键导航（InputFocusPlugin/InputDispatchPlugin 已在 DefaultPlugins）
+        bevy::input_focus::tab_navigation::TabNavigationPlugin,
+        bevy::input_focus::directional_navigation::DirectionalNavigationPlugin,
     ))
     .insert_resource(bevy::ui::picking_backend::UiPickingSettings {
         // v8 M1：没有 Pickable 的节点对拾取完全惰性——层根不再吞点击。

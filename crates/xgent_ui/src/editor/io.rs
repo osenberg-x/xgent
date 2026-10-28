@@ -221,6 +221,7 @@ pub fn handle_file_write_requests(
 /// 未就绪的保留到下一帧。
 pub fn poll_io_results(
     rt: ResMut<EditorIoRuntime>,
+    loc: Res<xgent_settings::Localizer>,
     mut read_writer: MessageWriter<FileReadResult>,
     mut saved_writer: MessageWriter<BufferSavedEvent>,
 ) {
@@ -243,7 +244,7 @@ pub fn poll_io_results(
                 read_writer.write(FileReadResult {
                     path: req.path.clone(),
                     line: req.line,
-                    content: Err("读取任务取消".into()),
+                    content: Err(crate::i18n::tr(&loc, "editor-read-cancelled").into()),
                 });
             }
         }

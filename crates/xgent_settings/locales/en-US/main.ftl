@@ -217,3 +217,9 @@ settings-fetch-models-needs-fields = Provider ID and API Base are required
 settings-model-list-empty = (no models)
 settings-report-sep ={"; "}
 settings-field-anthropic-only = Only Anthropic providers send this field; changing it does not affect requests for other kinds
+
+# --- v8 M7-T3: hardcoded tooltip and error text migration ---
+tooltip-expand-panel = Expand Panel
+tooltip-command-palette = Command Palette
+tooltip-settings = Settings
+editor-read-cancelled = Read task cancelled
