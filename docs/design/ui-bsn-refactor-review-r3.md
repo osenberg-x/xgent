@@ -1,5 +1,7 @@
 # UI BSN 重构方案 — 第三轮深度 Review
 
+> ⚠ **已放弃**：本方案已被 v8 交互架构层重建取代。见 `docs/plans/ui-v8-handoff.md` 与 `docs/design/ui-v8-layout-architecture.md`。
+
 > 对照 Bevy 0.19 源码 + bevy_resvg 2.5 文档 + bevy_feathers 实际实现，逐条验证方案代码可编译性。
 >
 > 第二轮已修复 6 个 P0 + 4 个 P1。本轮发现 **6 个新的 P0 + 4 个 P1 + 4 个 P2**。

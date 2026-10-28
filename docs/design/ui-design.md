@@ -1,5 +1,12 @@
 # XGent UI 界面设计
 
+> ⚠ **本文档已被 v8 交互架构层重建取代**。当前实现见：
+> - `docs/design/ui-v8-layout-architecture.md`（v8 架构设计）
+> - `docs/plans/ui-v8-tasks.md`（v8 任务台账）
+> - `docs/plans/ui-v8-handoff.md`（v8 交接文档）
+>
+> 原草案 v1 内容仅作历史参考，新 UI 工作请以 v8 文档为准。
+
 > 状态：草案 v1 · 待评审
 >
 > 范围：MVP（仅 2D GUI）。3D 可视化（F-16）、宠物（F-15）、TUI（F-17）、Web（F-18）不在本文档范围。

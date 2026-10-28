@@ -1,10 +1,10 @@
 # XGent 开发指南（已实现功能总览）
 
-> 本文档梳理 XGent 截至 2026-07-22 已实现的功能、对应的代码与文档、以及开发注意点。
+> 本文档梳理 XGent 截至 2026-10-28 已实现的功能、对应的代码与文档、以及开发注意点。
 > **维护规则**：后续实现新功能或功能有变化，都需要更新这个文档（见 `AGENTS.md` 第 6 节）。
 >
-> 代码现状：19 个 crate 已实现（含 `xgent_terminal` / `xgent_spatial`），`cargo check --workspace` 通过，约 22k 行 Rust。
-> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）+ UI v8 M1 分层与模态已落地。
+> 代码现状：19 个 crate 已实现（含 `xgent_terminal` / `xgent_spatial`），`cargo check --workspace` 通过，`crates/**/*.rs` 共 68322 行（2026-10-28 实测）。
+> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）+ UI v8 M1~M7 已落地。
 
 ---
 
@@ -31,6 +31,8 @@
 | UI v8 M3 | 滚动契约 / 填满契约 / 省略原语 / 虚拟列表 | ✅ | `xui/src/{scroll_frame,layout,ellipsis,virtual_list}.rs`：`ScrollFrame` 唯一可滚动入口（overflow 运行时回写）+ `region_fill()` 填满契约 + `Ellipsis`/`MidEllipsis` 省略原语（测量走 bevy 排版管线）+ `VirtualList` 不等高支持；`xgent_ui`：9 处假滚动归零、分屏三页改 `region_fill`、对话输入区自适应滚动、6 处省略截断点、文件树与会话历史虚拟化 | `plans/ui-v8-tasks.md` §M3、§5.20 |
 | UI v8 M4 | 跨平台字体与终端双宽 | ✅（macOS/Linux 硬门槛 A 待确认） | `xgent_ui/src/fonts.rs`（四槽位候选栈 + 等宽内嵌兜底）+ `xgent_terminal/src/render.rs`（`display_width`/`layout_cells` 双宽单元格模型）+ `xgent_ui/src/terminal/metrics.rs`（`MonoMetrics` 启动期实测 + 双宽校验 + `CellGrid`）+ `xgent_ui/src/terminal/output.rs`（按格定位渲染 + 实测列宽 + `legacy-terminal-layout` A/B feature） | `plans/ui-v8-tasks.md` §M4、§5.21–§5.23 |
 | UI v8 M5 | 槽位注册表与派生可见性 | ✅ | `xgent_ui/src/panels.rs`（`Slot`/`PanelDescriptor`/`PanelRegistry`/`SlotLayout` + `PanelRegister`/`PanelActivate`/`PanelDeactivate` 消息）+ `panels/visibility.rs`（`derive_panel_visibility` 唯一写面板可见性）+ `panels/tabs.rs`（槽位页签条）+ `panels/split.rs`（`SplitTree`/`Split`/`LeafSize` 分割模型）；rail 选中态从注册表派生（`ActiveActivity` 删除）；会话历史改 `Slot::Overlay` 注册面板；`SideViewContent` 枚举全量拆除 | `plans/ui-v8-tasks.md` §M5、§5.24 |
+| UI v8 M6 | 会话内容（Transcript + Markdown + 输入区） | 🟡 **仅模型层** | `xgent_ui/src/transcript.rs`（有序树模型）+ `markdown.rs`/`markdown_render.rs`（解析 + 渲染辅助）+ `completion.rs`（@ 补全模型）+ `context_set.rs`（上下文集合）；**除 `chat_panel.rs` 的发送/停止按钮（M6-T5）外，四者均未接入产品**，`spawn_markdown`/`completion`/`context_set` 全仓零消费者 | `plans/ui-v8-tasks.md` §M6 + §M6.5 |
+| UI v8 M7 | 闭环与验证 | ✅（A1 强度见勘误 46） | 快捷键清单与启动期 id 集断言（`shortcuts.rs`；`handler_name` 是字符串，分发表缺分支无编译期保障）+ Tab/方向键导航（`TabNavigationPlugin`/`DirectionalNavigationPlugin`/`InputFocusVisible`）+ i18n 语料守卫（`i18n_full_corpus.rs` 三测试，仅查 `.ftl`）+ `single_mut` 静默早退改 `tracing::warn!` + 布局几何断言层（`layout_geometry.rs` 11 测试） | `plans/ui-v8-tasks.md` §M7 + §10 勘误 46/47 |
 | 插件系统 | ✅ | WASM Component + wasmtime 29，3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello`/`xgent_plugin_git`）；插件经 WIT 注册 Agent 工具/命令/ContextProvider，动态安装卸载，cancel 穿透 | `design/plugin-system-design.md`、§5.13 |
 
 ### 1.2 非功能需求

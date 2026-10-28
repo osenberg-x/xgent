@@ -82,4 +82,4 @@ xgent_agent ← xgent_ui
 | 计划 | 文件 | 状态 |
 |:---|:---|:---|
 | O1~O10 优化落地 | `optimization-from-omp.md` | 已全部完成 |
-| UI v7（Linear 视觉基准）重构 | `ui-v7-migration.md`（方案）+ `ui-v7-tasks.md`（任务台账，唯一进度源） | 待实施 |
+| UI v7（Linear 视觉基准）重构 | `ui-v7-migration.md`（方案）+ `ui-v7-tasks.md`（任务台账，唯一进度源） | 已完成（已被 v8 交互架构层重建取代） |

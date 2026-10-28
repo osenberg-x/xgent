@@ -1,13 +1,13 @@
 # UI v8 交接：进度、基线与下一步
 
 > 用途：跨会话交接。**进度台账以 [ui-v8-tasks.md](ui-v8-tasks.md) 为准**（任务级勾选），本文记录「到哪儿了、基线是什么、下一步怎么开工、有哪些坑」。
-> 更新时间：2026-10-21（M5 交付后）。
+> 更新时间：2026-10-28（M6 模型层 / M7 交付后；M6 接线转入 M6.5）。
 
 ---
 
 ## 0. 一句话现状
 
-UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）、M4-T1（字体候选栈与等宽内嵌兜底）、M4-T2（终端双宽单元格与按格定位）、M4-T3/T4（代码类文本消费 `mono` + 中文排版约束）、M5（槽位注册表与派生可见性）已交付**；`cargo check --workspace` 绿，`xgent_ui` lib 95 项 + `xui` 103 项 + `xgent_terminal` 33 项测试全绿。**M5 已收口**（落点见 §4.0），下一期是 **M6（会话内容：Transcript 有序树 + Markdown + 输入区）**。
+UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、M2b（密度档位/hover 量化）、M3（滚动契约/填满契约/省略原语/虚拟列表）、M4（字体/双宽单元格/代码排版）、M5（槽位注册表与派生可见性）、M7（快捷键/焦点/i18n/几何断言）已交付**；**M6 只交付模型层**（`9ac4daf`），除发送/停止按钮（M6-T5，`81d3060`）外，Transcript 渲染、Markdown、`@` 补全、ContextSet 均未接入产品。`cargo check --workspace` 绿，`xgent_ui` lib **109 passed**（2026-10-28 实测）。**下一期是 M6.5（会话内容接线）**（任务见台账 §M6.5）。
 
 > ⚠ 唯一未闭环项：**硬门槛 A 的 macOS / Linux 的 `mono` 启动日志确认**（用户 2026-10-21 决定降级为不阻塞，先做 Windows 适配，其他平台后续适配）。详见 §1.1。
 
@@ -27,6 +27,8 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 | M4-T1 字体装配层 | Comet change `v8-m4-font-assembly` | 归档 `bd18ddd` / 实现 `d314256` | `xgent_ui::fonts`：四槽位模型（`FontSlot`/`FontSpec`/`FontCandidate`）+ 纯函数 `resolve_slot`（系统命中 → 内嵌兜底 → 失败记警告）；`UiFonts` 扩为 `mono/ui_cjk/mono_cjk: FontSource`；内嵌 **JetBrains Mono**（OFL 1.1，264KB）；`startup::load_fonts` 解析四槽位并打「槽位→家族名→来源」日志；**删除** `else { Handle::default() }` 分支 |
 | M4-T3/T4 排版消费 | Comet change `v8-m4-mono-typography` | 归档 `7c76366` / 实现 `de2bb68`+`5fa84e6` | 代码类文本走 `mono` 槽位（`EditorTheme.font` 注入 + **span 自带字体** + 行号列同源 + diff 行 `mono_text` + 工具卡摘要 `ellipsis_mono_text`）；`SMALL 12.5 → 12`、`MONO` → `CODE`、新增 `line_height::CJK = 1.7`；中文约束（`display_spacing` 负字距不作用中文、`line_height::for_text` 正文按内容选档） |
 | M5 槽位注册表与派生可见性 | Comet change `v8-m5-panel-registry` | 实现 `0aeecc4` / `0141343` / `dc22458` / `7eb83e9` | `xgent_ui::panels`：`Slot`（含 `Center`，只建模不接消费者）/ `PanelDescriptor`（`title_key` 必填）/ `PanelRegistry` / `SlotLayout` + `PanelRegister`/`PanelActivate`/`PanelDeactivate` 消息；`derive_panel_visibility` 唯一写面板可见性；rail 选中态派生（`ActiveActivity` 删除）；会话历史改 `Slot::Overlay` 注册面板；槽位页签条（`panels::tabs`）+ `EditorBackButtonMarker` 合一；`SplitTree`/`Split`/`LeafSize` 分割模型 + 抽屉可拖宽（240–480）；`SideViewContent` 枚举与 shim 全量拆除；`tests/panel_registry_contract.rs` 21 项契约测试 |
+| M6 会话内容（模型层） | Comet change `v8-m6-transcript-markdown` | 归档 `247d1bd` / 模型提交 `9ac4daf` / T5 在 `81d3060` | `transcript.rs`（`Transcript`/`BlockRef`/`ContentBlock`）、`markdown.rs`（`pulldown-cmark` 解析）、`markdown_render.rs`（`spawn_markdown`）、`completion.rs`（`CompletionState`/`spawn_completion_popup`/`detect_at_trigger`）、`context_set.rs`（`ContextSet`）；**除 send/stop 按钮外均无消费者**；归档验证无 Runtime checks，四条 Known limitation |
+| M7 闭环与验证 | Comet Native `v8-m7-closing-loop` | 归档 `6f10081` / 实现 `81d3060` | `shortcuts.rs` 清单 + 启动期 id 集断言；`TabNavigationPlugin`/`DirectionalNavigationPlugin` + `TabIndex` 派生 + `TabGroup::modal()`；焦点环只在键盘导航显形；`i18n_full_corpus` 3 项 + tooltip/错误文案迁移；删除 `ChatPanelEntities`；`layout_geometry` 11 项。**A1 强度打折**：`handler_name` 是字符串，分发表缺分支无编译期/启动期保障 |
 | M4-T2 终端双宽单元格 | Comet change `v8-m4-terminal-cells` | 实现 `ff9c203`+`5e1d4cb`+`e06f77d`+`d3a276b`+`0fd632b`+`fe96a82` | `xgent_terminal::render`：`display_width`（wcwidth）+ `display_width_str` + `CellRun` + `layout_cells`（按格布局内核）；`xgent_ui::terminal::metrics`：`MonoMetrics`（启动期**实测**）+ 双宽校验 + `CellGrid`；`terminal/output.rs`：行渲染改「行容器 + 绝对定位 run 节点」（`left = 起始列 × cell_w`）、PTY 列数改 `floor(视口逻辑宽 / cell_w)`、**删除** `font × 0.6` 估算；cargo feature `legacy-terminal-layout` 保留旧路径做 A/B |
 
 ### 1.1 硬门槛 A 状态
@@ -42,9 +44,10 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 ## 2. 当前基线（下次开工前直接用，别重跑）
 
 - `cargo check --workspace`：通过。
-- `xgent_ui` lib：**95 passed**（M2b 基线 76 + M4-T2 新增 8 + M5 新增 11）。
+- `xgent_ui` lib：**109 passed**（2026-10-28 实测；M5 基线 95 + M6 模型与 M7 新增 14）。
 - `xui` lib：**103 passed**（M2b 基线 + M3 新增 34）。
 - `xgent_terminal` lib：**33 passed**（M4-T2 新增 12：display_width 边界 / layout_cells）。
+- **验证范围提醒**：M7 归档的 Runtime checks 只跑 `xgent_ui` 与 `xgent_terminal integration`；`cargo test --workspace` 仍有下表既有红，2026-10-28 未复跑全量。
 - 集成测试（`xgent_ui`，全绿）：`layout`(2)、`modal_settings`(3)、`toast`(1)、`settings_panel_values`(19)、`settings_panel_i18n`(3)、`interaction_model`(7)、`editor_theme_sync`(2)、`conflict_save_guard`(4)、`settings_input_focus`(2)、`density`(4)、`scroll_contract`(8)、`ellipsis_contract`(6)、`virtual_list_contract`(3)、**`file_preview`(7)**、**`file_tree_refresh`(5)**、`mono_typography`(9)、`font_slots`(6)、**`terminal_cell_layout`(6，M4-T2 新增)**、**`panel_registry_contract`(21，M5 新增)**。
   - 标粗的两组在 M2b 基线是**长期失败**（见 §4.3），M3-T6 顺带修好了。
   - `terminal_cell_layout` 需**给相机一个非零渲染目标**（headless 无渲染管线 → UI 视口宽高全 0，见台账 §10 勘误 32）；其中 2 项按格定位专属用例在 `legacy-terminal-layout` feature 下自动跳过（旧路径不 spawn `OutputCellRun`）。
@@ -81,7 +84,7 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 
 ---
 
-## 4. 上期：M5 槽位注册表与派生可见性（已交付）
+## 4. 历史：M5 槽位注册表与派生可见性（已交付）
 
 ### 4.0 M5 落点速查
 
@@ -111,7 +114,10 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 > ⚠ **本文的 §4.1 / §4.2 原文写的是 M5 的起点事实与任务范围**（M5 交付前写的），
 > 已在 M5 交付时改写为 **M6** 的口径：M5 的落点见 §4.0，台账 §M5 已勾选。
 
-### 4.2 下一期的任务范围（台账 §M6）
+### 4.2 M6 的历史任务范围（已过时，2026-10-28 订正）
+
+> 本节是 M6 开工前写的范围，**不再是下一期任务**。M6 实际只交付模型层，
+> 下一期以 [ui-v8-tasks.md](ui-v8-tasks.md) §M6.5 为准；下表保留作历史对照。
 
 | 任务 | 范围 | 验收（可机器判定） |
 |:---|:---|:---|
@@ -122,10 +128,22 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 | M6-T5 | 发送/停止动作条（显式按钮；禁用态由 `AgentStatus` 派生；删除「发送按钮区」空注释） | 不碰键盘可完成一次完整发送与一次中断 |
 | M6-T6 | `ContextSet` 建模（独立 `Resource`，可增删、可持久化、显示 token 占比；替换 `context_scope.rs` 的只读镜像） | 移除某 chip 后其不再进入下一轮请求 |
 
-> ⚠ M6 依赖 M3 的滚动/省略/填满契约与 M5 的槽位注册表（面板 = 注册项）——两者都已交付，
-> **M6 可以直接开工**。
+> ⚠ M6.5 依赖同上，且顺序不可颠倒：**先建 Transcript 数据流，再替换命令式渲染**；
+> 直接删旧路径会让流式、工具卡、undo 通知三处同时失控。
 
-## 5. 下一步：M6 会话内容（Transcript 有序树 + Markdown + 输入区）
+## 5. 下一步：M6.5 会话内容接线
+
+### 5.0 M6.5 的范围（详见台账 §M6.5）
+
+1. **T1**：把用户消息、助手流式增量、工具调用/结果、压缩通知写入 `Transcript`；渲染按
+   `(turn_index, block_index)` 差分 spawn/update/despawn；删除命令式挪节点；消息列表虚拟化。
+2. **T2**：终稿消息走 `parse_markdown` + `spawn_markdown`；流式期纯文本，完成后替换；
+   代码块复制按钮接线；补 `docs/notes/` 依赖评审。
+3. **T3**：`@` 补全接入输入框与文件树候选，浮层挂 `DROPDOWN`。
+4. **T4**：`ContextSet` 替换 `context_scope.rs` 只读镜像，chips 双向同步，发送时进入请求，
+   token 占比 + 会话内持久化。
+5. **T5**：真实窗口走查 + 截图，把 M6 A1–A6 补成可复跑证据。
+6. **T6**：文档口径订正 + mac/Linux 硬门槛 A 排期。
 
 ### 5.1 M3 顺带修好的 12 个长期失败测试（别再当成"基线失败"）
 
@@ -141,10 +159,10 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 ## 6. 之后的可选方向（按台账 §8 里程碑表）
 
 - **M5 槽位注册表**（⚠ 最大改动面，**已交付**）：`PanelRegistry` 取代 `SideViewContent` closed 枚举、派生可见性单一系统、`SplitTree` 分割模型。详见 §4.0。
-- **M6 会话内容**（**下一期**）：`Transcript` 有序树 + Markdown + 输入区（依赖 M3 的滚动/省略/填满契约与 M5 的槽位注册表；M3-T6 的会话消息列表虚拟化随 M6-T1 一起做，见台账 §10 勘误 13）。
-- **M7 闭环**：快捷键单一来源、焦点栈、i18n 扩面、几何断言层（台账 §0.2 的 P0 缺陷回归测试多数在 M7 收口）。
-- **M8 Git 探针**（北极星：新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）。
-- **M4 尾巴**：硬门槛 A 的 macOS / Linux 确认 + 终端按格定位的实机视觉确认（`ls -l` / 中文输出 / `top` / `vim`）。
+- **M6 会话内容**（**模型层已交付**，`9ac4daf`）：`Transcript` / Markdown / 补全 / `ContextSet` 模型在库；**接线是 M6.5（下一期）**，见 §5.0。
+- **M7 闭环**（**已交付**，`81d3060`）：快捷键单一来源、焦点栈、i18n 扩面、几何断言层。A1 的「函数指针 / 编译期」表述不成立，见台账 §10 勘误 46。
+- **M8 Git 探针**（未开工，北极星：新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）。
+- **M4 尾巴**：硬门槛 A 的 macOS / Linux 确认 + 终端按格定位的实机视觉确认（`ls -l` / 中文输出 / `top` / `vim`）。用户 2026-10-28 决定：**Windows 收尾后立刻排**。
 
 ---
 
@@ -158,14 +176,17 @@ UI v8 的 **M1（分层/拾取/模态）、M2a（主题权威/令牌收敛）、
 6. **终端宽字符的字形填不满那 2 格**（M4-T2）：CJK 回退字体（雅黑/苹方/思源）的汉字步进是 1em，不是等宽拉丁的 2 倍 → 宽字符虽**严格占 2 格**（起点落在格边界，网格正确），但字形本身比 2 格窄（本机约差 1.2px/字），视觉上略有间隙。**根治办法是接 `mono_cjk` 槽位**（Sarasa / Noto Sans Mono CJK，真 2:1），本轮未做（见台账 §10 勘误 30）。
 7. **终端 UI 侧不再二次换行**（M4-T2）：超长行（PTY 未折行）会被视口裁掉而非 UI 再折一次——真实终端也是这个行为，但与旧路径不同（旧的会折行）。
 8. **等宽度量在首帧后才有**（M4-T2）：实测需要 UI 布局管线跑起来 → 度量就绪前终端不渲染行（游标不推进，下一帧补齐）；PTY 也暂不发 resize（保持默认 80×24）。
+9. **M6 模型与产品之间还有一整期**（2026-10-28）：`Transcript`/`markdown_render`/`completion`/`context_set` 在 `9ac4daf` 里只有模型与单测，除 send/stop 外无消费者；M6 归档「6/6 通过」是用户接受降级验证，不是运行时证据。集成风险集中在三处命令式渲染（流式正文、工具卡、undo 通知）与 `context_scope.rs` 的旧镜像。
+10. **M7-A1 的保障强度**（2026-10-28）：`handler_name` 是字符串，启动期只比 id 集合；新增 action 时若只加清单不加分发表分支，不会失败。M6.5 不要把它当已闭合的契约。
+11. **未闭环门槛**：mac/Linux 的 `mono` 启动日志与终端实机仍未确认（NF-01 是需求硬项）；`cargo test --workspace` 仍有既有红，M7 的「全绿」只对 `xgent_ui` + `xgent_terminal` 子集成立。
 
 ---
 
 ## 8. 下次开工的前 5 步
 
-1. `git log --oneline -8` 确认 M5 的实现提交（`0aeecc4` / `0141343` / `dc22458` / `7eb83e9`）在 HEAD。
-2. 读本文 §4.0 + `docs/plans/ui-v8-tasks.md` §M5 与 §10 勘误 34–38。
-3. 复核 §4.0 的落点（`xgent_ui::panels` 的 `Slot` / `PanelRegistry` / `SlotLayout` / `derive_panel_visibility` / `SplitTree`）。
+1. `git log --oneline -8` 确认 `9ac4daf`（M6 模型）/ `81d3060`（M7 + M6-T5）在 HEAD。
+2. 读本文 §5.0 + `docs/plans/ui-v8-tasks.md` §M6.5 与 §10 勘误 44–47。
+3. 复核 M6 模型的真实 API：`Transcript`（缺流式增量与工具状态更新方法）、`ContextSet`（缺持久化）、`markdown_render::spawn_markdown`、`completion::detect_at_trigger`——M6.5-T1/T4 需要先补这些方法。
 4. 读 `docs/design/ui-v8-layout-architecture.md` §6（Transcript 有序树）与 §3.1（注册表模型）。
 5. 开工前先跑一遍基线：`cargo test -p xgent_ui -p xgent_terminal -p xui`（全绿 = 基线没被本轮弄坏）。
 

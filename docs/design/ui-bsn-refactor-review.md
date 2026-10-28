@@ -1,5 +1,7 @@
 # UI BSN 重构方案 — 技术 Review 报告
 
+> ⚠ **已放弃**：本方案已被 v8 交互架构层重建取代。见 `docs/plans/ui-v8-handoff.md` 与 `docs/design/ui-v8-layout-architecture.md`。
+
 > 对 `ui-bsn-refactor-plan.md` v2 的深度技术审查，聚焦技术选型与实现方案中的错误、缺陷与改进点。
 > 审查方法：对照 Bevy 0.19 源码（`/Users/xdo/ws/bevy_ws/bevy`）、bevy_resvg 2.5 文档与源码、bevy_feathers 实际实现，逐条验证方案中的 API 调用与架构设计。
 

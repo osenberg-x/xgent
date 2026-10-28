@@ -1,5 +1,7 @@
 # UI BSN 重构实现方案（v2 细化版）
 
+> ⚠ **已放弃**：本方案已被 v8 交互架构层重建取代。见 `docs/plans/ui-v8-handoff.md` 与 `docs/design/ui-v8-layout-architecture.md`。
+
 > 对照 `ui-prototype-v6.html`（对话画布 v6.1）与 `icons/`（31 个 Lucide 风格 24×24 线性图标），将 XGent UI 从当前手写 Node bundle 方式重构为 **Bevy Scene Notation（BSN）** 声明式方式 + **bevy_resvg** 矢量图标加载，并补齐原型全部视觉/交互差距。
 >
 > **v2 变更摘要**（相对 v1）：

@@ -77,7 +77,7 @@ cargo clippy --workspace          # lint
 
 ## 4. crate 划分与依赖
 
-共 13 个 crate（MVP 12 + F-19 终端引入 `xgent_terminal`），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
+共 19 个 crate（下表为核心 13 个：MVP 12 + F-19 终端引入 `xgent_terminal`；另有插件系统 5 个（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`/`xgent_plugin_hello`/`xgent_plugin_git`）与 F-16 S0 的 `xgent_spatial`，见 `docs/dev-tutorial.md` §2），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
 
 | crate | 类型 | 依赖 | 职责 |
 |:---|:---|:---|:---|
@@ -196,9 +196,9 @@ xgent_app → 组装所有 UI 侧 crate
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。13 个 crate，`cargo check --workspace` 通过，约 5 万行 Rust（`crates/**/*.rs`）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型）、R3-5（Markdown 渲染）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。19 个 crate，`cargo check --workspace` 通过，约 6.8 万行 Rust（`crates/**/*.rs`，2026-10-28 实测 68322 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 仅模型层，未接入 chat_panel，接线见 M6.5）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**已交付 M1（分层/拾取/模态）、M2（主题权威/令牌/密度/hover）、M3（滚动契约 `ScrollFrame`、填满契约 `region_fill`、省略原语 `Ellipsis`、虚拟列表 `VirtualList`）、**M4（跨平台字体装配 + 终端双宽单元格 `MonoMetrics`/`display_width`/按格定位）**，下一期 M5（槽位注册表与派生可见性，⚠ 最大改动面）；台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 仅交付模型层**（`Transcript`/Markdown/补全/ContextSet 在库但未接入产品，除发送/停止按钮外），下一期为 **M6.5 会话内容接线**（实现提交 `9ac4daf` / `81d3060`）；M8 Git 探针未开工。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
 
 ---
 

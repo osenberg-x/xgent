@@ -1,5 +1,7 @@
 # UI BSN 重构方案 — 第四轮深度 Review（架构设计）
 
+> ⚠ **已放弃**：本方案已被 v8 交互架构层重建取代。见 `docs/plans/ui-v8-handoff.md` 与 `docs/design/ui-v8-layout-architecture.md`。
+
 > 前三轮聚焦 API 可编译性。本轮聚焦**架构设计合理性**与**可行性**，并补漏 r3 未应用的修复。
 >
 > 对照 Bevy 0.19 源码（bevy_feathers 完整实现 + bevy_ui_widgets + BSN 宏 + propagate 系统）逐条验证。

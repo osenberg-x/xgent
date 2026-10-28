@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b / M3 / M4 / M5 已交付**（M1/M2/M4 经 Comet change 归档；M3 直接以提交落地：`19fff0a` T1/T2、`3acbb17` T3、`663d1ad` T4/T5、`f5c4e32` T6；M4 见 §M4），**下一期 M6（会话内容：Transcript 有序树 + Markdown + 输入区）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落的勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 仅交付模型层**（M6-T5 已接线，T1/T2/T3/T4/T6 的模型与单测在 `9ac4daf`，但未接入 chat_panel / context_scope）。M7 与 M6-T5 的实现提交为 `81d3060`。**下一期 M6.5（会话内容接线）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -281,76 +281,103 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ## M6 会话内容与输入（修 E1–E5）
 
+> 状态：**部分交付 = 模型层**（提交 `9ac4daf`；M6-T5 接线在 `81d3060`）。
+> M6 归档（`247d1bd`）的验证记录自述四条 Known limitation（Transcript 未集成、
+> ContextSet 未替换、依赖评审未落、@ 补全数据源未接），且 `No Runtime checks were recorded`。
+> 因此 T1/T2/T3/T4/T6 只勾「模型」，接线一律移入 §M6.5。见 §10 勘误 44/45。
+
 ### M6-T1 `Transcript` 有序权威（修 E2）
-- [ ] `Transcript(Vec<TurnRef>)` + `BlockRef` 块序列；渲染按顺序 spawn/despawn/update，顺序键 `(turn_index, block_index)`。
-- [ ] 删除命令式挪子节点：`chat_panel.rs:489`、`tool_panel.rs:85`、`chat_panel.rs:724`、`undo.rs:286`。
+- [x] 模型：`Transcript` + `BlockRef` 块序列与顺序键 `(turn_index, block_index)`（`9ac4daf`）。
+- [ ] 渲染按顺序 spawn/despawn/update；删除命令式挪子节点（`chat_panel.rs`、`tool_panel.rs`、`undo.rs`）→ **M6.5-T1**。
 - **验收**：边流式边插工具卡，顺序稳定不倒退（自动化断言序列单调）。
 
 ### M6-T2 Markdown 块模型与依赖评审
-- [ ] 决定解析器：优先 **pulldown-cmark**（纯 Rust、无 Bevy 依赖），走一次依赖评审；退化方案为仅代码块 + 列表 + 粗体。
-- [ ] `MdBlock/Inline` 模型定义。
+- [x] 解析器 `pulldown-cmark 0.12` + `MarkdownBlock` 模型与单测（`9ac4daf`）。
+- [ ] 依赖评审记录落 `docs/notes/` → **M6.5-T2**（当前缺失，见 §10 勘误 44）。
 - **验收**：评审记录落 `docs/notes/`；解析器单测覆盖六类元素。
 
 ### M6-T3 富文本渲染（修 E1 / R3-5）
-- [ ] 单节点多 `TextSection` 承载行内样式（✅ `bevy_text/src/picking_backend.rs:219` 的 section 级文本存在）。
-- [ ] 代码块：`surface_code` 底 + `mono` + 语言标签 + 复制按钮（复制取定稿全文）；语法色接已落地的 `xui` 高亮链。
-- [ ] 增量渲染（依赖 M6-T1），不整段重建。
+- [x] `spawn_markdown` 渲染辅助（单节点多 `TextSection`、代码块样式、复制按钮）（`9ac4daf`）。
+- [ ] 接入 chat_panel 的终稿消息与流式增量路径；语法色接 `xui` 高亮链 → **M6.5-T2**。
 - **验收**：六类元素混合样张视觉正确；对照原型截图。
 
 ### M6-T4 `@` 内联补全（修 E3）
-- [ ] 浮层挂 `DROPDOWN` 层（**不能**留输入框子树，否则被 `ChatPanel` 的 `clip` 裁）。
-- [ ] 方向键导航 + Enter 接受；候选来自文件/符号/`@selection`。
+- [x] `CompletionState` / `spawn_completion_popup` / `detect_at_trigger` 模型与单测（`9ac4daf`）。
+- [ ] 接入输入框与真实候选来源（文件树 / ProjectRoot；符号与 selection 后置）→ **M6.5-T3**。
 - **验收**：输入 `@` 出现补全并可键盘选择；窄窗不被裁。
 
 ### M6-T5 发送/停止动作条（修 E4）
-- [ ] 显式按钮：发送（`accent`）、停止（流式中，`st_running` + pulse）；禁用态由 `AgentStatus` 派生。
-- [ ] 删除「发送按钮区」空注释（`chat_panel.rs:221`）。
+- [x] 显式发送/停止按钮 + 按 `ConversationStatus` 派生可见性（`81d3060`）。
+- [x] 删除「发送按钮区」空注释。
 - **验收**：不碰键盘可完成一次完整发送与一次中断。
 
 ### M6-T6 `ContextSet` 建模（修 E5）
-- [ ] 独立 Resource，可增删、可持久化、显示 token 占比；替换 `context_scope.rs:1-7` 的「打开 tab 只读镜像」。
+- [x] 模型：独立 Resource（增删/清空/token 合计）（`9ac4daf`）。
+- [ ] 替换 `context_scope.rs` 的只读镜像、token 占比显示、可持久化 → **M6.5-T4**（模型当前无持久化，见 §10 勘误 44）。
 - **验收**：移除某 chip 后其不再进入下一轮请求。
+
+---
+
+## M6.5 会话内容接线（M6 降级后的集成期）
+
+> 状态：**待开工**。目标不是新增抽象，而是让 `9ac4daf` 的模型进入产品路径，
+> 并把 M6 六项验收补成可复跑证据。依赖已交付的 M3 滚动契约与 M5 槽位注册表。
+
+| 任务 | 范围 | 验收（可机器判定） |
+|:---|:---|:---|
+| M6.5-T1 Transcript 渲染 | 把用户消息、助手流式增量、工具调用/结果、压缩通知写入 `Transcript`；渲染系统按 `(turn_index, block_index)` 差分 spawn/update/despawn；删除 chat_panel/tool_panel/undo 的命令式挪节点；会话消息列表虚拟化（承接 §10 勘误 13） | 流式中插工具卡顺序单调；全仓无「add_child 挪序」；长会话只渲染可见行 |
+| M6.5-T2 Markdown 接线 | 终稿助手消息走 `parse_markdown` + `spawn_markdown`；流式期纯文本、完成后替换，避免每帧重排；代码块复制按钮接线；补 `docs/notes/` 依赖评审 | 六类元素真实样张；窄窗不溢出；复制按钮可用；评审记录在库 |
+| M6.5-T3 `@` 补全接线 | 输入框触发 `detect_at_trigger`；候选来自文件树 / ProjectRoot；浮层挂 `DROPDOWN`；方向键 / Enter / Esc；接受后写回 `EditableText` | 窄窗不被裁；键盘完成选择；无候选不出浮层 |
+| M6.5-T4 ContextSet 接线 | 替换 `context_scope.rs` 只读镜像；chips 与 `ContextSet` 双向同步；发送请求时内容进入 `AgentCommand::StartLoop`；token 占比显示；持久化（会话内先做，跨会话按 ADR-0008 评估） | 移除 chip 后下一轮请求不含该内容；重开面板状态一致 |
+| M6.5-T5 视觉与端到端证据 | 真实窗口走查 + 截图（Markdown 样张、工具卡插入顺序、`@` 浮层、chips 删除）；把 M6 A1–A6 从「用户接受降级」补成可复跑证据 | 六项证据落 `docs/notes/` 或交接文档 |
+| M6.5-T6 文档与门槛 | M6 档案口径订正；handoff / AGENTS / dev-tutorial 同步；mac/Linux 硬门槛 A 排期（用户 2026-10-28：Windows 收尾后立刻排） | 文档无「M6 已全部完成」误导；门槛 A 有明确日期/里程碑 |
+
+> ⚠ M6.5 的 T1 会同时触碰流式路径、工具卡与 undo 通知三处命令式渲染；
+> 必须按 M6-T1 的顺序键先建数据流，再替换渲染，禁止先删旧路径。
 
 ---
 
 ## M7 闭环：快捷键、焦点、i18n、验证层
 
+> 状态：**已交付**（实现提交 `81d3060`）。A1 的强度按实际实现订正：`handler_name`
+> 是字符串而非函数指针，断言只比较 id 集合——见 §10 勘误 46。
+
 ### M7-T1 快捷键单一来源（修 F1/F2）
-- [ ] `HotkeyAction`（`id/label_key/default/when/handler`），`handler` 为函数指针 → 注册即必填，语言层面消灭空实现。
-- [ ] 修 `palette.open_files`（`shortcuts.rs:44` 注册、全仓零消费者）与 `input.focus => {}`（`:196` 空实现）。
-- [ ] 启动期一致性断言：注册 action 必有 handler、分发表 id 集等于注册表 id 集。
-- **验收**：一致性断言对现有 action 全绿；死键数为 0；命令面板显示的键位即真实绑定。
+- [x] `HotkeyAction` 清单（`id/label_key/default/handler_name`），注册从清单派生。
+- [x] 修 `palette.open_files` 与 `input.focus` 空实现；12 个 action 均有分发表分支。
+- [x] 启动期一致性断言：注册表 id 集 == 清单 id 集。
+- **验收**：一致性断言全绿；死键数为 0；命令面板显示的键位即真实绑定。**未达成**：分发表缺分支无编译期/启动期保障。
 
 ### M7-T2 焦点遍历与模态隔离（修 F3/F4）
-- [ ] 装配 `TabNavigationPlugin` + `DirectionalNavigationPlugin` + `InputDispatchPlugin`（✅ `tab_navigation.rs:18` 要求手动 add；`InputFocusPlugin` 已在 `default_plugins.rs:16`）。
-- [ ] `TabIndex` 由布局顺序派生（间隔 10），废除全 0；修 `tests/settings_input_focus.rs:154-167` 把错误当不变量的断言。
-- [ ] 模态层根挂 `TabGroup::modal()`（✅ `tab_navigation.rs:94`）→ Tab 不跳出模态。
-- [ ] 焦点环消费 `theme.accent_interactive` + `accent_glow`（`theme.rs:62-63` 今天零消费），配合 `InputFocusVisible`（✅ `bevy_input_focus/src/lib.rs:182`）只在键盘导航时显形。
+- [x] 装配 `TabNavigationPlugin` + `DirectionalNavigationPlugin`（`xgent_app/main.rs`）。
+- [x] `TabIndex` 由布局顺序派生（间隔 10）。
+- [x] 模态层根挂 `TabGroup::modal()` → Tab 不跳出模态。
+- [x] 焦点环消费 `accent_interactive`，配合 `InputFocusVisible` 只在键盘导航时显形。
 - **验收**：设置面板内 Tab 按视觉顺序遍历且可见焦点环；模态内 Tab 不外逃。
 
 ### M7-T3 i18n 全覆盖（修 H1/H2/H3）
-- [ ] 硬编码点迁移：`activity_bar.rs:130-167`、`top_bar.rs:222,225`、`editor/mod.rs:659-664`、`status_bar.rs:140`（`"$0.00"`）、`chat_panel.rs:385`（`"▼"`）。
-- [ ] `xui` 的 `StringSource` 真正被消费（R3-7/D5）：命令面板、虚拟列表、滚动条 aria 与空态文本。
-- [ ] 扫描从「只扫 settings」扩为全模块 + EN 无 CJK 码位 + zh 无缺失 key，纳入 CI。
+- [x] 硬编码点迁移（tooltip / 编辑器读取取消等）；新增 `i18n_full_corpus` 守卫。
+- [ ] `xui` 的 `StringSource` 真正被消费（R3-7/D5）——**未做**，移交后续。
+- [x] 语料守卫：EN 无 CJK、zh 无缺失 key、键集一致。**注意**：守卫只读 `.ftl` 语料，不是全模块源码扫描（见 §10 勘误 47）。
 - **验收**：英文语料下全界面无可读中文残留（白名单显式）；中文界面文案正确。
 
 ### M7-T4 状态健壮性（修 I1）
-- [ ] 删 `ChatPanelEntities` 这类把 `Entity` 缓存进 Resource 的做法（`chat_panel.rs:85-92`），改 marker 查询。
-- [ ] `q.single_mut()` 静默早退（`chat_panel.rs:796,889`、`top_bar.rs:293`）改 `single()` + `debug_assert` + `tracing::warn!`。
+- [x] 删 `ChatPanelEntities`，改 marker 查询。
+- [x] `single_mut()` 静默早退改 `single()` + `tracing::warn!`（`debug_assert!` 按 §10.1 移除）。
 - **验收**：布局重建后无静默失效；数量异常有日志。
 
 ### M7-T5 布局几何断言层（修 I2）
-- [ ] 新建 `crates/xgent_ui/tests/layout_geometry.rs`：`assert_fills_region` / `assert_no_overflow` / `assert_scrollable` / `assert_truncated_in_width` / `assert_pickable_leaf` / `assert_no_blocking_empty_layer`（架构 §9）。
-- [ ] 覆盖当前完全无测模块：chat、palette、confirm、status、topbar、resize、滚动、重叠。
-- [ ] 每条 P0 缺陷配一条"先红后绿"回归（≥ 9 条）。
-- **验收**：`cargo test --workspace` 全绿；故意引入 `clip_y` 假滚动会被测试抓住。
+- [x] `crates/xgent_ui/tests/layout_geometry.rs`：6 个断言函数 + 11 项回归。
+- [x] 覆盖 chat / palette / confirm / status / topbar / resize / 滚动 / 重叠。
+- [ ] 每条 P0 缺陷的先红后绿证据已并入测试，但尚无独立复跑记录 → **M6.5-T5 一并补**。
+- **验收**：`cargo test --workspace` 全绿——**只对 `xgent_ui` 子集成立**；全量仍有既有红（见交接 §2）。
 
 ### M7-T6 文档同步与勘误
-- [ ] `docs/dev-tutorial.md`：已实现功能总览、crate 拓扑、ADR 落地点、开发注意点（AGENTS.md §6.8 硬要求）。
-- [ ] `docs/plans/README.md:85` 把 v7 从「待实施」勘误为已完成。
-- [ ] `docs/design/ui-design.md` 标注被 v8 取代的章节；`ui-bsn-refactor-*` 顶部加「已放弃，见 ui-v8-audit.md 第七节」。
-- [x] ADR-0015 已归位 `docs/decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md`（状态：草案，待确认转「接受」）。
-- [ ] 本文追加勘误条目（§10）记录与文档不符的事实。
+- [x] `docs/dev-tutorial.md` 同步（M6 口径按 §10 勘误 44 订正）。
+- [x] `docs/plans/README.md` 的 v7 状态勘误。
+- [x] `docs/design/ui-design.md` 标注被 v8 取代；`ui-bsn-refactor-*` 顶部加放弃说明。
+- [x] ADR-0015 已归位（状态：草案，待确认转「接受」）。
+- [x] 本文 §10 追加勘误条目 40–47。
 
 ---
 
@@ -373,9 +400,10 @@ M1 与 M2 相互独立，可并行分头推进。
 | M3 滚动与省略 | `ScrollFrame`、`Ellipsis/Clamp`、`VirtualList` | C1–C5 E6 I4 D2 | — |
 | M4 字体与双宽 | 三平台字体装配、`MonoMetrics`、按格定位 | A1 A3 | ⚠ 硬门槛 A |
 | M5 槽位注册表 | `PanelRegistry`、派生可见性、`SplitTree` | D1–D6 I3 | ⚠ 最大改动面 |
-| M6 会话内容 | `Transcript`、Markdown、输入区 | E1–E5 | 依赖 M3/M4/M5 |
-| M7 闭环与验证 | 快捷键单源、焦点栈、i18n 扩面、几何断言 | F1–F4 H1–H3 I1 I2 | — |
-| M8 Git 探针 | 1 注册 + 1 视图模块落地 | 验证 U-05/U-12 | 北极星 |
+| M6 会话内容（模型层） | `Transcript`/Markdown/补全/ContextSet 模型 | E1–E5（仅 T5 接线） | **部分交付**（`9ac4daf`） |
+| M6.5 会话内容接线 | 渲染/输入/上下文接入产品 + 视觉证据 | E1–E5 补齐 | **待开工**（下一期） |
+| M7 闭环与验证 | 快捷键单源、焦点栈、i18n 扩面、几何断言 | F1–F4 H1–H3 I1 I2 | 已交付（`81d3060`；A1 强度见 §10.46） |
+| M8 Git 探针 | 1 注册 + 1 视图模块落地 | 验证 U-05/U-12 | 未开工 |
 
 每期收尾命令：`cargo fmt -p xui -p xgent_ui -p xgent_app` → `cargo clippy --workspace` → `cargo test --workspace`。
 
@@ -437,6 +465,21 @@ M1 与 M2 相互独立，可并行分头推进。
 
 39. **交接文档 §4.1 / §4.2 的口径订正**（M5，Verifier 复验轮）：M5 交付前写的 `ui-v8-handoff.md` §4.1「起点事实」与 §4.2「下一期的任务范围（台账 §M5）」在 M5 交付后**过时且会误导下一会话**——§4.2 的 M5-T5 写的是「拖拽排序 + 面板宽度持久化」（与台账 §M5-T5「分割模型」不是一回事，见勘误 2 的判定），且 §4.1/§4.2 被插在 §5 之后造成节序错乱。已改写为：**§4.0 = M5 落点速查**（新增）、**§4.1 = M6 的起点事实**、**§4.2 = 下一期的任务范围（台账 §M6）**（六行 M6 任务表）、**§5 = 下一步 M6**（原 §4.3 顺带记 M3 的 12 个长期失败测试 → §5.1），节序恢复为 §4 → §5 → §6 → §7 → §8 → §9。
 
+40. **M7-T4 的 `debug_assert!` 移除**（M7）：原文要求 `single()` + `debug_assert` + `tracing::warn!`。headless 测试下部分实体不存在（如 `update_input_scroll_to_caret` 查询 `ChatInputMarker`），`debug_assert!` 会在 debug/test profile panic，故只保留 `tracing::warn!`。影响 `chat_panel.rs`（20 处）与 `top_bar.rs`（2 处）。
+
+41. **headless 下 UI 视口为零**（M7-T5）：`layout_geometry.rs` 的 `ComputedNode.size()` 在无真实窗口时返回零向量，因此涉及绝对尺寸的断言改为结构性质断言（`Node.flex_grow` / `Node.height` 的 `Val`），而非像素值。
+
+42. **`AbortMessage` 必须注册**（M7-T4）：删除 `ChatPanelEntities` 后 `handle_abort` 仍写 `MessageWriter<AbortMessage>`；用 `ChatPanelPlugin` 的测试 App 未注册该消息会 "Message not initialized" panic。
+
+43. **v7 状态勘误**（M7-T6）：`docs/plans/README.md` 原标 v7 为「待实施」，实际 v7 已完成并被 v8 交互架构层重建取代，已改为「已完成（已被 v8 取代）」。
+
+44. **M6 归档的「6/6 通过」只覆盖模型层**（2026-10-28 复核）：M6 实现提交是 `9ac4daf`（模型层）+ `81d3060` 里的 M6-T5。代码实测：`Transcript` 只有 `chat_panel.rs:118` 的 `init_resource`；`spawn_markdown`、`completion`、`context_set` 全仓零消费者；`context_scope.rs` 未动。归档验证记录自身写明 `No Runtime checks were recorded` 与四条 Known limitation（`docs/comet/archive/2026-10-26-v8-m6-transcript-markdown/verification.md:30-41`）。台账据此把 M6 改判为「模型层交付」。
+
+45. **M6.5 立项**（2026-10-28，用户裁决）：M6 降级后新增接线期，任务见 §M6.5；同日决定把 mac/Linux 硬门槛 A 排在 Windows 收尾之后，不再无限期挂着。
+
+46. **M7-A1 不是编译期保障**（2026-10-28 复核）：`HotkeyAction.handler_name` 是 `&'static str`（`shortcuts.rs:35`），`assert_hotkey_consistency` 只比较注册表与清单的 id 集合（`shortcuts.rs:157-171`）；分发表缺分支不会在编译期或启动期失败。验证记录里「注册即必填函数指针」的措辞与代码不符。
+
+47. **文档计数与 i18n 守卫口径订正**（2026-10-28 复核）：实测 19 个 crate、`crates/**/*.rs` 共 68322 行（AGENTS.md 原写 13 crate / 约 5 万行，dev-tutorial 原写约 22k 行）；`i18n_full_corpus.rs` 只校验 `.ftl` 语料的键集与 CJK，不是「全模块源码扫描」。
 
 ## 附：文档树变更（2026-10-16，已完成）
 
