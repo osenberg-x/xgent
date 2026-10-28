@@ -41,6 +41,7 @@ pub mod theme;
 pub mod tool_panel;
 pub mod top_bar;
 pub mod transcript;
+pub mod transcript_write;
 pub mod undo;
 pub mod welcome;
 
@@ -85,6 +86,7 @@ impl Plugin for XgentUiPlugin {
             shortcuts::ShortcutsPlugin,
             kit::KitPlugin,
             undo::UndoPlugin,
+            transcript_write::TranscriptWritePlugin,
         ));
     }
 }

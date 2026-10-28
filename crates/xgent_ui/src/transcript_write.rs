@@ -1,0 +1,448 @@
+//! Transcript 写入侧（M6.5-T1 P0）：把 UI 消息流投影进 [`Transcript`]。
+//!
+//! 本阶段只做影子写入，渲染仍走旧路径；后续阶段逐条替换。
+
+use bevy::prelude::*;
+use xgent_agent::{
+    CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage,
+    SessionClearedMessage, SessionRestoredMessage, ToolCallMessage, ToolProgressMessage,
+    ToolResultMessage,
+};
+use xgent_core::chat::{AgentMessage, ContentBlock as CoreContentBlock};
+use xui::input::ChatInputSubmitted;
+
+use crate::chat_panel::ChatInputMarker;
+use crate::transcript::{BlockRef, ContentBlock, Transcript};
+use crate::undo::UndoNoticeMessage;
+
+/// Transcript 写入插件。
+pub struct TranscriptWritePlugin;
+
+impl Plugin for TranscriptWritePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                record_user_submission,
+                record_delta,
+                record_done,
+                record_tool_call,
+                record_tool_progress,
+                record_tool_result,
+                record_compacted,
+                record_undo_notice,
+                record_session_cleared,
+                record_session_restored,
+            )
+                .chain()
+                .after(xgent_agent::agent_loop::agent_poll_system),
+        );
+    }
+}
+
+fn record_user_submission(
+    mut reader: MessageReader<ChatInputSubmitted>,
+    q_input: Query<Entity, With<ChatInputMarker>>,
+    conv: Res<Conversation>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Ok(input_entity) = q_input.single() else {
+        return;
+    };
+    for ev in reader.read() {
+        if ev.entity != input_entity || ev.text.is_empty() {
+            continue;
+        }
+        if conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error {
+            continue;
+        }
+        let (turn, _) = transcript.push_user_message(ev.text.clone());
+        transcript.begin_assistant_message(turn);
+    }
+}
+
+fn record_delta(mut reader: MessageReader<DeltaMessage>, mut transcript: ResMut<Transcript>) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        transcript.append_text_delta(turn, &ev.text);
+    }
+}
+
+fn record_done(mut reader: MessageReader<DoneMessage>, mut transcript: ResMut<Transcript>) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    if reader.read().next().is_some() {
+        transcript.finalize_assistant(turn);
+    }
+}
+
+fn record_tool_call(
+    mut reader: MessageReader<ToolCallMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        transcript.push_tool_call(
+            turn,
+            ev.tool_call_id.clone(),
+            ev.tool_id.clone(),
+            ev.input.to_string(),
+        );
+        transcript.set_tool_status(&ev.tool_call_id, crate::transcript::ToolCallStatus::Running);
+    }
+}
+
+fn record_tool_progress(
+    mut reader: MessageReader<ToolProgressMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    for ev in reader.read() {
+        if !transcript.set_tool_progress(&ev.tool_call_id, &ev.output) {
+            tracing::warn!(tool_call_id = %ev.tool_call_id, "progress 找不到对应的工具调用块");
+        }
+    }
+}
+
+fn record_tool_result(
+    mut reader: MessageReader<ToolResultMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        transcript.set_tool_result(
+            turn,
+            ev.tool_call_id.clone(),
+            ev.output.clone(),
+            ev.is_error || ev.denied,
+        );
+    }
+}
+
+fn record_compacted(
+    mut reader: MessageReader<CompactedMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        transcript.push_compression_notice(turn, ev.tokens_before, ev.tokens_after);
+    }
+}
+
+fn record_undo_notice(
+    mut reader: MessageReader<UndoNoticeMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        transcript.push_notice(turn, ev.text.clone());
+    }
+}
+
+fn record_session_cleared(
+    mut reader: MessageReader<SessionClearedMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    if reader.read().next().is_some() {
+        transcript.clear();
+    }
+}
+
+fn record_session_restored(
+    mut reader: MessageReader<SessionRestoredMessage>,
+    mut transcript: ResMut<Transcript>,
+) {
+    for ev in reader.read() {
+        let mut blocks: Vec<BlockRef> = Vec::new();
+        let mut next_turn = 0u64;
+        for message in &ev.messages {
+            match message {
+                AgentMessage::User(user) => {
+                    let text = user
+                        .content
+                        .iter()
+                        .filter_map(|b| match b {
+                            CoreContentBlock::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    blocks.push(BlockRef::UserMessage {
+                        turn_index: next_turn,
+                        block_index: blocks.len(),
+                        content: text,
+                    });
+                    next_turn += 1;
+                }
+                AgentMessage::Assistant(assistant) => {
+                    let turn = next_turn.saturating_sub(1);
+                    next_turn = next_turn.max(turn + 1);
+                    let mut pending: Vec<ContentBlock> = Vec::new();
+                    for block in &assistant.content {
+                        match block {
+                            CoreContentBlock::Text { text } => {
+                                pending.push(ContentBlock::Text(text.clone()));
+                            }
+                            CoreContentBlock::ToolCall { id, name, args } => {
+                                flush_assistant_text(&mut blocks, turn, &mut pending);
+                                blocks.push(BlockRef::ToolCall {
+                                    turn_index: turn,
+                                    block_index: blocks.len(),
+                                    tool_call_id: id.clone(),
+                                    tool_name: name.clone(),
+                                    arguments: args.to_string(),
+                                    status: crate::transcript::ToolCallStatus::Pending,
+                                    progress: None,
+                                });
+                            }
+                            CoreContentBlock::ToolResult {
+                                tool_call_id,
+                                content: text,
+                                is_error,
+                            } => {
+                                flush_assistant_text(&mut blocks, turn, &mut pending);
+                                blocks.push(BlockRef::ToolResult {
+                                    turn_index: turn,
+                                    block_index: blocks.len(),
+                                    tool_call_id: tool_call_id.clone(),
+                                    content: text.clone(),
+                                    is_error: *is_error,
+                                });
+                            }
+                            CoreContentBlock::Image { .. } => {}
+                        }
+                    }
+                    flush_assistant_text(&mut blocks, turn, &mut pending);
+                }
+                AgentMessage::ToolResult(result) => {
+                    let turn = next_turn.saturating_sub(1);
+                    blocks.push(BlockRef::ToolResult {
+                        turn_index: turn,
+                        block_index: blocks.len(),
+                        tool_call_id: result.tool_call_id.clone(),
+                        content: result.content.clone(),
+                        is_error: result.is_error,
+                    });
+                }
+                AgentMessage::Notification(note) => {
+                    let turn = next_turn.saturating_sub(1);
+                    blocks.push(BlockRef::Notice {
+                        turn_index: turn,
+                        block_index: blocks.len(),
+                        text: note.text.clone(),
+                    });
+                }
+            }
+        }
+        apply_restored_tool_status(&mut blocks);
+        transcript.restore(blocks);
+    }
+}
+
+fn flush_assistant_text(blocks: &mut Vec<BlockRef>, turn: u64, pending: &mut Vec<ContentBlock>) {
+    if pending.is_empty() {
+        return;
+    }
+    blocks.push(BlockRef::AssistantMessage {
+        turn_index: turn,
+        block_index: blocks.len(),
+        blocks: std::mem::take(pending),
+        finalized: true,
+    });
+}
+
+fn apply_restored_tool_status(blocks: &mut [BlockRef]) {
+    for i in 0..blocks.len() {
+        let (call_id, is_error) = match &blocks[i] {
+            BlockRef::ToolResult {
+                tool_call_id,
+                is_error,
+                ..
+            } => (tool_call_id.clone(), *is_error),
+            _ => continue,
+        };
+        for block in blocks.iter_mut() {
+            if let BlockRef::ToolCall {
+                tool_call_id,
+                status,
+                ..
+            } = block
+            {
+                if *tool_call_id == call_id {
+                    *status = if is_error {
+                        crate::transcript::ToolCallStatus::Failed
+                    } else {
+                        crate::transcript::ToolCallStatus::Completed
+                    };
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xgent_agent::{DoneMessage, ToolCallMessage, ToolProgressMessage, ToolResultMessage};
+
+    fn app_with_systems() -> App {
+        let mut app = App::new();
+        app.add_message::<ChatInputSubmitted>()
+            .add_message::<DeltaMessage>()
+            .add_message::<DoneMessage>()
+            .add_message::<ToolCallMessage>()
+            .add_message::<ToolProgressMessage>()
+            .add_message::<ToolResultMessage>()
+            .add_message::<CompactedMessage>()
+            .add_message::<UndoNoticeMessage>()
+            .add_message::<SessionClearedMessage>()
+            .add_message::<SessionRestoredMessage>()
+            .insert_resource(Conversation::default())
+            .insert_resource(Transcript::default())
+            .add_systems(
+                Update,
+                (
+                    record_user_submission,
+                    record_delta,
+                    record_done,
+                    record_tool_call,
+                    record_tool_progress,
+                    record_tool_result,
+                    record_compacted,
+                    record_undo_notice,
+                ),
+            );
+        app
+    }
+
+    #[test]
+    fn submission_and_stream_project_in_order() {
+        let mut app = app_with_systems();
+        let input = app.world_mut().spawn(ChatInputMarker).id();
+        app.world_mut().write_message(ChatInputSubmitted {
+            text: "hello".into(),
+            entity: input,
+        });
+        app.update();
+        app.world_mut()
+            .write_message(DeltaMessage { text: "Hi".into() });
+        app.update();
+        app.world_mut().write_message(DeltaMessage {
+            text: " there".into(),
+        });
+        app.update();
+        app.world_mut().write_message(DoneMessage {
+            usage: None,
+            model: None,
+        });
+        app.update();
+
+        let transcript = app.world().resource::<Transcript>();
+        assert_eq!(transcript.blocks().len(), 2);
+        match &transcript.blocks()[1] {
+            BlockRef::AssistantMessage {
+                blocks, finalized, ..
+            } => {
+                assert_eq!(blocks, &vec![ContentBlock::Text("Hi there".into())]);
+                assert!(*finalized);
+            }
+            other => panic!("unexpected block: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_blocks_split_assistant_segments() {
+        let mut app = app_with_systems();
+        let input = app.world_mut().spawn(ChatInputMarker).id();
+        app.world_mut().write_message(ChatInputSubmitted {
+            text: "run".into(),
+            entity: input,
+        });
+        app.update();
+        app.world_mut().write_message(DeltaMessage {
+            text: "before".into(),
+        });
+        app.update();
+        app.world_mut().write_message(ToolCallMessage {
+            tool_call_id: "tc1".into(),
+            tool_id: "run_command".into(),
+            input: serde_json::json!({"cmd": "ls"}),
+        });
+        app.update();
+        app.world_mut().write_message(ToolProgressMessage {
+            tool_call_id: "tc1".into(),
+            tool_id: "run_command".into(),
+            output: "partial".into(),
+        });
+        app.update();
+        app.world_mut().write_message(ToolResultMessage {
+            tool_call_id: "tc1".into(),
+            tool_id: "run_command".into(),
+            output: "done".into(),
+            is_error: false,
+            denied: false,
+        });
+        app.update();
+        app.world_mut().write_message(DeltaMessage {
+            text: "after".into(),
+        });
+        app.update();
+        app.world_mut().write_message(DoneMessage {
+            usage: None,
+            model: None,
+        });
+        app.update();
+
+        let transcript = app.world().resource::<Transcript>();
+        let kinds: Vec<&str> = transcript
+            .blocks()
+            .iter()
+            .map(|b| match b {
+                BlockRef::UserMessage { .. } => "user",
+                BlockRef::AssistantMessage { finalized, .. } => {
+                    if *finalized {
+                        "assistant-final"
+                    } else {
+                        "assistant"
+                    }
+                }
+                BlockRef::ToolCall { .. } => "tool-call",
+                BlockRef::ToolResult { .. } => "tool-result",
+                BlockRef::CompressionNotice { .. } => "compression",
+                BlockRef::Notice { .. } => "notice",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "user",
+                "assistant-final",
+                "tool-call",
+                "tool-result",
+                "assistant-final"
+            ]
+        );
+        let call = transcript
+            .blocks()
+            .iter()
+            .find_map(|b| match b {
+                BlockRef::ToolCall {
+                    status, progress, ..
+                } => Some((*status, progress.clone())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(call.0, crate::transcript::ToolCallStatus::Completed);
+        assert_eq!(call.1.as_deref(), Some("partial"));
+    }
+}
