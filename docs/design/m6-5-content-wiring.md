@@ -297,3 +297,25 @@ parley 的 selection 写回接口需要实测；若 `insert_or_replace_selection
 
 - 2026-10-29：用户通过结构化选择明确确认「目标、范围、D1–D6、A1–A10、非目标」，选择「确认，进入 Build」；Comet Native Shape 随即进入 Build。
 - 本文在 Build 开始前已写入工作区并作为实现蓝图；`d377b86` 只是随文档提交入库，提交时间晚于实现提交不代表设计未先于实现。
+- **可核验的事实边界**（A8 判定用）：设计确认发生在实现之前（Shape 阶段选择「先出技术设计再实现」→ 四项决策 → 「确认，进入 Build」），但**仓库内没有独立于对话的前置确认证据**——文档文件的首个提交 `d377b86 09:21` 晚于实现首个提交 `d516bdb/b962f97 08:49`，本节记录也是后补的。若验收要求「提交历史可证明文档先于实现」，本项无法满足，需按降级口径接受或改写历史（未做）。
+
+## 12. 复审后的实现调整（2026-10-29，`/comet-review` 20 条发现，提交 `e485d5e`）
+
+只读复审在实现交付后发现 1 CRITICAL + 7 IMPORTANT + 8 WARNING + 4 SUGGESTION，已在本变更内全部处理。行为面变化如下（不改 D1–D6 的决策，只补实现漏洞）：
+
+| 主题 | 调整 | 影响 |
+|:---|:---|:---|
+| IME 索引空间 | `detect_at_trigger` 加索引上界；新增 `clamp_index`（钳长度 + 落字符边界）；组合期（`EditableText::is_composing`）不接管按键、不做触发检测 | 中文输入法下不再 panic 崩进程（`text()` 排除 preedit，而 `raw_selection()` 索引含 preedit） |
+| 浮层生命周期 | 统一 `close_popup`：Esc / 点击 / Enter 接受三条主动关闭路径都清签名缓存并 despawn | A4 的「Esc 关闭」真正生效（此前浮层会滞留到文本再次变化） |
+| Enter 语义 | 带任何修饰键的 Enter 都不算接受候选 | Ctrl/Cmd+Enter 在浮层打开时仍能发送 |
+| 写入排空 | 所有 `record_*` 在无当前轮时**仍排空 reader** 并 `warn` | 流式中「新建会话」的迟到 Delta/Done/Error 不再重放到下一轮 |
+| steering 落块 | 运行中引导文本也写入 Transcript（独立 user block） | 引导消息重新可见，不再只发给模型 |
+| 未知 tool_call_id | 按 Spec §1.1 `warn` 并忽略，不建孤立结果块 | 迟到/错配结果不再污染序列 |
+| denied 建模 | `BlockRef::ToolResult.denied` + 卡片三态（已拒绝/失败/完成） | 卡片重建后标签不变 |
+| progress 渲染 | 卡片从模型重建也带中间输出；实时 progress 会展开结果区 | 长任务的中间输出可见且重建后不丢 |
+| 空助手分段 | 无正文的助手块不占虚拟项也不渲染 | 等待期无空气泡；纯工具轮不留空行 |
+| 虚拟化几何 | 窗口按**连续段**布局，段间补占位高度；`ComputedNode::size`/`ScrollPosition` 乘 `inverse_scale_factor` | 上翻历史时当前轮不再贴错位置；HiDPI 下不漏渲染顶部可见行 |
+| Markdown 内联 | 段落内粗体/链接收进 `Inline` 组渲染在同一行；标题/列表项内并入文本；嵌套列表用栈 | `- **A**: b`、`# T **x**` 不再丢内容或错位 |
+| 终稿档位 | Markdown 段落/粗体/链接用 `theme.font_size` + `line_height::for_text` | Done 瞬间不跳字号/行高（`mono_typography` 守护已扩到 `markdown_render.rs`） |
+| pinned 上下文 | 路径改与检索同形（相对项目根）；**用户显式项优先**；合并后仍受 `retrieval_max_tokens` 约束，超出部分截断留痕 | 去重生效、不再注入两遍；打开大文件不会把请求撑爆 |
+| sidecar | 写入失败与损坏文件都告警；新增磁盘往返 + 旧数组格式 + 损坏回退测试 | 持久化不再静默失败 |

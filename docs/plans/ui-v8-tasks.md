@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 模型层 + M6.5 接线已交付**（M6 模型 `9ac4daf`；M6.5 实现 `b962f97`，启动修复 `5dde747`；真实窗口截图仍待用户走查）。**下一期 M8（Git 探针）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（M6 模型 `9ac4daf`；M6.5 实现 `b962f97`，启动修复 `5dde747`，复审修复 `e485d5e`（见 §10 勘误 51）；真实窗口截图仍待用户走查，须含中文输入法与 HiDPI 缩放）。**下一期 M8（Git 探针）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -326,10 +326,10 @@ M1 与 M2 相互独立，可并行分头推进。
 
 | 任务 | 范围 | 验收（可机器判定） |
 |:---|:---|:---|
-| M6.5-T1 Transcript 渲染 | 把用户消息、助手流式增量、工具调用/结果、压缩通知写入 `Transcript`；渲染系统按 `(turn_index, block_index)` 差分 spawn/update/despawn；删除 chat_panel/tool_panel/undo 的命令式挪节点；会话消息列表虚拟化（承接 §10 勘误 13） | ✅ 流式中插工具卡顺序单调；全仓无「add_child 挪序」；长会话只渲染可见行（`transcript_render_contract` 5 项） |
-| M6.5-T2 Markdown 接线 | 终稿助手消息走 `parse_markdown` + `spawn_markdown`；流式期纯文本、完成后替换，避免每帧重排；代码块复制按钮接线；补 `docs/notes/` 依赖评审 | ✅ 六类元素单测 + Markdown 渲染测试；窄窗不溢出；复制按钮可用；评审记录在库；真实窗口样张待走查 |
-| M6.5-T3 `@` 补全接线 | 输入框触发 `detect_at_trigger`；候选来自文件树 / ProjectRoot；浮层挂 `DROPDOWN`；方向键 / Enter / Esc；接受后写回 `EditableText` | ✅ 浮层挂 DROPDOWN；键盘路由与 Enter 消费；窄窗钳制；候选去抖 |
-| M6.5-T4 ContextSet 接线 | 替换 `context_scope.rs` 只读镜像；chips 与 `ContextSet` 双向同步；发送请求时内容进入 `AgentCommand::StartLoop`；token 占比显示；持久化（会话内先做，跨会话按 ADR-0008 评估） | ✅ 移除 chip 后下一轮请求不含该内容；token 占比；会话级 sidecar 恢复 |
+| M6.5-T1 Transcript 渲染 | 把用户消息、助手流式增量、工具调用/结果、压缩通知写入 `Transcript`；渲染系统按 `(turn_index, block_index)` 差分 spawn/update/despawn；删除 chat_panel/tool_panel/undo 的命令式挪节点；会话消息列表虚拟化（承接 §10 勘误 13） | ✅ 流式中插工具卡顺序单调；全仓无「add_child 挪序」；长会话只渲染可见行；段间空档与 HiDPI 物理/逻辑换算有契约（`transcript_render_contract` 10 项）；无当前轮时消息排空不重放、steering 也落块、denied/progress 都渲染 |
+| M6.5-T2 Markdown 接线 | 终稿助手消息走 `parse_markdown` + `spawn_markdown`；流式期纯文本、完成后替换，避免每帧重排；代码块复制按钮接线；补 `docs/notes/` 依赖评审 | ✅ 六类元素单测 + 内联组（段落内粗体/链接同一行；标题/列表项内并入文本；嵌套列表不丢外层）；终稿档位与流式一致（`mono_typography` 扩到 `markdown_render.rs`）；窄窗不溢出；复制按钮可用；评审记录在库；真实窗口样张待走查 |
+| M6.5-T3 `@` 补全接线 | 输入框触发 `detect_at_trigger`；候选来自文件树 / ProjectRoot；浮层挂 `DROPDOWN`；方向键 / Enter / Esc；接受后写回 `EditableText` | ✅ 浮层挂 DROPDOWN；键盘路由与 Enter 消费（带修饰键不吞发送）；主动关闭即销毁浮层；IME 组合期不接管且索引有上界（不再 panic）；窄窗钳制 + 锚点逻辑像素；候选去抖 |
+| M6.5-T4 ContextSet 接线 | 替换 `context_scope.rs` 只读镜像；chips 与 `ContextSet` 双向同步；发送请求时内容进入 `AgentCommand::StartLoop`；token 占比显示；持久化（会话内先做，跨会话按 ADR-0008 评估） | ✅ 移除 chip 后下一轮请求不含该内容；token 占比；会话级 sidecar 恢复（磁盘往返 + 旧数组格式 + 损坏回退有测试，失败/损坏告警）；pinned 路径与检索同形、显式项优先且受 `retrieval_max_tokens` 约束 |
 | M6.5-T5 视觉与端到端证据 | 真实窗口走查 + 截图（Markdown 样张、工具卡插入顺序、`@` 浮层、chips 删除）；把 M6 A1–A6 从「用户接受降级」补成可复跑证据 | 🟡 自动化证据已落测试；真实窗口截图待用户走查 |
 | M6.5-T6 文档与门槛 | M6 档案口径订正；handoff / AGENTS / dev-tutorial 同步；mac/Linux 硬门槛 A 排期（用户 2026-10-28：Windows 收尾后立刻排） | ✅ 文档同步；门槛 A 定为 M6.5 后第一个里程碑首项 |
 
@@ -487,6 +487,8 @@ M1 与 M2 相互独立，可并行分头推进。
 49. **实机启动暴露的三个既有缺陷**（2026-10-29，`5dde747`）：① `XgentUiPlugin` 中 `LayoutPlugin`/`OverlayPlugin`/`FilePanelPlugin` 会先自加 `PanelsPlugin`，随后元组再次无条件添加 → `plugin was already added` panic；改为在 `XgentUiPlugin` 开头判空预加 Panels/Visibility/Tabs。② `TabsPlugin` 把 `handle_slot_tab_click` 等同时挂进 `PanelSet::Requests` 与 `PanelSet::Visibility`，而两个集合有 before/after 链 → schedule 初始化报循环；改为只把纯视图系统挂 Visibility。③ `context_scope` 的 `ContextSetRemove` 未 `add_message` → 运行时 `Message not initialized`。三者都不是 M6.5 引入，而是之前只在 headless 测试中未暴露。
 
 50. **代码量更新**（2026-10-29）：`crates/**/*.rs` 实测 70002 行（M6.5 接线后）。
+
+51. **M6.5 只读复审修复 20 条**（2026-10-29，`/comet-review` 后，提交 `e485d5e`）：1 CRITICAL + 7 IMPORTANT + 8 WARNING + 4 SUGGESTION 全部处理。要点：① 中文输入法组合期会 panic——`EditableText::text()` 排除 IME preedit 而 `raw_selection()` 索引含 preedit，`detect_at_trigger` 无上界检查直接 `bytes[cursor-1]`；已加上界 + `clamp_index`（落字符边界）+ 组合期不接管。② `@` 浮层在 Esc/点击/接受后不销毁（`suppress_text` 分支只 deactivate 不清签名）；带修饰键的 Enter 被误判为接受候选，导致 Ctrl+Enter 发送被吞。③ `record_*` 在无当前轮时提前 return 不排空 reader，流式中「新建会话」后迟到的 Delta/Done 会重放到下一轮（Done 还会提前终稿）。④ 运行中引导（steering）文本不再渲染（旧的 `spawn_user_message` 无状态守卫）；未知 `tool_call_id` 建孤立结果块（Spec 要求 warn 并忽略）。⑤ denied 被折叠成 failed、progress 入模型不渲染、空助手分段渲染成空气泡。⑥ 虚拟窗口两处几何缺陷：可见区与当前轮不相邻时中间间隙塌陷（现按连续段补占位）；`ComputedNode::size`/`ScrollPosition` 是物理像素却与逻辑偏移表直接比较（HiDPI 下顶部可见行漏渲染，补全浮层锚点同理）。⑦ Markdown：段落内粗体/链接断行（现收进 `Inline` 组同行渲染）、列表项/标题内联元素丢内容、嵌套列表丢外层项、终稿段落用固定 `type_scale::BODY` 与流式档位不一致（Done 瞬间跳字号/行高，`mono_typography` 守护已扩到 `markdown_render.rs`）。⑧ pinned 上下文用绝对路径而检索片段是相对项目根 → 去重永不命中（同文件注入两遍）且与 `format.rs` 注释的「用户显式项优先」相反；显式项还绕过 `retrieval_max_tokens`（打开大文件即撑爆请求）。现同形 + 显式项优先 + 剩余预算内截断留痕。⑨ sidecar 写入失败与损坏文件静默；已告警并补磁盘往返 + 旧数组格式 + 损坏回退测试。**勘误 48 与本文件 §7 风险 10 里「中间间隙塌陷」的已知限制已由本条闭合**。验证：`xgent_ui` lib 135 + 24 个测试 target 全绿；`xgent_agent` 77 passed（唯一失败是 §2 台账基线里的既有并发 flake）；`cargo check --workspace` 绿；真实进程 12s 零 panic（`target/app-run10.log`）。未闭环不变：真实窗口截图/走查（含中文输入法与 125%/150% 缩放的实测）、@ 只做文件候选。代码量随之为 `crates/**/*.rs` 实测 71276 行（订正勘误 50）。
 
 ## 附：文档树变更（2026-10-16，已完成）
 

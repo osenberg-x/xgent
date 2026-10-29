@@ -7,7 +7,7 @@
 
 ## 0. 一句话现状
 
-UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付**（M6 模型 `9ac4daf`、M6.5 实现 `b962f97`、启动修复 `5dde747`）。Transcript 已成顺序权威，Markdown 终稿、`@` 补全、ContextSet+sidecar 与消息虚拟窗口均接入产品；`cargo check --workspace` 绿，`xgent_ui` lib **114 passed**（2026-10-29 实测），渲染契约 5 项、`xui` 103 项、`xgent_terminal` 33 项全绿。**下一期是 M8（Git 探针）**；真实窗口截图/走查仍待用户完成。
+UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（M6 模型 `9ac4daf`、M6.5 实现 `b962f97`、启动修复 `5dde747`、复审修复 `e485d5e`）。Transcript 已成顺序权威，Markdown 终稿、`@` 补全、ContextSet+sidecar 与消息虚拟窗口均接入产品；`cargo check --workspace` 绿，`xgent_ui` lib **135 passed**（2026-10-29 实测），渲染契约 10 项、`xui` 103 项、`xgent_terminal` 33 项全绿。**下一期是 M8（Git 探针）**；真实窗口截图/走查仍待用户完成（须含中文输入法与 HiDPI 缩放两项）。
 
 > ⚠ 未闭环项：**硬门槛 A 的 macOS / Linux 的 `mono` 启动日志确认**（用户 2026-10-21 决定降级为不阻塞；2026-10-28 决定 Windows 收尾后立刻排）。另：M6.5 的真实窗口截图/走查待用户完成（自动化证据已齐）。
 
@@ -151,10 +151,15 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付**（M6 
 
 - 实现：`b962f97`（Transcript 渲染器 / Markdown 终稿 / `@` 补全 / ContextSet+sidecar / VirtualList 窗口），
   影子写入 `d516bdb`，启动修复 `5dde747`。
-- 测试：`transcript_render_contract`(5) + `transcript_write`(7) + pinned context 合并；
-  `xgent_ui` 114 + `xui` 103 + `xgent_terminal` 33 全绿。
-- 未闭环：真实窗口截图/走查（A9 可视部分）；虚拟窗口在「可见区与当前轮不相邻」时中间间隙塌陷；
-  `@` 补全仅文件候选。
+- 测试：`transcript_render_contract`(10) + `transcript_write`(5) + pinned context 合并与预算；
+  `xgent_ui` lib **135** + `xui` 103 + `xgent_terminal` 33 全绿，`xgent_agent` 77 passed（唯一失败是 §2 基线里的既有并发 flake）。
+- 复审修复（同日 `e485d5e`，`/comet-review` 20 条发现全部处理）：中文输入法组合期 panic、`@` 浮层不关闭与
+  Ctrl+Enter 被吞、无当前轮时消息不排空导致跨轮重放、steering 文本不再渲染、denied/progress 丢失、
+  空助手气泡、虚拟窗口间隙塌陷与 HiDPI 物理/逻辑像素混用、Markdown 内联丢内容与终稿档位跳变、
+  pinned 路径不同形导致去重失效且不受检索预算约束、sidecar 静默失败。详见台账 §10 勘误 51 与
+  设计文档 §12。
+- 未闭环：真实窗口截图/走查（A9 可视部分，**须含中文输入法输入与 125%/150% 缩放**）；
+  `@` 补全仅文件候选；设计文档「实现前先提交」的仓库级证据无法满足（见设计文档 §11）。
 
 ### 5.0.2 下一步 M8（Git 探针）
 
@@ -193,7 +198,7 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付**（M6 
 7. **终端 UI 侧不再二次换行**（M4-T2）：超长行（PTY 未折行）会被视口裁掉而非 UI 再折一次——真实终端也是这个行为，但与旧路径不同（旧的会折行）。
 8. **等宽度量在首帧后才有**（M4-T2）：实测需要 UI 布局管线跑起来 → 度量就绪前终端不渲染行（游标不推进，下一帧补齐）；PTY 也暂不发 resize（保持默认 80×24）。
 9. **M6.5 已接线，但真实窗口证据未闭环**（2026-10-29）：自动化测试覆盖顺序/Markdown/工具卡/通知/虚拟窗口；真实窗口截图与走查仍需用户完成（A9 可视部分）。
-10. **虚拟窗口的中间间隙**（2026-10-29）：渲染窗口 = 可见区间 ∪ 当前轮；两者不相邻时没有中间占位块，滚动高度会偏短。典型使用（贴底）不受影响，后续可补中间 spacer。
+10. **虚拟窗口的中间间隙**（2026-10-29，**已闭合**）：渲染窗口 = 可见区间 ∪ 当前轮；原实现只在两端放占位，两段不相邻时中间空档没有高度 → 流式中上翻历史会把当前轮贴到可见区正下方。现按**连续段**布局并逐段补占位（`transcript_render.rs` 的 `build_runs`/`push_gap`，段集合变化才重建），契约测试 `gap_between_visible_window_and_active_turn_is_spaced` 锁住。同类问题一并修：`ComputedNode::size`/`ScrollPosition` 是物理像素，必须乘 `inverse_scale_factor` 再与逻辑偏移表比较（`hidpi_window_matches_the_same_logical_geometry`）。
 11. **M7-A1 的保障强度**（2026-10-28）：`handler_name` 是字符串，启动期只比 id 集合；新增 action 时若只加清单不加分发表分支，不会失败，不要把它当已闭合的契约。
 12. **未闭环门槛**：mac/Linux 的 `mono` 启动日志与终端实机仍未确认（NF-01 是需求硬项）；`cargo test --workspace` 仍有既有红，M6.5 的「全绿」只对 `xgent_ui` + `xui` + `xgent_terminal` 成立。
 
