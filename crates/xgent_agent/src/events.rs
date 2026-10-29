@@ -17,6 +17,8 @@ use xgent_tools::confirm::{ConfirmDecision, ConfirmRequest};
 pub struct UserInputMessage {
     pub text: String,
     pub editor_queries: Vec<xgent_core::EditorQuery>,
+    /// 用户在上下文条里显式保留的上下文项（随请求进入 system 消息）。
+    pub pinned_context: Vec<xgent_context::ContextChunk>,
 }
 
 /// 中断当前对话（UI → agent）。
@@ -211,6 +213,8 @@ pub struct RestoreSessionMessage {
 pub struct SessionRestoredMessage {
     /// 恢复的消息列表
     pub messages: Vec<xgent_core::chat::AgentMessage>,
+    /// 恢复的上下文项（会话级 sidecar）。
+    pub context_set: Vec<xgent_core::session::ContextSnapshot>,
 }
 
 /// 编辑器命令请求（agent → UI）：agent 经 EditorTool 发出，经 channel 桥接到 ECS。

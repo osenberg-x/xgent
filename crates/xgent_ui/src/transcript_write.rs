@@ -4,16 +4,21 @@
 
 use bevy::prelude::*;
 use xgent_agent::{
-    CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage,
-    SessionClearedMessage, SessionRestoredMessage, ToolCallMessage, ToolProgressMessage,
-    ToolResultMessage,
+    BoundedMessage, CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage,
+    ErrorMessage, RetryMessage, SessionClearedMessage, SessionRestoredMessage, ToolCallMessage,
+    ToolProgressMessage, ToolResultMessage,
 };
 use xgent_core::chat::{AgentMessage, ContentBlock as CoreContentBlock};
+use xgent_settings::Localizer;
 use xui::input::ChatInputSubmitted;
 
 use crate::chat_panel::ChatInputMarker;
-use crate::transcript::{BlockRef, ContentBlock, Transcript};
+use crate::transcript::{BlockRef, ContentBlock, NoticeKind, Transcript};
 use crate::undo::UndoNoticeMessage;
+
+/// 写入系统集合：渲染系统据此排序。
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TranscriptWriteSet;
 
 /// Transcript 写入插件。
 pub struct TranscriptWritePlugin;
@@ -31,10 +36,14 @@ impl Plugin for TranscriptWritePlugin {
                 record_tool_result,
                 record_compacted,
                 record_undo_notice,
+                record_error,
+                record_retry,
+                record_bounded,
                 record_session_cleared,
                 record_session_restored,
             )
                 .chain()
+                .in_set(TranscriptWriteSet)
                 .after(xgent_agent::agent_loop::agent_poll_system),
         );
     }
@@ -44,12 +53,17 @@ fn record_user_submission(
     mut reader: MessageReader<ChatInputSubmitted>,
     q_input: Query<Entity, With<ChatInputMarker>>,
     conv: Res<Conversation>,
+    consumed: Option<Res<crate::completion_ui::CompletionConsumed>>,
     mut transcript: ResMut<Transcript>,
 ) {
     let Ok(input_entity) = q_input.single() else {
         return;
     };
+    let completion_enter = consumed.as_deref().is_some_and(|c| c.enter);
     for ev in reader.read() {
+        if completion_enter {
+            continue;
+        }
         if ev.entity != input_entity || ev.text.is_empty() {
             continue;
         }
@@ -145,7 +159,86 @@ fn record_undo_notice(
         return;
     };
     for ev in reader.read() {
-        transcript.push_notice(turn, ev.text.clone());
+        transcript.push_notice(turn, ev.text.clone(), NoticeKind::Info);
+    }
+}
+
+fn record_error(
+    mut reader: MessageReader<ErrorMessage>,
+    loc: Res<Localizer>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        let prefix = match ev.kind {
+            xgent_core::chat::ErrorKind::NotConfigured => {
+                crate::i18n::tr(&loc, "error-not-configured")
+            }
+            xgent_core::chat::ErrorKind::AuthFailed => crate::i18n::tr(&loc, "error-auth-failed"),
+            xgent_core::chat::ErrorKind::Network => crate::i18n::tr(&loc, "error-network"),
+            xgent_core::chat::ErrorKind::StreamParse => crate::i18n::tr(&loc, "error-stream-parse"),
+            xgent_core::chat::ErrorKind::RateLimited => crate::i18n::tr(&loc, "error-rate-limited"),
+            xgent_core::chat::ErrorKind::ServerError => crate::i18n::tr(&loc, "error-server"),
+            xgent_core::chat::ErrorKind::ProviderError => crate::i18n::tr(&loc, "error-provider"),
+        };
+        let retry_hint = crate::i18n::tr(&loc, "error-retry-hint");
+        transcript.push_notice(
+            turn,
+            format!(
+                "{prefix} {}
+
+{retry_hint}",
+                ev.message
+            ),
+            NoticeKind::Error,
+        );
+    }
+}
+
+fn record_retry(
+    mut reader: MessageReader<RetryMessage>,
+    loc: Res<Localizer>,
+    mut transcript: ResMut<Transcript>,
+) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        let label = if ev.infinite {
+            crate::i18n::tr_with(
+                &loc,
+                "retry-attempt-infinite",
+                &[("n", ev.attempt.to_string())],
+            )
+            .to_string()
+        } else {
+            crate::i18n::tr_with(&loc, "retry-attempt", &[("n", ev.attempt.to_string())])
+                .to_string()
+        };
+        let last_error = crate::i18n::tr_with(
+            &loc,
+            "retry-last-error",
+            &[("error", ev.last_error.clone())],
+        );
+        transcript.push_notice(
+            turn,
+            format!(
+                "{label}
+{last_error}"
+            ),
+            NoticeKind::Retry,
+        );
+    }
+}
+
+fn record_bounded(mut reader: MessageReader<BoundedMessage>, mut transcript: ResMut<Transcript>) {
+    let Some(turn) = transcript.current_turn() else {
+        return;
+    };
+    for ev in reader.read() {
+        transcript.push_notice(turn, ev.detail.clone(), NoticeKind::Info);
     }
 }
 
@@ -240,6 +333,7 @@ fn record_session_restored(
                         turn_index: turn,
                         block_index: blocks.len(),
                         text: note.text.clone(),
+                        kind: NoticeKind::Info,
                     });
                 }
             }

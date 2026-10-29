@@ -244,7 +244,7 @@ pub fn poll_io_results(
                 read_writer.write(FileReadResult {
                     path: req.path.clone(),
                     line: req.line,
-                    content: Err(crate::i18n::tr(&loc, "editor-read-cancelled").into()),
+                    content: Err(crate::i18n::tr(&loc, "editor-read-cancelled")),
                 });
             }
         }

@@ -36,6 +36,7 @@ pub use provider_state::{ContextState, ProviderInfo};
 pub use session_store::{
     SessionStore, SessionSummary, list_sessions, restore_session, session_file_path,
 };
+pub use xgent_context::provider::ContextChunk;
 
 use bevy::prelude::*;
 

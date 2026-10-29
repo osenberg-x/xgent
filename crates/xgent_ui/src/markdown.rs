@@ -214,7 +214,10 @@ mod tests {
         let md = "# Title\n\nParagraph\n\n```rust\ncode\n```";
         let blocks = parse_markdown(md);
         assert_eq!(blocks.len(), 3);
-        assert!(matches!(&blocks[0], MarkdownBlock::Heading { level: 1, .. }));
+        assert!(matches!(
+            &blocks[0],
+            MarkdownBlock::Heading { level: 1, .. }
+        ));
         assert!(matches!(&blocks[1], MarkdownBlock::Paragraph { .. }));
         assert!(matches!(&blocks[2], MarkdownBlock::CodeBlock { .. }));
     }

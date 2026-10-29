@@ -100,6 +100,9 @@ pub fn spawn_completion_popup(
     state: &CompletionState,
     theme: &Theme,
     dropdown_layer: Entity,
+    anchor: Vec2,
+    input_size: Vec2,
+    viewport: Vec2,
 ) -> Option<Entity> {
     if !state.active || state.candidates.is_empty() {
         return None;
@@ -109,6 +112,11 @@ pub fn spawn_completion_popup(
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
+                left: Val::Px(anchor.x.min(viewport.x - 16.0)),
+                top: Val::Px((anchor.y - 208.0).max(0.0)),
+                width: Val::Px(
+                    (input_size.x.max(240.0)).min(viewport.x - anchor.x.max(0.0) - 16.0),
+                ),
                 flex_direction: FlexDirection::Column,
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 padding: UiRect::all(Val::Px(4.0)),
@@ -164,26 +172,39 @@ pub fn spawn_completion_popup(
 
 /// 处理候选项点击。
 pub fn handle_completion_item_click(
-    mut q: Query<(&CompletionItemMarker, &Interaction), Changed<Interaction>>,
+    mut q: Query<(&CompletionItemMarker, &Pressed), Changed<Pressed>>,
     mut state: ResMut<CompletionState>,
     mut q_input: Query<&mut bevy::text::EditableText, With<crate::chat_panel::ChatInputMarker>>,
 ) {
-    for (marker, interaction) in q.iter_mut() {
-        if matches!(*interaction, Interaction::Pressed) {
-            if let Some(candidate) = state.candidates.get(marker.index).cloned() {
-                // 直接插入到输入框
-                if let Ok(mut editable) = q_input.single_mut() {
-                    let text = editable.editor.text().to_string();
-                    let before = &text[..state.trigger_position];
-                    let after = &text[state.trigger_position..];
-                    let new_text = format!("{}{}{}", before, candidate.insert_text, after);
-                    editable.clear();
-                    editable.queue_edit(bevy::text::TextEdit::Insert(new_text.into()));
-                }
-                state.deactivate();
+    for (marker, _) in q.iter_mut() {
+        if let Some(candidate) = state.candidates.get(marker.index).cloned() {
+            if let Ok(mut editable) = q_input.single_mut() {
+                accept_candidate(&mut editable, &state, &candidate);
             }
+            state.deactivate();
         }
     }
+}
+
+/// 把选中候选替换掉输入框里的 `@query`。
+///
+/// 采用「整段重写 + queue_edit」而不是直接改 parley 选区：这是一条已被
+/// 文本输入系统消费的路径，能保证 `EditableText` 的变更通知与重排都触发。
+pub fn accept_candidate(
+    editable: &mut bevy::text::EditableText,
+    state: &CompletionState,
+    candidate: &CompletionCandidate,
+) {
+    let text = editable.editor().text().to_string();
+    let cursor = editable.editor().raw_selection().focus().index();
+    let start = state.trigger_position.min(text.len());
+    let end = cursor.min(text.len()).max(start);
+    let mut new_text = String::with_capacity(text.len() + candidate.insert_text.len());
+    new_text.push_str(&text[..start]);
+    new_text.push_str(&candidate.insert_text);
+    new_text.push_str(&text[end..]);
+    editable.clear();
+    editable.queue_edit(bevy::text::TextEdit::Insert(new_text.into()));
 }
 
 /// 补全接受事件（保留用于未来扩展）。

@@ -221,7 +221,11 @@ fn spawn_top_bar(
         });
 
         // ⑧ 命令面板图标钮
-        palette_btn = Some(kit.icon_button(p, "command", &crate::i18n::tr(&loc, "tooltip-command-palette")));
+        palette_btn = Some(kit.icon_button(
+            p,
+            "command",
+            &crate::i18n::tr(&loc, "tooltip-command-palette"),
+        ));
 
         // ⑨ 设置图标钮（常驻入口，rail 不放设置）
         settings_btn = Some(kit.icon_button(p, "gear", &crate::i18n::tr(&loc, "tooltip-settings")));

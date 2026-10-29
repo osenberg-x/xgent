@@ -153,16 +153,12 @@ fn body_line_height_follows_content_language() {
 /// 只改流式路径会让「流式 1.7 → 完成 1.6」出现行高跳变，且历史消息回看又是 1.6。
 #[test]
 fn all_message_body_paths_use_content_tier() {
-    let chat_src = include_str!("../src/chat_panel.rs");
-    let occurrences = chat_src.matches("line_height::for_text(").count();
+    // M6.5：用户/助手/历史统一由 Transcript 渲染器承载，正文路径都在这里。
+    let render_src = include_str!("../src/transcript_render.rs");
+    let occurrences = render_src.matches("line_height::for_text(").count();
     assert!(
         occurrences >= 2,
-        "对话面板的正文路径（流式 + 固化副本）都应用 for_text（实测 {occurrences} 处）"
-    );
-    let history_src = include_str!("../src/session_history.rs");
-    assert!(
-        history_src.contains("line_height::for_text("),
-        "会话历史的消息正文也应按内容选档"
+        "用户与助手正文都应用 for_text（实测 {occurrences} 处）"
     );
 }
 

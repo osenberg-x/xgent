@@ -143,7 +143,10 @@ pub struct ShortcutsPlugin;
 impl Plugin for ShortcutsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register_xgent_hotkeys)
-            .add_systems(Startup, assert_hotkey_consistency.after(register_xgent_hotkeys))
+            .add_systems(
+                Startup,
+                assert_hotkey_consistency.after(register_xgent_hotkeys),
+            )
             .add_systems(
                 Update,
                 handle_hotkey_triggers.after(crate::command_palette::handle_palette_triggers),
@@ -157,8 +160,7 @@ impl Plugin for ShortcutsPlugin {
 fn assert_hotkey_consistency(registry: Res<HotkeyRegistry>) {
     let registered_ids: std::collections::HashSet<&str> =
         registry.bindings.keys().map(|s| s.as_str()).collect();
-    let action_ids: std::collections::HashSet<&str> =
-        HOTKEY_ACTIONS.iter().map(|a| a.id).collect();
+    let action_ids: std::collections::HashSet<&str> = HOTKEY_ACTIONS.iter().map(|a| a.id).collect();
 
     let missing_in_registry: Vec<_> = action_ids.difference(&registered_ids).collect();
     let extra_in_registry: Vec<_> = registered_ids.difference(&action_ids).collect();
@@ -212,13 +214,17 @@ pub(crate) fn handle_hotkey_triggers(
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
     modal: Option<Res<crate::modal::ModalStack>>,
     modal_esc: Option<Res<crate::modal::ModalEscConsumed>>,
+    completion_esc: Option<Res<crate::completion_ui::CompletionConsumed>>,
     mut input_focus: Option<ResMut<bevy::input_focus::InputFocus>>,
     q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
 ) {
     // v8 M1：模态栈非空（或本帧 Esc 已被模态栈消费）时，全局快捷键整体让位。
     // 必须先排空 reader，否则消息会在模态关闭后被重放。
     let modal_open = modal.as_deref().is_some_and(|stack| !stack.is_empty());
-    let esc_consumed = modal_esc.as_deref().is_some_and(|consumed| consumed.0);
+    let esc_consumed = modal_esc.as_deref().is_some_and(|consumed| consumed.0)
+        || completion_esc
+            .as_deref()
+            .is_some_and(|consumed| consumed.esc);
     if modal_open || esc_consumed {
         for _ in reader.read() {}
         return;
@@ -359,7 +365,10 @@ mod tests {
         app.init_resource::<HotkeyRegistry>()
             .init_resource::<xgent_settings::Localizer>()
             .add_systems(Startup, register_xgent_hotkeys)
-            .add_systems(Startup, assert_hotkey_consistency.after(register_xgent_hotkeys));
+            .add_systems(
+                Startup,
+                assert_hotkey_consistency.after(register_xgent_hotkeys),
+            );
 
         // 运行启动系统
         app.world_mut().run_schedule(Startup);
@@ -383,7 +392,11 @@ mod tests {
     #[test]
     fn hotkey_actions_have_handler_names() {
         for action in HOTKEY_ACTIONS {
-            assert!(!action.handler_name.is_empty(), "Empty handler for {}", action.id);
+            assert!(
+                !action.handler_name.is_empty(),
+                "Empty handler for {}",
+                action.id
+            );
         }
     }
 }

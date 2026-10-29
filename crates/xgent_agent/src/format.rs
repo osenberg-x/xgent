@@ -63,6 +63,23 @@ pub fn build_request(
     }
 }
 
+/// 把用户显式保留的上下文项并入检索结果（按 path 去重，用户显式项优先）。
+pub fn merge_pinned_context(
+    result: &mut ContextResult,
+    pinned: &[xgent_context::provider::ContextChunk],
+) {
+    for chunk in pinned {
+        if !result
+            .chunks
+            .iter()
+            .any(|existing| existing.path == chunk.path)
+        {
+            result.chunks.push(chunk.clone());
+        }
+    }
+    result.total_tokens = result.chunks.iter().map(|chunk| chunk.token_estimate).sum();
+}
+
 /// 用最新上下文检索结果刷新 req 的首条 system 消息。
 ///
 /// bridge 异步侧在 `StartLoop` 接到 req 后、调 `run_agent_loop` 前调用：
@@ -188,5 +205,44 @@ mod tests {
         let req = build_request(&msgs, &ctx, "p", "m", None);
         // Notification 被过滤，只剩 system + user
         assert_eq!(req.messages.len(), 2);
+    }
+
+    #[test]
+    fn pinned_context_merges_and_dedupes_by_path() {
+        use xgent_context::provider::ContextChunk;
+        let mut result = ContextResult {
+            chunks: vec![ContextChunk {
+                path: "a.rs".into(),
+                content: "retrieved".into(),
+                relevance: "retrieval".into(),
+                token_estimate: 10,
+            }],
+            tree_summary: None,
+            total_tokens: 10,
+        };
+        let pinned = vec![
+            ContextChunk {
+                path: "a.rs".into(),
+                content: "pinned".into(),
+                relevance: "user".into(),
+                token_estimate: 20,
+            },
+            ContextChunk {
+                path: "b.rs".into(),
+                content: "pinned-b".into(),
+                relevance: "user".into(),
+                token_estimate: 30,
+            },
+        ];
+        merge_pinned_context(&mut result, &pinned);
+        assert_eq!(result.chunks.len(), 2);
+        assert_eq!(result.chunks[0].content, "retrieved");
+        assert!(
+            result
+                .chunks
+                .iter()
+                .any(|chunk| chunk.path == std::path::Path::new("b.rs"))
+        );
+        assert_eq!(result.total_tokens, 40);
     }
 }

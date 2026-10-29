@@ -200,6 +200,11 @@ fn only_derive_system_and_content_whitelist_write_display() {
             "内容态：滚动位置（回到底部按钮）",
         ),
         (
+            "chat_panel.rs",
+            "update_action_buttons",
+            "内容态：流式状态（发送/停止按钮）",
+        ),
+        (
             "activity_bar.rs",
             "companion_ring_system",
             "内容态：陪伴开关（激活环）",

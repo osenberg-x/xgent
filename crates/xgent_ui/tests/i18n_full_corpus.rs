@@ -77,10 +77,7 @@ fn en_us_corpus_has_no_cjk_except_whitelist() {
             continue;
         }
         // 去掉 Fluent 参数占位符再检查
-        let cleaned: String = v
-            .chars()
-            .filter(|c| !matches!(*c, '{' | '}'))
-            .collect();
+        let cleaned: String = v.chars().filter(|c| !matches!(*c, '{' | '}')).collect();
         if has_cjk(&cleaned) {
             violations.push(format!("{k} = {v}"));
         }

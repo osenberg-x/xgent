@@ -13,6 +13,7 @@ pub mod activity_bar;
 pub mod chat_panel;
 pub mod command_palette;
 pub mod completion;
+pub mod completion_ui;
 pub mod confirm_dialog;
 pub mod context_scope;
 pub mod context_set;
@@ -41,6 +42,7 @@ pub mod theme;
 pub mod tool_panel;
 pub mod top_bar;
 pub mod transcript;
+pub mod transcript_render;
 pub mod transcript_write;
 pub mod undo;
 pub mod welcome;
@@ -87,6 +89,8 @@ impl Plugin for XgentUiPlugin {
             kit::KitPlugin,
             undo::UndoPlugin,
             transcript_write::TranscriptWritePlugin,
-        ));
+            transcript_render::TranscriptRenderPlugin,
+        ))
+        .add_plugins(completion_ui::CompletionUiPlugin);
     }
 }

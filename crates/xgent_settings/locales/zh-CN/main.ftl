@@ -224,3 +224,6 @@ tooltip-expand-panel = 展开面板
 tooltip-command-palette = 命令面板
 tooltip-settings = 设置
 editor-read-cancelled = 读取任务取消
+
+# --- M6.5：上下文 token 占比 ---
+context-token-ratio = { $used } / { $window } tokens（{ $pct }%）

@@ -8,10 +8,7 @@ use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
-use xgent_agent::{
-    ListSessionsMessage, RestoreSessionMessage, SessionListMessage, SessionRestoredMessage,
-    SessionSummary,
-};
+use xgent_agent::{ListSessionsMessage, RestoreSessionMessage, SessionListMessage, SessionSummary};
 use xgent_settings::Localizer;
 
 use crate::fonts::ui_text;
@@ -96,10 +93,6 @@ impl Plugin for SessionHistoryPlugin {
         .add_systems(
             Update,
             handle_session_list_results.after(xgent_agent::agent_loop::agent_poll_system),
-        )
-        .add_systems(
-            Update,
-            handle_restore_results.after(xgent_agent::agent_loop::agent_poll_system),
         )
         .add_systems(Update, sync_session_list_rows)
         .add_systems(
@@ -521,153 +514,6 @@ fn handle_session_list_results(
     for ev in reader.read() {
         cached.sessions = ev.sessions.clone();
     }
-}
-
-/// 订阅 SessionRestoredMessage，通知 UI 重建消息列表。
-fn handle_restore_results(
-    mut reader: MessageReader<SessionRestoredMessage>,
-    theme: Res<Theme>,
-    loc: Res<Localizer>,
-    mut commands: Commands,
-    q_list: Query<Entity, With<crate::chat_panel::MessageListMarker>>,
-    q_current: Query<Entity, With<crate::chat_panel::CurrentAssistantText>>,
-) {
-    let Ok(list) = q_list.single() else {
-        return;
-    };
-    let Ok(cur) = q_current.single() else {
-        return;
-    };
-    for ev in reader.read() {
-        // 清空消息列表的子节点（保留 current_text）
-        commands
-            .entity(list)
-            .detach_children(&[cur])
-            .despawn_related::<Children>()
-            .add_child(cur);
-        commands
-            .entity(cur)
-            .insert((Text::new(String::new()), TextColor(theme.text)));
-
-        for msg in &ev.messages {
-            use xgent_core::chat::AgentMessage;
-            match msg {
-                AgentMessage::User(um) => {
-                    let text = extract_text(&um.content);
-                    if text.is_empty() {
-                        continue;
-                    }
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &text, true);
-                }
-                AgentMessage::Assistant(am) => {
-                    let text = extract_text(&am.content);
-                    if text.is_empty() {
-                        continue;
-                    }
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &text, false);
-                }
-                AgentMessage::ToolResult(tr_msg) => {
-                    let label = format!("[{}] {}", tr_msg.tool_name, tr_msg.content);
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &label, false);
-                }
-                AgentMessage::Notification(n) => {
-                    spawn_history_message_row(&mut commands, list, &theme, &loc, &n.text, false);
-                }
-            }
-        }
-    }
-}
-
-/// 从 ContentBlock 列表中提取纯文本。
-fn extract_text(blocks: &[xgent_core::chat::ContentBlock]) -> String {
-    blocks
-        .iter()
-        .filter_map(|b| match b {
-            xgent_core::chat::ContentBlock::Text { text } => Some(text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// 生成一条历史消息行（用户/助手统一布局）。
-fn spawn_history_message_row(
-    commands: &mut Commands,
-    list: Entity,
-    theme: &Theme,
-    loc: &Localizer,
-    text: &str,
-    is_user: bool,
-) {
-    let avatar_text: String;
-    let role_label: String;
-    let avatar_bg: Color;
-    let text_color: Color;
-
-    if is_user {
-        avatar_text = tr(loc, "role-user").to_string();
-        role_label = tr(loc, "role-user").to_string();
-        avatar_bg = theme.elevated;
-        text_color = theme.text;
-    } else {
-        avatar_text = "✦".to_string();
-        role_label = tr(loc, "role-assistant").to_string();
-        avatar_bg = theme.accent;
-        text_color = theme.text_dim;
-    }
-
-    commands.entity(list).with_children(|p| {
-        p.spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(space::MD),
-            ..default()
-        },))
-            .with_children(|row| {
-                row.spawn((
-                    Node {
-                        width: Val::Px(crate::theme::size::ICON_MD),
-                        height: Val::Px(crate::theme::size::ICON_MD),
-                        border_radius: BorderRadius::all(Val::Px(crate::theme::radius::CTRL)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                    BackgroundColor(avatar_bg),
-                    ui_text(
-                        avatar_text,
-                        type_scale::CAPTION,
-                        400,
-                        theme.text,
-                        type_scale::line_height::UI,
-                    ),
-                ));
-                row.spawn((Node {
-                    flex_grow: 1.0,
-                    min_width: Val::ZERO,
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },))
-                    .with_children(|body| {
-                        body.spawn(ui_text(
-                            role_label,
-                            type_scale::CAPTION,
-                            400,
-                            theme.text,
-                            type_scale::line_height::UI,
-                        ));
-                        body.spawn(ui_text(
-                            text.to_string(),
-                            type_scale::BODY,
-                            400,
-                            text_color,
-                            // v8 M4-T4：历史消息正文按内容选行高档（中文 1.7）
-                            type_scale::line_height::for_text(text),
-                        ));
-                    });
-            });
-    });
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 use xgent_settings::Localizer;
 
+use crate::context_set::{ContextItem, ContextKind, ContextSet};
 use crate::editor::buffer::EditorBuffer;
 use crate::editor::tabs::EditorTabs;
 use crate::i18n::tr;
@@ -35,18 +36,45 @@ pub struct ContextChipMarker;
 #[derive(Component, Default)]
 pub struct ContextAddMarker;
 
+/// 从 ContextSet 删除一项。
+#[derive(Message)]
+pub struct ContextSetRemove {
+    /// 上下文项 id。
+    pub id: String,
+}
+
+/// chip 上的删除钮。
+#[derive(Component)]
+pub struct ContextChipRemoveMarker {
+    /// 对应上下文项 id。
+    pub id: String,
+}
+
 /// 上下文条插件。
 pub struct ContextScopePlugin;
 
 impl Plugin for ContextScopePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            spawn_context_scope
-                .after(crate::layout::spawn_layout)
-                .after(crate::chat_panel::spawn_chat_panel),
-        )
-        .add_systems(Update, (rebuild_context_chips, handle_add_click));
+        app.init_resource::<ContextSet>()
+            .add_systems(
+                Startup,
+                spawn_context_scope
+                    .after(crate::layout::spawn_layout)
+                    .after(crate::chat_panel::spawn_chat_panel),
+            )
+            .add_systems(
+                Update,
+                (
+                    sync_context_from_tabs,
+                    handle_chip_remove_click,
+                    apply_context_remove,
+                    restore_context_set,
+                    rebuild_context_chips,
+                    handle_add_click,
+                    save_context_on_change,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -122,49 +150,141 @@ fn spawn_context_scope(
     commands.entity(panel).insert_children(0, &[row]);
 }
 
-/// tabs 列表变化时重建 chips（签名比对避免每帧重建；标签/添加钮保留）。
-fn rebuild_context_chips(
-    mut commands: Commands,
+/// 编辑器打开的 tab 同步进 ContextSet（只增不减；用户删除后不会被静默加回）。
+fn sync_context_from_tabs(
     tabs: Res<EditorTabs>,
     buffers: Query<&EditorBuffer>,
+    mut set: ResMut<ContextSet>,
+) {
+    for &entity in &tabs.tabs {
+        let Ok(buffer) = buffers.get(entity) else {
+            continue;
+        };
+        let id = buffer.path.display().to_string();
+        if set.contains(&id) {
+            continue;
+        }
+        let label = buffer
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| id.clone());
+        let content = buffer.disk_content.clone();
+        set.add(ContextItem {
+            id,
+            kind: ContextKind::File,
+            label,
+            token_count: (content.chars().count() as u64 / 4).max(1),
+            content,
+        });
+    }
+}
+
+/// chip 删除钮点击 → 发删除消息。
+fn handle_chip_remove_click(
+    q: Query<(&ContextChipRemoveMarker, &Pressed), Changed<Pressed>>,
+    mut remove: MessageWriter<ContextSetRemove>,
+) {
+    for (marker, _) in q.iter() {
+        remove.write(ContextSetRemove {
+            id: marker.id.clone(),
+        });
+    }
+}
+
+/// 应用删除消息。
+fn apply_context_remove(mut reader: MessageReader<ContextSetRemove>, mut set: ResMut<ContextSet>) {
+    for ev in reader.read() {
+        set.remove(&ev.id);
+    }
+}
+
+/// 会话恢复时替换 ContextSet。
+fn restore_context_set(
+    mut reader: MessageReader<xgent_agent::SessionRestoredMessage>,
+    mut set: ResMut<ContextSet>,
+) {
+    for ev in reader.read() {
+        set.clear();
+        for snapshot in &ev.context_set {
+            set.add(ContextItem {
+                id: snapshot.id.clone(),
+                kind: ContextKind::from_persisted(&snapshot.kind),
+                label: snapshot.label.clone(),
+                token_count: snapshot.token_count,
+                content: snapshot.content.clone(),
+            });
+        }
+    }
+}
+
+/// 把 ContextSet 写入会话 sidecar（会话内持久化）。
+fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Conversation>>) {
+    if !set.is_changed() {
+        return;
+    }
+    let Some(conv) = conv else {
+        return;
+    };
+    if conv.session_store.is_none() {
+        return;
+    }
+    let snapshots: Vec<xgent_core::session::ContextSnapshot> = set
+        .items()
+        .iter()
+        .map(|item| xgent_core::session::ContextSnapshot {
+            id: item.id.clone(),
+            kind: item.kind.as_str().to_string(),
+            label: item.label.clone(),
+            token_count: item.token_count,
+            content: item.content.clone(),
+        })
+        .collect();
+    let _ = xgent_agent::session_store::save_context_set(&conv.id.to_string(), &snapshots);
+}
+
+/// ContextSet 变化时重建 chips（签名比对避免每帧重建；标签/添加钮保留）。
+fn rebuild_context_chips(
+    mut commands: Commands,
+    set: Res<ContextSet>,
     theme: Res<Theme>,
     icons: Res<IconAssets>,
+    loc: Res<xgent_settings::Localizer>,
+    global: Option<Res<xgent_settings::GlobalConfigRes>>,
     mut cached: Local<String>,
     q_row: Query<Entity, With<ContextScopeMarker>>,
-    q_children: Query<&Children, With<ContextScopeMarker>>,
     chips: Query<Entity, With<ContextChipMarker>>,
 ) {
     let Ok(row) = q_row.single() else {
         return;
     };
-    let Ok(_children) = q_children.single() else {
-        return;
-    };
 
-    // 签名比对
-    let mut paths: Vec<String> = Vec::new();
-    for &e in &tabs.tabs {
-        if let Ok(buf) = buffers.get(e) {
-            paths.push(buf.path.display().to_string());
-        }
-    }
-    let signature = paths.join("\u{1}");
+    let window = global
+        .as_deref()
+        .and_then(|global| {
+            global
+                .providers
+                .get(&global.default_provider)
+                .map(|provider| provider.resolve_context_window(&global.default_model).0)
+        })
+        .unwrap_or(xgent_settings_core::global::defaults::CONTEXT_WINDOW);
+    let signature = set
+        .items()
+        .iter()
+        .map(|item| format!("{}|{}", item.id, item.label))
+        .collect::<Vec<_>>()
+        .join("\u{1}");
     if *cached == signature {
         return;
     }
     *cached = signature;
 
-    // 清旧 chips
     for chip in chips.iter() {
         commands.entity(chip).despawn();
     }
 
-    // 重建
-    for path in &paths {
-        let name = std::path::Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.clone());
+    for item in set.items() {
+        let id = item.id.clone();
         commands.entity(row).with_children(|row| {
             row.spawn((
                 Button,
@@ -181,21 +301,74 @@ fn rebuild_context_chips(
                 },
                 BorderColor::all(theme.border),
                 HoverTint::ghost(&theme),
-                Tooltip { text: path.clone() },
+                Tooltip {
+                    text: item.id.clone(),
+                },
                 ContextChipMarker,
             ))
             .with_children(|chip| {
                 chip.spawn(icon(&icons, "file", 12.0, theme.st_pending));
                 chip.spawn(ui_text(
-                    name,
+                    item.label.clone(),
                     type_scale::MICRO,
                     400,
                     theme.text_dim,
                     type_scale::line_height::UI,
                 ));
+                chip.spawn((
+                    Button,
+                    Hovered::default(),
+                    Node {
+                        padding: UiRect::horizontal(px(space::XS)),
+                        border_radius: BorderRadius::MAX,
+                        ..default()
+                    },
+                    BackgroundColor(Color::NONE),
+                    HoverTint::ghost(&theme),
+                    ContextChipRemoveMarker { id: id.clone() },
+                ))
+                .with_children(|remove| {
+                    remove.spawn(ui_text(
+                        "×",
+                        type_scale::MICRO,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ));
+                });
             });
         });
     }
+
+    let pct = if window == 0 {
+        0.0
+    } else {
+        set.total_tokens() as f64 * 100.0 / window as f64
+    };
+    let ratio = crate::i18n::tr_with(
+        &loc,
+        "context-token-ratio",
+        &[
+            ("used", set.total_tokens().to_string()),
+            ("window", window.to_string()),
+            ("pct", format!("{pct:.1}")),
+        ],
+    );
+    commands.entity(row).with_children(|row| {
+        row.spawn((
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+            ui_text(
+                ratio,
+                type_scale::MICRO,
+                400,
+                theme.text_muted,
+                type_scale::line_height::UI,
+            ),
+        ));
+    });
 }
 
 /// 「添加上下文」点击 → 打开文件抽屉（M5-T6 抽屉化）。

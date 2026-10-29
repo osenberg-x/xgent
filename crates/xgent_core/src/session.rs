@@ -198,3 +198,18 @@ mod tests {
         assert!(line.contains("\"type\":\"modelChange\""));
     }
 }
+
+/// 上下文项快照（会话级 sidecar 持久化用）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextSnapshot {
+    /// 唯一标识（File 类型为相对路径）。
+    pub id: String,
+    /// 类型：file / symbol / selection / other。
+    pub kind: String,
+    /// 显示名。
+    pub label: String,
+    /// token 估算。
+    pub token_count: u64,
+    /// 内容。
+    pub content: String,
+}

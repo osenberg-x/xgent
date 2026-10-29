@@ -8,10 +8,9 @@ use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
 
-use xgent_agent::{ToolCallMessage, ToolProgressMessage, ToolResultMessage};
+use xgent_agent::{ToolProgressMessage, ToolResultMessage};
 use xgent_settings::Localizer;
 
-use crate::chat_panel::MessageListMarker;
 use crate::fonts::ui_text;
 use crate::i18n::tr;
 use crate::kit::{HoverTint, icon};
@@ -67,7 +66,6 @@ impl Plugin for ToolPanelPlugin {
         app.add_systems(
             Update,
             (
-                spawn_tool_card,
                 update_tool_progress,
                 update_tool_result,
                 handle_tool_card_click,
@@ -79,202 +77,224 @@ impl Plugin for ToolPanelPlugin {
     }
 }
 
-/// 订阅 ToolCallMessage，在消息列表中 spawn 时间线节点。
-fn spawn_tool_card(
-    mut reader: MessageReader<ToolCallMessage>,
-    q_list: Query<Entity, With<MessageListMarker>>,
-    theme: Res<Theme>,
-    fonts: Res<crate::fonts::UiFonts>,
-    icons: Res<crate::kit::IconAssets>,
-    loc: Res<Localizer>,
-    mut commands: Commands,
-) {
-    let Ok(list) = q_list.single() else {
-        return;
+/// 构造一个工具卡片实体（供 Transcript 渲染器调用）。
+pub(crate) fn spawn_tool_card_entity(
+    commands: &mut Commands,
+    tool_call_id: &str,
+    tool_id: &str,
+    input: &serde_json::Value,
+    theme: &Theme,
+    fonts: &crate::fonts::UiFonts,
+    icons: &crate::kit::IconAssets,
+    loc: &Localizer,
+    status: crate::transcript::ToolCallStatus,
+    result: Option<&str>,
+    is_error: bool,
+) -> Entity {
+    let summary = format_tool_summary(tool_id, input);
+    let (status_label, status_color, dot_color) =
+        if status == crate::transcript::ToolCallStatus::Failed || is_error {
+            (tr(loc, "tool-failed"), theme.st_fail, theme.st_fail)
+        } else if status == crate::transcript::ToolCallStatus::Completed {
+            (tr(loc, "tool-done"), theme.st_ok, theme.st_ok)
+        } else {
+            (tr(loc, "tool-running"), theme.text_dim, theme.st_running)
+        };
+    let expanded = result.is_some();
+    let result_text = result.unwrap_or_default().to_string();
+    let result_height = if result.is_some() {
+        crate::theme::size::TOOL_PANEL_MAX_H
+    } else {
+        0.0
     };
-    let _font = theme.font_size;
-    for ev in reader.read() {
-        let summary = format_tool_summary(&ev.tool_id, &ev.input);
-        commands.entity(list).with_children(|p| {
-            // 时间线行：图标节点 + 卡片体
-            p.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(space::MD),
-                ..default()
-            },))
-                .with_children(|tl| {
-                    // 时间线图标节点（分类色调块 + 矢量图标）
-                    let (icon_name, tint_bg, tint_fg) = tool_visual(&ev.tool_id, &theme);
-                    tl.spawn((
-                        Node {
-                            width: px(28.0),
-                            height: px(28.0),
-                            border_radius: BorderRadius::all(px(radius::SMALL)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            flex_shrink: 0.0,
-                            ..default()
-                        },
-                        BackgroundColor(tint_bg),
-                    ))
-                    .with_children(|blk| {
-                        blk.spawn(icon(&icons, icon_name, 14.0, tint_fg));
-                    });
-                    // 卡片体
-                    tl.spawn((
+    let fold_text = result
+        .map(|text| {
+            crate::i18n::tr_with(
+                loc,
+                "tool-fold-result",
+                &[("lines", text.lines().count().to_string())],
+            )
+            .to_string()
+        })
+        .unwrap_or_default();
+    commands
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: px(space::MD),
+            ..default()
+        },))
+        .with_children(|tl| {
+            // 时间线图标节点（分类色调块 + 矢量图标）
+            let (icon_name, tint_bg, tint_fg) = tool_visual(tool_id, theme);
+            tl.spawn((
+                Node {
+                    width: px(28.0),
+                    height: px(28.0),
+                    border_radius: BorderRadius::all(px(radius::SMALL)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BackgroundColor(tint_bg),
+            ))
+            .with_children(|blk| {
+                blk.spawn(icon(icons, icon_name, 14.0, tint_fg));
+            });
+            // 卡片体
+            tl.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::ZERO,
+                    padding: UiRect::all(px(space::SM)),
+                    border: UiRect::all(px(1.0)),
+                    border_radius: BorderRadius::all(px(8.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(space::XS),
+                    ..default()
+                },
+                BackgroundColor(theme.subtle),
+                BorderColor::all(theme.border),
+                ToolCardMarker {
+                    tool_call_id: tool_call_id.to_string(),
+                    tool_id: tool_id.to_string(),
+                    expanded,
+                },
+            ))
+            .with_children(|card| {
+                // head：工具名 + 参数摘要 + 状态药丸
+                card.spawn((
+                    Button,
+                    Hovered::default(),
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        column_gap: px(space::SM),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::NONE),
+                    BorderColor::all(Color::NONE),
+                    HoverTint::ghost(theme),
+                    ToolCardHeadMarker,
+                ))
+                .with_children(|header| {
+                    // 工具名
+                    header.spawn((ui_text(
+                        tool_id,
+                        type_scale::SMALL,
+                        510,
+                        theme.text,
+                        type_scale::line_height::UI,
+                    ),));
+                    // 参数摘要
+                    // v8 M3-T5：摘要过长时省略（不再手工截 50 字，
+                    // 审计 E6：手工截断与真实宽度无关）。
+                    // v8 M4-T3：参数是路径/正则这类代码文本 → 走等宽。
+                    header.spawn((
                         Node {
                             flex_grow: 1.0,
+                            flex_shrink: 1.0,
                             min_width: Val::ZERO,
-                            padding: UiRect::all(px(space::SM)),
-                            border: UiRect::all(px(1.0)),
-                            border_radius: BorderRadius::all(px(8.0)),
-                            flex_direction: FlexDirection::Column,
-                            row_gap: px(space::XS),
+                            max_width: px(crate::theme::size::TOOL_SUMMARY_MAX_W),
+                            overflow: Overflow::clip(),
                             ..default()
                         },
-                        BackgroundColor(theme.subtle),
-                        BorderColor::all(theme.border),
-                        ToolCardMarker {
-                            tool_call_id: ev.tool_call_id.clone(),
-                            tool_id: ev.tool_id.clone(),
-                            expanded: false,
-                        },
-                    ))
-                    .with_children(|card| {
-                        // head：工具名 + 参数摘要 + 状态药丸
-                        card.spawn((
-                            Button,
-                            Hovered::default(),
+                        crate::fonts::ellipsis_mono_text(
+                            &fonts,
+                            summary,
+                            type_scale::CAPTION,
+                            theme.text_muted,
+                            type_scale::line_height::UI,
+                        ),
+                    ));
+                    // 状态药丸（elevated 底 + dot + 标签）
+                    header
+                        .spawn((
                             Node {
-                                width: Val::Percent(100.0),
                                 flex_direction: FlexDirection::Row,
-                                column_gap: px(space::SM),
                                 align_items: AlignItems::Center,
+                                column_gap: px(space::XS),
+                                padding: UiRect::horizontal(px(space::SM)),
+                                border_radius: BorderRadius::all(px(16.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::NONE),
-                            BorderColor::all(Color::NONE),
-                            HoverTint::ghost(&theme),
-                            ToolCardHeadMarker,
+                            BackgroundColor(theme.elevated),
                         ))
-                        .with_children(|header| {
-                            // 工具名
-                            header.spawn((ui_text(
-                                ev.tool_id.clone(),
-                                type_scale::SMALL,
-                                510,
-                                theme.text,
-                                type_scale::line_height::UI,
-                            ),));
-                            // 参数摘要
-                            // v8 M3-T5：摘要过长时省略（不再手工截 50 字，
-                            // 审计 E6：手工截断与真实宽度无关）。
-                            // v8 M4-T3：参数是路径/正则这类代码文本 → 走等宽。
-                            header.spawn((
+                        .with_children(|pill| {
+                            pill.spawn((
                                 Node {
-                                    flex_grow: 1.0,
-                                    flex_shrink: 1.0,
-                                    min_width: Val::ZERO,
-                                    max_width: px(crate::theme::size::TOOL_SUMMARY_MAX_W),
-                                    overflow: Overflow::clip(),
+                                    width: px(6.0),
+                                    height: px(6.0),
+                                    border_radius: BorderRadius::all(px(3.0)),
                                     ..default()
                                 },
-                                crate::fonts::ellipsis_mono_text(
-                                    &fonts,
-                                    summary,
-                                    type_scale::CAPTION,
-                                    theme.text_muted,
+                                BackgroundColor(dot_color),
+                                ToolStatusDotMarker,
+                            ));
+                            pill.spawn((
+                                ui_text(
+                                    status_label,
+                                    type_scale::MICRO,
+                                    510,
+                                    status_color,
                                     type_scale::line_height::UI,
                                 ),
+                                ToolStatusLabelMarker,
                             ));
-                            // 状态药丸（elevated 底 + dot + 标签）
-                            header
-                                .spawn((
-                                    Node {
-                                        flex_direction: FlexDirection::Row,
-                                        align_items: AlignItems::Center,
-                                        column_gap: px(space::XS),
-                                        padding: UiRect::horizontal(px(space::SM)),
-                                        border_radius: BorderRadius::all(px(16.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(theme.elevated),
-                                ))
-                                .with_children(|pill| {
-                                    pill.spawn((
-                                        Node {
-                                            width: px(6.0),
-                                            height: px(6.0),
-                                            border_radius: BorderRadius::all(px(3.0)),
-                                            ..default()
-                                        },
-                                        BackgroundColor(theme.st_running),
-                                        ToolStatusDotMarker,
-                                    ));
-                                    pill.spawn((
-                                        ui_text(
-                                            tr(&loc, "tool-running"),
-                                            type_scale::MICRO,
-                                            510,
-                                            theme.text_dim,
-                                            type_scale::line_height::UI,
-                                        ),
-                                        ToolStatusLabelMarker,
-                                    ));
-                                });
                         });
-                        // 结果区域（初始隐藏）
-                        // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定）。
-                        // 文本必须放在**子节点**里：挂在滚动容器自身的文本按容器
-                        // 内容盒定位，不随 ScrollPosition 滚动。
-                        let mut result_area = xui::ScrollFrame::vertical();
-                        result_area.content_sized();
-                        result_area.style().width = Val::Percent(100.0);
-                        result_area.style().max_height = Val::Px(0.0);
-                        card.spawn((result_area, ToolResultAreaMarker))
-                            .with_children(|area| {
-                                area.spawn((
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        ..default()
-                                    },
-                                    ui_text(
-                                        String::new(),
-                                        type_scale::CAPTION,
-                                        400,
-                                        theme.text_dim,
-                                        type_scale::line_height::CTRL,
-                                    ),
-                                    ToolResultTextMarker {
-                                        tool_call_id: ev.tool_call_id.clone(),
-                                    },
-                                ));
-                            });
-                        // fold 行
-                        card.spawn((
-                            Button,
-                            Hovered::default(),
+                });
+                // 结果区域（初始隐藏）
+                // v8 M3-T2：改用 ScrollFrame（overflow 由构造器定）。
+                // 文本必须放在**子节点**里：挂在滚动容器自身的文本按容器
+                // 内容盒定位，不随 ScrollPosition 滚动。
+                let mut result_area = xui::ScrollFrame::vertical();
+                result_area.content_sized();
+                result_area.style().width = Val::Percent(100.0);
+                result_area.style().max_height = Val::Px(result_height);
+                card.spawn((result_area, ToolResultAreaMarker))
+                    .with_children(|area| {
+                        area.spawn((
                             Node {
                                 width: Val::Percent(100.0),
-                                padding: UiRect::all(px(space::XS)),
-                                border: UiRect::top(px(1.0)),
                                 ..default()
                             },
-                            BorderColor::all(theme.line),
                             ui_text(
-                                String::new(),
-                                type_scale::MICRO,
+                                result_text,
+                                type_scale::CAPTION,
                                 400,
-                                theme.text_muted,
-                                type_scale::line_height::UI,
+                                theme.text_dim,
+                                type_scale::line_height::CTRL,
                             ),
-                            ToolFoldMarker,
+                            ToolResultTextMarker {
+                                tool_call_id: tool_call_id.to_string(),
+                            },
                         ));
                     });
-                });
-        });
-    }
+                // fold 行
+                card.spawn((
+                    Button,
+                    Hovered::default(),
+                    Node {
+                        width: Val::Percent(100.0),
+                        padding: UiRect::all(px(space::XS)),
+                        border: UiRect::top(px(1.0)),
+                        ..default()
+                    },
+                    BorderColor::all(theme.line),
+                    ui_text(
+                        fold_text,
+                        type_scale::MICRO,
+                        400,
+                        theme.text_muted,
+                        type_scale::line_height::UI,
+                    ),
+                    ToolFoldMarker,
+                ));
+            });
+        })
+        .id()
 }
 
 /// 订阅 ToolProgressMessage：长时工具执行中实时刷新结果区文本。

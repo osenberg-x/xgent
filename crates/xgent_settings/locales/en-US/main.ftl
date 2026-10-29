@@ -223,3 +223,6 @@ tooltip-expand-panel = Expand Panel
 tooltip-command-palette = Command Palette
 tooltip-settings = Settings
 editor-read-cancelled = Read task cancelled
+
+# --- M6.5: context token ratio ---
+context-token-ratio = { $used } / { $window } tokens ({ $pct }%)

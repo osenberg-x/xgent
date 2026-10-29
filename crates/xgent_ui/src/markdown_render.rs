@@ -120,16 +120,14 @@ fn render_list(
     items: &[crate::markdown::ListItem],
     ordered: bool,
     theme: &Theme,
-    loc: &xgent_settings::Localizer,
+    _loc: &xgent_settings::Localizer,
 ) -> Entity {
     commands
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            ..default()
+        },))
         .with_children(|parent| {
             for (i, item) in items.iter().enumerate() {
                 let prefix = if ordered {
@@ -184,15 +182,13 @@ fn render_code_block(
         .with_children(|parent| {
             // 顶部栏：语言标签 + 复制按钮
             parent
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceBetween,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::all(Val::Px(8.0)),
-                        ..default()
-                    },
-                ))
+                .spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::all(Val::Px(8.0)),
+                    ..default()
+                },))
                 .with_children(|bar| {
                     // 语言标签
                     if !language.is_empty() {
@@ -231,12 +227,10 @@ fn render_code_block(
 
             // 代码内容
             parent
-                .spawn((
-                    Node {
-                        padding: UiRect::all(Val::Px(12.0)),
-                        ..default()
-                    },
-                ))
+                .spawn((Node {
+                    padding: UiRect::all(Val::Px(12.0)),
+                    ..default()
+                },))
                 .with_children(|code_area| {
                     code_area.spawn(mono_text(
                         fonts,
@@ -290,7 +284,7 @@ pub fn handle_copy_button_click(
 ) {
     for (_copy, child_of) in q.iter_mut() {
         if let Ok(code_block) = q_code.get(child_of.parent()) {
-            clipboard.set_text(code_block.code.clone());
+            let _ = clipboard.set_text(code_block.code.clone());
         }
     }
 }

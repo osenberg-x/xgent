@@ -82,6 +82,7 @@ pub fn agent_poll_system(
         let _ = bridge.cmd_tx.try_send(AgentCommand::StartLoop {
             req,
             editor_queries: ev.editor_queries.clone(),
+            pinned_context: ev.pinned_context.clone(),
             // 检查点按 (会话, 轮) 归组；取数值 id，不经 Display 反解
             session: conv.id.0,
         });
@@ -147,7 +148,11 @@ pub fn agent_poll_system(
         }
         if let Some(messages) = crate::session_store::restore_session(&ev.session_id) {
             conv.restore(&ev.session_id, messages.clone());
-            session_restored.write(SessionRestoredMessage { messages });
+            let context_set = crate::session_store::load_context_set(&ev.session_id);
+            session_restored.write(SessionRestoredMessage {
+                messages,
+                context_set,
+            });
         } else {
             // 恢复失败静默会让用户以为会话为空——显式报错（如文件全部损坏）
             writers.p5().write(ErrorMessage {

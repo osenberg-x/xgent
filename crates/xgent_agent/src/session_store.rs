@@ -206,6 +206,28 @@ pub fn restore_session(session_id: &str) -> Option<Vec<xgent_core::chat::AgentMe
     Some(messages.into_iter().map(|(_, m)| m).collect())
 }
 
+/// 保存会话级上下文 sidecar（`<session_id>.context.json`，不改 JSONL 格式）。
+pub fn save_context_set(
+    session_id: &str,
+    items: &[xgent_core::session::ContextSnapshot],
+) -> std::io::Result<()> {
+    let path = session_file_path(session_id).with_extension("context.json");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(items).map_err(std::io::Error::other)?;
+    std::fs::write(path, text)
+}
+
+/// 读取会话级上下文 sidecar；缺失或损坏时返回空列表。
+pub fn load_context_set(session_id: &str) -> Vec<xgent_core::session::ContextSnapshot> {
+    let path = session_file_path(session_id).with_extension("context.json");
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
 /// 计算会话 JSONL 文件路径：`<agent_dir>/sessions/<session_id>.jsonl`。
 ///
 /// 转发到 [`xgent_settings_core::paths::session_file_path`]（全局用户目录）。

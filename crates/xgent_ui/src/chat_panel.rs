@@ -11,30 +11,23 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::text::{EditableText, LineHeight, TextLayoutInfo};
+use bevy::text::{EditableText, TextLayoutInfo};
 use bevy::ui::Pressed;
 use bevy::ui_widgets::{Button, TextInput};
 
-use xgent_agent::{
-    CompactedMessage, Conversation, ConversationStatus, DeltaMessage, DoneMessage, ErrorMessage,
-    RetryMessage, SessionClearedMessage, SteeringMessage, UserInputMessage,
-};
+use xgent_agent::{Conversation, ConversationStatus, SteeringMessage, UserInputMessage};
 use xui::input::{ChatInput, ChatInputSubmitted};
 use xui::scroll_frame::ScrollFrame;
 
 use crate::fonts::ui_text;
 use crate::i18n::tr;
-use crate::kit::{HoverTint, icon};
+use crate::kit::HoverTint;
 use crate::layout::ChatPanelMarker;
-use crate::theme::{Theme, radius, size, space, type_scale};
+use crate::theme::{Theme, radius, space, type_scale};
 use tracing;
 /// 历史消息容器（消息列表，可滚动）。
 #[derive(Component, Default)]
 pub struct MessageListMarker;
-
-/// 当前正在流式累加的助手消息文本节点。
-#[derive(Component, Default)]
-pub struct CurrentAssistantText;
 
 /// 回到底部浮钮标记。
 #[derive(Component, Default)]
@@ -127,10 +120,7 @@ impl Plugin for ChatPanelPlugin {
                     update_action_buttons,
                 ),
             )
-            .add_systems(
-                Update,
-                (handle_send_button_click, handle_stop_button_click),
-            )
+            .add_systems(Update, (handle_send_button_click, handle_stop_button_click))
             // v8 M3-T3：光标行跟随 + 可视行数自适应（要拿到本帧最新的布局与光标矩形）
             .add_systems(
                 PostUpdate,
@@ -141,28 +131,12 @@ impl Plugin for ChatPanelPlugin {
             .add_systems(
                 Update,
                 (
-                    accumulate_delta,
-                    finalize_on_done,
-                    on_error,
-                    show_compacted_notice,
                     forward_input_submission,
-                    spawn_user_message,
                     update_input_border,
-                    update_streaming_cursor,
-                    clear_on_new_session,
                     update_token_hint,
-                )
-                    .after(xgent_agent::agent_loop::agent_poll_system),
-            )
-            .add_systems(
-                Update,
-                (
-                    show_retry_status
-                        .after(xgent_agent::agent_loop::agent_poll_system)
-                        .after(finalize_on_done),
                     show_bounded_notice,
                 )
-                    .chain(),
+                    .after(xgent_agent::agent_loop::agent_poll_system),
             );
     }
 }
@@ -179,36 +153,12 @@ pub(crate) fn spawn_chat_panel(
         return;
     };
 
-    // 当前正在流式的助手消息节点（限宽 820 居中；v7 正文 text_dim/1.6）
-    let current_text = commands
-        .spawn((
-            Node {
-                max_width: px(size::MSG_MAX_W),
-                align_self: AlignSelf::Center,
-                flex_direction: FlexDirection::Row,
-                column_gap: px(space::MD),
-                ..default()
-            },
-            ui_text(
-                String::new(),
-                type_scale::BODY,
-                400,
-                theme.text_dim,
-                type_scale::line_height::BODY,
-            ),
-            CurrentAssistantText,
-        ))
-        .id();
-
     // 消息列表（居中 max-width 容器 + 可滚动）
     // v8 M3-T2：滚动语义只由 ScrollFrame 决定。
     let (mut frame, stick) = ScrollFrame::stick_bottom();
     frame.style().padding = UiRect::all(px(space::XXL));
     frame.style().row_gap = px(space::XL);
-    let message_list = commands
-        .spawn((frame, stick, MessageListMarker))
-        .add_child(current_text)
-        .id();
+    let message_list = commands.spawn((frame, stick, MessageListMarker)).id();
 
     // 浮动输入卡
     // v8 M3-T3：改成「外框 + 内层可滚动文本区」两段式——文本到上限（200px）
@@ -356,52 +306,56 @@ pub(crate) fn spawn_chat_panel(
                         TokenHintMarker,
                     ));
                     // M6-T5：发送按钮（accent 色）
-                    right.spawn((
-                        Button,
-                        Hovered::default(),
-                        Node {
-                            width: px(32.0),
-                            height: px(32.0),
-                            border_radius: BorderRadius::all(px(6.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        BackgroundColor(theme.accent),
-                        SendButtonMarker,
-                    )).with_children(|btn| {
-                        btn.spawn(ui_text(
-                            "↑",
-                            type_scale::BODY,
-                            600,
-                            theme.accent_text,
-                            type_scale::line_height::UI,
-                        ));
-                    });
+                    right
+                        .spawn((
+                            Button,
+                            Hovered::default(),
+                            Node {
+                                width: px(32.0),
+                                height: px(32.0),
+                                border_radius: BorderRadius::all(px(6.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(theme.accent),
+                            SendButtonMarker,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn(ui_text(
+                                "↑",
+                                type_scale::BODY,
+                                600,
+                                theme.accent_text,
+                                type_scale::line_height::UI,
+                            ));
+                        });
                     // M6-T5：停止按钮（流式中显示，st_running 色）
-                    right.spawn((
-                        Button,
-                        Hovered::default(),
-                        Node {
-                            width: px(32.0),
-                            height: px(32.0),
-                            border_radius: BorderRadius::all(px(6.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            display: Display::None,
-                            ..default()
-                        },
-                        BackgroundColor(theme.st_running),
-                        StopButtonMarker,
-                    )).with_children(|btn| {
-                        btn.spawn(ui_text(
-                            "■",
-                            type_scale::BODY,
-                            600,
-                            theme.accent_text,
-                            type_scale::line_height::UI,
-                        ));
-                    });
+                    right
+                        .spawn((
+                            Button,
+                            Hovered::default(),
+                            Node {
+                                width: px(32.0),
+                                height: px(32.0),
+                                border_radius: BorderRadius::all(px(6.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                display: Display::None,
+                                ..default()
+                            },
+                            BackgroundColor(theme.st_running),
+                            StopButtonMarker,
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn(ui_text(
+                                "■",
+                                type_scale::BODY,
+                                600,
+                                theme.accent_text,
+                                type_scale::line_height::UI,
+                            ));
+                        });
                 });
         })
         .id();
@@ -511,270 +465,6 @@ pub(crate) fn spawn_chat_panel(
         .add_child(back_to_bottom);
 }
 
-/// 用户提交输入时，在消息列表中 spawn 用户消息（全宽行式布局）。
-fn spawn_user_message(
-    mut reader: MessageReader<ChatInputSubmitted>,
-    theme: Res<Theme>,
-    loc: Res<xgent_settings::Localizer>,
-    mut commands: Commands,
-    q_list: Query<Entity, With<MessageListMarker>>,
-    q_current: Query<Entity, With<CurrentAssistantText>>,
-    q_input: Query<Entity, With<ChatInputMarker>>,
-) {
-    let Ok(list) = q_list.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    let Ok(current) = q_current.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    let input_entity = q_input.single().ok();
-    let font = theme.font_size;
-    for ev in reader.read() {
-        // 只渲染 chat 输入框自己的提交（命令面板复用 ChatInput，其提交
-        // 不是聊天消息）——与 forward_input_submission 同一守卫
-        if Some(ev.entity) != input_entity {
-            continue;
-        }
-        if ev.text.is_empty() {
-            continue;
-        }
-        // 在当前助手节点之前插入用户消息（全宽行式：头像 + 消息体）
-        commands.entity(list).with_children(|p| {
-            p.spawn((Node {
-                max_width: px(size::MSG_MAX_W),
-                align_self: AlignSelf::Center,
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(space::MD),
-                ..default()
-            },))
-                .with_children(|row| {
-                    // 头像（icon_bg 底 + "你"）
-                    row.spawn((
-                        Node {
-                            width: px(28.0),
-                            height: px(28.0),
-                            border_radius: BorderRadius::all(px(6.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            flex_shrink: 0.0,
-                            ..default()
-                        },
-                        BackgroundColor(theme.icon_bg),
-                        ui_text(
-                            crate::i18n::tr(&loc, "role-user"),
-                            type_scale::BODY_SM,
-                            590,
-                            theme.text_dim,
-                            type_scale::line_height::UI,
-                        ),
-                    ));
-                    // 消息体（role + content）
-                    row.spawn((Node {
-                        flex_grow: 1.0,
-                        min_width: Val::ZERO,
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },))
-                        .with_children(|body| {
-                            // role 行
-                            body.spawn((ui_text(
-                                crate::i18n::tr(&loc, "role-user"),
-                                type_scale::CAPTION,
-                                400,
-                                theme.text,
-                                type_scale::line_height::UI,
-                            ),));
-                            // 正文
-                            // v8 M4-T4：正文行高按内容选档（中文 1.7 / 拉丁 1.6）
-                            body.spawn((ui_text(
-                                ev.text.clone(),
-                                font,
-                                400,
-                                theme.text,
-                                type_scale::line_height::for_text(&ev.text),
-                            ),));
-                        });
-                });
-        });
-        commands.entity(list).add_child(current);
-        commands.entity(current).insert(Text::new(String::new()));
-    }
-}
-/// 订阅 DeltaMessage，累加到当前助手消息节点。
-///
-/// 流式光标由 [`update_streaming_cursor`] 维护在文本末尾，delta 追加前
-/// 先弹掉，避免光标字符被埋进正文（会污染历史副本与复制内容）。
-fn accumulate_delta(
-    mut reader: MessageReader<DeltaMessage>,
-    mut q: Query<(&mut Text, &mut LineHeight), With<CurrentAssistantText>>,
-) {
-    let Ok((mut text, mut line_height)) = q.single_mut() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    for ev in reader.read() {
-        if text.0.ends_with(STREAM_CURSOR) {
-            text.0.pop();
-        }
-        text.0.push_str(&ev.text);
-        // v8 M4-T4：流式正文按内容选行高档（中文 1.7 / 拉丁 1.6）。
-        let want = LineHeight::RelativeToFont(type_scale::line_height::for_text(&text.0));
-        if *line_height != want {
-            *line_height = want;
-        }
-    }
-}
-/// Done 时把当前助手消息固化为历史副本节点，并清空当前节点。
-fn finalize_on_done(
-    mut reader: MessageReader<DoneMessage>,
-    q: Query<&Text, With<CurrentAssistantText>>,
-    mut commands: Commands,
-    theme: Res<Theme>,
-    loc: Res<xgent_settings::Localizer>,
-    icons: Res<crate::kit::IconAssets>,
-    q_list: Query<Entity, With<MessageListMarker>>,
-    q_current: Query<Entity, With<CurrentAssistantText>>,
-) {
-    let Ok(current) = q_current.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    let Ok(list) = q_list.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    if reader.read().next().is_none() {
-        return;
-    }
-    let Ok(text) = q.get(current) else {
-        return;
-    };
-    let content = text
-        .0
-        // 兼容旧版本可能残留的 '▍'（历史上光标字符曾用过两种写法）
-        .trim_end_matches([STREAM_CURSOR, '▍'])
-        .to_string();
-    if content.is_empty() {
-        return;
-    }
-    let font = theme.font_size;
-    // 历史副本（限宽 820 居中：头像 + 消息体）
-    commands.entity(list).with_children(|p| {
-        p.spawn((Node {
-            max_width: px(size::MSG_MAX_W),
-            align_self: AlignSelf::Center,
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            column_gap: px(space::MD),
-            ..default()
-        },))
-            .with_children(|row| {
-                // 头像（accent 底 + "X"）
-                row.spawn((
-                    Node {
-                        width: px(28.0),
-                        height: px(28.0),
-                        border_radius: BorderRadius::all(px(6.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                    BackgroundColor(theme.accent),
-                    ui_text(
-                        "X",
-                        type_scale::CAPTION,
-                        590,
-                        theme.accent_text,
-                        type_scale::line_height::UI,
-                    ),
-                ));
-                // 消息体
-                row.spawn((Node {
-                    flex_grow: 1.0,
-                    min_width: Val::ZERO,
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },))
-                    .with_children(|body| {
-                        body.spawn((ui_text(
-                            crate::i18n::tr(&loc, "role-assistant"),
-                            type_scale::BODY_SM,
-                            510,
-                            theme.text,
-                            type_scale::line_height::UI,
-                        ),));
-                        body.spawn((ui_text(
-                            content.clone(),
-                            font,
-                            400,
-                            theme.text_dim,
-                            // v8 M4-T4：固化副本与流式正文同档（中文 1.7 / 拉丁 1.6），
-                            // 否则流式时 1.7、完成后 1.6 → 行高跳变。
-                            type_scale::line_height::for_text(&content),
-                        ),));
-                    });
-                // 操作栏（右上常显：复制到剪贴板；v7.1 悬停显隐留 span 重构）
-                row.spawn((
-                    Button,
-                    Hovered::default(),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: px(0.0),
-                        right: px(0.0),
-                        padding: UiRect::all(px(space::XS)),
-                        border_radius: BorderRadius::all(px(radius::SMALL)),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                    BackgroundColor(Color::NONE),
-                    HoverTint::ghost(&theme),
-                    CopyActionMarker {
-                        text: content.clone(),
-                    },
-                ))
-                .with_children(|bar| {
-                    bar.spawn(icon(&icons, "copy", 12.0, theme.text_faint));
-                });
-            });
-    });
-    commands.entity(current).insert(Text::new(String::new()));
-}
-
-/// 出错时把错误信息写到当前助手消息节点。
-fn on_error(
-    mut reader: MessageReader<ErrorMessage>,
-    q: Query<Entity, With<CurrentAssistantText>>,
-    mut commands: Commands,
-    theme: Res<Theme>,
-    loc: Res<xgent_settings::Localizer>,
-) {
-    let Ok(entity) = q.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    for ev in reader.read() {
-        let prefix = match ev.kind {
-            xgent_core::chat::ErrorKind::NotConfigured => {
-                crate::i18n::tr(&loc, "error-not-configured")
-            }
-            xgent_core::chat::ErrorKind::AuthFailed => crate::i18n::tr(&loc, "error-auth-failed"),
-            xgent_core::chat::ErrorKind::Network => crate::i18n::tr(&loc, "error-network"),
-            xgent_core::chat::ErrorKind::StreamParse => crate::i18n::tr(&loc, "error-stream-parse"),
-            xgent_core::chat::ErrorKind::RateLimited => crate::i18n::tr(&loc, "error-rate-limited"),
-            xgent_core::chat::ErrorKind::ServerError => crate::i18n::tr(&loc, "error-server"),
-            xgent_core::chat::ErrorKind::ProviderError => crate::i18n::tr(&loc, "error-provider"),
-        };
-        let retry_hint = crate::i18n::tr(&loc, "error-retry-hint");
-        commands.entity(entity).insert((
-            Text::new(format!("{prefix} {}\n\n{retry_hint}", ev.message)),
-            TextColor(theme.accent),
-        ));
-    }
-}
 /// 有界执行终止提示：命中迭代/ token 上限时在对话流里告知用户。
 ///
 /// 这不是错误（对话已正常结束），但用户必须知道本轮为何停下——否则
@@ -792,89 +482,6 @@ fn show_bounded_notice(
     }
 }
 
-/// 重试时在当前助手消息节点显示「重试中(第 N 次)」与上次失败原因。
-fn show_retry_status(
-    mut reader: MessageReader<RetryMessage>,
-    q: Query<Entity, With<CurrentAssistantText>>,
-    mut commands: Commands,
-    theme: Res<Theme>,
-    loc: Res<xgent_settings::Localizer>,
-) {
-    let Ok(entity) = q.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    for ev in reader.read() {
-        let label = if ev.infinite {
-            crate::i18n::tr_with(
-                &loc,
-                "retry-attempt-infinite",
-                &[("n", ev.attempt.to_string())],
-            )
-            .to_string()
-        } else {
-            crate::i18n::tr_with(&loc, "retry-attempt", &[("n", ev.attempt.to_string())])
-                .to_string()
-        };
-        let last_error = crate::i18n::tr_with(
-            &loc,
-            "retry-last-error",
-            &[("error", ev.last_error.clone())],
-        );
-        commands.entity(entity).insert((
-            Text::new(format!("{label}\n{last_error}")),
-            TextColor(theme.text_dim),
-        ));
-    }
-}
-
-/// 压缩触发后在消息列表插入一条 dim 提示。
-fn show_compacted_notice(
-    mut reader: MessageReader<CompactedMessage>,
-    mut commands: Commands,
-    theme: Res<Theme>,
-    loc: Res<xgent_settings::Localizer>,
-    q_list: Query<Entity, With<MessageListMarker>>,
-) {
-    let Ok(list) = q_list.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    for ev in reader.read() {
-        let before = crate::status_bar::format_tokens(ev.tokens_before.into());
-        let after = crate::status_bar::format_tokens(ev.tokens_after.into());
-        let notice = crate::i18n::tr_with(
-            &loc,
-            "compaction-notice",
-            &[("before", before), ("after", after)],
-        );
-        commands.entity(list).with_children(|p| {
-            p.spawn((Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },))
-                .with_children(|row| {
-                    row.spawn((
-                        Node {
-                            padding: UiRect::all(px(space::XS)),
-                            border_radius: BorderRadius::all(px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme.elevated),
-                        ui_text(
-                            notice,
-                            type_scale::MICRO,
-                            400,
-                            theme.text_muted,
-                            type_scale::line_height::UI,
-                        ),
-                    ));
-                });
-        });
-    }
-}
-
 pub fn forward_input_submission(
     mut reader: MessageReader<ChatInputSubmitted>,
     mut user_writer: MessageWriter<UserInputMessage>,
@@ -884,10 +491,16 @@ pub fn forward_input_submission(
     mut commands: Commands,
     q_input: Query<Entity, With<ChatInputMarker>>,
     q_card: Query<Entity, With<ChatInputCardMarker>>,
+    consumed: Option<Res<crate::completion_ui::CompletionConsumed>>,
+    context_set: Option<Res<crate::context_set::ContextSet>>,
 ) {
+    let completion_enter = consumed.as_deref().is_some_and(|c| c.enter);
     let input_entity = q_input.single().ok();
     let card_entity = q_card.single().ok();
     for ev in reader.read() {
+        if completion_enter {
+            continue;
+        }
         // 只消费 chat 输入框自己的提交：命令面板输入框复用 ChatInput，
         // 其 Enter（执行命令）也会发 ChatInputSubmitted——不过滤会把查询串
         // 当用户消息发给 agent 并渲染到对话流（同一次 Enter 双触发）。
@@ -905,9 +518,24 @@ pub fn forward_input_submission(
         }
         if conv.status == ConversationStatus::Idle || conv.status == ConversationStatus::Error {
             let (text, queries) = crate::editor::at_syntax::parse_at_references(&ev.text);
+            let pinned_context = context_set
+                .as_deref()
+                .map(|set| {
+                    set.items()
+                        .iter()
+                        .map(|item| xgent_agent::ContextChunk {
+                            path: std::path::PathBuf::from(&item.id),
+                            content: item.content.clone(),
+                            relevance: format!("用户显式上下文（{}）", item.kind.as_str()),
+                            token_estimate: item.token_count.min(u32::MAX as u64) as u32,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             user_writer.write(UserInputMessage {
                 text,
                 editor_queries: queries,
+                pinned_context,
             });
         } else {
             steering_writer.write(SteeringMessage {
@@ -952,66 +580,6 @@ fn update_input_border(
         border.set_all(theme.border);
     }
 }
-/// 流式光标字符（全文唯一约定：`accumulate_delta` 弹它、
-/// `update_streaming_cursor` 闪它、`finalize_on_done` trim 它）。
-const STREAM_CURSOR: char = '▋';
-
-/// 流式光标：会话进行中时，在当前助手消息文本末尾闪烁光标字符。
-fn update_streaming_cursor(
-    conv: Res<Conversation>,
-    time: Res<Time>,
-    mut q: Query<&mut Text, With<CurrentAssistantText>>,
-) {
-    let Ok(mut text) = q.single_mut() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    let is_busy =
-        conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error;
-    if !is_busy {
-        if text.0.ends_with(STREAM_CURSOR) {
-            text.0.pop();
-        }
-        return;
-    }
-    let show = (time.elapsed().as_secs_f64() % 1.0) < 0.5;
-    let has_cursor = text.0.ends_with(STREAM_CURSOR);
-    if show && !has_cursor {
-        text.0.push(STREAM_CURSOR);
-    } else if !show && has_cursor {
-        text.0.pop();
-    }
-}
-
-/// 收到 SessionClearedMessage 时清空消息列表的所有子节点。
-fn clear_on_new_session(
-    mut reader: MessageReader<SessionClearedMessage>,
-    theme: Res<Theme>,
-    mut commands: Commands,
-    q_list: Query<Entity, With<MessageListMarker>>,
-    q_current: Query<Entity, With<CurrentAssistantText>>,
-) {
-    if reader.read().next().is_none() {
-        return;
-    }
-    let Ok(list) = q_list.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
-        return;
-    };
-    if let Ok(cur) = q_current.single() {
-        commands
-            .entity(list)
-            .detach_children(&[cur])
-            .despawn_related::<Children>()
-            .add_child(cur);
-        commands
-            .entity(cur)
-            .insert((Text::new(String::new()), TextColor(theme.text)));
-    } else {
-        commands.entity(list).despawn_related::<Children>();
-    }
-}
-
 /// 更新输入框右侧 tokenhint 文本（有变更检测）。
 fn update_token_hint(
     conv: Res<Conversation>,
@@ -1247,10 +815,18 @@ fn update_action_buttons(
             | xgent_agent::ConversationStatus::ToolRunning
     );
     for mut node in q_send.iter_mut() {
-        node.display = if is_busy { Display::None } else { Display::Flex };
+        node.display = if is_busy {
+            Display::None
+        } else {
+            Display::Flex
+        };
     }
     for mut node in q_stop.iter_mut() {
-        node.display = if is_busy { Display::Flex } else { Display::None };
+        node.display = if is_busy {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 

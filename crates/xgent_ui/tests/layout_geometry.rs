@@ -278,7 +278,10 @@ fn status_bar_has_fixed_height() {
     let node = app.world().get::<Node>(status).unwrap();
     // StatusBar 应有固定高度（不是 Auto 或 Percent）
     match node.height {
-        Val::Px(h) => assert!(h > 20.0 && h < 60.0, "StatusBar 高度应在 20-60px（实测 {h})"),
+        Val::Px(h) => assert!(
+            h > 20.0 && h < 60.0,
+            "StatusBar 高度应在 20-60px（实测 {h})"
+        ),
         other => panic!("StatusBar 高度应为固定 Px，实际 {other:?}"),
     }
 }
@@ -337,16 +340,8 @@ fn ui_root_is_fullscreen() {
     let mut app = layout_app();
     let root = find_one::<UiRoot>(&mut app);
     let node = app.world().get::<Node>(root).unwrap();
-    assert_eq!(
-        node.width,
-        Val::Percent(100.0),
-        "UiRoot 宽度应为 100%"
-    );
-    assert_eq!(
-        node.height,
-        Val::Percent(100.0),
-        "UiRoot 高度应为 100%"
-    );
+    assert_eq!(node.width, Val::Percent(100.0), "UiRoot 宽度应为 100%");
+    assert_eq!(node.height, Val::Percent(100.0), "UiRoot 高度应为 100%");
 }
 
 /// I2 回归：源码级——扩展业务代码不再出现 `Overflow::clip_y()` 假滚动。
@@ -441,9 +436,7 @@ fn scroll_frame_contract_via_assertion() {
         .id();
     let frame = app
         .world_mut()
-        .spawn((
-            xui::scroll_frame::ScrollFrame::vertical(),
-        ))
+        .spawn((xui::scroll_frame::ScrollFrame::vertical(),))
         .id();
     app.world_mut().entity_mut(root).add_child(frame);
     for i in 0..200 {

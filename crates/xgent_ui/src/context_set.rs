@@ -82,6 +82,28 @@ pub enum ContextKind {
     Other,
 }
 
+impl ContextKind {
+    /// 持久化字符串。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ContextKind::File => "file",
+            ContextKind::Symbol => "symbol",
+            ContextKind::Selection => "selection",
+            ContextKind::Other => "other",
+        }
+    }
+
+    /// 从持久化字符串还原。
+    pub fn from_persisted(value: &str) -> Self {
+        match value {
+            "symbol" => ContextKind::Symbol,
+            "selection" => ContextKind::Selection,
+            "file" => ContextKind::File,
+            _ => ContextKind::Other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

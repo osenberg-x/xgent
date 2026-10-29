@@ -171,13 +171,11 @@ fn apply_modal_push(
             continue;
         }
         let depth = stack.len() as i32;
-        commands
-            .entity(push.entity)
-            .insert((
-                GlobalZIndex(z::MODAL_BASE + depth * z::MODAL_STRIDE),
-                // v8 M7-T2：模态层根挂 TabGroup::modal()，Tab 键不跳出模态
-                TabGroup::modal(),
-            ));
+        commands.entity(push.entity).insert((
+            GlobalZIndex(z::MODAL_BASE + depth * z::MODAL_STRIDE),
+            // v8 M7-T2：模态层根挂 TabGroup::modal()，Tab 键不跳出模态
+            TabGroup::modal(),
+        ));
         stack.layers.push(ModalLayer {
             id: push.id,
             entity: push.entity,

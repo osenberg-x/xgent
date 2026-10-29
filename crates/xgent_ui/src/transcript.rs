@@ -13,6 +13,8 @@ pub struct Transcript {
     pub blocks: Vec<BlockRef>,
     /// 下一个 turn 索引（用户消息递增）。
     next_turn_index: u64,
+    /// 代次：clear/restore 时递增，渲染层据此丢弃旧实体。
+    generation: u64,
 }
 
 impl Transcript {
@@ -222,13 +224,14 @@ impl Transcript {
         (turn_index, block_index)
     }
 
-    /// 追加通用通知（undo 结果等）。
-    pub fn push_notice(&mut self, turn_index: u64, text: String) -> (u64, usize) {
+    /// 追加通用通知（undo 结果、错误、重试状态等）。
+    pub fn push_notice(&mut self, turn_index: u64, text: String, kind: NoticeKind) -> (u64, usize) {
         let block_index = self.blocks.len();
         self.blocks.push(BlockRef::Notice {
             turn_index,
             block_index,
             text,
+            kind,
         });
         (turn_index, block_index)
     }
@@ -247,6 +250,11 @@ impl Transcript {
         &self.blocks
     }
 
+    /// 当前代次。
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// 整体替换（会话恢复）。
     pub fn restore(&mut self, blocks: Vec<BlockRef>) {
         let max_turn = blocks
@@ -257,12 +265,14 @@ impl Transcript {
             .unwrap_or(0);
         self.blocks = blocks;
         self.next_turn_index = max_turn;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// 清空 transcript。
     pub fn clear(&mut self) {
         self.blocks.clear();
         self.next_turn_index = 0;
+        self.generation = self.generation.wrapping_add(1);
     }
 }
 
@@ -309,11 +319,12 @@ pub enum BlockRef {
         tokens_before: u32,
         tokens_after: u32,
     },
-    /// 通用通知（undo 结果等）。
+    /// 通用通知（undo 结果、错误、重试状态等）。
     Notice {
         turn_index: u64,
         block_index: usize,
         text: String,
+        kind: NoticeKind,
     },
 }
 
@@ -374,6 +385,18 @@ pub enum ContentBlock {
     Text(String),
     /// 代码块。
     Code { language: String, code: String },
+}
+
+/// 通知类型（决定渲染色调）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NoticeKind {
+    /// 普通信息。
+    #[default]
+    Info,
+    /// 错误。
+    Error,
+    /// 重试状态。
+    Retry,
 }
 
 /// 工具调用状态。
