@@ -611,7 +611,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 9. **启动时序（硬性）**：`App::new` → 业务 Plugin（XgentTools/CommandPalette/XgentContext）→ `PluginHostPlugin`（build 时 `register_proxy_impls` 已 set proxy）→ `load_builtin_plugins`（spawn 到 tokio runtime）→ run。proxy 注册在 `PluginHostPlugin::build`，此时 ToolExecutor/CommandRegistry/ContextHub 已就绪。
 
-10. **构建插件**：`./build_plugins.sh`（debug）或 `./build_plugins.sh release`。打包到 `crates/xgent_app/assets/plugins/<id>/`（plugin.toml + extension.wasm）。首次启动 `load_builtin_plugins` 检测 `installed/` 为空时从 `assets/plugins/` 预装。
+10. **构建插件**：`./build_plugins.sh`（debug）或 `./build_plugins.sh release`。打包到 `crates/xgent_app/assets/plugins/<id>/`（plugin.toml + extension.wasm）。**改了 WIT / `xgent_plugin_api` 就必须重跑它**（`extension.wasm` 被 `.gitignore` 排除，不入库，打包与 CI 都要先跑这一步）——随包资产与 WIT 脱节的后果是插件加载失败（`xgent_plugin_host` 的 `git_plugin` 用例就是这道报警器，别把它当基线红容忍，见台账 §10 勘误 54）。启动时 `load_builtin_plugins` 以随包内容为准：`installed/<id>/` 与 assets 字节不一致就覆盖刷新（dev 模式的 symlink 目录不参与）。
 
 11. **wit-bindgen 0.22 约束**：guest 侧 `wit_bindgen::generate!` 必须在 crate 根（不在 `mod wit` 内），否则 `export!` 宏无法在 crate 根解析。host 侧 `wasmtime::component::bindgen!` 生成 `Plugin` world struct，`add_to_linker` + `instantiate_async` + `call_*_async`。WIT `result<_, E>` 用下划线表示 unit ok（非 `()`）。
 

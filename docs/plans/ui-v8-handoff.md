@@ -54,14 +54,14 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
   - 标粗的两组在 M2b 基线是**长期失败**（见 §4.3），M3-T6 顺带修好了。
   - `terminal_cell_layout` 需**给相机一个非零渲染目标**（headless 无渲染管线 → UI 视口宽高全 0，见台账 §10 勘误 32）；其中 2 项按格定位专属用例在 `legacy-terminal-layout` feature 下自动跳过（旧路径不 spawn `OutputCellRun`）。
 
-**基线既有失败（不是回归，别当自己弄坏的）**——`cargo test --workspace` 里仍有：
+**基线既有失败已全部闭合**（2026-10-29 实测 `cargo test --workspace` = 63 个 target ok、0 红）。历史清单与处置：
 
 | 目标 | 数量 | 现象 |
 |:---|:---|:---|
-| `xgent_tools` `builtins::run_command::tests::*` | 6 | 依赖 POSIX shell，Windows 上失败 |
-| `xgent_plugin_host` `git_plugin` / `ecs_registration` | 6 | git 插件 WASM 未构建（`preview-diff` 导出缺失） |
-| `xgent_daemon::config_store::global_write_lands_inside_the_isolated_dir` | 1 | 多个测试并行写同一个临时配置文件 |
-| `xgent_settings_core::paths::daemon_socket_env_override` | 1 | Windows 下期望 `/tmp/.../daemon.sock`，实际 named pipe |
+| ~~`xgent_tools` `builtins::run_command::tests::*`~~ | 0 | 本轮三次全量跑均 **ok**（含 `run_failing_command`）；该行是早期 POSIX 假设的记录，已过期 |
+| `xgent_plugin_host` `git_plugin` / `proxy_op` / `unregister` | 0 | **两层原因**：① 随包 `assets/plugins/git/extension.wasm` 是 8 月的旧产物，缺 `preview-diff` 导出（`./build_plugins.sh release` 重建即修；该 wasm 被 `.gitignore` 排除、不入库，故过期发生在每台机器与打包环节）；② 更要命的是 `load_builtin_plugins` 只判 `installed.exists()` → 内建插件**永不更新**，既有安装的用户每次启动都加载失败且无自愈路径。现按随包内容比对刷新（dev symlink 不参与），台账 §10 勘误 54 |
+| `xgent_daemon::config_store::global_write_lands_inside_the_isolated_dir` | 0 | **已修**：全局配置只有一个进程级路径，15 个测试并行写同一份 `config.toml` 互相覆盖。`isolate_agent_dir()` 现返回写盘锁守卫，写配置的用例串行到用例结束 |
+| `xgent_settings_core::paths::daemon_socket_env_override` | 0 | **已修**：断言按平台分叉——Windows 用命名管道且管道名必须固定（`XGENT_AGENT_DIR` 不参与是设计，不是缺陷） |
 | ~~`xgent_agent::bridge_tests::max_parallel_tools_written_to_handle_bounds_next_turn`~~ | 0 | **已修**（2026-10-29，台账 §10 勘误 53）：不是「偶发」，是测试用固定帧数追异步 bridge 任务；`drive_until` 有界轮询后 8/8 + 满载全绿 |
 
 ---

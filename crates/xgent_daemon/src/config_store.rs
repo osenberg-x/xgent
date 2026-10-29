@@ -407,7 +407,7 @@ fn parse_string(key: &str, value: &Value) -> XgentResult<String> {
 mod tests {
     use super::*;
 
-    use crate::test_util::isolate_agent_dir;
+    use crate::test_util::{isolate_agent_dir, lock_config_io};
 
     fn empty_config() -> GlobalConfig {
         GlobalConfig::default()
@@ -432,6 +432,7 @@ mod tests {
     #[test]
     fn write_updates_memory_and_returns_changed() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         let changed = c.write("default_model", json!("claude-3")).unwrap();
         assert_eq!(changed.key, "default_model");
@@ -442,6 +443,7 @@ mod tests {
     #[test]
     fn write_unknown_key_errors() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         let err = c.write("no.such.key", json!("x")).unwrap_err();
         assert!(matches!(err, XgentError::Config(_)));
@@ -450,6 +452,7 @@ mod tests {
     #[test]
     fn write_wrong_type_errors() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         let err = c.write("default_model", json!(42)).unwrap_err();
         assert!(matches!(err, XgentError::Config(_)));
@@ -458,6 +461,7 @@ mod tests {
     #[test]
     fn write_persists_to_memory_and_reflects_in_config() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write("default_model", json!("gpt-5")).unwrap();
         assert_eq!(c.config().default_model, "gpt-5");
@@ -470,6 +474,7 @@ mod tests {
     #[test]
     fn density_key_is_writable_and_readable() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         assert_eq!(c.read("preferences.density"), json!("comfortable"));
 
@@ -499,6 +504,7 @@ mod tests {
     #[test]
     fn global_write_lands_inside_the_isolated_dir() {
         let dir = isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write(
             "providers.openai.api_base",
@@ -523,6 +529,7 @@ mod tests {
     #[test]
     fn config_write_errors_avoid_fullwidth_punctuation() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let root = tempfile::tempdir().expect("临时项目根");
         let mut c = ConfigCoordinator::with_config(empty_config());
         let global_cases = [
@@ -566,6 +573,7 @@ mod tests {
     #[test]
     fn write_provider_field_creates_entry() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write(
             "providers.myai.api_base",
@@ -585,6 +593,7 @@ mod tests {
     #[test]
     fn write_provider_model_overrides_inserts_default_key() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write(
             "providers.myai.api_base",
@@ -614,6 +623,7 @@ mod tests {
     #[test]
     fn write_whole_provider_config() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         let pc = json!({
             "kind": "open_ai_compat",
@@ -629,6 +639,7 @@ mod tests {
     #[test]
     fn write_provider_retry_fields() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write("providers.myai.api_base", json!("https://x.example.com"))
             .unwrap();
@@ -663,6 +674,7 @@ mod tests {
     #[test]
     fn write_provider_context_limit_fields_reach_config() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write("providers.myai.context_window", json!(32000))
             .unwrap();
@@ -688,6 +700,7 @@ mod tests {
     #[test]
     fn writing_zero_to_provider_limits_keeps_the_unset_sentinel() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write("providers.myai.context_window", json!(32000))
             .unwrap();
@@ -706,6 +719,7 @@ mod tests {
     #[test]
     fn model_context_windows_is_readable_but_not_writable_as_a_field() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         c.write(
             "providers.gpt",
@@ -731,6 +745,7 @@ mod tests {
     #[test]
     fn unknown_global_provider_field_still_errors() {
         isolate_agent_dir();
+        let _io = lock_config_io();
         let mut c = ConfigCoordinator::with_config(empty_config());
         let err = c
             .write("providers.myai.not_a_field", json!(1))

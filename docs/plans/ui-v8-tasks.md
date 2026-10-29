@@ -494,6 +494,14 @@ M1 与 M2 相互独立，可并行分头推进。
 
 53. **`xgent_agent` 测试与异步 bridge 赛跑的缺陷族**（2026-10-29）：`bridge_tests` 用「跑固定帧数再断言」等异步任务推进，而一帧只有微秒级——机器负载稍高，tokio 上的 bridge 任务还没被调度，帧预算就烧完了。实测复现率：`max_parallel_tools_written_to_handle_bounds_next_turn` **6/6 稳定红**（§2 基线记的「并发时序偶发」不准确，真因是 `drive` 的 300 帧 ≈1.2s 小于「串行 4 个探针 × 400ms 等待」的 1.6s，第 4 个结果还没到）；`abort_interrupts_confirming_state`、`error_message_propagates`、`compaction_syncs_conv_messages`、`approved_read_tools_actually_overlap` 各约 1/6 flake。修复：① 新增 `drive_within`/`drive_until`（有界轮询到条件成立，预算用尽仍由原断言判红，不掩盖真实缺陷）；② `drive` 的预算从帧数改墙钟 15s；③ `ProbeState::overlapping()` 给「断言必须真重叠」的四个用例 2.5s 等待预算（串行/钳制型用例保持 400ms，它们要等的就是超时）。复验：单跑 8/8 全绿（78 passed），全 workspace 并发负载下 `bridge_tests` 亦全绿；套件耗时 1.9s→5.1s。**剩余基线红**（截至本次）：`xgent_plugin_host` 6（git 插件 WASM 缺 `preview-diff` 导出）、`xgent_daemon::config_store::global_write_lands_inside_the_isolated_dir` 1（并行测试共享同一临时配置文件）、`xgent_settings_core::paths::daemon_socket_env_override` 1（Windows 下期望 named pipe 却断言 `/tmp` 路径）。
 
+54. **`cargo test --workspace` 从 15 红到 0 红**（2026-10-29，用户要求「分析其他存在的 bug 并修复」）：
+    ① **随包 git 插件 wasm 与 WIT 契约脱节**——本机 `crates/xgent_app/assets/plugins/git/extension.wasm` 还是 8 月 5 日的产物，缺 `preview-diff` 导出（该导出后加进 `plugin.wit:67`），导致 `xgent_plugin_host` 6 个测试红 + 应用每次启动打一条 `加载插件失败 plugin=git` WARN。`./build_plugins.sh release` 重建即修（15s，178KB）。注意该 wasm **被 `.gitignore` 排除**（只入库 `plugin.toml`），所以过期发生在每台机器/每次打包上——这正是 ② 更要紧的原因。
+    ② **真正的产品缺陷是内建插件永不更新**：`load_builtin_plugins` 判的是 `installed.exists()` → 只装一次，之后随包版本再新也不刷新；用户在 ABI 变更后永久停在旧 wasm 上，且没有任何自愈路径（删目录才行）。现改为**以随包内容为准**：`builtin_needs_refresh` 先比长度再比字节，不一致就清理重拷；dev 模式的 symlink 目录不参与（源码说话）。单测 `builtin_refresh_detects_stale_asset` 覆盖「未装/长度不同/等长异字节/一致」四态；实测第一次启动打「刷新内建插件」且加载失败归零，第二次启动不再重拷（无 5MB churn）。
+    ③ **daemon 配置测试并行互踩**：全局配置路径进程级唯一，15 个用例并行写同一份 `config.toml`，`global_write_lands_inside_the_isolated_dir` 会读到别的测试的磁盘状态（`left: None`）。`isolate_agent_dir()` 现返回 `(&Path, MutexGuard)`，把写盘串行到用例结束（每用例只调一次——std Mutex 不可重入）。
+    ④ **`paths::daemon_socket_env_override` 的断言没分平台**：Windows 走命名管道且刻意不读 `XGENT_AGENT_DIR`（管道名必须固定），测试却无条件断言 `/tmp/.../daemon.sock`。改为 `cfg` 分叉断言。
+    ⑤ **§2 基线表里的 `xgent_tools::run_command` 6 项已不复现**（本轮三次全量跑均 ok），该行是过期记录，一并订正。
+    教训：**长期容忍「基线红」会让真缺陷混在里面**——`git_plugin` 那 6 个红本身就是随包资产过期的报警器，被记成基线后没人再看；而 `preview-diff` 的 WIT 变更其实早该被这三个测试拦住。**改 WIT/插件 API 后必须重跑 `./build_plugins.sh`**——资产不入库，打包与 CI 都得先跑它，否则每台旧机器都会停在过期 wasm 上（dev-tutorial §10 已补）。验证：`cargo test --workspace --no-fail-fast` = 63 targets ok / 0 红；`xgent_plugin` 18 单测绿；应用两次启动零 panic、零插件加载失败。
+
 ## 附：文档树变更（2026-10-16，已完成）
 
 原 `doc/` 与 Comet 专用的 `docs/` 已合并为单一 `docs/` 树：`docs/` 现含 `comet/`、`design/`、`decisions/`、`notes/`、`plans/`、`tasks/`、`README.md`、`dev-tutorial.md`、`conversation-flow-fixes-*.md`，`doc/` 不再存在。

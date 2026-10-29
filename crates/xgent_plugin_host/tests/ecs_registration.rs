@@ -60,7 +60,12 @@ async fn load_git_plugin(
             work_dir.path().to_path_buf(),
         )
         .await
-        .expect("加载 git 插件");
+        .unwrap_or_else(|e| {
+            panic!(
+                "加载 git 插件失败：{e}
+若报 'does not have export'，说明随包 wasm 比 WIT 旧——先跑 ./build_plugins.sh"
+            )
+        });
     (manifest, plugin)
 }
 

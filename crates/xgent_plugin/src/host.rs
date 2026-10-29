@@ -245,9 +245,12 @@ impl PluginHost {
         &self.wasm_host
     }
 
-    /// 加载内建插件（首次启动预装）。
+    /// 加载内建插件（随包发布的 `assets/plugins/`）。
     ///
-    /// 照设计文档 §13 Step P6：检测 `installed/` 为空时从 `assets/plugins/` 预装。
+    /// 照设计文档 §13 Step P6。**已装过不等于装对了**：`installed/<id>/` 与随包
+    /// 内容不一致时覆盖刷新——只判 `exists()` 会让用户在 ABI 变更后永远停在旧 wasm
+    /// 上（实测 `preview-diff` 进 WIT 之后，既有安装的 git 插件每次启动都报
+    /// `does not have export preview-diff`，而用户没有任何自愈路径）。
     pub async fn load_builtin_plugins(&self) -> Result<(), PluginHostError> {
         let assets = match &self.assets_dir {
             Some(d) if d.exists() => d.clone(),
@@ -267,10 +270,20 @@ impl PluginHost {
                 Some(s) => s.to_string(),
                 None => continue,
             };
-            // 若已安装则跳过
             let installed = self.installed_dir.join(&id);
             if installed.exists() {
-                continue;
+                // dev 模式（§8.5）是 symlink 到源码目录，由源码说话，不覆盖
+                if is_symlink_dir(&installed) {
+                    continue;
+                }
+                if !builtin_needs_refresh(&dir, &installed) {
+                    continue;
+                }
+                if let Err(e) = std::fs::remove_dir_all(&installed) {
+                    tracing::warn!(plugin = %id, error = %e, "刷新内建插件前清理旧目录失败");
+                    continue;
+                }
+                tracing::info!(plugin = %id, "刷新内建插件（与随包内容不一致）");
             }
             // 复制 assets/plugins/<id>/ → installed/<id>/
             if let Err(e) = copy_dir_recursive(&dir, &installed) {
@@ -597,6 +610,42 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 随包内建插件与 `installed/<id>/` 内容是否不一致（长度不同或字节不同）。
+///
+/// 先比长度再比内容：`extension.wasm` 有数 MB，长度不同就不必读第二份。
+fn builtin_needs_refresh(assets: &Path, installed: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(assets) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let from = entry.path();
+        if from.is_dir() {
+            continue;
+        }
+        let to = installed.join(entry.file_name());
+        let want_len = std::fs::metadata(&from).map(|m| m.len()).ok();
+        let have_len = std::fs::metadata(&to).map(|m| m.len()).ok();
+        if want_len != have_len {
+            return true;
+        }
+        let Ok(want) = std::fs::read(&from) else {
+            return true;
+        };
+        match std::fs::read(&to) {
+            Ok(have) if have == want => {}
+            _ => return true,
+        }
+    }
+    false
+}
+
+/// 该路径本身是否是符号链接（dev 模式安装的判据）。
+fn is_symlink_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
 /// 跨平台创建目录 symlink（dev 模式，§8.5）。
 #[cfg(unix)]
 fn symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -614,4 +663,47 @@ fn symlink_dir(_src: &Path, _dst: &Path) -> std::io::Result<()> {
         std::io::ErrorKind::Unsupported,
         "symlink 不支持此平台",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 内建插件刷新的判据：未装 / 内容不一致 → 刷新；一致 → 不重复拷贝。
+    #[test]
+    fn builtin_refresh_detects_stale_asset() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let assets = tmp.path().join("assets/git");
+        let installed = tmp.path().join("installed/git");
+        std::fs::create_dir_all(&assets).expect("mkdir assets");
+        std::fs::write(assets.join("extension.wasm"), b"new-wasm-bytes").expect("wasm");
+        std::fs::write(assets.join("plugin.toml"), b"id = \"git\"\n").expect("toml");
+
+        assert!(
+            builtin_needs_refresh(&assets, &installed),
+            "还没装过 → 需要装"
+        );
+
+        // 旧 wasm（长度也不同）：ABI 变更后既有安装的真实形态
+        std::fs::create_dir_all(&installed).expect("mkdir installed");
+        std::fs::write(installed.join("extension.wasm"), b"old").expect("old wasm");
+        std::fs::write(installed.join("plugin.toml"), b"id = \"git\"\n").expect("old toml");
+        assert!(
+            builtin_needs_refresh(&assets, &installed),
+            "随包 wasm 与已装内容不一致时必须刷新"
+        );
+
+        // 等长但内容不同：长度判据不足以覆盖，必须比字节
+        std::fs::write(installed.join("extension.wasm"), b"zed-wasm-bytes").expect("same-len");
+        assert!(
+            builtin_needs_refresh(&assets, &installed),
+            "长度相同而内容不同也要刷新"
+        );
+
+        std::fs::write(installed.join("extension.wasm"), b"new-wasm-bytes").expect("sync");
+        assert!(
+            !builtin_needs_refresh(&assets, &installed),
+            "内容一致时不该每次启动都重拷"
+        );
+    }
 }

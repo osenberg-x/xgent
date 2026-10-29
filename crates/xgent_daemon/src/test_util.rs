@@ -14,8 +14,15 @@ use xgent_settings_core::paths::ENV_AGENT_DIR;
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 static LOCK: Mutex<()> = Mutex::new(());
+/// 全局配置只有一个进程级路径，写它的测试必须**串行**：并行时 A 的写入会被 B 的
+/// `empty_config()` 落盘覆盖，`global_write_lands_inside_the_isolated_dir` 实测就会
+/// 读到别的测试的磁盘状态（断言 `left: None`）。
+static CONFIG_IO: Mutex<()> = Mutex::new(());
 
 /// 把 `XGENT_AGENT_DIR` 指到一个进程级临时目录（幂等）。返回该目录。
+///
+/// 只写会话/其他文件的用例用这个就够了；**写全局 `config.toml` 的用例还要另外持
+/// 有 [`lock_config_io`] 到用例结束**，否则并发用例互相覆盖同一份配置文件。
 pub(crate) fn isolate_agent_dir() -> &'static Path {
     // 守卫持有到函数结束：并发的第二个调用者不会读到尚未设置的 env
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -29,4 +36,13 @@ pub(crate) fn isolate_agent_dir() -> &'static Path {
         path
     });
     DIR.get().expect("上面已初始化")
+}
+
+/// 全局配置写盘锁：`config.toml` 只有一个进程级路径，写它的用例必须串行到结束。
+///
+/// 守卫绑定到一个 `_io` 变量上即可（用例结束自动释放）。**不要在 async 用例里跨
+/// `await` 持有它**（std Mutex 非 async 安全，`clippy::await_holding_lock` 会报）——
+/// 目前只有同步的 `config_store` 用例需要它。
+pub(crate) fn lock_config_io() -> std::sync::MutexGuard<'static, ()> {
+    CONFIG_IO.lock().unwrap_or_else(|e| e.into_inner())
 }

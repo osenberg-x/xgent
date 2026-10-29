@@ -61,7 +61,12 @@ async fn git_plugin_register_and_id_consistency() {
             work_dir.path().to_path_buf(),
         )
         .await
-        .expect("加载 git 插件");
+        .unwrap_or_else(|e| {
+            panic!(
+                "加载 git 插件失败：{e}
+若报 'does not have export'，说明随包 wasm 比 WIT 旧——先跑 ./build_plugins.sh"
+            )
+        });
 
     // register 返回 4 个工具（git_diff/git_log/git_status/git_commit）
     let tools = plugin.call_tool_register().await.expect("register");
@@ -104,7 +109,12 @@ async fn git_plugin_execute_git_status() {
             work_dir.path().to_path_buf(),
         )
         .await
-        .expect("加载 git 插件");
+        .unwrap_or_else(|e| {
+            panic!(
+                "加载 git 插件失败：{e}
+若报 'does not have export'，说明随包 wasm 比 WIT 旧——先跑 ./build_plugins.sh"
+            )
+        });
 
     // 调 git_status 工具（经 host.run_command 执行真实 git status）
     let result = plugin
@@ -149,7 +159,12 @@ async fn git_plugin_cancel_returns_aborted() {
             work_dir.path().to_path_buf(),
         )
         .await
-        .expect("加载 git 插件");
+        .unwrap_or_else(|e| {
+            panic!(
+                "加载 git 插件失败：{e}
+若报 'does not have export'，说明随包 wasm 比 WIT 旧——先跑 ./build_plugins.sh"
+            )
+        });
 
     // 先 cancel，再调用——验证 dispatch select! biased 优先 cancelled 分支
     let token = tokio_util::sync::CancellationToken::new();

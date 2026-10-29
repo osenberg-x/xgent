@@ -249,8 +249,18 @@ mod tests {
         let _guard = ENV_LOCK.lock();
         // SAFETY: 持锁串行化，测试结束清理
         unsafe { std::env::set_var(ENV_AGENT_DIR, "/tmp/xgent-test-sock") };
-        let p = daemon_socket_path();
-        assert_eq!(p, PathBuf::from("/tmp/xgent-test-sock/daemon.sock"));
+        #[cfg(not(windows))]
+        assert_eq!(
+            daemon_socket_path(),
+            PathBuf::from("/tmp/xgent-test-sock/daemon.sock")
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            daemon_socket_path(),
+            PathBuf::from(r"\\.\pipe\xgent-daemon"),
+            "Windows 走命名管道，管道名必须固定（UI 与 daemon 约定一致），\
+             XGENT_AGENT_DIR 不参与——这是设计而非缺陷，断言须按平台分叉"
+        );
         // SAFETY: 持锁串行化
         unsafe { std::env::remove_var(ENV_AGENT_DIR) };
     }
