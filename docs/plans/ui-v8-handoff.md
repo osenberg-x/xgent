@@ -62,7 +62,7 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 | `xgent_plugin_host` `git_plugin` / `ecs_registration` | 6 | git 插件 WASM 未构建（`preview-diff` 导出缺失） |
 | `xgent_daemon::config_store::global_write_lands_inside_the_isolated_dir` | 1 | 多个测试并行写同一个临时配置文件 |
 | `xgent_settings_core::paths::daemon_socket_env_override` | 1 | Windows 下期望 `/tmp/.../daemon.sock`，实际 named pipe |
-| `xgent_agent::bridge_tests::max_parallel_tools_written_to_handle_bounds_next_turn` | 1 | 并发时序偶发；2026-10-29 连跑 3 次均 3/4（未修） |
+| ~~`xgent_agent::bridge_tests::max_parallel_tools_written_to_handle_bounds_next_turn`~~ | 0 | **已修**（2026-10-29，台账 §10 勘误 53）：不是「偶发」，是测试用固定帧数追异步 bridge 任务；`drive_until` 有界轮询后 8/8 + 满载全绿 |
 
 ---
 

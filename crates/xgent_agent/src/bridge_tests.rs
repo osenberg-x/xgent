@@ -348,9 +348,12 @@ fn error_message_propagates() {
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
     });
-    for _ in 0..20 {
-        app.update();
-    }
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            == ConversationStatus::Error
+    });
     let conv = app.world().resource::<crate::conversation::Conversation>();
     assert_eq!(conv.status, ConversationStatus::Error);
 }
@@ -1215,9 +1218,9 @@ fn compaction_syncs_conv_messages() {
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
     });
-    for _ in 0..60 {
-        app.update();
-    }
+    drive_until(&mut app, |app| {
+        app.world().resource::<CompactedCollected>().count >= 1
+    });
     let collected = app.world().resource::<CompactedCollected>();
     assert!(collected.count >= 1, "compaction 应触发");
     // 压缩后 conv.messages 应被替换为压缩后的消息（含 summary 前置）
@@ -1641,10 +1644,13 @@ fn confirm_decision_sets_tool_running_status() {
         pinned_context: Vec::new(),
     });
 
-    // 跑帧让 tool_call 到达 + ConfirmRequest 弹出
-    for _ in 0..30 {
-        app.update();
-    }
+    // 轮询到 tool_call 到达 + ConfirmRequest 弹出（固定帧数在负载下追不上异步任务）
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            == ConversationStatus::Confirming
+    });
 
     // 此时状态应为 Confirming（等待用户确认）
     {
@@ -2216,10 +2222,13 @@ fn abort_interrupts_confirming_state() {
         pinned_context: Vec::new(),
     });
 
-    // 跑帧让 tool_call 到达 + ConfirmRequest 弹出
-    for _ in 0..30 {
-        app.update();
-    }
+    // 轮询到 tool_call 到达 + ConfirmRequest 弹出（固定帧数在负载下追不上异步任务）
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            == ConversationStatus::Confirming
+    });
 
     // 此时状态应为 Confirming（等待用户确认）
     {
@@ -2841,6 +2850,8 @@ struct ProbeState {
     max_in_flight: Arc<std::sync::atomic::AtomicUsize>,
     /// 期望的最小并发数；`1` 表示不等（只记录），`>1` 表示必须等到或有界超时
     target: usize,
+    /// 等待并发到位的墙钟预算（见 `overlapping`）
+    wait_ms: u64,
 }
 
 impl ProbeState {
@@ -2849,7 +2860,19 @@ impl ProbeState {
             in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             max_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             target,
+            wait_ms: 400,
         }
+    }
+
+    /// 断言「必须真的重叠」的用例专用（`st.max() == 2/3` 这一类）。
+    ///
+    /// 默认 400ms 预算在机器负载下不够：兄弟工具的任务可能还没被 tokio 轮询到，
+    /// 等待者就超时放行 → `max` 停在 1 → 断言假红（实测 1/6 复现）。串行/钳制型
+    /// 用例继续用 `new`：它们要等的就是超时，预算放大只会拖慢套件。
+    fn overlapping(target: usize) -> Self {
+        let mut st = Self::new(target);
+        st.wait_ms = 2_500;
+        st
     }
 
     fn max(&self) -> usize {
@@ -2908,7 +2931,7 @@ impl Tool for ProbeTool {
         let cur = self.state.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         self.state.max_in_flight.fetch_max(cur, Ordering::SeqCst);
         // 等到并发到位（或有界超时）：串行调度走的是超时这条路，max 因此停在 1
-        let deadline = Instant::now() + Duration::from_millis(400);
+        let deadline = Instant::now() + Duration::from_millis(self.state.wait_ms);
         while self.state.in_flight.load(Ordering::SeqCst) < self.state.target
             && Instant::now() < deadline
             && !signal.is_cancelled()
@@ -3006,17 +3029,37 @@ fn probe_app(
     app
 }
 
-/// 驱动 App 直到 `want` 条结果到位（或帧数用尽）。每帧之间让出一点时间，
+/// 驱动 App 直到 `want` 条结果到位（或墙钟预算用尽）。每帧之间让出一点时间，
 /// 桥接 runtime 上的工具才有机会推进——探针靠 sleep 重叠，纯空转 update 也能推进，
-/// 但留出时间片能让"该重叠"的情形稳定成立。
+/// 但留出时间片能让「该重叠」的情形稳定成立。
+///
+/// 预算按墙钟算而不是帧数：`max_parallel_tools = 1` 时每个探针都要等满 target 的
+/// 400ms 超时才放行，4 个串行 ≈ 1.6s，原来的 300 帧（≈1.2s）会在第 4 个到位前就
+/// 返回，留下 `results.len() == 3` 的稳定红。到位即返回，健康情形不多花时间。
 fn drive(app: &mut App, want: usize) {
-    for _ in 0..300 {
+    drive_within(app, 15_000, |app| {
+        app.world().resource::<Probed>().results.len() >= want
+    });
+}
+
+/// 轮询推进帧，直到 `ready` 为真或墙钟预算用尽。
+///
+/// 「跑固定帧数再断言」在负载下必 flake：一帧只有微秒级，异步 bridge 任务还没被
+/// tokio 调度到，帧预算就烧完了。轮询让断言只依赖「有没有发生」，不依赖「多少帧内
+/// 发生」；预算用尽后仍由调用方的断言判红，不掩盖真实缺陷。
+fn drive_within(app: &mut App, budget_ms: u64, ready: impl Fn(&App) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(budget_ms);
+    while std::time::Instant::now() < deadline {
         app.update();
-        if app.world().resource::<Probed>().results.len() >= want {
+        if ready(app) {
             return;
         }
-        std::thread::sleep(std::time::Duration::from_millis(4));
+        std::thread::sleep(std::time::Duration::from_millis(2));
     }
+}
+
+fn drive_until(app: &mut App, ready: impl Fn(&App) -> bool) {
+    drive_within(app, 8_000, ready);
 }
 
 fn probe(
@@ -3039,7 +3082,7 @@ fn probe(
 /// 观测到的最大并发停在 1，本断言即失败。
 #[test]
 fn approved_read_tools_actually_overlap() {
-    let st = ProbeState::new(2);
+    let st = ProbeState::overlapping(2);
     let tools = vec![
         probe("pa", ToolTier::Read, Concurrency::Shared, 30, &st),
         probe("pb", ToolTier::Read, Concurrency::Shared, 30, &st),
@@ -3110,7 +3153,7 @@ fn exclusive_call_is_a_barrier_for_its_neighbours() {
 /// 不同（c1 最快、c0 最慢），同时用 target=3 证明三者确实重叠过。
 #[test]
 fn results_keep_model_order_even_when_completion_differs() {
-    let st = ProbeState::new(3);
+    let st = ProbeState::overlapping(3);
     let tools = vec![
         probe("pa", ToolTier::Read, Concurrency::Shared, 120, &st),
         probe("pb", ToolTier::Read, Concurrency::Shared, 10, &st),
@@ -3172,7 +3215,7 @@ fn cap_one_serialises_even_approved_read_tools() {
 /// A5：上限=2 时最多 2 个在跑，4 个调用全部产出。
 #[test]
 fn cap_two_bounds_the_group() {
-    let st = ProbeState::new(3);
+    let st = ProbeState::overlapping(3);
     let tools = (0..4u64)
         .map(|k| {
             probe(
@@ -3262,7 +3305,7 @@ fn confirmations_are_asked_one_at_a_time_and_never_overlap() {
 /// 已启动的报中断，没启动的补占位。
 #[test]
 fn abort_during_concurrent_group_pairs_every_call() {
-    let st = ProbeState::new(3);
+    let st = ProbeState::overlapping(3);
     let tools = vec![
         probe("pa", ToolTier::Read, Concurrency::Shared, 600, &st),
         probe("pb", ToolTier::Read, Concurrency::Shared, 600, &st),
