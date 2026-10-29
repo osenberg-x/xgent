@@ -59,6 +59,16 @@ impl ContextSet {
         self.removed.contains(id)
     }
 
+    /// 标记为已移除（会话恢复时回放 sidecar 用）。
+    pub fn mark_removed(&mut self, id: &str) {
+        self.removed.insert(id.to_string());
+    }
+
+    /// 已移除项 id 列表。
+    pub fn removed_ids(&self) -> Vec<String> {
+        self.removed.iter().cloned().collect()
+    }
+
     /// 检查是否包含某 id。
     pub fn contains(&self, id: &str) -> bool {
         self.items.iter().any(|i| i.id == id)

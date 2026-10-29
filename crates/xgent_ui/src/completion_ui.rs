@@ -224,3 +224,41 @@ fn file_candidates(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat_panel::ChatInputMarker;
+    use crate::completion::{CompletionCandidate, CompletionKind, CompletionState};
+
+    #[test]
+    fn enter_is_consumed_and_popup_closes() {
+        let mut app = App::new();
+        app.init_resource::<CompletionState>()
+            .init_resource::<CompletionConsumed>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .add_systems(
+                PreUpdate,
+                (reset_completion_consumed, handle_completion_keys).chain(),
+            );
+        app.world_mut()
+            .spawn((bevy::text::EditableText::new("hi @fi"), ChatInputMarker));
+        {
+            let mut state = app.world_mut().resource_mut::<CompletionState>();
+            state.activate(
+                vec![CompletionCandidate {
+                    label: "src/main.rs".into(),
+                    insert_text: "@file:src/main.rs ".into(),
+                    kind: CompletionKind::File,
+                }],
+                3,
+            );
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.update();
+        assert!(!app.world().resource::<CompletionState>().active);
+        assert!(app.world().resource::<CompletionConsumed>().enter);
+    }
+}

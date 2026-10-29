@@ -206,23 +206,42 @@ pub fn restore_session(session_id: &str) -> Option<Vec<xgent_core::chat::AgentMe
     Some(messages.into_iter().map(|(_, m)| m).collect())
 }
 
+/// 会话级上下文 sidecar 内容。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ContextSidecar {
+    /// 格式版本。
+    #[serde(default)]
+    pub version: u32,
+    /// 当前上下文项。
+    #[serde(default)]
+    pub items: Vec<xgent_core::session::ContextSnapshot>,
+    /// 用户显式移除的项（tab 同步不再加回）。
+    #[serde(default)]
+    pub removed: Vec<String>,
+}
+
 /// 保存会话级上下文 sidecar（`<session_id>.context.json`，不改 JSONL 格式）。
 pub fn save_context_set(
     session_id: &str,
     items: &[xgent_core::session::ContextSnapshot],
+    removed: &[String],
 ) -> std::io::Result<()> {
     let session_id = session_id.trim_start_matches("session:");
     let path = session_file_path(session_id).with_extension("context.json");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let text = serde_json::to_string_pretty(items).map_err(std::io::Error::other)?;
+    let sidecar = ContextSidecar {
+        version: 1,
+        items: items.to_vec(),
+        removed: removed.to_vec(),
+    };
+    let text = serde_json::to_string_pretty(&sidecar).map_err(std::io::Error::other)?;
     std::fs::write(path, text)
 }
 
-/// 读取会话级上下文 sidecar；缺失或损坏时返回空列表。
-pub fn load_context_set(session_id: &str) -> Vec<xgent_core::session::ContextSnapshot> {
-    let session_id = session_id.trim_start_matches("session:");
+/// 读取会话级上下文 sidecar；缺失或损坏时返回空内容。
+pub fn load_context_set(session_id: &str) -> ContextSidecar {
     let session_id = session_id.trim_start_matches("session:");
     let path = session_file_path(session_id).with_extension("context.json");
     std::fs::read_to_string(path)

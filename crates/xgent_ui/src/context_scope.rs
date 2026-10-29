@@ -43,6 +43,10 @@ pub struct ContextSetRemove {
     pub id: String,
 }
 
+/// 上下文条右侧的 token 占比标签。
+#[derive(Component)]
+pub struct ContextTokenRatioMarker;
+
 /// chip 上的删除钮。
 #[derive(Component)]
 pub struct ContextChipRemoveMarker {
@@ -230,6 +234,9 @@ fn restore_context_set(
                 content: snapshot.content.clone(),
             });
         }
+        for id in &ev.removed_context {
+            set.mark_removed(id);
+        }
     }
 }
 
@@ -241,7 +248,8 @@ fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Co
     let Some(conv) = conv else {
         return;
     };
-    if conv.session_store.is_none() {
+    // 测试/未开始会话的占位 id 不落盘（默认 1）。
+    if conv.id.0 < 1_000_000_000_000 {
         return;
     }
     let snapshots: Vec<xgent_core::session::ContextSnapshot> = set
@@ -255,7 +263,9 @@ fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Co
             content: item.content.clone(),
         })
         .collect();
-    let _ = xgent_agent::session_store::save_context_set(&conv.id.0.to_string(), &snapshots);
+    let removed = set.removed_ids();
+    let _ =
+        xgent_agent::session_store::save_context_set(&conv.id.0.to_string(), &snapshots, &removed);
 }
 
 /// ContextSet 变化时重建 chips（签名比对避免每帧重建；标签/添加钮保留）。
@@ -269,6 +279,7 @@ fn rebuild_context_chips(
     mut cached: Local<String>,
     q_row: Query<Entity, With<ContextScopeMarker>>,
     chips: Query<Entity, With<ContextChipMarker>>,
+    ratios: Query<Entity, With<ContextTokenRatioMarker>>,
 ) {
     let Ok(row) = q_row.single() else {
         return;
@@ -296,6 +307,9 @@ fn rebuild_context_chips(
 
     for chip in chips.iter() {
         commands.entity(chip).despawn();
+    }
+    for ratio in ratios.iter() {
+        commands.entity(ratio).despawn();
     }
 
     for item in set.items() {
@@ -382,6 +396,7 @@ fn rebuild_context_chips(
                 theme.text_muted,
                 type_scale::line_height::UI,
             ),
+            ContextTokenRatioMarker,
         ));
     });
 }

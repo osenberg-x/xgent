@@ -307,8 +307,19 @@ mod tests {
             },
         );
         app.update();
-        let mut query = app.world_mut().query::<&CompletionPopupMarker>();
-        assert_eq!(query.iter(app.world()).count(), 1);
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(Entity, &ChildOf), With<CompletionPopupMarker>>();
+        let popups: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(popups.len(), 1);
+        assert_eq!(popups[0].1.parent(), layer, "浮层必须挂在 DROPDOWN 层");
+        let popup = popups[0].0;
+        let node = app.world().get::<Node>(popup).expect("popup Node");
+        assert!(
+            matches!(node.left, Val::Px(x) if x <= 784.0),
+            "窄窗左缘应钳制: {:?}",
+            node.left
+        );
     }
 
     #[test]

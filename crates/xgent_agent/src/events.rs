@@ -215,6 +215,8 @@ pub struct SessionRestoredMessage {
     pub messages: Vec<xgent_core::chat::AgentMessage>,
     /// 恢复的上下文项（会话级 sidecar）。
     pub context_set: Vec<xgent_core::session::ContextSnapshot>,
+    /// 恢复的显式移除项。
+    pub removed_context: Vec<String>,
 }
 
 /// 编辑器命令请求（agent → UI）：agent 经 EditorTool 发出，经 channel 桥接到 ECS。

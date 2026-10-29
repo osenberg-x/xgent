@@ -148,10 +148,11 @@ pub fn agent_poll_system(
         }
         if let Some(messages) = crate::session_store::restore_session(&ev.session_id) {
             conv.restore(&ev.session_id, messages.clone());
-            let context_set = crate::session_store::load_context_set(&ev.session_id);
+            let sidecar = crate::session_store::load_context_set(&ev.session_id);
             session_restored.write(SessionRestoredMessage {
                 messages,
-                context_set,
+                context_set: sidecar.items,
+                removed_context: sidecar.removed,
             });
         } else {
             // 恢复失败静默会让用户以为会话为空——显式报错（如文件全部损坏）

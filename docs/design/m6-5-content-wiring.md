@@ -292,3 +292,8 @@ parley 的 selection 写回接口需要实测；若 `insert_or_replace_selection
 | 上下文注入被 bridge 覆盖 | `pinned_context` 进入 `StartLoop`，在 `refresh_system_message` 前合并 |
 | 会话恢复丢上下文 | 侧车读写单测 + 恢复集成测试 |
 | 实体缓存回潮 | 渲染器只用 `TranscriptBlockKey` 查询，不把 Entity 存 Resource |
+
+## 11. 确认记录
+
+- 2026-10-29：用户通过结构化选择明确确认「目标、范围、D1–D6、A1–A10、非目标」，选择「确认，进入 Build」；Comet Native Shape 随即进入 Build。
+- 本文在 Build 开始前已写入工作区并作为实现蓝图；`d377b86` 只是随文档提交入库，提交时间晚于实现提交不代表设计未先于实现。

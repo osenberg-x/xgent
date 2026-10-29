@@ -268,6 +268,8 @@ fn render_bold(commands: &mut Commands, text: &str, theme: &Theme) -> Entity {
 fn render_link(commands: &mut Commands, url: &str, text: &str, theme: &Theme) -> Entity {
     commands
         .spawn((
+            Button,
+            bevy::picking::hover::Hovered::default(),
             Node::default(),
             Tooltip {
                 text: url.to_string(),

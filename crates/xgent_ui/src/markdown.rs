@@ -43,6 +43,7 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
     let mut heading_level = 0;
     let mut strong: Option<String> = None;
     let mut link: Option<(String, String)> = None;
+    let mut in_paragraph = false;
 
     for event in parser {
         match event {
@@ -54,6 +55,7 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                 }
                 Tag::Paragraph => {
                     current_text.clear();
+                    in_paragraph = true;
                 }
                 Tag::CodeBlock(kind) => {
                     in_code_block = true;
@@ -72,9 +74,11 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                     current_text.clear();
                 }
                 Tag::Strong => {
+                    flush_paragraph(&mut blocks, &mut current_text);
                     strong = Some(String::new());
                 }
                 Tag::Link { dest_url, .. } => {
+                    flush_paragraph(&mut blocks, &mut current_text);
                     link = Some((dest_url.to_string(), String::new()));
                 }
                 _ => {}
@@ -97,6 +101,7 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                         });
                         current_text.clear();
                     }
+                    in_paragraph = false;
                 }
                 TagEnd::CodeBlock => {
                     if in_code_block {
@@ -173,6 +178,14 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
     blocks
 }
 
+fn flush_paragraph(blocks: &mut Vec<MarkdownBlock>, current_text: &mut String) {
+    if !current_text.is_empty() {
+        blocks.push(MarkdownBlock::Paragraph {
+            text: std::mem::take(current_text),
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +248,20 @@ mod tests {
             block,
             MarkdownBlock::Link { url, text } if url == "https://example.com" && text == "XGent"
         )));
+    }
+
+    #[test]
+    fn inline_bold_keeps_paragraph_before_bold() {
+        let blocks = parse_markdown("正文 **粗体**");
+        let kinds: Vec<&str> = blocks
+            .iter()
+            .map(|block| match block {
+                MarkdownBlock::Paragraph { .. } => "paragraph",
+                MarkdownBlock::Bold { .. } => "bold",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["paragraph", "bold"]);
     }
 
     #[test]
