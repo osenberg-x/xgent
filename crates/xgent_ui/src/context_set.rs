@@ -4,6 +4,7 @@
 //! 替换 `context_scope.rs` 的只读镜像。
 
 use bevy::prelude::*;
+use std::collections::HashSet;
 
 /// 上下文集合：持有当前会话的上下文项。
 #[derive(Resource, Default, Debug, Clone)]
@@ -12,11 +13,14 @@ pub struct ContextSet {
     items: Vec<ContextItem>,
     /// 总 token 数（用于显示占比）。
     total_tokens: u64,
+    /// 用户显式移除的项（tab 同步不再自动加回）。
+    removed: HashSet<String>,
 }
 
 impl ContextSet {
     /// 添加上下文项。
     pub fn add(&mut self, item: ContextItem) {
+        self.removed.remove(&item.id);
         self.total_tokens += item.token_count;
         self.items.push(item);
     }
@@ -25,6 +29,7 @@ impl ContextSet {
     pub fn remove(&mut self, id: &str) -> bool {
         if let Some(pos) = self.items.iter().position(|i| i.id == id) {
             let item = self.items.remove(pos);
+            self.removed.insert(item.id);
             self.total_tokens = self.total_tokens.saturating_sub(item.token_count);
             true
         } else {
@@ -45,7 +50,13 @@ impl ContextSet {
     /// 清空上下文。
     pub fn clear(&mut self) {
         self.items.clear();
+        self.removed.clear();
         self.total_tokens = 0;
+    }
+
+    /// 该项是否被用户显式移除（tab 同步跳过）。
+    pub fn is_removed(&self, id: &str) -> bool {
+        self.removed.contains(id)
     }
 
     /// 检查是否包含某 id。
@@ -126,6 +137,26 @@ mod tests {
         assert_eq!(set.items().len(), 0);
         assert_eq!(set.total_tokens(), 0);
         assert!(!set.contains("file1"));
+    }
+
+    #[test]
+    fn removed_item_is_not_readded_by_tab_sync() {
+        let mut set = ContextSet::default();
+        let item = ContextItem {
+            id: "src/main.rs".into(),
+            kind: ContextKind::File,
+            label: "main.rs".into(),
+            token_count: 10,
+            content: "fn main() {}".into(),
+        };
+        set.add(item.clone());
+        assert!(set.remove("src/main.rs"));
+        assert!(set.is_removed("src/main.rs"));
+        assert!(!set.contains("src/main.rs"));
+        // 显式加入才会清除 removed 标记
+        set.add(item);
+        assert!(!set.is_removed("src/main.rs"));
+        assert!(set.contains("src/main.rs"));
     }
 
     #[test]

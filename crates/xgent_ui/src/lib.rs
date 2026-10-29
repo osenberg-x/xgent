@@ -99,6 +99,9 @@ impl Plugin for XgentUiPlugin {
             transcript_write::TranscriptWritePlugin,
             transcript_render::TranscriptRenderPlugin,
         ))
-        .add_plugins(completion_ui::CompletionUiPlugin);
+        .add_plugins((
+            completion_ui::CompletionUiPlugin,
+            markdown_render::MarkdownRenderPlugin,
+        ));
     }
 }

@@ -28,7 +28,6 @@ impl Plugin for TranscriptWritePlugin {
         app.add_systems(
             Update,
             (
-                record_user_submission,
                 record_delta,
                 record_done,
                 record_tool_call,
@@ -41,6 +40,9 @@ impl Plugin for TranscriptWritePlugin {
                 record_bounded,
                 record_session_cleared,
                 record_session_restored,
+                // 提交放最后：同帧迟到的 Done 先结算上一轮，避免把新一轮的空
+                // AssistantMessage 误标为终稿。
+                record_user_submission,
             )
                 .chain()
                 .in_set(TranscriptWriteSet)

@@ -8,6 +8,7 @@ use bevy::ui_widgets::Button;
 
 use crate::fonts::{mono_text, ui_text};
 use crate::i18n::tr;
+use crate::kit::Tooltip;
 use crate::markdown::MarkdownBlock;
 use crate::theme::{Theme, type_scale};
 
@@ -174,7 +175,7 @@ fn render_code_block(
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            BackgroundColor(theme.code_bg),
+            BackgroundColor(theme.surface_code()),
             CodeBlockMarker {
                 code: code_content.clone(),
             },
@@ -213,6 +214,9 @@ fn render_code_block(
                         },
                         BackgroundColor(Color::NONE),
                         CopyButtonMarker,
+                        CodeBlockMarker {
+                            code: code_content.clone(),
+                        },
                     ))
                     .with_children(|btn| {
                         btn.spawn(ui_text(
@@ -260,13 +264,18 @@ fn render_bold(commands: &mut Commands, text: &str, theme: &Theme) -> Entity {
         .id()
 }
 
-/// 渲染链接。
+/// 渲染链接：显示文本，URL 进 tooltip（本期不打开外部浏览器）。
 fn render_link(commands: &mut Commands, url: &str, text: &str, theme: &Theme) -> Entity {
     commands
-        .spawn((Node::default(),))
+        .spawn((
+            Node::default(),
+            Tooltip {
+                text: url.to_string(),
+            },
+        ))
         .with_children(|parent| {
             parent.spawn(ui_text(
-                &format!("[{}]({})", text, url),
+                text,
                 type_scale::BODY,
                 400,
                 theme.accent,
@@ -276,15 +285,21 @@ fn render_link(commands: &mut Commands, url: &str, text: &str, theme: &Theme) ->
         .id()
 }
 
+/// Markdown 渲染插件（复制按钮需要系统注册）。
+pub struct MarkdownRenderPlugin;
+
+impl Plugin for MarkdownRenderPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, handle_copy_button_click);
+    }
+}
+
 /// 处理复制按钮点击。
 pub fn handle_copy_button_click(
-    mut q: Query<(&CopyButtonMarker, &ChildOf), Added<Pressed>>,
-    q_code: Query<&CodeBlockMarker>,
+    q: Query<&CodeBlockMarker, (With<CopyButtonMarker>, Added<Pressed>)>,
     mut clipboard: ResMut<bevy::clipboard::Clipboard>,
 ) {
-    for (_copy, child_of) in q.iter_mut() {
-        if let Ok(code_block) = q_code.get(child_of.parent()) {
-            let _ = clipboard.set_text(code_block.code.clone());
-        }
+    for code_block in q.iter() {
+        let _ = clipboard.set_text(code_block.code.clone());
     }
 }

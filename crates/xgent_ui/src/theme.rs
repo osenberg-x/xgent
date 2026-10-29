@@ -206,6 +206,11 @@ impl Theme {
             font_size: 14.0,
         }
     }
+
+    /// 代码块表面色（Markdown 代码块 / 行内代码底色）。
+    pub fn surface_code(&self) -> Color {
+        self.code_bg
+    }
 }
 
 impl Default for Theme {

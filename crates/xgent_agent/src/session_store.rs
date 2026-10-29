@@ -211,6 +211,7 @@ pub fn save_context_set(
     session_id: &str,
     items: &[xgent_core::session::ContextSnapshot],
 ) -> std::io::Result<()> {
+    let session_id = session_id.trim_start_matches("session:");
     let path = session_file_path(session_id).with_extension("context.json");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -221,6 +222,8 @@ pub fn save_context_set(
 
 /// 读取会话级上下文 sidecar；缺失或损坏时返回空列表。
 pub fn load_context_set(session_id: &str) -> Vec<xgent_core::session::ContextSnapshot> {
+    let session_id = session_id.trim_start_matches("session:");
+    let session_id = session_id.trim_start_matches("session:");
     let path = session_file_path(session_id).with_extension("context.json");
     std::fs::read_to_string(path)
         .ok()

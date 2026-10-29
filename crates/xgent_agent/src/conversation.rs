@@ -51,7 +51,10 @@ impl Conversation {
     /// 打开对应的 SessionStore（后续 append 继续写同一文件）。
     pub fn restore(&mut self, session_id: &str, messages: Vec<AgentMessage>) {
         // 解析 session_id 为 SessionId（时间戳）
-        let id_num: u64 = session_id.parse().unwrap_or(0);
+        let id_num: u64 = session_id
+            .trim_start_matches("session:")
+            .parse()
+            .unwrap_or(0);
         self.id = SessionId(id_num);
         self.messages = messages;
         self.current_assistant_text.clear();
@@ -121,12 +124,12 @@ impl Conversation {
         if self.session_store.is_some() {
             return;
         }
-        let path = crate::session_store::session_file_path(&self.id.to_string());
+        let path = crate::session_store::session_file_path(&self.id.0.to_string());
         match crate::session_store::SessionStore::open(path) {
             Ok(mut store) => {
                 let header =
                     xgent_core::session::SessionEntry::Header(xgent_core::session::SessionHeader {
-                        id: self.id.to_string(),
+                        id: self.id.0.to_string(),
                         version: 1,
                         cwd: project_root.to_string_lossy().into_owned(),
                         timestamp: crate::session_store::now_ms(),

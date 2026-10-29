@@ -39,16 +39,14 @@ fn keyed_blocks(app: &mut App) -> Vec<(u64, usize)> {
         .get::<Children>(list)
         .map(|children| children.iter().collect::<Vec<_>>())
         .unwrap_or_default();
-    let mut keys: Vec<(u64, usize)> = children
+    children
         .into_iter()
         .filter_map(|child| {
             app.world()
                 .get::<TranscriptBlockKey>(child)
                 .map(|key| (key.turn_index, key.block_index))
         })
-        .collect();
-    keys.sort();
-    keys
+        .collect()
 }
 
 #[test]

@@ -53,7 +53,7 @@ impl bevy::app::Plugin for UndoPlugin {
             .init_resource::<PendingUndo>()
             .add_systems(
                 Update,
-                (request_undo, collect_undo_results, append_undo_notice)
+                (request_undo, collect_undo_results)
                     .chain()
                     // 与确认弹窗/面板同序：读到本帧最新的 Conversation.status，
                     // 避免用上一帧的 Idle 判断放行撤销
@@ -267,45 +267,6 @@ fn skip_reason(loc: &xgent_settings::Localizer, reason: SkipReason) -> String {
         SkipReason::Unverified => "undo-skip-unverified",
     };
     tr(loc, key)
-}
-
-/// 把详情画进对话流（与压缩提示同一形状：居中 muted 小字）。
-fn append_undo_notice(
-    mut reader: MessageReader<UndoNoticeMessage>,
-    mut commands: Commands,
-    theme: Res<crate::theme::Theme>,
-    q_list: Query<Entity, With<crate::chat_panel::MessageListMarker>>,
-) {
-    let Ok(list) = q_list.single() else {
-        return;
-    };
-    for ev in reader.read() {
-        let text = ev.text.clone();
-        commands.entity(list).with_children(|p| {
-            p.spawn((Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },))
-                .with_children(|row| {
-                    row.spawn((
-                        Node {
-                            padding: UiRect::all(px(crate::theme::space::XS)),
-                            border_radius: BorderRadius::all(px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme.elevated),
-                        crate::fonts::ui_text(
-                            text,
-                            crate::theme::type_scale::MICRO,
-                            400,
-                            theme.text_muted,
-                            crate::theme::type_scale::line_height::UI,
-                        ),
-                    ));
-                });
-        });
-    }
 }
 
 #[cfg(test)]

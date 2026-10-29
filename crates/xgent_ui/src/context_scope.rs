@@ -50,12 +50,19 @@ pub struct ContextChipRemoveMarker {
     pub id: String,
 }
 
+/// 上下文同步状态：恢复会话后跳过一次 tab 同步，避免把恢复的集合覆盖。
+#[derive(Resource, Default)]
+pub struct ContextSetUiState {
+    skip_tab_sync: bool,
+}
+
 /// 上下文条插件。
 pub struct ContextScopePlugin;
 
 impl Plugin for ContextScopePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ContextSet>()
+            .init_resource::<ContextSetUiState>()
             .add_message::<ContextSetRemove>()
             .add_systems(
                 Startup,
@@ -156,13 +163,18 @@ fn sync_context_from_tabs(
     tabs: Res<EditorTabs>,
     buffers: Query<&EditorBuffer>,
     mut set: ResMut<ContextSet>,
+    mut ui: ResMut<ContextSetUiState>,
 ) {
+    if ui.skip_tab_sync {
+        ui.skip_tab_sync = false;
+        return;
+    }
     for &entity in &tabs.tabs {
         let Ok(buffer) = buffers.get(entity) else {
             continue;
         };
         let id = buffer.path.display().to_string();
-        if set.contains(&id) {
+        if set.contains(&id) || set.is_removed(&id) {
             continue;
         }
         let label = buffer
@@ -204,8 +216,10 @@ fn apply_context_remove(mut reader: MessageReader<ContextSetRemove>, mut set: Re
 fn restore_context_set(
     mut reader: MessageReader<xgent_agent::SessionRestoredMessage>,
     mut set: ResMut<ContextSet>,
+    mut ui: ResMut<ContextSetUiState>,
 ) {
     for ev in reader.read() {
+        ui.skip_tab_sync = true;
         set.clear();
         for snapshot in &ev.context_set {
             set.add(ContextItem {
@@ -241,7 +255,7 @@ fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Co
             content: item.content.clone(),
         })
         .collect();
-    let _ = xgent_agent::session_store::save_context_set(&conv.id.to_string(), &snapshots);
+    let _ = xgent_agent::session_store::save_context_set(&conv.id.0.to_string(), &snapshots);
 }
 
 /// ContextSet 变化时重建 chips（签名比对避免每帧重建；标签/添加钮保留）。

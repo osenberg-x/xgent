@@ -1,6 +1,6 @@
 # M6.5 会话内容接线技术设计
 
-> 状态：**草案，待用户确认**。按 brief 决策 D6，本文确认前不写实现代码。
+> 状态：**已确认**（2026-10-29，用户选择「确认，进入 Build」）。按 brief 决策 D6，本文作为实现蓝图。
 > 依据：`docs/comet/changes/v8-m65-content-wiring/brief.md`、`specs/ui-m65-content-wiring/spec.md`、
 > `docs/design/ui-v8-layout-architecture.md` §6、2026-10-28 代码实测。
 > 基线提交：`9ac4daf`（M6 模型层）、`81d3060`（M7 + M6-T5）。

@@ -275,6 +275,43 @@ mod tests {
     }
 
     #[test]
+    fn popup_spawns_in_dropdown_layer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::theme::Theme>();
+        let layer = app.world_mut().spawn_empty().id();
+        let mut state = CompletionState::default();
+        state.activate(
+            vec![CompletionCandidate {
+                label: "src/main.rs".into(),
+                insert_text: "@file:src/main.rs ".into(),
+                kind: CompletionKind::File,
+            }],
+            3,
+        );
+        app.insert_resource(state);
+        app.add_systems(
+            Startup,
+            move |mut commands: Commands,
+                  state: Res<CompletionState>,
+                  theme: Res<crate::theme::Theme>| {
+                spawn_completion_popup(
+                    &mut commands,
+                    &state,
+                    &theme,
+                    layer,
+                    Vec2::new(100.0, 600.0),
+                    Vec2::new(400.0, 40.0),
+                    Vec2::new(800.0, 600.0),
+                );
+            },
+        );
+        app.update();
+        let mut query = app.world_mut().query::<&CompletionPopupMarker>();
+        assert_eq!(query.iter(app.world()).count(), 1);
+    }
+
+    #[test]
     fn detect_at_trigger_basic() {
         assert_eq!(detect_at_trigger("@", 1), Some(0));
         assert_eq!(detect_at_trigger(" @", 2), Some(1));

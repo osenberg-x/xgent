@@ -41,6 +41,8 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
     let mut list_ordered = false;
     let mut in_heading = false;
     let mut heading_level = 0;
+    let mut strong: Option<String> = None;
+    let mut link: Option<(String, String)> = None;
 
     for event in parser {
         match event {
@@ -51,9 +53,7 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                     current_text.clear();
                 }
                 Tag::Paragraph => {
-                    if !in_code_block && !in_list && !in_heading {
-                        current_text.clear();
-                    }
+                    current_text.clear();
                 }
                 Tag::CodeBlock(kind) => {
                     in_code_block = true;
@@ -72,11 +72,10 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                     current_text.clear();
                 }
                 Tag::Strong => {
-                    // 粗体作为内联样式，在文本中处理
+                    strong = Some(String::new());
                 }
                 Tag::Link { dest_url, .. } => {
-                    // 链接在 Text 事件中处理
-                    let _ = dest_url;
+                    link = Some((dest_url.to_string(), String::new()));
                 }
                 _ => {}
             },
@@ -92,13 +91,11 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                     }
                 }
                 TagEnd::Paragraph => {
-                    if !in_code_block && !in_list && !in_heading {
-                        if !current_text.is_empty() {
-                            blocks.push(MarkdownBlock::Paragraph {
-                                text: current_text.clone(),
-                            });
-                            current_text.clear();
-                        }
+                    if !current_text.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph {
+                            text: current_text.clone(),
+                        });
+                        current_text.clear();
                     }
                 }
                 TagEnd::CodeBlock => {
@@ -130,19 +127,32 @@ pub fn parse_markdown(input: &str) -> Vec<MarkdownBlock> {
                         current_text.clear();
                     }
                 }
+                TagEnd::Strong => {
+                    if let Some(text) = strong.take() {
+                        if !text.is_empty() {
+                            blocks.push(MarkdownBlock::Bold { text });
+                        }
+                    }
+                }
+                TagEnd::Link => {
+                    if let Some((url, text)) = link.take() {
+                        blocks.push(MarkdownBlock::Link { url, text });
+                    }
+                }
                 _ => {}
             },
             Event::Text(text) => {
                 if in_code_block {
                     code_content.push_str(&text);
-                } else if in_heading || in_list {
-                    current_text.push_str(&text);
+                } else if let Some(strong) = strong.as_mut() {
+                    strong.push_str(&text);
+                } else if let Some((_, text_out)) = link.as_mut() {
+                    text_out.push_str(&text);
                 } else {
                     current_text.push_str(&text);
                 }
             }
             Event::Code(code) => {
-                // 行内代码
                 if in_code_block {
                     code_content.push_str(&code);
                 } else {
@@ -206,6 +216,57 @@ mod tests {
             assert_eq!(items.len(), 2);
         } else {
             panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn parse_bold() {
+        let blocks = parse_markdown("**bold text**");
+        assert!(blocks.iter().any(|block| matches!(
+            block,
+            MarkdownBlock::Bold { text } if text == "bold text"
+        )));
+    }
+
+    #[test]
+    fn parse_link() {
+        let blocks = parse_markdown("[XGent](https://example.com)");
+        assert!(blocks.iter().any(|block| matches!(
+            block,
+            MarkdownBlock::Link { url, text } if url == "https://example.com" && text == "XGent"
+        )));
+    }
+
+    #[test]
+    fn parse_six_element_sample() {
+        let md = "# H
+
+Para
+
+- a
+- b
+
+```rust
+code
+```
+
+**bold**
+
+[link](https://e.com)";
+        let blocks = parse_markdown(md);
+        let kinds: Vec<&str> = blocks
+            .iter()
+            .map(|block| match block {
+                MarkdownBlock::Heading { .. } => "heading",
+                MarkdownBlock::Paragraph { .. } => "paragraph",
+                MarkdownBlock::List { .. } => "list",
+                MarkdownBlock::CodeBlock { .. } => "code",
+                MarkdownBlock::Bold { .. } => "bold",
+                MarkdownBlock::Link { .. } => "link",
+            })
+            .collect();
+        for kind in ["heading", "paragraph", "list", "code", "bold", "link"] {
+            assert!(kinds.contains(&kind), "missing {kind}: {kinds:?}");
         }
     }
 
