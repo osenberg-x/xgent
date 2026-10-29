@@ -100,7 +100,11 @@ pub(crate) fn spawn_layout(
         .leaf_size(crate::panels::split::leaf_ids::SIDE_DOCK)
         .map(|s| s.preferred())
         .unwrap_or(size::CONTEXT_W_DEFAULT);
-    commands.spawn(Camera2d);
+    // `UiPickingSettings.require_markers = true`（xgent_app 启动时设定）会让 UI 拾取
+    // 后端**跳过没有 `UiPickingCamera` 的相机**（见 bevy_ui::picking_backend::ui_picking
+    // 的 camera_query 过滤），后果是全局零命中、所有鼠标交互失效。因此这个标记必须
+    // 与相机一起 spawn，不能只给节点加 `Pickable`。
+    commands.spawn((Camera2d, bevy::ui::picking_backend::UiPickingCamera));
 
     commands
         .spawn((
@@ -301,6 +305,29 @@ mod tests {
             app.update();
         }
         app
+    }
+
+    /// A1 的另一半：`require_markers = true` 时 UI 拾取后端**只认带 `UiPickingCamera`
+    /// 的相机**（`bevy_ui::picking_backend::ui_picking` 的 camera_query 过滤）。相机缺
+    /// 这个标记 = 全局零命中 = 所有鼠标交互静默失效，而节点侧的 `Pickable` 再多也照样
+    /// 全绿——headless 测试看不见这件事，只能锁组件契约。
+    #[test]
+    fn layout_camera_carries_ui_picking_camera() {
+        let mut app = layout_app();
+        let mut cameras = app.world_mut().query::<(
+            Entity,
+            &Camera,
+            Has<bevy::ui::picking_backend::UiPickingCamera>,
+        )>();
+        let found: Vec<bool> = cameras
+            .iter(app.world())
+            .map(|(_, _, can_pick)| can_pick)
+            .collect();
+        assert_eq!(found.len(), 1, "布局应恰好 spawn 一个 UI 相机：{found:?}");
+        assert!(
+            found[0],
+            "UI 相机必须带 UiPickingCamera：require_markers 下缺它会导致零命中、点击全废"
+        );
     }
 
     /// A1：六个静态层根存在，z 来自 `theme::z`，且层根不带 `Pickable`。

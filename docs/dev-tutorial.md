@@ -731,7 +731,7 @@ agent 写过的文件此前**无法退回**：编辑器内的 `UndoStack` 只管
 v8 M1 把「浮层放在哪、谁吃点击、Esc 关谁」从散落实现收敛为四个原语：
 
 - **六静态层根**（`layout.rs`）：`BASE 0 / DOCK 100 / DRAWER 200 / DROPDOWN 300 / TOOLTIP 500 / TOAST 600`，常量在 `theme::z`。业务浮层只往层根挂，`MainArea`/`ChatPanel` 的 `Overflow::clip()` 不再裁到 tooltip。`GlobalZIndex(` 只允许出现在 `layout.rs`（BASE）、`kit.rs`（`layer_root`/`drawer_z`/toast）与 `modal.rs`（栈深派生）。
-- **拾取白名单**（`picking.rs` + `xgent_app`）：`UiPickingSettings { require_markers: true }` 后，没有 `Pickable` 的节点对拾取完全惰性——层根与布局容器不再吞点击。可交互叶子（`Button`/`EditableText`）由 `attach_pickable_to_interactive` 自动补 `Pickable`；**新增自定义可点组件时必须自己带 `Pickable`，否则点不动**。
+- **拾取白名单**（`picking.rs` + `xgent_app`）：`UiPickingSettings { require_markers: true }` 后，没有 `Pickable` 的节点对拾取完全惰性——层根与布局容器不再吞点击。可交互叶子（`Button`/`EditableText`）由 `attach_pickable_to_interactive` 自动补 `Pickable`；**新增自定义可点组件时必须自己带 `Pickable`，否则点不动**。白名单还有**相机侧的另一半**：`require_markers = true` 时 `ui_picking` 会跳过没有 `UiPickingCamera` 的相机（`bevy_ui/src/picking_backend.rs:122`），故 `layout.rs` 的 UI 相机必须 `spawn((Camera2d, UiPickingCamera))`——缺它 = 每个指针零命中 = 全局点击无响应，而节点侧 `Pickable` 数量正常、headless 契约测试全绿（真实缺陷与诊断见台账 §10 勘误 52）。
 - **模态栈**（`modal.rs`）：`ModalPush`/`ModalPop` + `Dismiss{EscOnly,EscAndScrim,NotDismissable}`；z = `400 + depth*8`；出栈还原 `InputFocus`。`shortcuts.rs` 在栈非空（或本帧 Esc 被消费）时整体让位，`chat.abort` 不再穿透。设置面板监听 `ModalDismissRequested{id:"settings"}` 自行关；确认弹窗是 `NotDismissable`，Esc=拒绝由它自己处理。
 - **抽屉统一裁决**（`overlay.rs`）：rail 文件钮、「+ 添加」、`filepanel.toggle` 都只发 `DrawerToggle`，由 `OverlayRegistry` 单一系统决定开谁关谁，`FileDrawerOpen`/`SessionHistoryState` 降为派生视图。
 

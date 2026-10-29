@@ -83,6 +83,7 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 5. **提交信息要写文件再 `git commit -F`**：PowerShell 管道按 GBK 代码页转码，中文提交信息会被搞坏（`git log` 里能看到乱码）。
 6. **验收人独立性**：平台无法自证 Verifier 独立性，`confirm-skill-coordinated-pass` 必须由用户点头，不要代签。
 7. **Bevy 系统元组上限 16**：`add_systems(Update, (a, b, c, …))` 的链式元组超过 16 个会编译失败（`spawn_mono_probes` 因此单独 `add_systems`）。
+8. **真机点击探针**（2026-10-29 踩透，见台账 §10 勘误 52）：要判「点击有没有响应」，两件事必须先自证——① **注入是否送达**：`SendInput` 注入鼠标按键在本机返回 accepted 而应用侧 `press_events=0`，改用 legacy `mouse_event(LEFTDOWN/LEFTUP)` + `SetCursorPos` 才真的送达；先加一条临时系统打印 `MessageReader<CursorMoved>/<MouseButtonInput>`、`ButtonInput<MouseButton>`、`Pressed`/`Hovered` 实体数，再信截图结论。② **截图是否可用**：显示器休眠时 `CopyFromScreen` 对任何矩形都抛「参数无效」，会被误读成「UI 无响应」。红信号 = 「事件送达 + 帧在跑 + 命中集合为空」这种可分辨的组合，而不是「画面没变」。
 
 ---
 
@@ -201,6 +202,7 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 10. **虚拟窗口的中间间隙**（2026-10-29，**已闭合**）：渲染窗口 = 可见区间 ∪ 当前轮；原实现只在两端放占位，两段不相邻时中间空档没有高度 → 流式中上翻历史会把当前轮贴到可见区正下方。现按**连续段**布局并逐段补占位（`transcript_render.rs` 的 `build_runs`/`push_gap`，段集合变化才重建），契约测试 `gap_between_visible_window_and_active_turn_is_spaced` 锁住。同类问题一并修：`ComputedNode::size`/`ScrollPosition` 是物理像素，必须乘 `inverse_scale_factor` 再与逻辑偏移表比较（`hidpi_window_matches_the_same_logical_geometry`）。
 11. **M7-A1 的保障强度**（2026-10-28）：`handler_name` 是字符串，启动期只比 id 集合；新增 action 时若只加清单不加分发表分支，不会失败，不要把它当已闭合的契约。
 12. **未闭环门槛**：mac/Linux 的 `mono` 启动日志与终端实机仍未确认（NF-01 是需求硬项）；`cargo test --workspace` 仍有既有红，M6.5 的「全绿」只对 `xgent_ui` + `xui` + `xgent_terminal` 成立。
+13. **tooltip 定位到窗口左上角**（2026-10-29 新发现，未修）：修好全局点击后 hover 才可见，实测悬停顶栏齿轮时「设置」提示出现在窗口 `(0,0)` 而非目标旁。拾取与 hover 已正常（`Hovered` 有值），坏的是 tooltip 浮层的坐标计算——排查方向是 TOOLTIP 层根的绝对定位与 `UiGlobalTransform`/物理像素换算（与勘误 51 的补全浮层锚点同一类）。
 
 ---
 
