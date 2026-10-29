@@ -56,6 +56,7 @@ pub struct ContextScopePlugin;
 impl Plugin for ContextScopePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ContextSet>()
+            .add_message::<ContextSetRemove>()
             .add_systems(
                 Startup,
                 spawn_context_scope

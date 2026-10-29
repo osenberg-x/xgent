@@ -553,7 +553,7 @@ fn update_input_border(
     mut q: Query<(Entity, &mut BorderColor, Option<&InputBusyMarker>), With<ChatInputBorderMarker>>,
 ) {
     let Ok((entity, mut border, busy)) = q.single_mut() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("input border 节点缺失（update_input_border）");
         return;
     };
     let now = time.elapsed().as_secs_f64();
@@ -590,7 +590,7 @@ fn update_token_hint(
         return;
     }
     let Ok(mut text) = q.single_mut() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("tokenhint 节点缺失（update_token_hint）");
         return;
     };
     let label = match conv.status {
@@ -622,11 +622,11 @@ fn update_input_focus_ring(
     q_outline: Query<Option<&Outline>, With<ChatInputCardMarker>>,
 ) {
     let Ok(entity) = q_input.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("focus ring 节点缺失（update_input_focus_ring）");
         return;
     };
     let Ok(card) = q_card.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("focus ring 节点缺失（update_input_focus_ring）");
         return;
     };
     let focused = focus.get() == Some(entity);
@@ -678,11 +678,11 @@ fn update_back_to_bottom(
     q_back: Query<Entity, With<BackToBottomMarker>>,
 ) {
     let Ok(list) = q_list.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("回到底部节点缺失（update_back_to_bottom）");
         return;
     };
     let Ok(btn) = q_back.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("回到底部节点缺失（update_back_to_bottom）");
         return;
     };
     let Ok(mut scroll) = q_scroll.get_mut(list) else {
@@ -706,7 +706,7 @@ fn handle_qa_chips(
     mut q_input: Query<&mut EditableText, With<ChatInputMarker>>,
 ) {
     let Ok(mut editable) = q_input.single_mut() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        tracing::warn!("回到底部节点缺失（update_back_to_bottom）");
         return;
     };
     for marker in q.iter_mut() {
@@ -759,14 +759,13 @@ fn update_input_scroll_to_caret(
     mut q_scroll: Query<(&mut ScrollPosition, &ComputedNode), With<ChatInputScrollMarker>>,
 ) {
     let Ok(info) = q_text.single() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
+        // 可编辑文本的布局信息在首帧/重排前可能尚未就绪；这是正常状态。
         return;
     };
     let Some((_blink, caret)) = info.cursor else {
         return;
     };
     let Ok((mut scroll, computed)) = q_scroll.single_mut() else {
-        tracing::warn!("single-entity query 返回 0 或多个实体");
         return;
     };
     // `TextLayoutInfo` 的尺寸与光标矩形都是物理像素；`ScrollPosition` 是逻辑像素。

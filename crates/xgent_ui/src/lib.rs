@@ -57,6 +57,17 @@ pub struct XgentUiPlugin;
 
 impl Plugin for XgentUiPlugin {
     fn build(&self, app: &mut App) {
+        // Bevy 0.20 的 add_plugins 不幂等；多个业务插件会按需自加 PanelsPlugin，
+        // 这里先统一兜底，避免后面的元组再次无条件添加导致 panic（M5 勘误 36）。
+        if !app.is_plugin_added::<panels::PanelsPlugin>() {
+            app.add_plugins(panels::PanelsPlugin);
+        }
+        if !app.is_plugin_added::<panels::visibility::VisibilityPlugin>() {
+            app.add_plugins(panels::visibility::VisibilityPlugin);
+        }
+        if !app.is_plugin_added::<panels::tabs::TabsPlugin>() {
+            app.add_plugins(panels::tabs::TabsPlugin);
+        }
         app.add_plugins((
             theme::ThemePlugin,
             density::DensityPlugin,
@@ -76,9 +87,6 @@ impl Plugin for XgentUiPlugin {
         ))
         .add_plugins((
             cursor::CursorStylePlugin,
-            panels::PanelsPlugin,
-            panels::visibility::VisibilityPlugin,
-            panels::tabs::TabsPlugin,
             session_history::SessionHistoryPlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,

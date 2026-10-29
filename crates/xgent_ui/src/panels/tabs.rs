@@ -237,10 +237,9 @@ impl Plugin for TabsPlugin {
             (
                 handle_slot_tab_click.in_set(crate::panels::PanelSet::Requests),
                 handle_back_button_click.in_set(crate::panels::PanelSet::Requests),
-                sync_slot_tab_bar,
-                update_slot_tab_indicators,
-            )
-                .in_set(crate::panels::PanelSet::Visibility),
+                (sync_slot_tab_bar, update_slot_tab_indicators)
+                    .in_set(crate::panels::PanelSet::Visibility),
+            ),
         );
     }
 }
