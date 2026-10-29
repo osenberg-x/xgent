@@ -160,6 +160,18 @@ fn all_message_body_paths_use_content_tier() {
         occurrences >= 2,
         "用户与助手正文都应用 for_text（实测 {occurrences} 处）"
     );
+    // 终稿 Markdown 是同一条助手消息的另一条正文路径：档位不一致会在 Done 的
+    // 瞬间跳字号/跳行高（流式 1.7 → 完成 1.6），正是本测试要拦的情形。
+    let md_src = include_str!("../src/markdown_render.rs");
+    let md_occurrences = md_src.matches("line_height::for_text(").count();
+    assert!(
+        md_occurrences >= 3,
+        "Markdown 的段落/粗体/链接都要按内容选档（实测 {md_occurrences} 处）"
+    );
+    assert!(
+        md_src.contains("theme.font_size"),
+        "Markdown 正文字号须跟随用户设置，不能用固定 BODY 档位"
+    );
 }
 
 /// A7 检索链路的 CJK 分词未被破坏（中文问句仍能抽出二元组）。

@@ -141,7 +141,7 @@ fn tool_card_reflects_status_and_result() {
             "{\"path\":\"src/main.rs\"}".into(),
         );
         transcript.set_tool_progress("tc1", "partial");
-        transcript.set_tool_result(turn, "tc1".into(), "done".into(), false);
+        transcript.set_tool_result(turn, "tc1".into(), "done".into(), false, false);
         transcript.append_text_delta(turn, "after");
         transcript.finalize_assistant(turn);
     }
@@ -191,8 +191,8 @@ fn notices_render_and_order_is_monotonic() {
     assert!(texts.iter().any(|text| text.contains("undo done")));
 }
 
-#[test]
-fn long_conversation_only_renders_visible_window() {
+/// 200 块长会话 + 可控缩放/视口/滚动（`ComputedNode::size` 与滚动量都是物理像素）。
+fn long_app(inverse_scale: f32, physical_viewport_h: f32, scroll_y_physical: f32) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .init_resource::<Theme>()
@@ -202,16 +202,18 @@ fn long_conversation_only_renders_visible_window() {
         .insert_resource(Conversation::default())
         .insert_resource(Transcript::default())
         .add_plugins(TranscriptRenderPlugin);
-    let mut computed = bevy::ui::ComputedNode::default();
-    computed.size = Vec2::new(800.0, 600.0);
-    computed.inverse_scale_factor = 1.0;
+    let computed = bevy::ui::ComputedNode {
+        size: Vec2::new(800.0, physical_viewport_h),
+        inverse_scale_factor: inverse_scale,
+        ..Default::default()
+    };
     let list = app
         .world_mut()
         .spawn((
             MessageListMarker,
             xui::VirtualList::new(0, 120.0),
             computed,
-            bevy::ui::ScrollPosition(Vec2::new(0.0, 23_400.0)),
+            bevy::ui::ScrollPosition(Vec2::new(0.0, scroll_y_physical)),
         ))
         .id();
     app.insert_resource(ListEntity(list));
@@ -225,7 +227,13 @@ fn long_conversation_only_renders_visible_window() {
         }
     }
     app.update();
+    app
+}
 
+#[test]
+fn long_conversation_only_renders_visible_window() {
+    // 逻辑视口 600、滚动 24400（估算行高 120 → 已经贴近列表末端）。
+    let mut app = long_app(1.0, 600.0, 24_400.0);
     let rendered = keyed_blocks(&mut app).len();
     assert!(rendered < 40, "200 个块只应渲染可见窗口，实际 {rendered}");
     let spacers = app
@@ -234,4 +242,81 @@ fn long_conversation_only_renders_visible_window() {
         .iter(app.world())
         .count();
     assert!(spacers >= 1, "滚出窗口应生成占位块");
+}
+
+#[test]
+fn hidpi_window_matches_the_same_logical_geometry() {
+    // 200% 缩放的物理视口 1200 / 物理滚动 24000，等价于逻辑 600 / 12000。
+    // 渲染窗口按物理像素算就会把 first 推深，顶部可见行漏渲染。
+    let mut flat = long_app(1.0, 600.0, 12_000.0);
+    let mut hidpi = long_app(0.5, 1_200.0, 24_000.0);
+    let first_visible_key = (50u64, 100usize); // 逻辑偏移 12000 落在第 100 项
+    let flat_keys = keyed_blocks(&mut flat);
+    let hidpi_keys = keyed_blocks(&mut hidpi);
+    assert!(
+        flat_keys.contains(&first_visible_key),
+        "基准用例应渲染逻辑首可见行：{flat_keys:?}"
+    );
+    assert_eq!(
+        hidpi_keys, flat_keys,
+        "HiDPI 下的渲染窗口必须与同一逻辑几何一致"
+    );
+}
+
+#[test]
+fn gap_between_visible_window_and_active_turn_is_spaced() {
+    // 流式期间上翻历史：可见区在顶部、当前轮在底部，中间空档必须有占位高度。
+    let mut app = long_app(1.0, 600.0, 0.0);
+    let mut query = app.world_mut().query::<(&TranscriptSpacer, &Node)>();
+    let mut heights: Vec<f32> = query
+        .iter(app.world())
+        .map(|(_, node)| match node.height {
+            Val::Px(h) => h,
+            _ => 0.0,
+        })
+        .collect();
+    heights.sort_by(|a, b| b.total_cmp(a));
+    assert!(heights.len() >= 2, "空档与尾部各需占位：{heights:?}");
+    assert!(
+        heights[0] > 10_000.0,
+        "可见区与当前轮之间的空档必须被撑住，实测 {heights:?}"
+    );
+}
+
+#[test]
+fn denied_tool_card_keeps_denied_label() {
+    let mut app = app();
+    {
+        let mut transcript = app.world_mut().resource_mut::<Transcript>();
+        let (turn, _) = transcript.push_user_message("write".into());
+        transcript.push_tool_call(turn, "tc1".into(), "write_file".into(), "{}".into());
+        transcript.set_tool_result(turn, "tc1".into(), "用户拒绝".into(), false, true);
+    }
+    app.update();
+    let mut query = app
+        .world_mut()
+        .query_filtered::<&Text, With<ToolStatusLabelMarker>>();
+    let labels: Vec<String> = query.iter(app.world()).map(|text| text.0.clone()).collect();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("已拒绝") || label.contains("Denied")),
+        "拒绝态从模型重建后不得变成「失败」：{labels:?}"
+    );
+}
+
+#[test]
+fn empty_assistant_segment_renders_no_row() {
+    let mut app = app();
+    {
+        let mut transcript = app.world_mut().resource_mut::<Transcript>();
+        let (turn, _) = transcript.push_user_message("hi".into());
+        transcript.begin_assistant_message(turn);
+    }
+    app.update();
+    assert_eq!(
+        keyed_blocks(&mut app),
+        vec![(0, 0)],
+        "尚无正文的助手分段不应渲染空气泡"
+    );
 }

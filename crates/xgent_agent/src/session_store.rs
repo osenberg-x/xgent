@@ -240,11 +240,13 @@ pub fn save_context_set(
     std::fs::write(path, text)
 }
 
-/// 读取会话级上下文 sidecar；缺失或损坏时返回空内容。
+/// 读取会话级上下文 sidecar；缺失时返回空内容。
+///
+/// 损坏文件显式报出来再按空处理——静默会让用户以为集合被清空了。
 pub fn load_context_set(session_id: &str) -> ContextSidecar {
     let session_id = session_id.trim_start_matches("session:");
     let path = session_file_path(session_id).with_extension("context.json");
-    let Some(text) = std::fs::read_to_string(path).ok() else {
+    let Some(text) = std::fs::read_to_string(&path).ok() else {
         return ContextSidecar::default();
     };
     if let Ok(sidecar) = serde_json::from_str::<ContextSidecar>(&text) {
@@ -258,6 +260,7 @@ pub fn load_context_set(session_id: &str) -> ContextSidecar {
             removed: Vec::new(),
         };
     }
+    eprintln!("[session] {} 无法解析，上下文集合按空处理", path.display());
     ContextSidecar::default()
 }
 

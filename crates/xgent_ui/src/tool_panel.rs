@@ -77,7 +77,47 @@ impl Plugin for ToolPanelPlugin {
     }
 }
 
+/// 工具卡片视图：Transcript 渲染器从模型组装的一次渲染输入。
+///
+/// 取代原先的 `(status, result, is_error)` 位置参数三元组——`denied` 与
+/// `progress` 都必须能进渲染，否则卡片重建后标签会从「已拒绝」变「失败」、
+/// 执行中的中间输出会丢失。
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ToolCardView<'a> {
+    /// 调用状态。
+    pub status: crate::transcript::ToolCallStatus,
+    /// 最终结果文本（`None` = 尚无结果）。
+    pub result: Option<&'a str>,
+    /// 结果是否为失败。
+    pub is_error: bool,
+    /// 结果是否为用户拒绝（与失败区分文案）。
+    pub denied: bool,
+    /// 执行中的中间输出。
+    pub progress: Option<&'a str>,
+}
+
+impl ToolCardView<'_> {
+    /// 结果区应展示的文本：最终结果优先，否则执行中的中间输出。
+    fn shown_text(&self) -> Option<&str> {
+        self.result.or(self.progress)
+    }
+
+    /// 状态药丸文案与色调（与 `update_tool_result` 的三态口径一致）。
+    fn status_pill(&self, loc: &Localizer, theme: &Theme) -> (String, Color, Color) {
+        if self.denied {
+            (tr(loc, "tool-denied"), theme.st_deny, theme.st_deny)
+        } else if self.status == crate::transcript::ToolCallStatus::Failed || self.is_error {
+            (tr(loc, "tool-failed"), theme.st_fail, theme.st_fail)
+        } else if self.status == crate::transcript::ToolCallStatus::Completed {
+            (tr(loc, "tool-done"), theme.st_ok, theme.st_ok)
+        } else {
+            (tr(loc, "tool-running"), theme.text_dim, theme.st_running)
+        }
+    }
+}
+
 /// 构造一个工具卡片实体（供 Transcript 渲染器调用）。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_tool_card_entity(
     commands: &mut Commands,
     tool_call_id: &str,
@@ -87,27 +127,20 @@ pub(crate) fn spawn_tool_card_entity(
     fonts: &crate::fonts::UiFonts,
     icons: &crate::kit::IconAssets,
     loc: &Localizer,
-    status: crate::transcript::ToolCallStatus,
-    result: Option<&str>,
-    is_error: bool,
+    view: ToolCardView<'_>,
 ) -> Entity {
     let summary = format_tool_summary(tool_id, input);
-    let (status_label, status_color, dot_color) =
-        if status == crate::transcript::ToolCallStatus::Failed || is_error {
-            (tr(loc, "tool-failed"), theme.st_fail, theme.st_fail)
-        } else if status == crate::transcript::ToolCallStatus::Completed {
-            (tr(loc, "tool-done"), theme.st_ok, theme.st_ok)
-        } else {
-            (tr(loc, "tool-running"), theme.text_dim, theme.st_running)
-        };
-    let expanded = result.is_some();
-    let result_text = result.unwrap_or_default().to_string();
-    let result_height = if result.is_some() {
+    let (status_label, status_color, dot_color) = view.status_pill(loc, theme);
+    let expanded = view.shown_text().is_some();
+    let result_text = view.shown_text().unwrap_or_default().to_string();
+    let result_height = if expanded {
         crate::theme::size::TOOL_PANEL_MAX_H
     } else {
         0.0
     };
-    let fold_text = result
+    let fold_text = view
+        .result
+        .or(view.progress)
         .map(|text| {
             crate::i18n::tr_with(
                 loc,
@@ -202,7 +235,7 @@ pub(crate) fn spawn_tool_card_entity(
                             ..default()
                         },
                         crate::fonts::ellipsis_mono_text(
-                            &fonts,
+                            fonts,
                             summary,
                             type_scale::CAPTION,
                             theme.text_muted,
@@ -303,16 +336,30 @@ pub(crate) fn spawn_tool_card_entity(
 /// 用户能看到增量输出（如 `run_command` 的 stdout），不必干等（R1-9）。
 fn update_tool_progress(
     mut reader: MessageReader<ToolProgressMessage>,
+    mut q_cards: Query<(&mut ToolCardMarker, &Children)>,
     mut q_result: Query<(&mut Text, &ToolResultTextMarker)>,
+    mut q_area: Query<&mut Node, With<ToolResultAreaMarker>>,
 ) {
     for ev in reader.read() {
         // 只更新本次调用对应的结果文本（此前实现会写到**所有**卡片的结果文本上）。
-        for (mut text, marker) in q_result.iter_mut() {
-            if marker.tool_call_id != ev.tool_call_id {
+        for (mut card, children) in q_cards.iter_mut() {
+            if card.tool_call_id != ev.tool_call_id {
                 continue;
             }
-            text.0 = ev.output.clone();
-            text.0.push_str("\n…");
+            // 执行中的中间输出要有可见高度：写到 max_height=0 的收起区等于没显示。
+            card.expanded = true;
+            for child in children.iter() {
+                if let Ok(mut node) = q_area.get_mut(child) {
+                    node.max_height = Val::Px(crate::theme::size::TOOL_PANEL_MAX_H);
+                }
+            }
+            for (mut text, marker) in q_result.iter_mut() {
+                if marker.tool_call_id != ev.tool_call_id {
+                    continue;
+                }
+                text.0 = ev.output.clone();
+                text.0.push_str("\n…");
+            }
         }
     }
 }

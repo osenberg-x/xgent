@@ -63,21 +63,54 @@ pub fn build_request(
     }
 }
 
-/// 把用户显式保留的上下文项并入检索结果（按 path 去重，用户显式项优先）。
+/// 把用户显式保留的上下文项并入检索结果。
+///
+/// 两条规则：
+/// 1. **用户显式项优先**——同 path 的检索片段（检索侧已截断）让位给完整项；
+/// 2. 合并后仍受 `max_tokens` 约束——显式项是整份文件，不受限会让请求超出
+///    上下文窗口被 provider 直接拒掉。超出剩余预算的部分按 1 token ≈ 4 字符裁剪。
 pub fn merge_pinned_context(
     result: &mut ContextResult,
     pinned: &[xgent_context::provider::ContextChunk],
+    max_tokens: u32,
 ) {
     for chunk in pinned {
-        if !result
+        let existing = result
             .chunks
             .iter()
-            .any(|existing| existing.path == chunk.path)
-        {
-            result.chunks.push(chunk.clone());
+            .position(|item| item.path == chunk.path);
+        let used: u32 = result.chunks.iter().map(|item| item.token_estimate).sum();
+        // 被替换掉的检索片段腾出的预算可以复用。
+        let freed = existing
+            .map(|idx| result.chunks[idx].token_estimate)
+            .unwrap_or(0);
+        let room = max_tokens.saturating_sub(used.saturating_sub(freed));
+        let kept = truncate_chunk_to_tokens(chunk, room);
+        match existing {
+            Some(idx) => result.chunks[idx] = kept,
+            None => result.chunks.push(kept),
         }
     }
     result.total_tokens = result.chunks.iter().map(|chunk| chunk.token_estimate).sum();
+}
+
+/// 把上下文片段裁剪到给定 token 预算（与检索侧同一 1 token ≈ 4 字符口径）。
+fn truncate_chunk_to_tokens(
+    chunk: &xgent_context::provider::ContextChunk,
+    max_tokens: u32,
+) -> xgent_context::provider::ContextChunk {
+    let mut kept = chunk.clone();
+    kept.token_estimate = chunk.token_estimate.min(max_tokens);
+    if max_tokens == 0 {
+        kept.content = String::new();
+        return kept;
+    }
+    let limit = (max_tokens as usize).saturating_mul(4);
+    if chunk.content.chars().count() > limit {
+        let head: String = chunk.content.chars().take(limit).collect();
+        kept.content = format!("{head}\n…（按上下文预算截断）");
+    }
+    kept
 }
 
 /// 用最新上下文检索结果刷新 req 的首条 system 消息。
@@ -207,42 +240,89 @@ mod tests {
         assert_eq!(req.messages.len(), 2);
     }
 
+    fn chunk(path: &str, content: &str, tokens: u32) -> xgent_context::provider::ContextChunk {
+        xgent_context::provider::ContextChunk {
+            path: std::path::PathBuf::from(path),
+            content: content.into(),
+            relevance: "retrieval".into(),
+            token_estimate: tokens,
+        }
+    }
+
     #[test]
-    fn pinned_context_merges_and_dedupes_by_path() {
-        use xgent_context::provider::ContextChunk;
+    fn pinned_context_replaces_retrieved_chunk_by_path() {
         let mut result = ContextResult {
-            chunks: vec![ContextChunk {
-                path: "a.rs".into(),
-                content: "retrieved".into(),
-                relevance: "retrieval".into(),
-                token_estimate: 10,
-            }],
+            chunks: vec![chunk("a.rs", "retrieved", 10)],
             tree_summary: None,
             total_tokens: 10,
         };
         let pinned = vec![
-            ContextChunk {
-                path: "a.rs".into(),
-                content: "pinned".into(),
+            xgent_context::provider::ContextChunk {
                 relevance: "user".into(),
-                token_estimate: 20,
+                ..chunk("a.rs", "pinned", 20)
             },
-            ContextChunk {
-                path: "b.rs".into(),
-                content: "pinned-b".into(),
+            xgent_context::provider::ContextChunk {
                 relevance: "user".into(),
-                token_estimate: 30,
+                ..chunk("b.rs", "pinned-b", 30)
             },
         ];
-        merge_pinned_context(&mut result, &pinned);
-        assert_eq!(result.chunks.len(), 2);
-        assert_eq!(result.chunks[0].content, "retrieved");
+        merge_pinned_context(&mut result, &pinned, 1_000);
+        assert_eq!(
+            result.chunks.len(),
+            2,
+            "同路径不得出现两份：{:?}",
+            result.chunks
+        );
+        assert_eq!(
+            result.chunks[0].content, "pinned",
+            "用户显式项优先于检索片段（检索侧可能已截断）"
+        );
         assert!(
             result
                 .chunks
                 .iter()
-                .any(|chunk| chunk.path == std::path::Path::new("b.rs"))
+                .any(|c| c.path == std::path::Path::new("b.rs")),
+            "显式项要真的进入请求"
         );
-        assert_eq!(result.total_tokens, 40);
+        assert_eq!(result.total_tokens, 50);
+    }
+
+    #[test]
+    fn pinned_context_is_clamped_to_remaining_budget() {
+        // 检索已用满预算时，显式项不得把整份文件塞进请求（provider 会直接拒）。
+        let mut result = ContextResult {
+            chunks: vec![chunk("a.rs", &"x".repeat(400), 100)],
+            tree_summary: None,
+            total_tokens: 100,
+        };
+        let pinned = vec![chunk("big.rs", &"y".repeat(4000), 1000)];
+        merge_pinned_context(&mut result, &pinned, 100);
+        assert_eq!(result.chunks[1].token_estimate, 0, "无剩余预算时不占用额度");
+        assert!(result.chunks[1].content.is_empty());
+        assert_eq!(result.total_tokens, 100, "合并后总量不得超过 max_tokens");
+    }
+
+    #[test]
+    fn pinned_context_truncates_to_leftover_budget() {
+        let mut result = ContextResult {
+            chunks: vec![chunk("a.rs", &"x".repeat(40), 10)],
+            tree_summary: None,
+            total_tokens: 10,
+        };
+        let pinned = vec![chunk("b.rs", &"y".repeat(400), 100)];
+        merge_pinned_context(&mut result, &pinned, 30);
+        let kept = &result.chunks[1];
+        assert_eq!(kept.token_estimate, 20, "只保留剩余预算");
+        assert!(
+            kept.content.starts_with(&"y".repeat(80)),
+            "预算内的内容原样保留：{}",
+            kept.content
+        );
+        assert!(
+            kept.content.contains("按上下文预算截断"),
+            "截断必须留痕，不能让模型以为拿到了完整文件：{}",
+            kept.content
+        );
+        assert_eq!(result.total_tokens, 30);
     }
 }

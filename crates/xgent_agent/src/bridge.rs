@@ -615,7 +615,13 @@ async fn agent_loop_task(
                         };
                         result = cfg.context.retrieve(&query).await;
                     }
-                    crate::format::merge_pinned_context(&mut result, &pinned_context);
+                    // 显式项并入也在检索预算之内进行：chip 携带整份文件内容，
+                    // 不受限会让请求超出上下文窗口被 provider 拒掉。
+                    crate::format::merge_pinned_context(
+                        &mut result,
+                        &pinned_context,
+                        settings.retrieval_max_tokens,
+                    );
                     crate::format::refresh_system_message(&mut req, &result);
                     let next = run_agent_loop(
                         &cfg.provider,

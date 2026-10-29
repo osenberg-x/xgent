@@ -41,10 +41,9 @@ impl Transcript {
                 finalized,
                 ..
             } = block
+                && *t == turn_index
             {
-                if *t == turn_index {
-                    *finalized = true;
-                }
+                *finalized = true;
             }
         }
         let block_index = self.blocks.len();
@@ -128,11 +127,10 @@ impl Transcript {
                 status: current,
                 ..
             } = block
+                && id == tool_call_id
             {
-                if id == tool_call_id {
-                    *current = status;
-                    return true;
-                }
+                *current = status;
+                return true;
             }
         }
         false
@@ -147,46 +145,58 @@ impl Transcript {
                 status,
                 ..
             } = block
+                && id == tool_call_id
             {
-                if id == tool_call_id {
-                    *progress = Some(text.to_string());
-                    *status = ToolCallStatus::Running;
-                    return true;
-                }
+                *progress = Some(text.to_string());
+                *status = ToolCallStatus::Running;
+                return true;
             }
         }
         false
     }
 
-    /// 追加或更新工具结果，并把对应工具调用标记为完成/失败。
+    /// 该工具调用是否已有对应的 `ToolCall` 块。
+    pub fn has_tool_call(&self, tool_call_id: &str) -> bool {
+        self.blocks.iter().any(|block| {
+            matches!(block, BlockRef::ToolCall { tool_call_id: id, .. } if id == tool_call_id)
+        })
+    }
+
+    /// 追加或更新工具结果，并把对应工具调用标记为完成/失败/拒绝。
+    ///
+    /// 没有对应 `ToolCall` 时返回 `None` 且不改动序列（调用方按 Spec 记 warn）。
     pub fn set_tool_result(
         &mut self,
         turn_index: u64,
         tool_call_id: String,
         content: String,
         is_error: bool,
-    ) -> usize {
+        denied: bool,
+    ) -> Option<usize> {
+        if !self.has_tool_call(&tool_call_id) {
+            return None;
+        }
+        let status = if denied || is_error {
+            ToolCallStatus::Failed
+        } else {
+            ToolCallStatus::Completed
+        };
         if let Some(idx) = self.blocks.iter().position(
             |b| matches!(b, BlockRef::ToolResult { tool_call_id: id, .. } if id == &tool_call_id),
         ) {
             if let BlockRef::ToolResult {
                 content: current,
                 is_error: current_err,
+                denied: current_denied,
                 ..
             } = &mut self.blocks[idx]
             {
                 *current = content;
                 *current_err = is_error;
+                *current_denied = denied;
             }
-            self.set_tool_status(
-                &tool_call_id,
-                if is_error {
-                    ToolCallStatus::Failed
-                } else {
-                    ToolCallStatus::Completed
-                },
-            );
-            return idx;
+            self.set_tool_status(&tool_call_id, status);
+            return Some(idx);
         }
         let block_index = self.blocks.len();
         self.blocks.push(BlockRef::ToolResult {
@@ -195,16 +205,10 @@ impl Transcript {
             tool_call_id: tool_call_id.clone(),
             content,
             is_error,
+            denied,
         });
-        self.set_tool_status(
-            &tool_call_id,
-            if is_error {
-                ToolCallStatus::Failed
-            } else {
-                ToolCallStatus::Completed
-            },
-        );
-        block_index
+        self.set_tool_status(&tool_call_id, status);
+        Some(block_index)
     }
 
     /// 追加压缩通知。
@@ -311,6 +315,8 @@ pub enum BlockRef {
         tool_call_id: String,
         content: String,
         is_error: bool,
+        /// 用户拒绝执行（与「执行失败」区分，重建卡片时标签不能变）。
+        denied: bool,
     },
     /// 压缩通知。
     CompressionNotice {
@@ -424,7 +430,7 @@ mod tests {
         let b0 = t.begin_assistant_message(t0);
         t.append_to_assistant(b0, ContentBlock::Text("response".into()));
         let (t1, _) = t.push_tool_call(t0, "tc1".into(), "read_file".into(), "{}".into());
-        t.set_tool_result(t0, "tc1".into(), "content".into(), false);
+        t.set_tool_result(t0, "tc1".into(), "content".into(), false, false);
 
         let keys: Vec<_> = t.blocks().iter().map(|b| b.order_key()).collect();
         for i in 1..keys.len() {
@@ -463,8 +469,8 @@ mod tests {
         t.push_tool_call(turn, "tc1".into(), "read_file".into(), "{}".into());
         assert!(t.set_tool_progress("tc1", "reading"));
         assert!(t.set_tool_status("tc1", ToolCallStatus::Running));
-        t.set_tool_result(turn, "tc1".into(), "ok".into(), false);
-        t.set_tool_result(turn, "tc1".into(), "ok2".into(), true);
+        t.set_tool_result(turn, "tc1".into(), "ok".into(), false, false);
+        t.set_tool_result(turn, "tc1".into(), "ok2".into(), true, false);
         let results: Vec<_> = t
             .blocks()
             .iter()
@@ -485,6 +491,45 @@ mod tests {
             })
             .unwrap();
         assert_eq!(status, ToolCallStatus::Failed);
+    }
+
+    #[test]
+    fn orphan_tool_result_is_rejected() {
+        let mut t = Transcript::default();
+        let (turn, _) = t.push_user_message("hi".into());
+        // 没有对应 ToolCall 的结果：不建块、不改顺序（调用方按 Spec 记 warn）。
+        assert_eq!(
+            t.set_tool_result(turn, "ghost".into(), "out".into(), false, false),
+            None
+        );
+        assert_eq!(t.blocks().len(), 1);
+    }
+
+    #[test]
+    fn denied_result_keeps_denied_flag_and_fails_status() {
+        let mut t = Transcript::default();
+        let (turn, _) = t.push_user_message("hi".into());
+        t.push_tool_call(turn, "tc1".into(), "write_file".into(), "{}".into());
+        assert!(
+            t.set_tool_result(turn, "tc1".into(), "用户拒绝".into(), false, true)
+                .is_some()
+        );
+        let status = t
+            .blocks()
+            .iter()
+            .find_map(|b| match b {
+                BlockRef::ToolCall { status, .. } => Some(*status),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(status, ToolCallStatus::Failed);
+        let denied = t.blocks().iter().find_map(|b| match b {
+            BlockRef::ToolResult {
+                denied, is_error, ..
+            } => Some((*denied, *is_error)),
+            _ => None,
+        });
+        assert_eq!(denied, Some((true, false)), "拒绝与失败必须可区分");
     }
 
     #[test]

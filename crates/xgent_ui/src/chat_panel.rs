@@ -108,8 +108,8 @@ pub struct ChatPanelPlugin;
 
 impl Plugin for ChatPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::transcript::Transcript>()
-            .add_systems(Startup, spawn_chat_panel.after(crate::layout::spawn_layout))
+        // Transcript 资源由 transcript_write::TranscriptWritePlugin 持有（写入侧唯一 owner）。
+        app.add_systems(Startup, spawn_chat_panel.after(crate::layout::spawn_layout))
             .add_systems(
                 Update,
                 (
@@ -493,10 +493,12 @@ pub fn forward_input_submission(
     q_card: Query<Entity, With<ChatInputCardMarker>>,
     consumed: Option<Res<crate::completion_ui::CompletionConsumed>>,
     context_set: Option<Res<crate::context_set::ContextSet>>,
+    project_root: Option<Res<crate::file_panel::ProjectRoot>>,
 ) {
     let completion_enter = consumed.as_deref().is_some_and(|c| c.enter);
     let input_entity = q_input.single().ok();
     let card_entity = q_card.single().ok();
+    let root = project_root.as_deref();
     for ev in reader.read() {
         if completion_enter {
             continue;
@@ -524,7 +526,7 @@ pub fn forward_input_submission(
                     set.items()
                         .iter()
                         .map(|item| xgent_agent::ContextChunk {
-                            path: std::path::PathBuf::from(&item.id),
+                            path: pinned_path(&item.id, root),
                             content: item.content.clone(),
                             relevance: format!("用户显式上下文（{}）", item.kind.as_str()),
                             token_estimate: item.token_count.min(u32::MAX as u64) as u32,
@@ -543,6 +545,21 @@ pub fn forward_input_submission(
             });
         }
     }
+}
+
+/// 上下文项 id（绝对路径）→ 与检索片段同形的相对项目根路径。
+///
+/// `ContextChunk.path` 按项目根相对记账（`xgent_context::on_demand`），而 chip 的
+/// id 是 `EditorBuffer.path`（绝对）。两边不一致时 `merge_pinned_context` 的按
+/// path 去重永不命中，同一文件会被注入 system 两遍。
+fn pinned_path(id: &str, root: Option<&crate::file_panel::ProjectRoot>) -> std::path::PathBuf {
+    let path = std::path::Path::new(id);
+    if let Some(root) = root
+        && let Ok(rel) = path.strip_prefix(&root.path)
+    {
+        return rel.to_path_buf();
+    }
+    path.to_path_buf()
 }
 /// 更新输入框边框颜色：忙时 accent；空输入发送时红边闪烁。
 fn update_input_border(
@@ -706,7 +723,7 @@ fn handle_qa_chips(
     mut q_input: Query<&mut EditableText, With<ChatInputMarker>>,
 ) {
     let Ok(mut editable) = q_input.single_mut() else {
-        tracing::warn!("回到底部节点缺失（update_back_to_bottom）");
+        tracing::warn!("对话输入框缺失（handle_qa_chips）");
         return;
     };
     for marker in q.iter_mut() {

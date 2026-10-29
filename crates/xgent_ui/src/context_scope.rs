@@ -277,8 +277,12 @@ fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Co
         })
         .collect();
     let removed = set.removed_ids();
-    let _ =
-        xgent_agent::session_store::save_context_set(&conv.id.0.to_string(), &snapshots, &removed);
+    if let Err(error) =
+        xgent_agent::session_store::save_context_set(&conv.id.0.to_string(), &snapshots, &removed)
+    {
+        // 静默失败会让用户以为 chip 已持久化，重启后却发现集合是空的。
+        tracing::warn!(%error, "上下文 sidecar 写入失败：会话恢复后 chip 会丢失");
+    }
 }
 
 /// ContextSet 变化时重建 chips（签名比对避免每帧重建；标签/添加钮保留）。

@@ -205,9 +205,9 @@ pub fn accept_candidate(
     candidate: &CompletionCandidate,
 ) {
     let text = editable.editor().text().to_string();
-    let cursor = editable.editor().raw_selection().focus().index();
-    let start = state.trigger_position.min(text.len());
-    let end = cursor.min(text.len()).max(start);
+    let cursor = clamp_index(&text, editable.editor().raw_selection().focus().index());
+    let start = clamp_index(&text, state.trigger_position);
+    let end = cursor.max(start);
     let mut new_text = String::with_capacity(text.len() + candidate.insert_text.len());
     new_text.push_str(&text[..start]);
     new_text.push_str(&candidate.insert_text);
@@ -223,9 +223,23 @@ pub struct CompletionAccepted {
     pub candidate: CompletionCandidate,
 }
 
+/// 把索引钳到字符串内并落到字符边界上。
+///
+/// `PlainEditor` 的选区索引按**原始缓冲区**计（含 IME preedit），而
+/// `EditableText::text()` 会**排除** preedit——两者长度可以不一致，直接切片
+/// 会 panic 或落在半个汉字上。
+pub fn clamp_index(text: &str, index: usize) -> usize {
+    let mut index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
 /// 检测输入中的 @ 触发。
 pub fn detect_at_trigger(input_text: &str, cursor_pos: usize) -> Option<usize> {
-    if cursor_pos == 0 {
+    // 上界检查：索引可能来自含 IME preedit 的原始缓冲区，比可见文本更长。
+    if cursor_pos == 0 || cursor_pos > input_text.len() {
         return None;
     }
 
@@ -339,5 +353,28 @@ mod tests {
         assert_eq!(detect_at_trigger("hello @", 7), Some(6));
         assert_eq!(detect_at_trigger("hello@", 6), None);
         assert_eq!(detect_at_trigger("test@", 5), None);
+    }
+
+    #[test]
+    fn detect_at_trigger_survives_out_of_range_cursor() {
+        // IME 组合期的原始缓冲区比 text() 长：越界索引必须回 None，不是 panic。
+        assert_eq!(detect_at_trigger("@", 3), None);
+        assert_eq!(detect_at_trigger("你好", 9), None);
+        assert_eq!(detect_at_trigger("", 1), None);
+    }
+
+    #[test]
+    fn detect_at_trigger_handles_cjk_between_trigger_and_caret() {
+        // "@世界"：@ 在 0，光标在字节 7（CJK 每字 3 字节）。
+        assert_eq!(detect_at_trigger("@世界", 7), Some(0));
+        assert_eq!(detect_at_trigger("看@世界 一下", 16), None);
+    }
+
+    #[test]
+    fn clamp_index_snaps_to_char_boundary() {
+        assert_eq!(clamp_index("你好", 4), 3);
+        assert_eq!(clamp_index("你好", 2), 0);
+        assert_eq!(clamp_index("你好", 99), 6);
+        assert_eq!(clamp_index("abc", 2), 2);
     }
 }

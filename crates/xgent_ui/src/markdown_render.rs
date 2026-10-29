@@ -72,7 +72,32 @@ fn render_block(
         }
         MarkdownBlock::Bold { text } => render_bold(commands, text, theme),
         MarkdownBlock::Link { url, text } => render_link(commands, url, text, theme),
+        MarkdownBlock::Inline { blocks } => render_inline(commands, blocks, theme, fonts, loc),
     }
+}
+
+/// 渲染段落内联组：文本/粗体/链接排在同一行，宽度不足自动折行。
+fn render_inline(
+    commands: &mut Commands,
+    blocks: &[MarkdownBlock],
+    theme: &Theme,
+    fonts: &crate::fonts::UiFonts,
+    loc: &xgent_settings::Localizer,
+) -> Entity {
+    let row = commands
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(2.0),
+            align_items: AlignItems::FlexStart,
+            ..default()
+        },))
+        .id();
+    for block in blocks {
+        let child = render_block(commands, block, theme, fonts, loc);
+        commands.entity(row).add_child(child);
+    }
+    row
 }
 
 /// 渲染标题。
@@ -100,16 +125,19 @@ fn render_heading(commands: &mut Commands, level: u8, text: &str, theme: &Theme)
 }
 
 /// 渲染段落。
+///
+/// 正文档位必须与流式路径一致（`theme.font_size` + 按内容选行高），否则同一条
+/// 助手消息在 Done 前后会跳字号/跳行高——`mono_typography` 的守护断言管的就是这个。
 fn render_paragraph(commands: &mut Commands, text: &str, theme: &Theme) -> Entity {
     commands
         .spawn((Node::default(),))
         .with_children(|parent| {
             parent.spawn(ui_text(
                 text,
-                type_scale::BODY,
+                theme.font_size,
                 400,
                 theme.text,
-                type_scale::line_height::BODY,
+                type_scale::line_height::for_text(text),
             ));
         })
         .id()
@@ -255,10 +283,10 @@ fn render_bold(commands: &mut Commands, text: &str, theme: &Theme) -> Entity {
         .with_children(|parent| {
             parent.spawn(ui_text(
                 text,
-                type_scale::BODY,
+                theme.font_size,
                 600,
                 theme.text,
-                type_scale::line_height::BODY,
+                type_scale::line_height::for_text(text),
             ));
         })
         .id()
@@ -278,10 +306,10 @@ fn render_link(commands: &mut Commands, url: &str, text: &str, theme: &Theme) ->
         .with_children(|parent| {
             parent.spawn(ui_text(
                 text,
-                type_scale::BODY,
+                theme.font_size,
                 400,
                 theme.accent,
-                type_scale::line_height::BODY,
+                type_scale::line_height::for_text(text),
             ));
         })
         .id()

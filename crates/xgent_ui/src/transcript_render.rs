@@ -20,7 +20,7 @@ use crate::kit::{HoverTint, IconAssets};
 use crate::markdown::parse_markdown;
 use crate::markdown_render::spawn_markdown;
 use crate::theme::{Theme, size, space, type_scale};
-use crate::tool_panel::spawn_tool_card_entity;
+use crate::tool_panel::{ToolCardView, spawn_tool_card_entity};
 use crate::transcript::{BlockRef, NoticeKind, Transcript};
 
 /// 流式光标字符。
@@ -60,11 +60,15 @@ struct AssistantTextBody;
 #[derive(Component, Debug, Clone, Copy)]
 struct AssistantMarkdownDone;
 
-/// 当前虚拟窗口（first 变化才重建，避免流式每帧重建）。
+/// 当前虚拟窗口（渲染段变化才重建，避免流式每帧重建）。
 #[derive(Resource, Default)]
 struct RenderWindow {
     generation: u64,
-    first: usize,
+    /// 已渲染的连续段（虚拟项下标区间 `[start, end)`）。
+    ///
+    /// 用段而不是单个 `first` 记录窗口：可见区与当前轮可以不相邻，中间的空档
+    /// 必须有占位高度，否则当前轮会紧贴可见区出现在错误位置。
+    runs: Vec<(usize, usize)>,
 }
 
 /// Transcript 渲染插件。
@@ -115,20 +119,25 @@ fn render_transcript(
     let busy = conv.status != ConversationStatus::Idle && conv.status != ConversationStatus::Error;
     let show_cursor = busy && (time.elapsed().as_secs_f64() % 1.0) < 0.5;
 
-    // 虚拟项序号 → 块下标（ToolResult 没有独立视觉，不占虚拟项）。
+    // 虚拟项序号 → 块下标（工具结果没有独立视觉；尚无正文的助手分段不占位，
+    // 否则网络等待期会渲染一只空泡，且该下标永远量不到高度）。
     let render_items: Vec<usize> = transcript
         .blocks()
         .iter()
         .enumerate()
-        .filter(|(_, block)| !matches!(block, BlockRef::ToolResult { .. }))
+        .filter(|(_, block)| is_renderable(block))
         .map(|(index, _)| index)
         .collect();
     vlist.item_count = render_items.len();
 
-    let viewport_h = node.map(|node| node.size().y).unwrap_or(0.0);
-    let scroll_y = scroll.map(|position| position.0.y).unwrap_or(0.0);
+    // `ComputedNode::size` 与 `ScrollPosition` 是**物理**像素，而 `measured` 表按
+    // 逻辑像素记账（见 `xui::virtual_list::update_virtual_list` 的同类换算）。
+    // 不乘 inverse_scale_factor 会在 HiDPI 下把 first 算深，顶部可见行漏渲染。
+    let scale = node.map(|node| node.inverse_scale_factor()).unwrap_or(1.0);
+    let viewport_h = node.map(|node| node.size().y * scale).unwrap_or(0.0);
+    let scroll_y = scroll.map(|position| position.0.y * scale).unwrap_or(0.0);
     let offsets = build_measured_offsets(render_items.len(), vlist.item_height, &vlist.measured);
-    let (mut first, count) = if viewport_h > 0.0 {
+    let (first, count) = if viewport_h > 0.0 {
         compute_visible_range_measured(&offsets, viewport_h, scroll_y, 4)
     } else {
         (0, render_items.len())
@@ -141,16 +150,17 @@ fn render_transcript(
                 .position(|&block| transcript.blocks()[block].turn_index() == turn)
         })
         .unwrap_or(render_items.len());
-    first = first.min(active_start);
+    let first = first.min(active_start);
 
     let mut desired: Vec<usize> = (first..(first + count).min(render_items.len())).collect();
     desired.extend(active_start..render_items.len());
     desired.sort_unstable();
     desired.dedup();
+    let runs = build_runs(&desired);
     let desired_blocks: Vec<usize> = desired.iter().map(|&item| render_items[item]).collect();
     let desired_set: std::collections::HashSet<usize> = desired_blocks.iter().copied().collect();
 
-    let rebuild = window.generation != generation || window.first != first;
+    let rebuild = window.generation != generation || window.runs != runs;
     if rebuild {
         for (entity, key, spacer) in q_nodes.iter() {
             if key.is_some() || spacer.is_some() {
@@ -158,7 +168,7 @@ fn render_transcript(
             }
         }
         window.generation = generation;
-        window.first = first;
+        window.runs = runs.clone();
     }
 
     // 现有块：despawn 出窗的；更新窗内的助手正文。
@@ -232,9 +242,9 @@ fn render_transcript(
         }
     }
 
-    // 新块：只渲染窗口内的。
-    let mut new_entities = Vec::new();
-    for &block_index in &desired_blocks {
+    // 新块：只渲染窗口内的，并按虚拟项下标记账（分段插位要用）。
+    let mut new_entities: Vec<(usize, Entity)> = Vec::new();
+    for (&item, &block_index) in desired.iter().zip(&desired_blocks) {
         if existing.contains(&block_index) {
             continue;
         }
@@ -255,44 +265,104 @@ fn render_transcript(
                 turn_index: transcript.blocks()[block_index].turn_index(),
                 block_index,
             },
-            VirtualListItem {
-                index: render_items
-                    .iter()
-                    .position(|&item| item == block_index)
-                    .unwrap_or(0),
-            },
+            VirtualListItem { index: item },
         ));
-        new_entities.push(entity);
+        new_entities.push((item, entity));
     }
 
     if rebuild {
-        let mut children = Vec::new();
-        if first > 0 {
-            let height = offsets.get(first).copied().unwrap_or(0.0);
-            children.push(spawn_spacer(&mut commands, height, true));
+        let mut children: Vec<Entity> = Vec::new();
+        let mut covered = 0usize;
+        for &(start, end) in &runs {
+            push_gap(
+                &mut commands,
+                &mut children,
+                &offsets,
+                covered,
+                start,
+                true,
+                false,
+            );
+            children.extend(
+                new_entities
+                    .iter()
+                    .filter(|(item, _)| *item >= start && *item < end)
+                    .map(|(_, entity)| *entity),
+            );
+            covered = end;
         }
-        children.extend(new_entities);
-        let last_v = desired.last().map(|last| last + 1).unwrap_or(0);
-        let bottom_offset = offsets.get(last_v).copied().unwrap_or(0.0);
-        let bottom_height = (offsets.last().copied().unwrap_or(0.0) - bottom_offset).max(0.0);
-        children.push(spawn_spacer(&mut commands, bottom_height, false));
+        // 尾部占位始终存在（哪怕 0 高）：增量追加依赖「最后一个子节点是尾部占位」。
+        push_gap(
+            &mut commands,
+            &mut children,
+            &offsets,
+            covered,
+            render_items.len(),
+            false,
+            true,
+        );
         commands.entity(list).add_children(&children);
     } else if !new_entities.is_empty() {
-        // 追加：插到底部占位块之前，保持顺序。
-        let insert_at = q_children.get(list).ok().and_then(|children| {
-            q_nodes
-                .iter()
-                .find(|(_, _, spacer)| spacer.is_some_and(|spacer| !spacer.top))
-                .and_then(|(spacer, _, _)| children.iter().position(|child| child == spacer))
-        });
-        match insert_at {
-            Some(index) => {
-                commands.entity(list).insert_children(index, &new_entities);
-            }
-            None => {
-                commands.entity(list).add_children(&new_entities);
-            }
+        // 段边界变化已在上面触发 rebuild，这里追加的只会是最后一段的尾部：
+        // 插到尾部占位之前保持顺序。
+        let entities: Vec<Entity> = new_entities.into_iter().map(|(_, entity)| entity).collect();
+        let insert_at = q_children
+            .get(list)
+            .map(|children| children.len())
+            .unwrap_or(1)
+            .saturating_sub(1);
+        commands.entity(list).insert_children(insert_at, &entities);
+    }
+}
+
+/// desired（升序去重）→ 极大连续段 `[start, end)`。
+fn build_runs(desired: &[usize]) -> Vec<(usize, usize)> {
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for &item in desired {
+        if let Some(last) = runs.last_mut().filter(|(_, end)| *end == item) {
+            last.1 = item + 1;
+        } else {
+            runs.push((item, item + 1));
         }
+    }
+    runs
+}
+
+/// 虚拟项下标 → 累积偏移（越界时取总量）。
+fn offset_at(offsets: &[f32], index: usize) -> f32 {
+    offsets
+        .get(index)
+        .copied()
+        .unwrap_or_else(|| offsets.last().copied().unwrap_or(0.0))
+}
+
+/// 给一段空档补占位高度；`force` 时即使 0 高也建节点（尾部定位锚点）。
+fn push_gap(
+    commands: &mut Commands,
+    children: &mut Vec<Entity>,
+    offsets: &[f32],
+    from: usize,
+    to: usize,
+    top: bool,
+    force: bool,
+) {
+    let height = if to > from {
+        (offset_at(offsets, to) - offset_at(offsets, from)).max(0.0)
+    } else {
+        0.0
+    };
+    if height <= 0.0 && !force {
+        return;
+    }
+    children.push(spawn_spacer(commands, height, top));
+}
+
+/// 该块是否占一个虚拟项。
+fn is_renderable(block: &BlockRef) -> bool {
+    match block {
+        BlockRef::ToolResult { .. } => false,
+        BlockRef::AssistantMessage { blocks, .. } => !assistant_text(blocks).is_empty(),
+        _ => true,
     }
 }
 
@@ -337,6 +407,7 @@ fn spawn_block(
             tool_name,
             arguments,
             status,
+            progress,
             ..
         } => {
             let result = transcript.blocks().iter().find_map(|other| match other {
@@ -344,10 +415,18 @@ fn spawn_block(
                     tool_call_id: id,
                     content,
                     is_error,
+                    denied,
                     ..
-                } if id == tool_call_id => Some((content.as_str(), *is_error)),
+                } if id == tool_call_id => Some((content.as_str(), *is_error, *denied)),
                 _ => None,
             });
+            let view = ToolCardView {
+                status: *status,
+                result: result.map(|(content, _, _)| content),
+                is_error: result.map(|(_, is_error, _)| is_error).unwrap_or(false),
+                denied: result.map(|(_, _, denied)| denied).unwrap_or(false),
+                progress: progress.as_deref(),
+            };
             spawn_tool_card_entity(
                 commands,
                 tool_call_id,
@@ -357,9 +436,7 @@ fn spawn_block(
                 fonts,
                 icons,
                 loc,
-                *status,
-                result.map(|(content, _)| content),
-                result.map(|(_, is_error)| is_error).unwrap_or(false),
+                view,
             )
         }
         BlockRef::CompressionNotice {

@@ -3579,3 +3579,53 @@ fn frame_event_cap_written_to_handle_is_read_next_frame() {
         "drain 应读共享句柄里的新分闸"
     );
 }
+
+/// 会话级上下文 sidecar 的磁盘往返（A6：恢复后集合必须与恢复前一致）。
+#[test]
+fn context_sidecar_roundtrip_and_legacy_array_format() {
+    {
+        let _g = ENV_ONCE.lock();
+        if std::env::var("XGENT_AGENT_DIR").is_err() {
+            let dir = std::mem::ManuallyDrop::new(tempfile::tempdir().expect("tempdir"))
+                .path()
+                .to_path_buf();
+            // SAFETY: 持锁串行化；设一次后只读
+            unsafe { std::env::set_var("XGENT_AGENT_DIR", dir) };
+        }
+    }
+    let id = format!(
+        "9000000{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .subsec_nanos()
+    );
+    let items = vec![xgent_core::session::ContextSnapshot {
+        id: "crates/xgent_ui/src/main.rs".into(),
+        kind: "file".into(),
+        label: "main.rs".into(),
+        token_count: 12,
+        content: "fn main() {}".into(),
+    }];
+    let removed = vec!["crates/old.rs".to_string()];
+    crate::session_store::save_context_set(&id, &items, &removed).expect("save sidecar");
+    let loaded = crate::session_store::load_context_set(&id);
+    assert_eq!(loaded.items, items, "sidecar 往返必须保住集合");
+    assert_eq!(loaded.removed, removed, "显式移除项也要往返");
+
+    // 最早的纯数组格式：不得读成空集合。
+    let path = crate::session_store::session_file_path(&id).with_extension("context.json");
+    std::fs::write(
+        &path,
+        serde_json::to_string(&items).expect("serialize legacy"),
+    )
+    .expect("write legacy");
+    let legacy = crate::session_store::load_context_set(&id);
+    assert_eq!(legacy.items, items, "旧数组格式不得读为空");
+    assert!(legacy.removed.is_empty());
+
+    // 损坏文件：按空处理，但不能 panic。
+    std::fs::write(&path, "{ not json").expect("write corrupt");
+    assert!(crate::session_store::load_context_set(&id).items.is_empty());
+    let _ = std::fs::remove_file(&path);
+}
