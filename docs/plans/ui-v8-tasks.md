@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 仅交付模型层**（M6-T5 已接线，T1/T2/T3/T4/T6 的模型与单测在 `9ac4daf`，但未接入 chat_panel / context_scope）。M7 与 M6-T5 的实现提交为 `81d3060`。**下一期 M6.5（会话内容接线）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 模型层 + M6.5 接线已交付**（M6 模型 `9ac4daf`；M6.5 实现 `b962f97`，启动修复 `5dde747`；真实窗口截图仍待用户走查）。**下一期 M8（Git 探针）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -288,22 +288,22 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ### M6-T1 `Transcript` 有序权威（修 E2）
 - [x] 模型：`Transcript` + `BlockRef` 块序列与顺序键 `(turn_index, block_index)`（`9ac4daf`）。
-- [ ] 渲染按顺序 spawn/despawn/update；删除命令式挪子节点（`chat_panel.rs`、`tool_panel.rs`、`undo.rs`）→ **M6.5-T1**。
+- [x] 渲染按顺序 spawn/despawn/update；删除命令式挪子节点（`chat_panel.rs`、`tool_panel.rs`、`undo.rs`）→ **M6.5-T1**。
 - **验收**：边流式边插工具卡，顺序稳定不倒退（自动化断言序列单调）。
 
 ### M6-T2 Markdown 块模型与依赖评审
 - [x] 解析器 `pulldown-cmark 0.12` + `MarkdownBlock` 模型与单测（`9ac4daf`）。
-- [ ] 依赖评审记录落 `docs/notes/` → **M6.5-T2**（当前缺失，见 §10 勘误 44）。
+- [x] 依赖评审记录落 `docs/notes/markdown-dependency-review.md` → **M6.5-T2**。
 - **验收**：评审记录落 `docs/notes/`；解析器单测覆盖六类元素。
 
 ### M6-T3 富文本渲染（修 E1 / R3-5）
 - [x] `spawn_markdown` 渲染辅助（单节点多 `TextSection`、代码块样式、复制按钮）（`9ac4daf`）。
-- [ ] 接入 chat_panel 的终稿消息与流式增量路径；语法色接 `xui` 高亮链 → **M6.5-T2**。
+- [x] 接入 chat_panel 的终稿消息与流式增量路径；语法色接 `xui` 高亮链 → **M6.5-T2**。
 - **验收**：六类元素混合样张视觉正确；对照原型截图。
 
 ### M6-T4 `@` 内联补全（修 E3）
 - [x] `CompletionState` / `spawn_completion_popup` / `detect_at_trigger` 模型与单测（`9ac4daf`）。
-- [ ] 接入输入框与真实候选来源（文件树 / ProjectRoot；符号与 selection 后置）→ **M6.5-T3**。
+- [x] 接入输入框与真实候选来源（文件树 / ProjectRoot；符号与 selection 后置）→ **M6.5-T3**。
 - **验收**：输入 `@` 出现补全并可键盘选择；窄窗不被裁。
 
 ### M6-T5 发送/停止动作条（修 E4）
@@ -313,24 +313,25 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ### M6-T6 `ContextSet` 建模（修 E5）
 - [x] 模型：独立 Resource（增删/清空/token 合计）（`9ac4daf`）。
-- [ ] 替换 `context_scope.rs` 的只读镜像、token 占比显示、可持久化 → **M6.5-T4**（模型当前无持久化，见 §10 勘误 44）。
+- [x] 替换 `context_scope.rs` 的只读镜像、token 占比显示、可持久化 → **M6.5-T4**（会话级 sidecar，见 §10 勘误 48）。
 - **验收**：移除某 chip 后其不再进入下一轮请求。
 
 ---
 
 ## M6.5 会话内容接线（M6 降级后的集成期）
 
-> 状态：**待开工**。目标不是新增抽象，而是让 `9ac4daf` 的模型进入产品路径，
-> 并把 M6 六项验收补成可复跑证据。依赖已交付的 M3 滚动契约与 M5 槽位注册表。
+> 状态：**已交付（自动化证据齐；真实窗口截图待走查）**。目标不是新增抽象，而是让
+> `9ac4daf` 的模型进入产品路径，并把 M6 六项验收补成可复跑证据。实现提交 `b962f97`，
+> 启动修复 `5dde747`；依赖已交付的 M3 滚动契约与 M5 槽位注册表。
 
 | 任务 | 范围 | 验收（可机器判定） |
 |:---|:---|:---|
-| M6.5-T1 Transcript 渲染 | 把用户消息、助手流式增量、工具调用/结果、压缩通知写入 `Transcript`；渲染系统按 `(turn_index, block_index)` 差分 spawn/update/despawn；删除 chat_panel/tool_panel/undo 的命令式挪节点；会话消息列表虚拟化（承接 §10 勘误 13） | 流式中插工具卡顺序单调；全仓无「add_child 挪序」；长会话只渲染可见行 |
-| M6.5-T2 Markdown 接线 | 终稿助手消息走 `parse_markdown` + `spawn_markdown`；流式期纯文本、完成后替换，避免每帧重排；代码块复制按钮接线；补 `docs/notes/` 依赖评审 | 六类元素真实样张；窄窗不溢出；复制按钮可用；评审记录在库 |
-| M6.5-T3 `@` 补全接线 | 输入框触发 `detect_at_trigger`；候选来自文件树 / ProjectRoot；浮层挂 `DROPDOWN`；方向键 / Enter / Esc；接受后写回 `EditableText` | 窄窗不被裁；键盘完成选择；无候选不出浮层 |
-| M6.5-T4 ContextSet 接线 | 替换 `context_scope.rs` 只读镜像；chips 与 `ContextSet` 双向同步；发送请求时内容进入 `AgentCommand::StartLoop`；token 占比显示；持久化（会话内先做，跨会话按 ADR-0008 评估） | 移除 chip 后下一轮请求不含该内容；重开面板状态一致 |
-| M6.5-T5 视觉与端到端证据 | 真实窗口走查 + 截图（Markdown 样张、工具卡插入顺序、`@` 浮层、chips 删除）；把 M6 A1–A6 从「用户接受降级」补成可复跑证据 | 六项证据落 `docs/notes/` 或交接文档 |
-| M6.5-T6 文档与门槛 | M6 档案口径订正；handoff / AGENTS / dev-tutorial 同步；mac/Linux 硬门槛 A 排期（用户 2026-10-28：Windows 收尾后立刻排） | 文档无「M6 已全部完成」误导；门槛 A 有明确日期/里程碑 |
+| M6.5-T1 Transcript 渲染 | 把用户消息、助手流式增量、工具调用/结果、压缩通知写入 `Transcript`；渲染系统按 `(turn_index, block_index)` 差分 spawn/update/despawn；删除 chat_panel/tool_panel/undo 的命令式挪节点；会话消息列表虚拟化（承接 §10 勘误 13） | ✅ 流式中插工具卡顺序单调；全仓无「add_child 挪序」；长会话只渲染可见行（`transcript_render_contract` 5 项） |
+| M6.5-T2 Markdown 接线 | 终稿助手消息走 `parse_markdown` + `spawn_markdown`；流式期纯文本、完成后替换，避免每帧重排；代码块复制按钮接线；补 `docs/notes/` 依赖评审 | ✅ 六类元素单测 + Markdown 渲染测试；窄窗不溢出；复制按钮可用；评审记录在库；真实窗口样张待走查 |
+| M6.5-T3 `@` 补全接线 | 输入框触发 `detect_at_trigger`；候选来自文件树 / ProjectRoot；浮层挂 `DROPDOWN`；方向键 / Enter / Esc；接受后写回 `EditableText` | ✅ 浮层挂 DROPDOWN；键盘路由与 Enter 消费；窄窗钳制；候选去抖 |
+| M6.5-T4 ContextSet 接线 | 替换 `context_scope.rs` 只读镜像；chips 与 `ContextSet` 双向同步；发送请求时内容进入 `AgentCommand::StartLoop`；token 占比显示；持久化（会话内先做，跨会话按 ADR-0008 评估） | ✅ 移除 chip 后下一轮请求不含该内容；token 占比；会话级 sidecar 恢复 |
+| M6.5-T5 视觉与端到端证据 | 真实窗口走查 + 截图（Markdown 样张、工具卡插入顺序、`@` 浮层、chips 删除）；把 M6 A1–A6 从「用户接受降级」补成可复跑证据 | 🟡 自动化证据已落测试；真实窗口截图待用户走查 |
+| M6.5-T6 文档与门槛 | M6 档案口径订正；handoff / AGENTS / dev-tutorial 同步；mac/Linux 硬门槛 A 排期（用户 2026-10-28：Windows 收尾后立刻排） | ✅ 文档同步；门槛 A 定为 M6.5 后第一个里程碑首项 |
 
 > ⚠ M6.5 的 T1 会同时触碰流式路径、工具卡与 undo 通知三处命令式渲染；
 > 必须按 M6-T1 的顺序键先建数据流，再替换渲染，禁止先删旧路径。
@@ -480,6 +481,12 @@ M1 与 M2 相互独立，可并行分头推进。
 46. **M7-A1 不是编译期保障**（2026-10-28 复核）：`HotkeyAction.handler_name` 是 `&'static str`（`shortcuts.rs:35`），`assert_hotkey_consistency` 只比较注册表与清单的 id 集合（`shortcuts.rs:157-171`）；分发表缺分支不会在编译期或启动期失败。验证记录里「注册即必填函数指针」的措辞与代码不符。
 
 47. **文档计数与 i18n 守卫口径订正**（2026-10-28 复核）：实测 19 个 crate、`crates/**/*.rs` 共 68322 行（AGENTS.md 原写 13 crate / 约 5 万行，dev-tutorial 原写约 22k 行）；`i18n_full_corpus.rs` 只校验 `.ftl` 语料的键集与 CJK，不是「全模块源码扫描」。
+
+48. **M6.5 交付口径**（2026-10-29）：`b962f97` 把 M6 模型接入产品——Transcript 成为顺序权威（用户/助手分段/工具卡/通知全量渲染）、Markdown 终稿、@ 补全、ContextSet+sidecar、消息列表虚拟窗口。自动化证据：`transcript_write` 7 项、`transcript_render_contract` 5 项（顺序/Markdown/工具卡/通知/200 条消息只渲染窗口）、pinned context 合并、i18n 语料 3 项；`xgent_ui` 全套 + `xui` + `xgent_terminal` 全绿。**未闭环**：真实窗口截图/走查待用户完成（A9 的可视部分）；虚拟窗口在「可见区与当前轮不相邻」时会塌掉中间间隙（已知限制）；@ 补全只做文件候选。
+
+49. **实机启动暴露的三个既有缺陷**（2026-10-29，`5dde747`）：① `XgentUiPlugin` 中 `LayoutPlugin`/`OverlayPlugin`/`FilePanelPlugin` 会先自加 `PanelsPlugin`，随后元组再次无条件添加 → `plugin was already added` panic；改为在 `XgentUiPlugin` 开头判空预加 Panels/Visibility/Tabs。② `TabsPlugin` 把 `handle_slot_tab_click` 等同时挂进 `PanelSet::Requests` 与 `PanelSet::Visibility`，而两个集合有 before/after 链 → schedule 初始化报循环；改为只把纯视图系统挂 Visibility。③ `context_scope` 的 `ContextSetRemove` 未 `add_message` → 运行时 `Message not initialized`。三者都不是 M6.5 引入，而是之前只在 headless 测试中未暴露。
+
+50. **代码量更新**（2026-10-29）：`crates/**/*.rs` 实测 70002 行（M6.5 接线后）。
 
 ## 附：文档树变更（2026-10-16，已完成）
 
