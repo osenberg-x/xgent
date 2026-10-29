@@ -227,3 +227,6 @@ editor-read-cancelled = 读取任务取消
 
 # --- M6.5：上下文 token 占比 ---
 context-token-ratio = { $used } / { $window } tokens（{ $pct }%）
+
+# --- M6.5: code block copy ---
+copy = 复制

@@ -56,7 +56,7 @@ fn reset_completion_consumed(mut consumed: ResMut<CompletionConsumed>) {
 }
 
 fn handle_completion_keys(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
     mut state: ResMut<CompletionState>,
     mut consumed: ResMut<CompletionConsumed>,
     mut q_input: Query<&mut bevy::text::EditableText, With<ChatInputMarker>>,
@@ -65,15 +65,21 @@ fn handle_completion_keys(
         return;
     }
     if keys.just_pressed(KeyCode::ArrowDown) {
+        keys.clear_just_pressed(KeyCode::ArrowDown);
         state.select_next();
         return;
     }
     if keys.just_pressed(KeyCode::ArrowUp) {
+        keys.clear_just_pressed(KeyCode::ArrowUp);
         state.select_prev();
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
-        state.deactivate();
+        let text = q_input
+            .single()
+            .map(|editable| editable.editor().text().to_string())
+            .unwrap_or_default();
+        state.dismiss(&text);
         consumed.esc = true;
         return;
     }
@@ -82,9 +88,10 @@ fn handle_completion_keys(
             return;
         };
         if let Ok(mut editable) = q_input.single_mut() {
-            accept_candidate(&mut editable, &state, &candidate);
+            accept_candidate(&mut editable, &mut state, &candidate);
+        } else {
+            state.deactivate();
         }
-        state.deactivate();
         consumed.enter = true;
     }
 }
@@ -114,6 +121,11 @@ fn sync_completion_state(
         return;
     };
     let text = editable.editor().text().to_string();
+    if state.suppress_text.as_deref() == Some(text.as_str()) {
+        state.deactivate();
+        return;
+    }
+    state.suppress_text = None;
     let cursor = editable.editor().raw_selection().focus().index();
     let Some(trigger) = detect_at_trigger(&text, cursor) else {
         state.deactivate();

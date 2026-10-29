@@ -42,6 +42,8 @@ pub struct CompletionState {
     pub selected_index: usize,
     /// 触发位置（输入框中的字符索引）。
     pub trigger_position: usize,
+    /// 停用时的输入文本快照：文本未变化前不再自动重开浮层。
+    pub suppress_text: Option<String>,
 }
 
 impl CompletionState {
@@ -51,6 +53,7 @@ impl CompletionState {
         self.candidates = candidates;
         self.selected_index = 0;
         self.trigger_position = trigger_pos;
+        self.suppress_text = None;
     }
 
     /// 停用补全。
@@ -58,6 +61,12 @@ impl CompletionState {
         self.active = false;
         self.candidates.clear();
         self.selected_index = 0;
+    }
+
+    /// 用户主动关闭（Esc/接受）：记录当前文本，文本不再变化前不重开。
+    pub fn dismiss(&mut self, text: &str) {
+        self.deactivate();
+        self.suppress_text = Some(text.to_string());
     }
 
     /// 向下选择。
@@ -179,7 +188,7 @@ pub fn handle_completion_item_click(
     for (marker, _) in q.iter_mut() {
         if let Some(candidate) = state.candidates.get(marker.index).cloned() {
             if let Ok(mut editable) = q_input.single_mut() {
-                accept_candidate(&mut editable, &state, &candidate);
+                accept_candidate(&mut editable, &mut state, &candidate);
             }
             state.deactivate();
         }
@@ -192,7 +201,7 @@ pub fn handle_completion_item_click(
 /// 文本输入系统消费的路径，能保证 `EditableText` 的变更通知与重排都触发。
 pub fn accept_candidate(
     editable: &mut bevy::text::EditableText,
-    state: &CompletionState,
+    state: &mut CompletionState,
     candidate: &CompletionCandidate,
 ) {
     let text = editable.editor().text().to_string();
@@ -204,7 +213,8 @@ pub fn accept_candidate(
     new_text.push_str(&candidate.insert_text);
     new_text.push_str(&text[end..]);
     editable.clear();
-    editable.queue_edit(bevy::text::TextEdit::Insert(new_text.into()));
+    editable.queue_edit(bevy::text::TextEdit::Insert(new_text.clone().into()));
+    state.dismiss(&new_text);
 }
 
 /// 补全接受事件（保留用于未来扩展）。

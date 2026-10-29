@@ -226,3 +226,6 @@ editor-read-cancelled = Read task cancelled
 
 # --- M6.5: context token ratio ---
 context-token-ratio = { $used } / { $window } tokens ({ $pct }%)
+
+# --- M6.5: code block copy ---
+copy = Copy

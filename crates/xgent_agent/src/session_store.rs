@@ -244,10 +244,21 @@ pub fn save_context_set(
 pub fn load_context_set(session_id: &str) -> ContextSidecar {
     let session_id = session_id.trim_start_matches("session:");
     let path = session_file_path(session_id).with_extension("context.json");
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+    let Some(text) = std::fs::read_to_string(path).ok() else {
+        return ContextSidecar::default();
+    };
+    if let Ok(sidecar) = serde_json::from_str::<ContextSidecar>(&text) {
+        return sidecar;
+    }
+    // 兼容最早的纯数组格式。
+    if let Ok(items) = serde_json::from_str::<Vec<xgent_core::session::ContextSnapshot>>(&text) {
+        return ContextSidecar {
+            version: 0,
+            items,
+            removed: Vec::new(),
+        };
+    }
+    ContextSidecar::default()
 }
 
 /// 计算会话 JSONL 文件路径：`<agent_dir>/sessions/<session_id>.jsonl`。

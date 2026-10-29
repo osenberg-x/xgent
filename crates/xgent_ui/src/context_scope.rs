@@ -77,6 +77,7 @@ impl Plugin for ContextScopePlugin {
             .add_systems(
                 Update,
                 (
+                    clear_context_on_new_session,
                     sync_context_from_tabs,
                     handle_chip_remove_click,
                     apply_context_remove,
@@ -160,6 +161,18 @@ fn spawn_context_scope(
         })
         .id();
     commands.entity(panel).insert_children(0, &[row]);
+}
+
+/// 新会话清空上下文集合，避免旧会话的 chip 继承到新会话。
+fn clear_context_on_new_session(
+    mut reader: MessageReader<xgent_agent::SessionClearedMessage>,
+    mut set: ResMut<ContextSet>,
+    mut ui: ResMut<ContextSetUiState>,
+) {
+    if reader.read().next().is_some() {
+        set.clear();
+        ui.skip_tab_sync = true;
+    }
 }
 
 /// 编辑器打开的 tab 同步进 ContextSet（只增不减；用户删除后不会被静默加回）。
@@ -294,12 +307,17 @@ fn rebuild_context_chips(
                 .map(|provider| provider.resolve_context_window(&global.default_model).0)
         })
         .unwrap_or(xgent_settings_core::global::defaults::CONTEXT_WINDOW);
-    let signature = set
+    let signature_base = set
         .items()
         .iter()
         .map(|item| format!("{}|{}", item.id, item.label))
         .collect::<Vec<_>>()
         .join("\u{1}");
+    let signature = format!(
+        "{}|{}|{signature_base}",
+        set.total_tokens(),
+        set.removed_ids().len()
+    );
     if *cached == signature {
         return;
     }

@@ -73,6 +73,42 @@ fn user_and_streaming_assistant_render_in_order() {
     );
 }
 
+fn row_for_key(app: &App, key: (u64, usize)) -> Option<Entity> {
+    let list = app.world().resource::<ListEntity>().0;
+    app.world()
+        .get::<Children>(list)
+        .into_iter()
+        .flatten()
+        .find(|child| {
+            app.world()
+                .get::<TranscriptBlockKey>(**child)
+                .is_some_and(|k| (k.turn_index, k.block_index) == key)
+        })
+        .copied()
+}
+
+#[test]
+fn finalize_replaces_only_current_assistant_row() {
+    let mut app = app();
+    {
+        let mut transcript = app.world_mut().resource_mut::<Transcript>();
+        let (turn, _) = transcript.push_user_message("hi".into());
+        transcript.begin_assistant_message(turn);
+        transcript.append_text_delta(turn, "streaming");
+    }
+    app.update();
+    let row_before = row_for_key(&app, (0, 1)).expect("assistant row");
+    {
+        let mut transcript = app.world_mut().resource_mut::<Transcript>();
+        transcript.finalize_assistant(0);
+    }
+    app.update();
+    let row_after = row_for_key(&app, (0, 1)).expect("assistant row after finalize");
+    assert_eq!(row_before, row_after, "终稿替换不应重建消息行实体");
+    let mut query = app.world_mut().query::<&MarkdownRendered>();
+    assert!(query.iter(app.world()).count() >= 1);
+}
+
 #[test]
 fn finalized_assistant_renders_markdown() {
     let mut app = app();
