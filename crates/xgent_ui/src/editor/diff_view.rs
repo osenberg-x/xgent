@@ -80,6 +80,9 @@ pub fn spawn_diff_view(
                     theme.text_muted,
                     type_scale::line_height::UI,
                 ),
+                // 种子空态也要带标记：否则 `show_empty` 的幂等守卫认不出它
+                // （会再叠一份），真实差异行出现后清理循环也认不出它（永远留着）。
+                DiffEmptyMarker,
             ));
         })
         .id();
@@ -242,6 +245,90 @@ fn show_empty(
                 theme.text_muted,
                 type_scale::line_height::UI,
             ),
+            DiffEmptyMarker,
         ));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::panels::{PanelDescriptor, PanelRegistry, Slot, ids};
+
+    /// 最小环境：注册并激活 `diff` 面板，只跑差异页的两条系统。
+    fn diff_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::panels::PanelRegister>()
+            .init_resource::<Theme>()
+            .init_resource::<Localizer>()
+            .insert_resource(crate::fonts::UiFonts::fallback())
+            .init_resource::<EditorTabs>()
+            .init_resource::<PanelRegistry>();
+        app.world_mut().spawn(crate::layout::SideViewMarker);
+        {
+            let mut registry = app.world_mut().resource_mut::<PanelRegistry>();
+            registry.register(
+                PanelDescriptor::new(ids::DIFF, Slot::SideDock, "panel-diff", "diff", 1),
+                None,
+            );
+            registry.activate(ids::DIFF);
+        }
+        app.add_systems(Startup, spawn_diff_view);
+        app.add_systems(Update, rebuild_diff_view);
+        app
+    }
+
+    /// 连续触发 `times` 次重建（tab 指向不存在的 buffer → 每帧都走空态分支）。
+    fn trigger(app: &mut App, times: usize) {
+        for _ in 0..times {
+            app.world_mut()
+                .resource_mut::<EditorTabs>()
+                .tabs
+                .push(Entity::PLACEHOLDER);
+            app.update();
+        }
+    }
+
+    fn entities_with<M: Component>(app: &mut App) -> Vec<Entity> {
+        let mut q = app.world_mut().query_filtered::<Entity, With<M>>();
+        q.iter(app.world()).collect()
+    }
+
+    /// 空态节点必须带 `DiffEmptyMarker`，且反复触发只有一份。
+    ///
+    /// 缺标记时 `show_empty` 的幂等守卫（`empties.contains`）恒假 → 每次内容变化
+    /// 都再 spawn 一份空态文案；同时 `rebuild_diff_view` 的清理循环
+    /// （`rows.contains(child) || empties.contains(child)`）认不出它们 → 真实差异
+    /// 行出现后，旧的「无差异」文案永远叠在上方。
+    #[test]
+    fn empty_state_row_carries_its_marker_and_is_not_duplicated() {
+        let mut app = diff_app();
+        trigger(&mut app, 3);
+
+        let views = entities_with::<DiffViewMarker>(&mut app);
+        assert_eq!(views.len(), 1, "差异页容器应恰好一个");
+        let empties = entities_with::<DiffEmptyMarker>(&mut app);
+        assert_eq!(
+            empties.len(),
+            1,
+            "空态文案必须带 DiffEmptyMarker（种子节点与 show_empty 都要），\
+             否则幂等守卫与清理循环双双失效"
+        );
+        let kids: Vec<Entity> = app
+            .world()
+            .get::<Children>(views[0])
+            .map(|c| c.iter().collect())
+            .unwrap_or_default();
+        assert_eq!(
+            kids.len(),
+            1,
+            "连续三次触发后容器里只应剩一份空态，实际 {} 份",
+            kids.len()
+        );
+        assert!(
+            empties.iter().all(|e| kids.contains(e)),
+            "空态应是容器的直接子节点"
+        );
+    }
 }

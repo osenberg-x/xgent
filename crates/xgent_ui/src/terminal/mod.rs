@@ -238,6 +238,7 @@ impl Plugin for TerminalPlugin {
                     output::update_status_bar,
                     handle_close_button,
                     handle_new_tab_button,
+                    handle_clear_button,
                     input::update_input_caret,
                 )
                     .chain(),
@@ -543,5 +544,100 @@ fn handle_new_tab_button(
             .map(|r| r.path.clone())
             .unwrap_or_else(std::env::temp_dir);
         writer.write(tabs::SpawnTabRequest { cwd });
+    }
+}
+
+/// 处理「清屏」按钮：给当前激活 tab 发 [`tabs::ClearTabRequest`]。
+///
+/// 这条按压处理曾经缺失——`TerminalClearButtonMarker` 只有 spawn、`tabs::
+/// handle_clear_tab_requests` 只有 reader，没人写请求 → 「清屏」是死钮。
+fn handle_clear_button(
+    q_btn: Query<(), (With<TerminalClearButtonMarker>, Added<Pressed>)>,
+    tabs: Res<TerminalTabs>,
+    mut writer: MessageWriter<tabs::ClearTabRequest>,
+) {
+    if q_btn.iter().count() == 0 {
+        return;
+    }
+    let Some(tab) = tabs.active.and_then(|idx| tabs.tabs.get(idx)).copied() else {
+        tracing::warn!("终端没有激活 tab，忽略清屏请求");
+        return;
+    };
+    writer.write(tabs::ClearTabRequest { tab });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 收集本帧写出的 `ClearTabRequest` 目标 tab。
+    #[derive(Resource, Default)]
+    struct Collected(Vec<Entity>);
+
+    fn collect(mut reader: MessageReader<tabs::ClearTabRequest>, mut out: ResMut<Collected>) {
+        for req in reader.read() {
+            out.0.push(req.tab);
+        }
+    }
+
+    fn clear_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<tabs::ClearTabRequest>()
+            .init_resource::<Collected>()
+            .init_resource::<TerminalTabs>()
+            .add_systems(Update, (handle_clear_button, collect).chain());
+        app
+    }
+
+    fn set_tabs(app: &mut App, tabs: Vec<Entity>, active: Option<usize>) {
+        let mut res = app.world_mut().resource_mut::<TerminalTabs>();
+        res.tabs = tabs;
+        res.active = active;
+    }
+
+    /// 按下清屏钮 → 请求落在激活 tab 上。
+    #[test]
+    fn clear_button_targets_the_active_tab() {
+        let mut app = clear_app();
+        let first = app.world_mut().spawn(()).id();
+        let active = app.world_mut().spawn(()).id();
+        set_tabs(&mut app, vec![first, active], Some(1));
+        app.world_mut()
+            .spawn((Button, TerminalClearButtonMarker, Pressed));
+        app.update();
+        assert_eq!(
+            app.world().resource::<Collected>().0,
+            vec![active],
+            "清屏应只作用于当前激活 tab"
+        );
+    }
+
+    /// 没按按钮不发请求；无激活 tab 时按了也不发（且不能 panic）。
+    #[test]
+    fn clear_button_writes_nothing_without_press_or_active_tab() {
+        let mut app = clear_app();
+        app.update();
+        assert!(app.world().resource::<Collected>().0.is_empty());
+
+        let dead = app.world_mut().spawn(()).id();
+        set_tabs(&mut app, vec![dead], None);
+        app.world_mut()
+            .spawn((Button, TerminalClearButtonMarker, Pressed));
+        app.update();
+        assert!(
+            app.world().resource::<Collected>().0.is_empty(),
+            "无激活 tab 时不该发出清屏请求"
+        );
+    }
+
+    /// 接线护栏：处理系统必须既定义又注册进 Update（只定义 = 死钮）。
+    #[test]
+    fn clear_button_handler_is_registered() {
+        let src = include_str!("mod.rs");
+        assert!(
+            src.matches("handle_clear_button").count() >= 2,
+            "handle_clear_button 必须定义并出现在插件的 Update 注册里"
+        );
     }
 }

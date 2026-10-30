@@ -895,6 +895,7 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **派生视图不能当权威状态改**：`FileDrawerOpen` / `SessionHistoryState` 现在由注册表算出，测试直接 `insert_resource(FileDrawerOpen(true))` 会被派生系统覆盖 → 抽屉保持隐藏、依赖抽屉宽度的文件树不渲染行。要开抽屉必须发 `PanelActivate { id: ids::FILE_DRAWER }`。
 - **消息链多一跳，可见性晚 1～2 帧**：打开代码文件经「点击 → `OpenFileRequest` → `PanelActivate` → 注册表」三跳，断言要从「逐帧等于 Editor」改成「一旦可见不得再消失」。
 - **`.display =` 的口径分三类**（2026-10-21 用户裁决）：动态面板/区域可见性（7 处）归一进派生系统；spawn 期构造默认值（3 处）改构造期字面量；**内容态可见性（5 处：欢迎空态、最近会话标题、回到底部按钮、文档页签、陪伴激活环）不动**——它们描述内容状态而非面板，塞进注册表是类别错误。白名单由 `tests/panel_registry_contract.rs` 的源码级测试固化。
+- **ECS 查询条件是运行时的「存在性断言」**（2026-10-30，台账勘误 55/56）：`With<标记>` / `&组件` 写错或标记从没挂上，**既不编译失败也不 panic**，系统只是恒空转。已发生三例：① `kit.rs::position_tooltips` 对 UI 宿主查询 `&GlobalTransform`（0.20 的 UI 节点只有 `UiGlobalTransform`；注意 `TextLayoutInfo` 由 `TextLayout` `#[require]`，而 `EditableText` `#[require(TextLayout, …)]`，所以 `TextInput + EditableText` 不带 `Text` 也照样有它——别照着「缺组件」的猜测去加 `Text`，那会踩 `ContentSize` 争用）；② `editor/diff_view.rs` 查询 `DiffEmptyMarker` 但两个空态 spawn 点都没挂 → 空态文案每次改字符叠一份、清理循环认不出；③ `terminal/mod.rs` spawn 了 `TerminalClearButtonMarker` 却没有按压处理系统 → 「清屏」是死钮（同头的 ✕/＋ 都有 handler，可作对照模板）。新增或改动系统时，先确认标记/组件在 spawn 点真的挂上，再补一条**能观测状态位或消息翻转**的测试（`tooltip_anchor.rs`、`editor::diff_view::tests`、`terminal::tests` 是三个可抄的样板）。
 - **`EditorBackButtonMarker` 原本有两套**（编辑器顶栏 ✕ 与页签条 ✕）——M5 合一，侧区顶部只保留一个返回入口（页签条上的 ✕）。
 - **「展开面板」钮是恢复入口，语义与其它槽位跟随**相反**：分屏**折叠**时才出现（`PanelVisibility::of_closed_slot` 的反向跟随）。若照搬「跟随槽位开放」的写法，按钮会在分屏展开时出现、折叠时消失——恰好在最需要时不可用（Verifer 复验轮发现）。
 - **`Slot::Center` 只建模不接消费者**：首个消费者留给 F-16 的 3D 空间视图。
