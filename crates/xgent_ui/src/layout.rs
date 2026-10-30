@@ -47,9 +47,13 @@ pub struct ActivityBarMarker;
 #[derive(Component, Default)]
 pub struct FilePanelMarker;
 
-/// 对话主区容器。
+/// 对话面板（MVP-2 起位于 SideDock）。
 #[derive(Component, Default)]
 pub struct ChatPanelMarker;
+
+/// 主区 Center 面板容器（3D / 编辑器 / 预览 / 差异 / 终端）。
+#[derive(Component, Default)]
+pub struct CenterHostMarker;
 
 /// 右侧分屏容器（编辑器/文件预览/终端，默认隐藏）。
 #[derive(Component, Default)]
@@ -78,6 +82,10 @@ impl Plugin for LayoutPlugin {
         // 面板注册表（幂等：宿主可能已装配）
         if !app.is_plugin_added::<crate::panels::PanelsPlugin>() {
             app.add_plugins(crate::panels::PanelsPlugin);
+        }
+        // 布局模式（宇宙 / 经典 2D 回退）也属于布局层：切换时搬视图与槽位。
+        if !app.is_plugin_added::<crate::layout_mode::LayoutModePlugin>() {
+            app.add_plugins(crate::layout_mode::LayoutModePlugin);
         }
         app.init_resource::<crate::theme::ThemeHandle>()
             .init_resource::<crate::theme::Theme>()
@@ -194,45 +202,30 @@ pub(crate) fn spawn_layout(
                         ActivityBarMarker,
                     ));
 
-                    // 对话主区
-                    let chat = main
-                        .spawn((
-                            Node {
-                                flex_grow: 1.0,
-                                height: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                min_width: Val::ZERO,
-                                min_height: Val::ZERO,
-                                overflow: Overflow::clip(),
-                                ..default()
-                            },
-                            BackgroundColor(theme.bg),
-                            Themed {
-                                role: ThemeRole::Canvas,
-                                generation,
-                            },
-                            ChatPanelMarker,
-                            crate::resize::SplitLeafMarker {
-                                id: crate::panels::split::leaf_ids::CHAT,
-                                axis: crate::panels::split::Axis::Horizontal,
-                            },
-                        ))
-                        .id();
-                    // v8 M5：对话区注册为 `Slot::Center` 面板（主区默认可见）。
-                    register.write(crate::panels::PanelRegister {
-                        desc: crate::panels::PanelDescriptor::new(
-                            crate::panels::ids::CHAT,
-                            crate::panels::Slot::Center,
-                            "panel-chat",
-                            "chat",
-                            0,
-                        )
-                        .with_default_visible(),
-                        view: Some(chat),
-                    });
+                    // 主区 CenterHost（3D / 编辑器 / 预览 / 差异 / 终端）
+                    main.spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            min_width: Val::ZERO,
+                            min_height: Val::ZERO,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        BackgroundColor(theme.bg),
+                        Themed {
+                            role: ThemeRole::Canvas,
+                            generation,
+                        },
+                        CenterHostMarker,
+                        crate::resize::SplitLeafMarker {
+                            id: crate::panels::split::leaf_ids::CHAT,
+                            axis: crate::panels::split::Axis::Horizontal,
+                        },
+                    ));
 
-                    // 右拖拽手柄（v8 M5：由 `resize::sync_split_handles` 遍历分割树生成）
-                    // 上下文面板（预览/差异/终端；默认展开，宽度走分割树）
+                    // 右侧栏：对话常驻（SideDock）。编辑器/终端/差异在 CenterHost。
                     main.spawn((
                         Node {
                             width: px(side_view_w),
@@ -251,14 +244,52 @@ pub(crate) fn spawn_layout(
                             generation,
                         },
                         SideViewMarker,
-                        // v8 M5-T3：分屏容器的显隐由派生系统统一写。
-                        crate::panels::PanelVisibility::of_slot(crate::panels::Slot::SideDock),
-                        // v8 M5-T5：宽度由分割树的 `side-dock` 叶子驱动。
+                        // 右侧栏只在槽内有可见面板时出现：宇宙里是常驻对话，
+                        // 经典回退里是编辑器/终端（都没开时整块收起，不留空条）。
+                        crate::panels::PanelVisibility::of_slot_panels(
+                            crate::panels::Slot::SideDock,
+                        ),
                         crate::resize::SplitLeafMarker {
                             id: crate::panels::split::leaf_ids::SIDE_DOCK,
                             axis: crate::panels::split::Axis::Horizontal,
                         },
-                    ));
+                    ))
+                    .with_children(|side| {
+                        let chat = side
+                            .spawn((
+                                Node {
+                                    display: Display::Flex,
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Column,
+                                    overflow: Overflow::clip(),
+                                    ..xui::region_fill()
+                                },
+                                BackgroundColor(theme.bg),
+                                Themed {
+                                    role: ThemeRole::Canvas,
+                                    generation,
+                                },
+                                ChatPanelMarker,
+                                crate::panels::PanelVisibility::of_panel(
+                                    crate::panels::ids::CHAT,
+                                    crate::panels::Slot::SideDock,
+                                ),
+                            ))
+                            .id();
+                        // 对话迁到 SideDock；sticky 表示常驻，页签不提供关闭。
+                        register.write(crate::panels::PanelRegister {
+                            desc: crate::panels::PanelDescriptor::new(
+                                crate::panels::ids::CHAT,
+                                crate::panels::Slot::SideDock,
+                                "panel-chat",
+                                "chat",
+                                0,
+                            )
+                            .with_default_visible()
+                            .sticky(),
+                            view: Some(chat),
+                        });
+                    });
                 });
 
                 // 状态栏

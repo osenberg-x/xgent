@@ -317,7 +317,11 @@ fn handle_rail_click(
     mut terminal_spawn: MessageWriter<crate::terminal::tabs::SpawnTabRequest>,
     mut companion: ResMut<CompanionOn>,
     project_root: Option<Res<crate::file_panel::ProjectRoot>>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
 ) {
+    let universe = mode
+        .as_deref()
+        .is_none_or(|m| *m == crate::layout_mode::LayoutMode::Universe);
     for item in q_items.iter() {
         let Some(entry) = registry.get(item.id) else {
             continue;
@@ -335,6 +339,10 @@ fn handle_rail_click(
             RailAction::Toggle => {
                 if registry.is_visible(rail.target) {
                     deactivate.write(PanelDeactivate { id: rail.target });
+                    // 宇宙里终端在 Center：关掉它要把主区还给空间首页。
+                    if universe && rail.target == ids::TERMINAL {
+                        activate.write(PanelActivate { id: ids::SPACE });
+                    }
                 } else {
                     if rail.target == ids::TERMINAL && terminal_tabs.is_empty() {
                         let cwd = project_root

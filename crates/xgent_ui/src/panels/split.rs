@@ -145,8 +145,9 @@ impl Default for SplitTree {
     /// 默认分割树：抽屉（覆盖层，可拖宽）+ 对话主区（弹性）+ 右侧分屏。
     ///
     /// 抽屉宽度从定值 320 改为 `Min(240, Preferred(320))`（上限 480，见
-    /// `crate::theme::size::DRAWER_W_MAX`）；右侧分屏沿用
-    /// `CONTEXT_W_MIN / CONTEXT_W_DEFAULT`。
+    /// `crate::theme::size::DRAWER_W_MAX`）；右侧分屏默认按经典编辑器坞的 720
+    /// 起步，宇宙模式再由 `resize::apply_chat_side_preference` 落到对话侧栏偏好
+    /// （默认 400、下限 320）。
     fn default() -> Self {
         Self {
             root: Some(Split::Splitter {
@@ -162,8 +163,11 @@ impl Default for SplitTree {
                     },
                     Split::Leaf {
                         id: leaf_ids::SIDE_DOCK,
+                        // 默认按经典编辑器坞的宽度起步；宇宙模式下
+                        // `resize::apply_chat_side_preference` 会把它落到对话侧栏
+                        // 偏好（默认 400）。
                         size: LeafSize::Min(
-                            crate::theme::size::CONTEXT_W_MIN,
+                            crate::theme::size::CHAT_SIDE_W_MIN,
                             crate::theme::size::CONTEXT_W_DEFAULT,
                         ),
                     },

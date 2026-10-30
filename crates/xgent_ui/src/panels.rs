@@ -22,6 +22,8 @@ pub mod visibility;
 pub mod ids {
     /// 主区对话面板（`Slot::Center`）。
     pub const CHAT: &str = "chat";
+    /// 3D 空间视图（`Slot::Center`）。
+    pub const SPACE: &str = "space";
     /// 文件抽屉面板（`Slot::Overlay`）。
     pub const FILE_DRAWER: &str = "file-drawer";
     /// 会话历史面板（`Slot::Overlay`）。
@@ -232,6 +234,20 @@ impl PanelRegistry {
         }
     }
 
+    /// 把面板改挂到另一个槽位（布局模式切换用）。
+    ///
+    /// 只改注册表这个权威来源；视图实体的父子关系与 [`PanelVisibility`] 的槽位
+    /// 由布局模式系统一并调整。返回是否发生了变化。
+    pub fn set_slot(&mut self, id: &str, slot: Slot) -> bool {
+        match self.get_mut(id) {
+            Some(entry) if entry.desc.slot != slot => {
+                entry.desc.slot = slot;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// 按 id 取条目。
     pub fn get(&self, id: &str) -> Option<&PanelEntry> {
         self.entries.iter().find(|e| e.desc.id == id)
@@ -419,6 +435,10 @@ pub struct PanelVisibility {
     pub slot: Slot,
     /// **反向**跟随槽位：槽位**关闭**时可见（如 rail 的「展开面板」钮）。
     pub invert_slot: bool,
+    /// 跟随**槽位内任意面板**：槽位开放且槽内至少一个面板可见时可见。
+    ///
+    /// 用于可空的分屏容器：槽里没有任何可见面板时整块收起，而不是留一条空条。
+    pub slot_panels: bool,
 }
 
 impl PanelVisibility {
@@ -428,6 +448,7 @@ impl PanelVisibility {
             panel: Some(panel),
             slot,
             invert_slot: false,
+            slot_panels: false,
         }
     }
 
@@ -437,6 +458,17 @@ impl PanelVisibility {
             panel: None,
             slot,
             invert_slot: false,
+            slot_panels: false,
+        }
+    }
+
+    /// 跟随槽位内任意面板：槽位开放且至少一个面板可见。
+    pub fn of_slot_panels(slot: Slot) -> Self {
+        Self {
+            panel: None,
+            slot,
+            invert_slot: false,
+            slot_panels: true,
         }
     }
 
@@ -448,6 +480,7 @@ impl PanelVisibility {
             panel: None,
             slot,
             invert_slot: true,
+            slot_panels: false,
         }
     }
 }
@@ -473,6 +506,15 @@ pub struct PanelActivate {
 pub struct PanelDeactivate {
     /// 面板 id。
     pub id: &'static str,
+}
+
+/// 把面板改挂到另一个槽位（消息，布局模式切换专用）。
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PanelRetargetSlot {
+    /// 面板 id。
+    pub id: &'static str,
+    /// 新槽位。
+    pub slot: Slot,
 }
 
 /// 面板相关的系统集合（跨插件排序用）。
@@ -505,6 +547,7 @@ impl Plugin for PanelsPlugin {
             .add_message::<PanelRegister>()
             .add_message::<PanelActivate>()
             .add_message::<PanelDeactivate>()
+            .add_message::<PanelRetargetSlot>()
             .configure_sets(
                 Update,
                 (PanelSet::Requests, PanelSet::Registry, PanelSet::Visibility).chain(),
@@ -524,6 +567,7 @@ impl Plugin for PanelsPlugin {
             Update,
             (
                 handle_panel_register,
+                handle_panel_retarget_slot,
                 handle_panel_activate,
                 handle_panel_deactivate,
             )
@@ -606,6 +650,16 @@ pub fn handle_panel_deactivate(
 ) {
     for msg in reader.read() {
         registry.deactivate(msg.id);
+    }
+}
+
+/// 处理改挂消息：只改注册表里的槽位，视图实体由布局模式系统搬动。
+pub fn handle_panel_retarget_slot(
+    mut reader: MessageReader<PanelRetargetSlot>,
+    mut registry: ResMut<PanelRegistry>,
+) {
+    for msg in reader.read() {
+        registry.set_slot(msg.id, msg.slot);
     }
 }
 

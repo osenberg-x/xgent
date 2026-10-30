@@ -4,6 +4,8 @@
 > 需求：[ui-v8-requirements-brief.md](ui-v8-requirements-brief.md)　证据：[ui-v8-audit.md](../notes/ui-v8-audit.md)　视觉：[ui-v8-design-system.md](ui-v8-design-system.md)
 > 目标：修掉审计 P0 九条，并让路线图上的 Git/MCP/插件/成本界面**注册即落地**，不再返工布局。
 > 范围：`xui`（通用原语）+ `xgent_ui`（业务布局）+ `xgent_app`（装配）。不改协议、不改 agent loop。
+>
+> **2026-10-30 布局修订（MVP-2）**：`Slot::Center` 的默认面板由「对话」改为「空间」；对话移到 SideDock；编辑器/终端打开时接管 Center，Esc 回宇宙。运行期由 `preferences.three_d_home` 选择 `LayoutMode::{Universe, Classic}`（`layout_mode.rs`）：宇宙为 3D 首页 + 对话右栏，经典回退把对话放回 Center、编辑器/差异/终端放 SideDock，并在页签与命令入口隐藏 `space`。对话侧栏默认 400px（320–560 / 可用宽度 45%），拖拽结束写 `preferences.chat_side_width`。本文其余部分是 v8 布局架构的既有设计；布局相关处以 `requirements.md` §4.2 与 `ui-v8-3d-viewport.md` §1.2 为准。
 
 ---
 
@@ -144,7 +146,7 @@ pub struct PanelRegistry { entries: Vec<(PanelDescriptor, PanelRuntime)> }
 pub struct PanelRuntime { entity: Option<Entity>, visible: bool, focused: bool }
 ```
 
-**`Center`（2026-10-19 增补）**：中央列同一时刻**只有一个**活跃面板，默认是「对话」。`Center` 与 `SideDock` 的差别是**互斥**而非并列——同槽任意时刻至多一个 `visible`，切换由 `PanelActivate` 表达，旧面板自动失活，业务侧不写 `display`。首个消费者是 3D 空间视图（[ui-v8-3d-viewport.md](ui-v8-3d-viewport.md) §1.2）：它证明「换主视图」不需要新增 closed enum，也把「对话 / 空间 / 未来的任务看板」统一到同一条规则上。
+**`Center`（2026-10-19 增补；2026-10-30 修订）**：中央列同一时刻**只有一个**活跃面板。MVP-1 默认是「对话」；MVP-2 默认是 3D 空间，对话移到 SideDock，编辑器/终端打开时接管 Center（见 requirements §4.2）。`Center` 与 `SideDock` 的差别是**互斥**而非并列——同槽任意时刻至多一个 `visible`，切换由 `PanelActivate` 表达，旧面板自动失活，业务侧不写 `display`。MVP-2 起 Center 的占用者是 `space`（默认）、编辑器、差异、终端；对话在宇宙模式常驻 SideDock，经典回退模式回到 Center。换主视图不需要新增 closed enum，所有视图仍在同一条「注册表 + 槽位」规则下。
 
 注册经 ECS 消息（P-5）：
 
@@ -174,6 +176,24 @@ let active = registry.iter_rail().find(|p| slots.is_visible(p.id));
 连点两次关掉了抽屉，选中态自然回到派生结果，不会停留。
 
 修 **D3**（双 tab 条 / 双返回按钮）：页签条由 `SlotLayout` 拥有并渲染，`editor/mod.rs:220-239` 的编辑器内部 tab 条降级为**文档列表**（不是槽位页签），两套 `EditorBackButtonMarker`（`:220-239` 与 `:706-731`）合一。
+
+### 3.2b 运行期布局模式（MVP-2，`layout_mode.rs`）
+
+`PanelActivate` 只改「谁可见」，不解决「对话和编辑器谁在 Center」。MVP-2 新增一个比槽位更外层的模式资源：
+
+| 模式 | Center | SideDock | 首页 |
+|:---|:---|:---|:---|
+| `LayoutMode::Universe`（默认） | `space` / `editor` / `diff` / `terminal` | `chat`（常驻） | `space` |
+| `LayoutMode::Classic`（`three_d_home=false`） | `chat` | `editor` / `diff` / `terminal` / `space`（不暴露） | `chat` |
+
+- **偏好是唯一输入**：`GlobalConfigRes.preferences.three_d_home`；运行时开关由设置面板写回，`apply_layout_mode` 在下一帧生效。
+- **改挂是消息**：新增 `PanelRetargetSlot { id, slot }`，由 `handle_panel_retarget_slot` 在 `PanelSet::Registry` 内写注册表；不直接改 `desc.slot`。
+- **视图要跟着搬**：`apply_layout_mode` 同时把五个视图实体 `add_child` 到 `CenterHostMarker` / `SideViewMarker`，并同步各自 `PanelVisibility.slot`；否则容器搬了、`display` 还按旧槽位算。
+- **等五块视图齐了再应用**：五块视图分布在多个 `PostStartup`，注册消息要到第一个 `Update` 才入表；缺一块就下一帧重试，避免在半套视图上切错。
+- **右侧分屏按需出现**：`SideView` 用 `PanelVisibility::of_slot_panels(SideDock)`（槽内至少一个可见面板才显示）。宇宙里对话常驻所以始终显示；经典回退里没开编辑器/终端时整块收起，不留空条。
+- **宇宙模式不折叠侧栏**：`responsive_collapse` 在宇宙模式直接返回——SideDock 是常驻对话，按 <1100px 收起等于把对话藏掉。
+- **回退不暴露 3D**：经典回退下 `space` 虽在 SideDock 但失活，槽位页签过滤掉它，命令面板 `space.show` 也忽略。
+- **Esc / 关闭工作区面板回首页**：`chat.abort` 分支先看终端/编辑器/差异是否可见；可见则失活并向 `LayoutMode::home_panel()` 发 `PanelActivate`，否则才中断对话。终端 ✕、编辑器最后一个文档关闭、图标轨终端钮也走同一首页规则。
 
 ### 3.3 尺寸契约（修 D2 的 38px 永久裁切）
 

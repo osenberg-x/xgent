@@ -3,7 +3,7 @@
 > 依据：需求简报 [ui-v8-requirements-brief.md](../design/ui-v8-requirements-brief.md)、技术设计 [ui-v8-layout-architecture.md](../design/ui-v8-layout-architecture.md)、设计系统 [ui-v8-design-system.md](../design/ui-v8-design-system.md)、证据基线 [ui-v8-audit.md](../notes/ui-v8-audit.md)。
 > 视觉蓝本：可交互原型 `docs/design/ui-prototype-v8.html`（本轮产出；若尚未落到 docs/，见文末「交付缺口」）。
 > 决策记录：ADR-0015（正文见 [ADR-0015](../decisions/0015-ui-v8-交互架构层重建-保留-linear-视觉基准.md)，定稿后移入 `docs/decisions/`）。
-> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（M6 模型 `9ac4daf`；M6.5 实现 `b962f97`，启动修复 `5dde747`，复审修复 `e485d5e`（见 §10 勘误 51）；真实窗口截图仍待用户走查，须含中文输入法与 HiDPI 缩放）。**下一期 M8（Git 探针）**（进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
+> 状态：**M1 / M2a / M2b / M3 / M4 / M5 / M7 已交付；M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（M6 模型 `9ac4daf`；M6.5 实现 `b962f97`，启动修复 `5dde747`，复审修复 `e485d5e`（见 §10 勘误 51）；真实窗口截图仍待用户走查，须含中文输入法与 HiDPI 缩放）。**下一期改为 MVP-2 3D 首页**（G7 spike → S1 + 点击打开；M8 Git 探针顺延；进度与下一步见 [ui-v8-handoff.md](ui-v8-handoff.md)；M1/M2 段落勾选仍有滞后，以归档 change 与代码实测为准）。任务编号 `M{期}-T{序}`，完成打勾。本文是唯一进度台账；实施中发现与文档不符的事实时，改代码的同时在本文 §10 追加勘误（文档跟随代码）。
 
 ---
 
@@ -382,7 +382,7 @@ M1 与 M2 相互独立，可并行分头推进。
 
 ---
 
-## M8 Git 探针（验收北极星指标，非功能开发）
+## M8 Git 探针（验收北极星指标，非功能开发；已顺延）
 
 ### M8-T1 源代码控制面板最小注册
 - [ ] 仅**新增** 1 个 `PanelDescriptor`（`SideDock`，`title_key`、icon、order）+ 1 个视图模块，展示 F-10 插件已有的 status 数据。
@@ -404,7 +404,7 @@ M1 与 M2 相互独立，可并行分头推进。
 | M6 会话内容（模型层） | `Transcript`/Markdown/补全/ContextSet 模型 | E1–E5（仅 T5 接线） | **部分交付**（`9ac4daf`） |
 | M6.5 会话内容接线 | 渲染/输入/上下文接入产品 + 视觉证据 | E1–E5 补齐 | 已交付（`b962f97`/`5dde747`；真实窗口截图待走查） |
 | M7 闭环与验证 | 快捷键单源、焦点栈、i18n 扩面、几何断言 | F1–F4 H1–H3 I1 I2 | 已交付（`81d3060`；A1 强度见 §10.46） |
-| M8 Git 探针 | 1 注册 + 1 视图模块落地 | 验证 U-05/U-12 | 未开工 |
+| M8 Git 探针 | 1 注册 + 1 视图模块落地 | 验证 U-05/U-12 | 顺延（MVP-2 优先） |
 
 每期收尾命令：`cargo fmt -p xui -p xgent_ui -p xgent_app` → `cargo clippy --workspace` → `cargo test --workspace`。
 

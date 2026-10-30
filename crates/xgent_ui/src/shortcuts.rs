@@ -15,6 +15,7 @@ use xui::shortcuts::HotkeyTriggered;
 use crate::editor::EditorView;
 use crate::editor::tabs::{CloseTabRequest, CycleTabRequest};
 use crate::i18n::tr;
+use crate::layout_mode::LayoutMode;
 
 /// 快捷键动作声明：每个注册的快捷键必须在此清单中有对应条目。
 ///
@@ -215,6 +216,7 @@ pub(crate) fn handle_hotkey_triggers(
     modal: Option<Res<crate::modal::ModalStack>>,
     modal_esc: Option<Res<crate::modal::ModalEscConsumed>>,
     completion_esc: Option<Res<crate::completion_ui::CompletionConsumed>>,
+    layout_mode: Option<Res<LayoutMode>>,
     mut input_focus: Option<ResMut<bevy::input_focus::InputFocus>>,
     q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
 ) {
@@ -229,19 +231,46 @@ pub(crate) fn handle_hotkey_triggers(
         for _ in reader.read() {}
         return;
     }
+    // 缺 `LayoutMode` 的装配（旧测试 / 极简宿主）按宇宙处理：3D 首页是 MVP-2 默认。
+    let universe = layout_mode
+        .as_deref()
+        .is_none_or(|mode| *mode == LayoutMode::Universe);
     for ev in reader.read() {
         match ev.id.as_str() {
-            // handle_chat_abort: Esc 中断当前对话
+            // handle_chat_abort: Esc 从中断对话 / 关闭工作区面板 / 回宇宙
             "chat.abort" => {
-                // 终端视图激活时，Esc 退出终端视图（不中断对话）
                 if registry.is_visible(crate::panels::ids::TERMINAL) {
                     msgs.p3().write(crate::panels::PanelDeactivate {
                         id: crate::panels::ids::TERMINAL,
                     });
-                    layout.set_open(crate::panels::Slot::SideDock, false);
-                } else if *view == EditorView::Editor {
-                    // 编辑器视图激活时，Esc 优先退出编辑器视图而非中断对话
+                    if universe {
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::SPACE,
+                        });
+                    } else {
+                        layout.set_open(crate::panels::Slot::SideDock, false);
+                    }
+                } else if registry.is_visible(crate::panels::ids::EDITOR)
+                    || registry.is_visible(crate::panels::ids::DIFF)
+                {
+                    // 编辑器 / 差异视图激活时，Esc 优先回首页而非中断对话
                     *view = EditorView::Chat;
+                    msgs.p3().write(crate::panels::PanelDeactivate {
+                        id: crate::panels::ids::EDITOR,
+                    });
+                    msgs.p3().write(crate::panels::PanelDeactivate {
+                        id: crate::panels::ids::DIFF,
+                    });
+                    if universe {
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::SPACE,
+                        });
+                    } else {
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::CHAT,
+                        });
+                        layout.set_open(crate::panels::Slot::SideDock, false);
+                    }
                 } else {
                     msgs.p0().write(AbortMessage);
                 }
@@ -252,7 +281,13 @@ pub(crate) fn handle_hotkey_triggers(
                     msgs.p3().write(crate::panels::PanelDeactivate {
                         id: crate::panels::ids::TERMINAL,
                     });
-                    layout.set_open(crate::panels::Slot::SideDock, false);
+                    if universe {
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::SPACE,
+                        });
+                    } else {
+                        layout.set_open(crate::panels::Slot::SideDock, false);
+                    }
                 } else {
                     msgs.p2().write(crate::panels::PanelActivate {
                         id: crate::panels::ids::TERMINAL,
@@ -281,21 +316,37 @@ pub(crate) fn handle_hotkey_triggers(
                     crate::overlay::OverlayId::FileDrawer,
                 ));
             }
-            // handle_sideview_toggle: Cmd/Ctrl+\ 切换右侧分屏
+            // handle_sideview_toggle: Cmd/Ctrl+\ 切换编辑器视图
             "sideview.toggle" => {
-                // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）
-                if layout.is_open(crate::panels::Slot::SideDock)
-                    && registry.is_visible(crate::panels::ids::EDITOR)
-                {
-                    msgs.p3().write(crate::panels::PanelDeactivate {
-                        id: crate::panels::ids::EDITOR,
-                    });
-                    layout.set_open(crate::panels::Slot::SideDock, false);
+                if universe {
+                    // 编辑器在 Center：开 → 关并回宇宙；关 → 打开编辑器
+                    if registry.is_visible(crate::panels::ids::EDITOR) {
+                        msgs.p3().write(crate::panels::PanelDeactivate {
+                            id: crate::panels::ids::EDITOR,
+                        });
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::SPACE,
+                        });
+                    } else {
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::EDITOR,
+                        });
+                    }
                 } else {
-                    msgs.p2().write(crate::panels::PanelActivate {
-                        id: crate::panels::ids::EDITOR,
-                    });
-                    layout.set_open(crate::panels::Slot::SideDock, true);
+                    // 已展开且 Editor → 收起；否则展开并切 Editor（让出 Terminal）
+                    if layout.is_open(crate::panels::Slot::SideDock)
+                        && registry.is_visible(crate::panels::ids::EDITOR)
+                    {
+                        msgs.p3().write(crate::panels::PanelDeactivate {
+                            id: crate::panels::ids::EDITOR,
+                        });
+                        layout.set_open(crate::panels::Slot::SideDock, false);
+                    } else {
+                        msgs.p2().write(crate::panels::PanelActivate {
+                            id: crate::panels::ids::EDITOR,
+                        });
+                        layout.set_open(crate::panels::Slot::SideDock, true);
+                    }
                 }
             }
             // handle_input_focus: Cmd/Ctrl+I 聚焦输入框（M7-T1 修复空实现）
@@ -312,14 +363,21 @@ pub(crate) fn handle_hotkey_triggers(
                 msgs.p2().write(crate::panels::PanelActivate {
                     id: crate::panels::ids::EDITOR,
                 });
-                layout.set_open(crate::panels::Slot::SideDock, true);
+                if !universe {
+                    layout.set_open(crate::panels::Slot::SideDock, true);
+                }
             }
             // handle_chat_view: Cmd/Ctrl+Shift+D 切换回对话视图
             "chat.view" => {
-                // 聚焦会话区：收起上下文面板；同步 view 保证 Esc（chat.abort）
-                // 的 view 判断与可见状态一致，否则 Esc 被静默吞掉一次
+                // 聚焦会话区：宇宙里对话常驻右侧，只激活不收起；
+                // 经典里对话在 Center，顺手收起右侧分屏。
                 *view = EditorView::Chat;
-                layout.set_open(crate::panels::Slot::SideDock, false);
+                msgs.p2().write(crate::panels::PanelActivate {
+                    id: crate::panels::ids::CHAT,
+                });
+                if !universe {
+                    layout.set_open(crate::panels::Slot::SideDock, false);
+                }
             }
             // handle_editor_close_tab: Cmd/Ctrl+W 关闭当前标签
             "editor.close_tab" => {
@@ -355,7 +413,6 @@ pub(crate) fn handle_hotkey_triggers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::input_focus::InputFocus;
     use xui::hotkeys::HotkeyRegistry;
 
     /// M7-T1：验证 HOTKEY_ACTIONS 与注册表的一致性断言。

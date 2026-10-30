@@ -14,7 +14,7 @@ use crate::editor::tabs::EditorTabs;
 use crate::fonts::{mono_text, ui_text};
 use crate::i18n::tr;
 use crate::theme::{Theme, space, type_scale};
-/// 差异页容器标记（挂 `crate::layout::SideViewMarker`，显隐由
+/// 差异页容器标记（挂 `crate::layout::CenterHostMarker`，显隐由
 /// `derive_panel_visibility` 依据注册表中的 `diff` 面板派生）。
 #[derive(Component, Default)]
 pub struct DiffViewMarker;
@@ -37,10 +37,10 @@ impl Plugin for DiffViewPlugin {
     }
 }
 
-/// 启动时在右侧分屏内 spawn 差异页容器（默认隐藏）。
+/// 启动时在主区 CenterHost 内 spawn 差异页容器（默认隐藏）。
 pub fn spawn_diff_view(
     mut commands: Commands,
-    q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
+    q_side: Query<Entity, With<crate::layout::CenterHostMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
     mut register: MessageWriter<crate::panels::PanelRegister>,
@@ -64,7 +64,7 @@ pub fn spawn_diff_view(
             DiffViewMarker,
             crate::panels::PanelVisibility::of_panel(
                 crate::panels::ids::DIFF,
-                crate::panels::Slot::SideDock,
+                crate::panels::Slot::Center,
             ),
         ))
         .with_children(|view| {
@@ -87,11 +87,11 @@ pub fn spawn_diff_view(
         })
         .id();
     commands.entity(side).add_child(view);
-    // v8 M5：注册为 `Slot::SideDock` 面板。
+    // v8 M5：注册为 `Slot::Center` 面板。
     register.write(crate::panels::PanelRegister {
         desc: crate::panels::PanelDescriptor::new(
             crate::panels::ids::DIFF,
-            crate::panels::Slot::SideDock,
+            crate::panels::Slot::Center,
             "panel-diff",
             "diff",
             1,
@@ -265,11 +265,11 @@ mod tests {
             .insert_resource(crate::fonts::UiFonts::fallback())
             .init_resource::<EditorTabs>()
             .init_resource::<PanelRegistry>();
-        app.world_mut().spawn(crate::layout::SideViewMarker);
+        app.world_mut().spawn(crate::layout::CenterHostMarker);
         {
             let mut registry = app.world_mut().resource_mut::<PanelRegistry>();
             registry.register(
-                PanelDescriptor::new(ids::DIFF, Slot::SideDock, "panel-diff", "diff", 1),
+                PanelDescriptor::new(ids::DIFF, Slot::Center, "panel-diff", "diff", 1),
                 None,
             );
             registry.activate(ids::DIFF);

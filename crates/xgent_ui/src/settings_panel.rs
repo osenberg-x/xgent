@@ -212,6 +212,13 @@ pub struct DensityButton {
     pub density: Density,
 }
 
+/// 3D 首页开关按钮（MVP-2）。
+#[derive(Component, Clone, Copy)]
+pub struct ThreeDHomeButton {
+    /// 是否启用 3D 首页
+    pub enabled: bool,
+}
+
 /// 数值设置输入框标记。
 #[derive(Component, Clone)]
 pub struct SettingsNumInput {
@@ -582,6 +589,7 @@ impl Plugin for SettingsPanelPlugin {
             .add_message::<ModelListResultMessage>()
             .add_message::<SaveLanguageMessage>()
             .add_message::<SaveDensityMessage>()
+            .add_message::<Save3DHomeMessage>()
             .insert_resource(SettingsPanelState::default())
             .insert_resource(KindSelector::default())
             .insert_resource(ModelListState::default())
@@ -597,6 +605,7 @@ impl Plugin for SettingsPanelPlugin {
                     handle_kind_button,
                     handle_panel_dismiss,
                     handle_density_choice,
+                    handle_3d_home_choice,
                     handle_policy_button,
                     handle_save_button,
                     handle_fetch_models,
@@ -624,6 +633,13 @@ pub struct SaveLanguageMessage {
 pub struct SaveDensityMessage {
     /// 目标档位
     pub density: Density,
+}
+
+/// 保存 3D 首页偏好（MVP-2）：点击即生效，不进「保存」通路。
+#[derive(Message, Debug, Clone, Copy)]
+pub struct Save3DHomeMessage {
+    /// 是否启用 3D 首页
+    pub enabled: bool,
 }
 
 /// 根据开关状态 spawn/despawn 面板，并在快照更新时重渲染。
@@ -939,6 +955,30 @@ fn spawn_panel(
                                 key,
                                 selected,
                                 DensityButton { density },
+                            );
+                        }
+                    });
+
+                // ── 3D 首页（MVP-2）─────────────────────────
+                section(card, theme, loc, "settings-section-3d-home");
+                card.spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(space::SM),
+                    ..default()
+                },))
+                    .with_children(|row| {
+                        for (enabled, key) in [
+                            (true, "settings-3d-home-on"),
+                            (false, "settings-3d-home-off"),
+                        ] {
+                            let selected = global.preferences.three_d_home == enabled;
+                            segment_button(
+                                row,
+                                theme,
+                                loc,
+                                key,
+                                selected,
+                                ThreeDHomeButton { enabled },
                             );
                         }
                     });
@@ -1496,6 +1536,22 @@ fn handle_density_choice(
             global.preferences.density = hit.density;
             writer.write(SaveDensityMessage {
                 density: hit.density,
+            });
+        }
+    }
+}
+
+/// 3D 首页开关：点击即改 `GlobalConfigRes` 并发写入消息；布局在下一帧切换。
+fn handle_3d_home_choice(
+    q: Query<&ThreeDHomeButton, Added<Pressed>>,
+    mut global: ResMut<GlobalConfigRes>,
+    mut writer: MessageWriter<Save3DHomeMessage>,
+) {
+    for hit in q.iter() {
+        if global.preferences.three_d_home != hit.enabled {
+            global.preferences.three_d_home = hit.enabled;
+            writer.write(Save3DHomeMessage {
+                enabled: hit.enabled,
             });
         }
     }

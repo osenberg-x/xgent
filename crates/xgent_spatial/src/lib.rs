@@ -15,4 +15,4 @@ pub mod workspace;
 pub use error::SpatialError;
 pub use layout::{LayoutConfig, LayoutReport, layout, layout_incremental};
 pub use manifest::{DependencyKind, ManifestDependency, ManifestInfo, parse_manifest};
-pub use workspace::scan;
+pub use workspace::{ScanOptions, scan, scan_with_options};

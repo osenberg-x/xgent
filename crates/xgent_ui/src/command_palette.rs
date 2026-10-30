@@ -93,6 +93,12 @@ pub fn register_xgent_commands(mut registry: ResMut<CommandRegistry>, loc: Res<L
         label: tr(&loc, "cmd-settings-open"),
         kind: CommandKind::Action,
     });
+    // MVP-2 S1：临时入口，布局反转前用命令面板打开 3D 空间视图。
+    registry.register(PaletteCommand {
+        id: "space.show".into(),
+        label: tr(&loc, "cmd-space-show"),
+        kind: CommandKind::Action,
+    });
     // 撤销上一轮 agent 文件改动（R3-11）。非 plugin. 前缀：本地图层动作，
     // 由 undo::request_undo 在会话空闲时执行。
     if let Err(e) = registry.try_register(PaletteCommand {
@@ -396,7 +402,12 @@ pub(crate) fn handle_palette_triggers(
     mut plugin_command: MessageWriter<xgent_agent::PluginCommandTriggered>,
     mut undo_writer: MessageWriter<crate::undo::UndoChangesMessage>,
     mut save_lang: MessageWriter<crate::settings_panel::SaveLanguageMessage>,
+    mut panel_activate: MessageWriter<crate::panels::PanelActivate>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
 ) {
+    let universe = mode
+        .as_deref()
+        .is_none_or(|m| *m == crate::layout_mode::LayoutMode::Universe);
     for ev in reader.read() {
         match ev.command_id.as_str() {
             "lang.switch.en" => {
@@ -423,6 +434,14 @@ pub(crate) fn handle_palette_triggers(
             }
             "settings.open" => {
                 settings_state.open = true;
+            }
+            "space.show" => {
+                // 经典回退（three_d_home=false）下空间不暴露，别把它叫到侧栏里。
+                if universe {
+                    panel_activate.write(crate::panels::PanelActivate {
+                        id: crate::panels::ids::SPACE,
+                    });
+                }
             }
             "agent.undo-changes" => {
                 // 交给 undo 系统：只有空闲时才真正撤销，忙时回一句提示

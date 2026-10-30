@@ -18,6 +18,7 @@ xgent_settings_core = { path = "../xgent_settings_core" }
 xgent_terminal = { path = "../xgent_terminal" }
 xgent_agent = { path = "../xgent_agent" }
 xgent_tools = { path = "../xgent_tools" }
+xgent_spatial = { path = "../xgent_spatial" }
 xui = { path = "../xui" }
 parley = { workspace = true }
 xui_i18n = { path = "../xui_i18n" }

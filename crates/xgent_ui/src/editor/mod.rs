@@ -132,11 +132,11 @@ impl Plugin for EditorPlugin {
 /// 启动时在右侧分屏容器内 spawn 编辑器视图（顶部标签栏 + 编辑器区）。
 ///
 /// 编辑器视图是右侧分屏的内容之一（另一为文件预览）；分屏本身由
-/// [`crate::layout::SideViewMarker`] 容器承载，展开/收起由
-/// [`crate::layout::SideViewCollapsed`] 统一控制。
+/// [`crate::layout::CenterHostMarker`] 容器承载，展开/收起由
+/// [`crate::panels::SlotLayout`] 的 `Slot::Center` 统一控制。
 fn spawn_editor_view(
     mut commands: Commands,
-    q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
+    q_side: Query<Entity, With<crate::layout::CenterHostMarker>>,
     theme: Res<Theme>,
     mut register: MessageWriter<crate::panels::PanelRegister>,
 ) {
@@ -162,7 +162,7 @@ fn spawn_editor_view(
             EditorViewMarker,
             crate::panels::PanelVisibility::of_panel(
                 crate::panels::ids::EDITOR,
-                crate::panels::Slot::SideDock,
+                crate::panels::Slot::Center,
             ),
         ))
         .with_children(|p| {
@@ -208,11 +208,11 @@ fn spawn_editor_view(
         })
         .id();
     commands.entity(side).add_child(editor_view);
-    // v8 M5：注册为 `Slot::SideDock` 面板（页签标题取 `title_key`）。
+    // v8 M5：注册为 `Slot::Center` 面板（页签标题取 `title_key`）。
     register.write(crate::panels::PanelRegister {
         desc: crate::panels::PanelDescriptor::new(
             crate::panels::ids::EDITOR,
-            crate::panels::Slot::SideDock,
+            crate::panels::Slot::Center,
             "panel-editor",
             "file",
             0,

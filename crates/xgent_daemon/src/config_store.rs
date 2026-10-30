@@ -8,6 +8,8 @@
 //! - `default_provider` / `default_model` — 字符串
 //! - `preferences.language` / `preferences.theme` — 字符串
 //! - `preferences.density` — 字符串，只接受 `comfortable` / `compact`（v8 M2b）
+//! - `preferences.three_d_home` — 布尔（MVP-2：3D 首页开关）
+//! - `preferences.chat_side_width` — 数字（MVP-2：对话侧栏宽度，320–560）
 //! - `providers` — 整个 providers map（读：JSON 对象；写：替换整个 map）
 //! - `providers.<id>` — 单个 provider 配置（读：JSON 对象；写：插入/替换）
 //! - `providers.<id>.api_base` / `api_key` / `kind` / `model_overrides` /
@@ -85,6 +87,8 @@ impl ConfigCoordinator {
             "preferences.language" => json!(self.config.preferences.language),
             "preferences.theme" => json!(self.config.preferences.theme),
             "preferences.density" => json!(self.config.preferences.density.as_str()),
+            "preferences.three_d_home" => json!(self.config.preferences.three_d_home),
+            "preferences.chat_side_width" => json!(self.config.preferences.chat_side_width),
             "providers" => json!(self.config.providers),
             other if other.starts_with("providers.") => {
                 let parts: Vec<&str> = other.split('.').collect();
@@ -133,6 +137,29 @@ impl ConfigCoordinator {
                     )));
                 }
                 self.config.preferences.density = Density::parse(&raw);
+            }
+            "preferences.three_d_home" => {
+                let enabled = match &value {
+                    Value::Bool(enabled) => *enabled,
+                    Value::String(raw) if raw == "true" => true,
+                    Value::String(raw) if raw == "false" => false,
+                    _ => return Err(XgentError::Config(format!("{key} 只接受 true / false"))),
+                };
+                self.config.preferences.three_d_home = enabled;
+            }
+            "preferences.chat_side_width" => {
+                let width = match &value {
+                    Value::Number(number) => number.as_f64(),
+                    Value::String(raw) => raw.parse::<f64>().ok(),
+                    _ => None,
+                };
+                let Some(width) = width else {
+                    return Err(XgentError::Config(format!("{key} 只接受数字")));
+                };
+                if !width.is_finite() {
+                    return Err(XgentError::Config(format!("{key} 只接受有限数字")));
+                }
+                self.config.preferences.chat_side_width = (width as f32).clamp(320.0, 560.0);
             }
             "providers" => {
                 // 整体替换 providers map
@@ -493,6 +520,40 @@ mod tests {
             Density::Comfortable,
             "被拒绝的写入不应改动权威副本"
         );
+    }
+
+    /// MVP-2：对话侧栏宽度可写可读，越界值被钳到 320–560。
+    #[test]
+    fn chat_side_width_is_writable_clamped_and_readable() {
+        isolate_agent_dir();
+        let _io = lock_config_io();
+        let mut c = ConfigCoordinator::with_config(empty_config());
+        assert_eq!(c.read("preferences.chat_side_width"), json!(400.0));
+
+        c.write("preferences.chat_side_width", json!(480.0))
+            .unwrap();
+        assert_eq!(c.config().preferences.chat_side_width, 480.0);
+        assert_eq!(c.read("preferences.chat_side_width"), json!(480.0));
+
+        c.write("preferences.chat_side_width", json!(900.0))
+            .unwrap();
+        assert_eq!(
+            c.config().preferences.chat_side_width,
+            560.0,
+            "上界应钳到 560"
+        );
+        c.write("preferences.chat_side_width", json!("300"))
+            .unwrap();
+        assert_eq!(
+            c.config().preferences.chat_side_width,
+            320.0,
+            "下界应钳到 320"
+        );
+
+        let err = c
+            .write("preferences.chat_side_width", json!("wide"))
+            .unwrap_err();
+        assert!(matches!(err, XgentError::Config(_)), "非数字应被拒绝");
     }
 
     /// 全局写入的落盘点必须跟着 `XGENT_AGENT_DIR` 走。

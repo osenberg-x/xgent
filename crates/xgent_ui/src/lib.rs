@@ -26,6 +26,7 @@ pub mod fonts;
 pub mod i18n;
 pub mod kit;
 pub mod layout;
+pub mod layout_mode;
 pub mod markdown;
 pub mod markdown_render;
 pub mod modal;
@@ -36,6 +37,7 @@ pub mod resize;
 pub mod session_history;
 pub mod settings_panel;
 pub mod shortcuts;
+pub mod space;
 pub mod status_bar;
 pub mod terminal;
 pub mod theme;
@@ -88,6 +90,7 @@ impl Plugin for XgentUiPlugin {
         .add_plugins((
             cursor::CursorStylePlugin,
             session_history::SessionHistoryPlugin,
+            space::SpacePlugin,
             confirm_dialog::ConfirmDialogPlugin,
             tool_panel::ToolPanelPlugin,
             editor::EditorPlugin,

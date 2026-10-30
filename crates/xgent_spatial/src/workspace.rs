@@ -28,6 +28,7 @@ const SKIP_DIRS: &[&str] = &[
     ".dsh",
     ".workbuddy",
     ".workbuddy-ai",
+    ".xgent",
 ];
 
 struct Package {
@@ -42,7 +43,423 @@ struct Package {
 /// - `Normal` 与 `Build` 依赖中能解析到工作区内部的，生成 `DependsOn` 边；
 ///   `Dev` 依赖只解析、不生成边。
 /// - 无法解析到工作区内部的依赖视为外部依赖，不生成节点或边，也不报错。
+#[derive(Debug, Clone, Copy)]
+/// L1 扫描选项。
+pub struct ScanOptions {
+    /// 是否生成文件/目录级 L1 节点。
+    pub l1: bool,
+    /// 节点上限；`0` 表示不限。
+    pub node_limit: usize,
+    /// 是否应用 `.gitignore` / 隐藏文件规则。
+    pub ignore: bool,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            l1: false,
+            node_limit: 2000,
+            ignore: true,
+        }
+    }
+}
+
 pub fn scan(root: &Path) -> Result<SpatialGraph, SpatialError> {
+    scan_with_options(root, ScanOptions::default())
+}
+
+/// 按选项扫描：`l1=false` 保持 S0 的 crate 级行为。
+pub fn scan_with_options(
+    root: &Path,
+    options: ScanOptions,
+) -> Result<SpatialGraph, SpatialError> {
+    let l0 = scan_l0(root)?;
+    if !options.l1 {
+        return Ok(l0);
+    }
+    build_l1(root, options, l0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FsKind {
+    Dir,
+    File,
+}
+
+#[derive(Clone)]
+struct FsEntry {
+    path: PathBuf,
+    kind: FsKind,
+    depth: usize,
+    size: u64,
+    top: Option<String>,
+}
+
+impl FsEntry {
+    fn weight(&self) -> f32 {
+        if self.kind == FsKind::File {
+            ((self.size as f32) + 1.0).ln()
+        } else {
+            1.0
+        }
+    }
+}
+
+fn build_l1(
+    root: &Path,
+    options: ScanOptions,
+    l0: SpatialGraph,
+) -> Result<SpatialGraph, SpatialError> {
+    let entries = collect_fs_entries(root, options.ignore)?;
+    let crate_count = l0.nodes.len();
+    let l1_limit = if options.node_limit == 0 {
+        usize::MAX
+    } else {
+        options.node_limit.saturating_sub(crate_count)
+    };
+    let (selected, omitted_nodes) = select_entries(&entries, l1_limit);
+    let (clusters, cluster_of_top) = build_clusters(root, &selected);
+
+    let mut nodes = Vec::with_capacity(selected.len() + l0.nodes.len());
+    let mut path_to_id = BTreeMap::new();
+    for entry in &selected {
+        let id = SpatialNodeId(nodes.len() as u32);
+        path_to_id.insert(entry.path.clone(), id);
+        let label = entry
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| root_label(root));
+        let cluster = entry
+            .top
+            .as_ref()
+            .and_then(|top| cluster_of_top.get(top))
+            .copied()
+            .unwrap_or(ClusterId(0));
+        nodes.push(SpatialNode {
+            id,
+            kind: match entry.kind {
+                FsKind::Dir => SpatialNodeKind::Module,
+                FsKind::File => SpatialNodeKind::File,
+            },
+            label,
+            path: Some(entry.path.clone()),
+            cluster,
+            weight: entry.weight(),
+            status: SpatialStatus::Idle,
+            anchor: None,
+        });
+    }
+
+    // 目录权重 = 1 + 后代文件权重；用于 LOD/半径。
+    let dir_ids: BTreeMap<PathBuf, SpatialNodeId> = nodes
+        .iter()
+        .filter(|node| node.kind == SpatialNodeKind::Module)
+        .filter_map(|node| node.path.clone().map(|path| (path, node.id)))
+        .collect();
+    let mut dir_weights: BTreeMap<SpatialNodeId, f32> =
+        dir_ids.values().map(|id| (*id, 1.0)).collect();
+    for node in nodes.iter().filter(|node| node.kind == SpatialNodeKind::File) {
+        if let Some(path) = &node.path {
+            for ancestor in path.ancestors().skip(1) {
+                if let Some(id) = dir_ids.get(ancestor) {
+                    if let Some(weight) = dir_weights.get_mut(id) {
+                        *weight += node.weight;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    for node in &mut nodes {
+        if node.kind == SpatialNodeKind::Module
+            && let Some(weight) = dir_weights.get(&node.id)
+        {
+            node.weight = *weight;
+        }
+    }
+
+    let mut edges = Vec::new();
+    for entry in &selected {
+        if entry.path == root {
+            continue;
+        }
+        let Some(parent) = entry.path.parent() else {
+            continue;
+        };
+        if let (Some(&from), Some(&to)) =
+            (path_to_id.get(parent), path_to_id.get(&entry.path))
+        {
+            edges.push(SpatialEdge {
+                from,
+                to,
+                kind: EdgeKind::Contains,
+                weight: 1.0,
+            });
+        }
+    }
+
+    // 叠加 crate 节点与 DependsOn 边；crate 节点使用新的连续 id。
+    let base = nodes.len() as u32;
+    for node in &l0.nodes {
+        let mut node = node.clone();
+        node.id = SpatialNodeId(base + node.id.0);
+        node.cluster = node
+            .path
+            .as_deref()
+            .and_then(|path| cluster_for_path(path, root, &cluster_of_top))
+            .unwrap_or(ClusterId(0));
+        node.anchor = None;
+        nodes.push(node);
+    }
+    for edge in &l0.edges {
+        edges.push(SpatialEdge {
+            from: SpatialNodeId(base + edge.from.0),
+            to: SpatialNodeId(base + edge.to.0),
+            kind: edge.kind,
+            weight: edge.weight,
+        });
+    }
+    edges.sort_by_key(|edge| (edge.from.0, edge.to.0));
+
+    let generation = generation_of_graph(&nodes, &edges, &clusters);
+    Ok(SpatialGraph {
+        generation,
+        nodes,
+        edges,
+        clusters,
+        omitted_nodes,
+    })
+}
+
+fn collect_fs_entries(root: &Path, use_ignore: bool) -> Result<Vec<FsEntry>, SpatialError> {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(use_ignore)
+        .git_ignore(use_ignore)
+        .git_global(use_ignore)
+        .git_exclude(use_ignore)
+        .parents(use_ignore)
+        .ignore(use_ignore)
+        .require_git(false)
+        .follow_links(false);
+    builder.filter_entry(|entry| !is_skipped_dir(entry));
+
+    let mut entries = Vec::new();
+    for result in builder.build() {
+        let Ok(entry) = result else {
+            continue;
+        };
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        let kind = if file_type.is_dir() {
+            FsKind::Dir
+        } else if file_type.is_file() {
+            FsKind::File
+        } else {
+            continue;
+        };
+        let size = if kind == FsKind::File {
+            entry.metadata().map(|metadata| metadata.len()).unwrap_or(0)
+        } else {
+            0
+        };
+        let path = entry.path().to_path_buf();
+        let top = top_component(&path, root, kind);
+        entries.push(FsEntry {
+            path,
+            kind,
+            depth: entry.depth(),
+            size,
+            top,
+        });
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+fn is_skipped_dir(entry: &ignore::DirEntry) -> bool {
+    entry.file_type().is_some_and(|file_type| file_type.is_dir())
+        && entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| SKIP_DIRS.contains(&name))
+}
+
+fn top_component(path: &Path, root: &Path, kind: FsKind) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut components = relative.components();
+    let first = components.next()?;
+    let nested = relative.components().count() >= 2;
+    if nested || kind == FsKind::Dir {
+        Some(first.as_os_str().to_string_lossy().into_owned())
+    } else {
+        None
+    }
+}
+
+fn select_entries(entries: &[FsEntry], limit: usize) -> (Vec<FsEntry>, usize) {
+    if limit == usize::MAX || entries.len() <= limit {
+        return (entries.to_vec(), 0);
+    }
+
+    let mut dirs: Vec<&FsEntry> = entries
+        .iter()
+        .filter(|entry| entry.kind == FsKind::Dir)
+        .collect();
+    dirs.sort_by_key(|entry| (entry.depth, entry.path.clone()));
+    let kept_dirs: BTreeSet<PathBuf> = dirs
+        .iter()
+        .take(limit)
+        .map(|entry| entry.path.clone())
+        .collect();
+
+    let mut selected: Vec<FsEntry> = entries
+        .iter()
+        .filter(|entry| entry.kind == FsKind::Dir && kept_dirs.contains(&entry.path))
+        .cloned()
+        .collect();
+    let remaining = limit.saturating_sub(selected.len());
+    let mut files: Vec<&FsEntry> = entries
+        .iter()
+        .filter(|entry| entry.kind == FsKind::File)
+        .filter(|entry| entry.path.parent().is_some_and(|parent| kept_dirs.contains(parent)))
+        .collect();
+    files.sort_by(|a, b| {
+        b.weight()
+            .total_cmp(&a.weight())
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    selected.extend(files.into_iter().take(remaining).cloned());
+    selected.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let omitted = entries.len().saturating_sub(selected.len());
+    (selected, omitted)
+}
+
+fn build_clusters(
+    root: &Path,
+    entries: &[FsEntry],
+) -> (Vec<SpatialCluster>, BTreeMap<String, ClusterId>) {
+    let tops: BTreeSet<String> = entries.iter().filter_map(|entry| entry.top.clone()).collect();
+    let mut clusters = vec![SpatialCluster {
+        id: ClusterId(0),
+        label: root_label(root),
+        path: Some(root.to_path_buf()),
+        weight: 1.0,
+        anchor: None,
+    }];
+    let mut cluster_of_top = BTreeMap::new();
+    for (index, top) in tops.into_iter().enumerate() {
+        let id = ClusterId((index + 1) as u32);
+        clusters.push(SpatialCluster {
+            id,
+            label: top.clone(),
+            path: Some(root.join(&top)),
+            weight: 1.0,
+            anchor: None,
+        });
+        cluster_of_top.insert(top, id);
+    }
+    (clusters, cluster_of_top)
+}
+
+fn cluster_for_path(
+    path: &Path,
+    root: &Path,
+    cluster_of_top: &BTreeMap<String, ClusterId>,
+) -> Option<ClusterId> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut components = relative.components();
+    let first = components.next()?;
+    let nested = relative.components().count() >= 2;
+    if nested || path.is_dir() {
+        first
+            .as_os_str()
+            .to_str()
+            .and_then(|top| cluster_of_top.get(top))
+            .copied()
+    } else {
+        Some(ClusterId(0))
+    }
+}
+
+fn root_label(root: &Path) -> String {
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| root.display().to_string())
+}
+
+fn generation_of_graph(
+    nodes: &[SpatialNode],
+    edges: &[SpatialEdge],
+    clusters: &[SpatialCluster],
+) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut hash = OFFSET;
+
+    for node in nodes {
+        mix(&mut hash, &node.id.0.to_le_bytes());
+        mix(&mut hash, &[node_kind_rank(node.kind)]);
+        mix(&mut hash, node.label.as_bytes());
+        if let Some(path) = &node.path {
+            mix(&mut hash, path.to_string_lossy().as_bytes());
+        }
+        mix(&mut hash, &node.cluster.0.to_le_bytes());
+        mix(&mut hash, &node.weight.to_bits().to_le_bytes());
+    }
+    for edge in edges {
+        mix(&mut hash, &edge.from.0.to_le_bytes());
+        mix(&mut hash, &edge.to.0.to_le_bytes());
+        mix(&mut hash, &[edge_kind_rank(edge.kind)]);
+        mix(&mut hash, &edge.weight.to_bits().to_le_bytes());
+    }
+    for cluster in clusters {
+        mix(&mut hash, &cluster.id.0.to_le_bytes());
+        mix(&mut hash, cluster.label.as_bytes());
+        if let Some(path) = &cluster.path {
+            mix(&mut hash, path.to_string_lossy().as_bytes());
+        }
+        mix(&mut hash, &cluster.weight.to_bits().to_le_bytes());
+    }
+    hash
+}
+
+fn mix(hash: &mut u64, bytes: &[u8]) {
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(PRIME);
+    }
+    *hash ^= 0xff;
+    *hash = hash.wrapping_mul(PRIME);
+}
+
+fn node_kind_rank(kind: SpatialNodeKind) -> u8 {
+    match kind {
+        SpatialNodeKind::Crate => 0,
+        SpatialNodeKind::Module => 1,
+        SpatialNodeKind::File => 2,
+        SpatialNodeKind::Symbol => 3,
+        SpatialNodeKind::External => 4,
+    }
+}
+
+fn edge_kind_rank(kind: EdgeKind) -> u8 {
+    match kind {
+        EdgeKind::DependsOn => 0,
+        EdgeKind::Contains => 1,
+        EdgeKind::Imports => 2,
+        EdgeKind::ChangedTogether => 3,
+        EdgeKind::AgentTouched => 4,
+    }
+}
+
+fn scan_l0(root: &Path) -> Result<SpatialGraph, SpatialError> {
     if !root.is_dir() {
         return Err(SpatialError::InvalidWorkspace {
             reason: format!("{} 不是目录", root.display()),
@@ -160,6 +577,7 @@ pub fn scan(root: &Path) -> Result<SpatialGraph, SpatialError> {
         nodes,
         edges,
         clusters,
+        omitted_nodes: 0,
     })
 }
 

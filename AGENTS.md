@@ -8,14 +8,15 @@
 
 **XGent** — 面向个人开发者日常编码的桌面端 AI Code Agent 工具，基于 Bevy 游戏引擎构建。以完整可用的产品为目标，覆盖 AI 辅助编码、代码理解、自动化操作，并通过轻量创意的视觉与陪伴体验区别于同类工具。
 
-四大设计支柱：实用优先、数据驱动、可扩展、轻量多开。
+四大设计支柱（README 愿景，2026-10-30 起进入主线）：3D 可视化、时空回溯、数据驱动 UI、沉浸式协作。跨支柱底线：实用优先、可扩展、轻量多开。
 
 - 语言：Rust（edition 2024）
 - 引擎：Bevy 0.20.0（正式版），依赖通过 path 指向本地源码 `../bevy`（检出上游 `v0.20.0` tag，便于调试）
 - Rust 工具链：bevy 0.20.0 要求 `rust-version >= 1.97.1`
-- 当前阶段：MVP（仅 2D GUI，3D/TUI/Web/宠物留待后续）
+- 当前阶段：MVP-1 已交付（2D agent IDE + 编辑器 + 终端）；MVP-2（3D 首页）首期已落地（L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback），正在收尾集成验收；TUI/Web/宠物留待后续。
 
-**权威设计文档**（从零设计，不参考旧代码）：
+**权威设计文档**（README 保留愿景，requirements 定阶段）：
+- `README.md` — 产品愿景（四大支柱与详细设想；冲突时以 `requirements.md` 的阶段与验收为准）
 - `docs/design/requirements.md` — 需求设计（功能 F-xx、非功能 NF-xx、关键约束、分期路线）
 - `docs/design/architecture.md` — 架构设计（进程模型、分层、crate 划分、数据流、抽象接口、待决策点 D-xx）
 - `docs/design/plugin-system-design.md` — 插件系统设计（WASM 组件模型、扩展点契约、加载机制；参考 Zed 插件机制）
@@ -32,7 +33,7 @@ xgent/
 ├── Cargo.toml                # workspace 根
 ├── Cargo.lock
 ├── AGENTS.md                # 本文件
-├── src/main.rs              # 遗留 Hello world，待删除（xgent_app 接管入口）
+├── README.md                # 产品愿景（四大支柱与详细设想）
 ├── crates/                  # 所有 crate（见第 4 节）
 └── docs/                    # 文档（见下文）
 ```
@@ -77,7 +78,7 @@ cargo clippy --workspace          # lint
 
 ## 4. crate 划分与依赖
 
-共 19 个 crate（下表为核心 13 个：MVP 12 + F-19 终端引入 `xgent_terminal`；另有插件系统 5 个（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`/`xgent_plugin_hello`/`xgent_plugin_git`）与 F-16 S0 的 `xgent_spatial`，见 `docs/dev-tutorial.md` §2），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
+共 19 个 crate（下表为核心 13 个：MVP-1 的 12 个 + F-19 终端引入 `xgent_terminal`；另有插件系统 5 个（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`/`xgent_plugin_hello`/`xgent_plugin_git`）与 F-16 的 `xgent_spatial`（S0 已交付；MVP-2 扩 L1 文件/目录图），见 `docs/dev-tutorial.md` §2），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
 
 | crate | 类型 | 依赖 | 职责 |
 |:---|:---|:---|:---|
@@ -187,22 +188,21 @@ xgent_app → 组装所有 UI 侧 crate
 2. **先通后优**：每个模块先实现最小可用版本，确保编译通过与基本功能，再迭代。
 3. **接口先行**：先定义 trait 与协议类型，再实现具体逻辑，保证调用方无感于实现变化。
 4. **测试驱动**：每个 crate 完成后写最小集成测试验证。
-5. **不提前引入 3D/TUI/Web/宠物**：MVP 仅 2D GUI。
+5. **3D 已进入主线，TUI/Web/宠物暂不引入**：MVP-2 交付 3D 首页（`requirements.md` §4.2）；TUI/Web/宠物留待后续。
 6. **产出文档放 docs/**：生成的设计/计划类文档放 `docs/` 对应分类目录（见第 2 节），不放项目根目录。
-7. **遗留清理**：根目录 `src/main.rs` 是遗留 Hello world，按计划应删除（xgent_app 接管入口）。
-8. **同步开发指南**：后续实现新功能或功能有变化，都需要更新 `docs/dev-tutorial.md`（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点）。新增/变更功能、crate、ADR、trait 时必须同步该文档对应章节，避免文档与代码脱节。
-9. **UI 视觉工作用 design-md**：UI 重构、新增界面、调整视觉风格时，使用项目 skill `design-md`（`.agents/skills/design-md/`，75 套 DESIGN.md 设计系统参考库），按其映射规则落地到 `xgent_ui::theme`。
+7. **同步开发指南**：后续实现新功能或功能有变化，都需要更新 `docs/dev-tutorial.md`（已实现功能总览、crate 拓扑、ADR 落地点、开发注意点）。新增/变更功能、crate、ADR、trait 时必须同步该文档对应章节，避免文档与代码脱节。
+8. **UI 视觉工作用 design-md**：UI 重构、新增界面、调整视觉风格时，使用项目 skill `design-md`（`.agents/skills/design-md/`，75 套 DESIGN.md 设计系统参考库），按其映射规则落地到 `xgent_ui::theme`。
 
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP + F-11 编辑器（P1）+ F-19 终端（P1）已落地阶段。19 个 crate，`cargo check --workspace` 通过，约 7 万行 Rust（`crates/**/*.rs`，2026-10-29 实测 71276 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 已随 M6.5 接入 chat_panel）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP-1 + F-11 编辑器 + F-19 终端已落地、MVP-2（3D 首页）首期已落地并收尾集成验收的阶段。19 个 crate，`cargo check --workspace` 通过，约 7 万行 Rust（`crates/**/*.rs`，2026-10-29 实测 71276 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 已随 M6.5 接入 chat_panel）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（Transcript 顺序权威/Markdown 终稿与内联组/`@` 补全/ContextSet+sidecar/消息虚拟窗口；实现提交 `9ac4daf` / `b962f97` / `5dde747`，复审修复 `e485d5e`（台账 §10 勘误 51））；下一期为 **M8 Git 探针**。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.2 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（Transcript 顺序权威/Markdown 终稿与内联组/`@` 补全/ContextSet+sidecar/消息虚拟窗口；实现提交 `9ac4daf` / `b962f97` / `5dde747`，复审修复 `e485d5e`（台账 §10 勘误 51））；**MVP-2 3D 首页**已交付首期（G7 通过；L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback），当前收尾集成验收；M8 Git 探针顺延。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.3 的 P1/P2 项推进。
 
 ---
 
-## 8. 待决策点（不阻塞 MVP 起步）
+## 8. 待决策点（不阻塞 MVP-2 起步）
 
 详见 `docs/design/architecture.md` 第 13 节。摘要：
 

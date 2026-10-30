@@ -4,7 +4,7 @@
 >
 > 范围：F-19 内置终端（P1）。基于 grill 会话决策落地，覆盖 UI 界面、架构边界、数据流、状态机、与编辑器/SideView 的复用关系、安全模型。领域语言见 `CONTEXT.md` "终端（F-19，P1）" 小节。
 >
-> 与既有文档关系：本文档不重写 `ui-design.md` / `architecture.md` / `requirements.md`，只补充终端引入后的增量变更，并在文末列出对三份文档的具体修订点。终端与编辑器（F-11）复用 `SideView` 容器，故本文档同时修订 `editor-design.md` §2.1 的布局描述（原"编辑器在对话主区标签条"作废，改为"编辑器/预览/终端都是 SideView 互斥子视图"）。
+> 与既有文档关系：本文档不重写 `ui-design.md` / `architecture.md` / `requirements.md`，只补充终端引入后的增量变更，并在文末列出对三份文档的具体修订点。终端与编辑器（F-11）复用 `SideView` 容器，故本文档同时修订 `editor-design.md` §2.1 的布局描述（原"编辑器在对话主区标签条"作废，改为"编辑器/预览/终端都是 SideView 互斥子视图"）。**2026-10-30 再修订**：MVP-2 起终端与编辑器/预览从 SideView 迁到 `Slot::Center`（打开终端时接管主区），SideView 让给对话；下述 SideView 布局是 MVP-1 口径，MVP-2 以 `requirements.md` §4.2 为准。
 
 ---
 
@@ -384,7 +384,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 ### 7.1 `docs/design/requirements.md`
 
-- **新增 F-19**：行 "F-19 | 内置终端 | 嵌入式用户人机交互终端，多 tab PTY，UI 侧行编辑，与编辑器/预览复用 SideView。详见 `docs/design/terminal-design.md`。 | P1" 加入 §4.2 功能表，并加入 §7.2 P1 清单。
+- **新增 F-19**：行 "F-19 | 内置终端 | 嵌入式用户人机交互终端，多 tab PTY，UI 侧行编辑，与编辑器/预览复用 SideView。详见 `docs/design/terminal-design.md`。 | P1" 加入 §4.2 功能表，并加入 §7.2 P1 清单。**（MVP-1 口径；MVP-2 起终端接管主区，见 requirements §4.2。）**
 
 ### 7.2 `docs/design/architecture.md`
 

@@ -128,6 +128,9 @@ pub struct SpatialGraph {
     pub edges: Vec<SpatialEdge>,
     /// 星团，按稳定顺序排列。
     pub clusters: Vec<SpatialCluster>,
+    /// 因节点上限被聚合/裁剪掉的节点数；0 表示没有裁剪。
+    #[serde(default)]
+    pub omitted_nodes: usize,
 }
 
 impl SpatialGraph {

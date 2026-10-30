@@ -32,6 +32,8 @@ bytes = "1"
 tokio-stream = "0.1"
 # 文件监听
 notify = "8"
+# 文件树遍历（.gitignore / 隐藏文件 / 内置跳过）
+ignore = "0.4"
 # 日志
 tracing = "0.1"
 tracing-subscriber = "0.3"

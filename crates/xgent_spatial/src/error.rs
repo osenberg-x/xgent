@@ -47,4 +47,8 @@ pub enum SpatialError {
         /// 具体原因。
         reason: String,
     },
+
+    /// 扫描已被调用方取消。
+    #[error("扫描已取消")]
+    Cancelled,
 }

@@ -242,6 +242,14 @@ pub mod size {
     pub const CONTEXT_W_DEFAULT: f32 = 720.0;
     /// 上下文面板最小宽度
     pub const CONTEXT_W_MIN: f32 = 380.0;
+    /// 对话侧栏默认宽度（MVP-2：对话常驻右侧）
+    pub const CHAT_SIDE_W_DEFAULT: f32 = 400.0;
+    /// 对话侧栏最小宽度
+    pub const CHAT_SIDE_W_MIN: f32 = 320.0;
+    /// 对话侧栏最大宽度（另受可用宽度 45% 约束）
+    pub const CHAT_SIDE_W_MAX: f32 = 560.0;
+    /// 对话侧栏最大宽度占主区可用宽度的比例
+    pub const CHAT_SIDE_MAX_RATIO: f32 = 0.45;
     /// 会话主区最小宽度（拖拽钳制）
     pub const CHAT_MIN: f32 = 520.0;
     /// 上下文面板页签条高度

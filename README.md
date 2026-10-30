@@ -1,6 +1,8 @@
 # XGent — 下一代沉浸式 AI Code Agent
 
 > 基于 Bevy 游戏引擎构建的沉浸式 AI 编程助手，将代码库可视化为可交互的 3D 宇宙，让开发者在"探索-构建-回溯"的闭环中高效编码。
+>
+> 落地状态与阶段划分以 `docs/design/requirements.md` 为准（2026-10-30 起 3D 首页进入 MVP-2）。本文保留产品愿景与详细设想；个别技术事实（如 Bevy 版本、LSP 状态）以代码与设计文档为准。
 
 ---
 
@@ -39,6 +41,8 @@
 1. **可玩性优先**：每一次交互都应该有"操作感"——3D 飞行有惯性，节点点选有弹性反馈，时间回溯有拖拽手势。
 2. **实用底线**：酷炫但不失效率。3D 视图与 2D 面板无缝切换；所有 3D 操作都有对应的键盘快捷键；核心编辑流绝不被 3D 动画阻塞。
 3. **渐进式沉浸**：用户可以从纯 2D 模式起步，按需解锁 3D 层。不强制 3D，但 3D 始终是"更酷"的选项。
+
+> 注：MVP-2 首期采用轨道相机、无惯性；自由飞行/惯性作为后续可选模式（见 `docs/design/requirements.md` OQ-13）。
 
 ---
 
@@ -479,11 +483,11 @@ XGent 不只对接 HTTP API，还要支持主流 AI Agent 协议，实现工具�
 
 | 协议 | 全称 | 角色 | 状态 |
 |:---|:---|:---|:---|
-| **MCP** | Model Context Protocol | XGent 作为 MCP Client 调用外部工具服务器 | 核心，MVP-1 |
+| **MCP** | Model Context Protocol | XGent 作为 MCP Client 调用外部工具服务器 | 核心；实际 P1（MVP-1 未含，顺延） |
 | **ACP** | Agent Communication Protocol | XGent 内部多 Agent 间通信 | 核心，Alpha-1 |
 | **OpenAI Compatible** | OpenAI Chat Completions API | 模型调用的事实标准 | 核心，MVP-1 |
 | **A2A** | Agent-to-Agent Protocol (Google) | XGent 与外部 Agent 互操作 | 实验，Beta |
-| **LSP** | Language Server Protocol | 代码智能（已有，见代码智能管线） | 核心，Alpha-1 |
+| **LSP** | Language Server Protocol | 代码智能（未接入；编辑器暂无 LSP） | 核心，Alpha-1 |
 
 #### MCP (Model Context Protocol) 支持
 
@@ -815,7 +819,7 @@ struct CodePreviewPanel {
 
 #### 核心事件与消息
 
-Bevy 0.19 提供两种通信机制：
+Bevy 0.20 提供两种通信机制：
 - **Event**（`#[derive(Event)]`）：即时触发，通过 Observer 模式响应，适合通知类场景
 - **Message**（`#[derive(Message)]`）：缓冲式，通过 `MessageWriter`/`MessageReader` 读写，适合批量处理
 
@@ -920,7 +924,7 @@ Source Files
 - 引用解析（import、call、type annotation）
 - 诊断信息集成（编译错误、lint 警告）
 
-**力导向布局算法**：
+**力导向布局算法**（2026-10-30：S0 已用确定性布局取代力导向；本节保留为早期设想）：
 
 ```
 目录节点 = 引力中心（按目录层级排列）
@@ -1163,7 +1167,7 @@ XGent 的核心交互设计原则：**每个操作都有键盘快捷键**，3D �
 
 ### 🔌 插件与扩展体系
 
-XGent 采用 Bevy Plugin 机制作为扩展点。在 Bevy 0.19 中，Plugin 可以是 struct 或 plain function：
+XGent 采用 Bevy Plugin 机制作为扩展点。在 Bevy 0.20 中，Plugin 可以是 struct 或 plain function：
 
 ```rust
 /// XGent 主 Plugin（struct 方式）
@@ -1273,6 +1277,8 @@ fn security_check(
 
 XGent 的性能目标是：**10 万个代码节点的项目，3D 宇宙保持 60fps，UI 操作延迟 < 16ms**。
 
+> 2026-10-30：首期 MVP-2 的 G7 门是 **2k 节点 @60fps**（退化梯 2k → 800 → 2D）；10 万节点是长期目标，不是首期验收。
+
 #### 3D 渲染性能
 
 | 策略 | 描述 | 预期收益 |
@@ -1343,7 +1349,7 @@ Main Thread (Bevy ECS — 60fps)
 
 ```toml
 [dependencies]
-# 引擎核心 — 使用 Bevy 0.19 (path 依赖指向本地源码)
+# 引擎核心 — 使用 Bevy 0.20 (path 依赖指向本地源码)
 bevy = { path = "../bevy", features = [
     "3d",           # 3D 渲染 + PBR + glTF + 拾取
     "ui",           # UI + bevy_ui_widgets + bevy_feathers + 拾取
@@ -1368,7 +1374,7 @@ serde_json = "1"
 # 无需额外依赖，使用 #[derive(SettingsGroup)] + PreferencesPlugin
 ```
 
-> **Bevy 0.19 关键变化**：
+> **Bevy 0.20 关键变化（项目基线；0.19 的多项变化仍适用）**：
 > - `bevy_ui_widgets` 和 `bevy_feathers` 已成为**官方一级 crate**，通过 `features = ["ui"]` 自动启用
 > - `bevy_picking` 是**内置拾取系统**，不再需要第三方 `bevy_mod_picking`
 > - `bevy_camera_controller` 提供内置 `FreeCamera`（WASD + 鼠标视角），不再需要自实现
@@ -1443,21 +1449,21 @@ keyring = "3"                  # 操作系统原生 Keychain 访问
 zstd = "0.13"                  # 快速压缩（快照存储）
 ```
 
-> **UI 构建选型**：Bevy 0.19 已将 `bevy_ui_widgets`（无头组件）和 `bevy_feathers`（带主题控件）作为官方 crate 内置。`bevy_feathers` 提供完整的暗色主题和 ~150+ 设计 Token，开箱即用，无需第三方 UI 框架。
+> **UI 构建选型**：Bevy 0.20 已将 `bevy_ui_widgets`（无头组件）和 `bevy_feathers`（带主题控件）作为官方 crate 内置。`bevy_feathers` 提供完整的暗色主题和 ~150+ 设计 Token，开箱即用，无需第三方 UI 框架。
 
 ---
 
 ### 🗺️ 实现路线图
 
-| 阶段 | 内容与目标 | 交付物 |
-|:---|:---|:---|
-| **MVP-1** | 基础 UI 框架 + Provider/协议层基础：主窗口 + Agent 侧边栏聊天 + OpenAI 兼容适配器 + Provider 注册表 + 基础 MCP Client + 文件显示 | 可对话的 AI 编程助手（2D 模式，支持多模型切换） |
-| **MVP-2** | 3D 宇宙原型：文件渲染为静态球体 + 目录层级布局 + 点击选中 + 飞行相机 | 可飞行的 3D 代码导航 |
-| **MVP-3** | Agent 深度集成：AgentAvatar 可视化 + 工具调用实时反馈 + 智能路由 + 降级链 + 时间线基础 | Agent 操作在 3D 中可见，多模型智能路由 |
-| **Alpha-1** | 代码智能管线 + ACP 协议：Tree-sitter 集成 + 依赖虫洞 + 复杂度着色 + 力导向布局 + 内部 ACP 通信 | 依赖关系可视化 + 多 Agent 协作 |
-| **Alpha-2** | 时空回溯：完整时间线 UI + 快照存储 + 分支探索 + 时间线导航 | 全功能时间旅行 |
-| **Beta-1** | 高级交互 + MCP 深度集成：分屏对比 + 径向菜单 + 沉浸式面板 + MCP 工具桥接 + DoE 方案卡 + Feathers 主题定制 | 差异化交互体验 + MCP 生态打通 |
-| **Beta-2** | 体验打磨：诊断雷达 + 热力图 + 计费面板 + 外部 A2A 探索 + 插件 API + 性能优化 + 打包发布 | 可发布的 Beta 版本 |
+| 阶段 | 内容与目标 | 交付物 | 状态（2026-10-30） |
+|:---|:---|:---|:---|
+| **MVP-1** | 基础 UI 框架 + Provider/协议层基础：主窗口 + Agent 侧边栏聊天 + OpenAI 兼容适配器 + Provider 注册表 + 基础 MCP Client + 文件显示 | 可对话的 AI 编程助手（2D 模式，支持多模型切换） | 已交付（不含 MCP；MCP 顺延 P1） |
+| **MVP-2** | 3D 宇宙原型：文件渲染为静态球体 + 目录层级布局 + 轨道相机 + 点击选中/双击打开 | 可探索的 3D 首页（L1 文件/目录图） | 首期已交付（3D 首页 + 2D fallback）；自由飞行/惯性不在首期（OQ-13） |
+| **MVP-3** | Agent 深度集成：AgentAvatar 可视化 + 工具调用实时反馈 + 智能路由 + 降级链 + 时间线基础 | Agent 操作在 3D 中可见，多模型智能路由 | 未开工 |
+| **Alpha-1** | 代码智能管线 + ACP 协议：Tree-sitter 集成 + 依赖虫洞 + 复杂度着色 + 确定性布局（S0 已取代力导向）+ 内部 ACP 通信 | 依赖关系可视化 + 多 Agent 协作 | 部分：Rust 语法高亮；符号/依赖图/ACP 未做 |
+| **Alpha-2** | 时空回溯：完整时间线 UI + 快照存储 + 分支探索 + 时间线导航 | 全功能时间旅行 | 部分：按轮文件检查点撤销；时间线/分支未做 |
+| **Beta-1** | 高级交互 + MCP 深度集成：分屏对比 + 径向菜单 + 沉浸式面板 + MCP 工具桥接 + DoE 方案卡 + Feathers 主题定制 | 差异化交互体验 + MCP 生态打通 | 部分：命令面板/2D 面板；其余未做 |
+| **Beta-2** | 体验打磨：诊断雷达 + 热力图 + 计费面板 + 外部 A2A 探索 + 插件 API + 性能优化 + 打包发布 | 可发布的 Beta 版本 | 部分：插件 API；计费/热力图/诊断雷达未做 |
 
 **执行原则**：
 

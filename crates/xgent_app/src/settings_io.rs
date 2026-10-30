@@ -32,9 +32,10 @@ use xgent_core::config::{ConfigReadRequest, ConfigScope, ConfigWriteRequest};
 use xgent_core::methods;
 use xgent_settings::{GlobalConfigRes, Localizer, ProjectConfigRes};
 use xgent_settings_core::{Density, GlobalConfig, ProjectConfig};
+use xgent_ui::resize::SaveChatSideWidthMessage;
 use xgent_ui::settings_panel::{
-    RequestSettingsSnapshotMessage, SaveDensityMessage, SaveLanguageMessage, SaveSettingsMessage,
-    SettingsSaveReportMessage, SettingsSnapshotReady,
+    RequestSettingsSnapshotMessage, Save3DHomeMessage, SaveDensityMessage, SaveLanguageMessage,
+    SaveSettingsMessage, SettingsSaveReportMessage, SettingsSnapshotReady,
 };
 
 use crate::config_bridge::RefreshSender;
@@ -167,6 +168,8 @@ impl Plugin for SettingsIoPlugin {
                     apply_peer_change,
                     save_language,
                     save_density,
+                    save_3d_home,
+                    save_chat_side_width,
                 ),
             );
     }
@@ -259,6 +262,8 @@ async fn read_global(ipc: &Arc<crate::ipc_client::IpcClient>) -> Result<GlobalCo
         "preferences.language",
         "preferences.theme",
         "preferences.density",
+        "preferences.three_d_home",
+        "preferences.chat_side_width",
     ] {
         let v = ipc
             .call_ok(
@@ -267,6 +272,21 @@ async fn read_global(ipc: &Arc<crate::ipc_client::IpcClient>) -> Result<GlobalCo
             )
             .await
             .map_err(|e| e.to_string())?;
+        if key == "preferences.three_d_home" {
+            cfg.preferences.three_d_home = v
+                .as_bool()
+                .or_else(|| v.as_str().map(|raw| raw == "true"))
+                .unwrap_or(true);
+            continue;
+        }
+        if key == "preferences.chat_side_width" {
+            cfg.preferences.chat_side_width = v
+                .as_f64()
+                .map(|width| width as f32)
+                .or_else(|| v.as_str().and_then(|raw| raw.parse().ok()))
+                .unwrap_or(400.0);
+            continue;
+        }
         let s = v.as_str().unwrap_or_default().to_string();
         match key {
             "default_provider" => cfg.default_provider = s,
@@ -366,6 +386,8 @@ fn apply_preferences(global: &mut GlobalConfigRes, loc: &mut Localizer, src: &Gl
     global.0.preferences.language = src.preferences.language.clone();
     global.0.preferences.theme = src.preferences.theme.clone();
     global.0.preferences.density = src.preferences.density;
+    global.0.preferences.three_d_home = src.preferences.three_d_home;
+    global.0.preferences.chat_side_width = src.preferences.chat_side_width;
     apply_language(loc, &src.preferences.language);
 }
 
@@ -652,6 +674,78 @@ fn save_density(
             let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
             if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
                 tracing::warn!("写入 preferences.density 失败: {e}");
+            }
+            let (global, project, error) = read_both(&ipc, &root).await;
+            let _ = tx
+                .send(SnapshotResult {
+                    global,
+                    project,
+                    error,
+                    preferences_only: false,
+                })
+                .await;
+        });
+    }
+}
+
+/// 3D 首页开关（MVP-2）：与语言/密度同一条写入通路，只写 `preferences.three_d_home`。
+fn save_3d_home(
+    mut reader: MessageReader<Save3DHomeMessage>,
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+    tx: Res<SnapshotTx>,
+) {
+    for ev in reader.read() {
+        let ipc = ipc.client.clone();
+        let tx = tx.0.clone();
+        let enabled = ev.enabled;
+        let root = bridge.project_root.clone();
+        bridge.runtime.handle().spawn(async move {
+            let req = ConfigWriteRequest {
+                scope: ConfigScope::Global,
+                key: "preferences.three_d_home".into(),
+                value: serde_json::Value::Bool(enabled),
+                project_root: None,
+            };
+            let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
+            if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
+                tracing::warn!("写入 preferences.three_d_home 失败: {e}");
+            }
+            let (global, project, error) = read_both(&ipc, &root).await;
+            let _ = tx
+                .send(SnapshotResult {
+                    global,
+                    project,
+                    error,
+                    preferences_only: false,
+                })
+                .await;
+        });
+    }
+}
+
+/// 对话侧栏宽度（MVP-2）：拖拽结束时把最终宽度写进 `preferences.chat_side_width`。
+fn save_chat_side_width(
+    mut reader: MessageReader<SaveChatSideWidthMessage>,
+    ipc: Res<IpcClientResource>,
+    bridge: Res<AgentBridge>,
+    tx: Res<SnapshotTx>,
+) {
+    for ev in reader.read() {
+        let ipc = ipc.client.clone();
+        let tx = tx.0.clone();
+        let width = ev.width;
+        let root = bridge.project_root.clone();
+        bridge.runtime.handle().spawn(async move {
+            let req = ConfigWriteRequest {
+                scope: ConfigScope::Global,
+                key: "preferences.chat_side_width".into(),
+                value: serde_json::json!(width),
+                project_root: None,
+            };
+            let params = serde_json::to_value(&req).unwrap_or(serde_json::Value::Null);
+            if let Err(e) = ipc.call_ok(methods::CONFIG_WRITE, params).await {
+                tracing::warn!("写入 preferences.chat_side_width 失败: {e}");
             }
             let (global, project, error) = read_both(&ipc, &root).await;
             let _ = tx

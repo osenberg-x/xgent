@@ -55,6 +55,7 @@ fn synthetic(node_count: usize, cluster_count: usize, edge_count: usize) -> Spat
         nodes,
         edges,
         clusters,
+        omitted_nodes: 0,
     }
 }
 

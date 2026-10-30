@@ -399,10 +399,13 @@ fn autoplay_probe(
 
     if f == 90 && !state.opened {
         state.opened = true;
-        open_writer.write(xgent_ui::editor::tabs::OpenFileRequest {
-            path: project_root.path.join(&state.rel),
-            line: None,
-        });
+        let path = project_root.path.join(&state.rel);
+        if path.exists() {
+            open_writer.write(xgent_ui::editor::tabs::OpenFileRequest { path, line: None });
+        } else {
+            // 诊断工具也守项目根边界：不存在的目标不打开，避免把 3D 主区换成错误编辑器。
+            tracing::warn!("autoplay: 目标不存在，跳过打开: {}", path.display());
+        }
     }
 
     if (330..850).contains(&f) {

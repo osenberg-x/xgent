@@ -7,9 +7,20 @@
 
 ## 0. 一句话现状
 
-UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（M6 模型 `9ac4daf`、M6.5 实现 `b962f97`、启动修复 `5dde747`、复审修复 `e485d5e`）。Transcript 已成顺序权威，Markdown 终稿、`@` 补全、ContextSet+sidecar 与消息虚拟窗口均接入产品；`cargo check --workspace` 绿，`xgent_ui` lib **135 passed**（2026-10-29 实测），渲染契约 10 项、`xui` 103 项、`xgent_terminal` 33 项全绿。**下一期是 M8（Git 探针）**；真实窗口截图/走查仍待用户完成（须含中文输入法与 HiDPI 缩放两项）。
+UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（M6 模型 `9ac4daf`、M6.5 实现 `b962f97`、启动修复 `5dde747`、复审修复 `e485d5e`）。Transcript 已成顺序权威，Markdown 终稿、`@` 补全、ContextSet+sidecar 与消息虚拟窗口均接入产品；`cargo check --workspace` 绿，`xgent_ui` lib **135 passed**（2026-10-29 实测），渲染契约 10 项、`xui` 103 项、`xgent_terminal` 33 项全绿。**下一期改为 MVP-2 3D 首页（G7 spike → S1 + 点击打开；M8 Git 探针顺延）**；真实窗口截图/走查仍待用户完成（须含中文输入法与 HiDPI 缩放两项）。
 
 > ⚠ 未闭环项：**硬门槛 A 的 macOS / Linux 的 `mono` 启动日志确认**（用户 2026-10-21 决定降级为不阻塞；2026-10-28 决定 Windows 收尾后立刻排）。另：M6.5 的真实窗口截图/走查待用户完成（自动化证据已齐）。
+
+## 0.1 2026-10-30 决策：MVP-2 3D 首页（当前主线）
+
+用户确认把 README 的四大支柱作为主线依据，3D 从 F-16/P2 提升为 MVP-2，并钉死以下边界（详见 `docs/design/requirements.md` §4.2/§7.2 与 `docs/design/ui-v8-3d-viewport.md`）：
+
+- **3D 是默认首页**；打开文件/终端时主区让位，Esc 回宇宙；对话常驻右侧栏。方案 ①（3D 永久主区）与 ③（Ctrl+1/2/3 平级视图）被否。
+- **数据源是 L1 文件/目录图**（目录簇 + 文件星），所有项目通用；有 `Cargo.toml` 才叠 crate 依赖边。仅 crate 级、或多语言符号图都被否。扫描忽略 `.gitignore`/`target`/`node_modules`。
+- **第一里程碑 = S1 + 点击打开**：渲染、轨道相机、悬停高亮、点击选中、双击/Enter 打开文件；完整 S2 留到下一期。
+- **G7 退化梯**：2k 节点 60fps → 800 节点/关特效 60fps → 2D fallback；测试基准为默认 1280×800 窗口 / 本机 Windows（优先集显，另记 1080p 压力值，记录 GPU/驱动）；G7 spike 必须在布局改造之前。
+- **布局迁移**：对话 → SideDock；编辑器/终端 → Center；Center 默认 = 空间；2D fallback 偏好；SideDock 宽度/拖拽。
+- **M8 Git 探针顺延**，不再是下一期。
 
 ---
 
@@ -134,7 +145,7 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 > ⚠ M6.5 依赖同上，且顺序不可颠倒：**先建 Transcript 数据流，再替换命令式渲染**；
 > 直接删旧路径会让流式、工具卡、undo 通知三处同时失控。
 
-## 5. M6.5 回顾与下一步：M8 Git 探针
+## 5. M6.5 回顾与下一步（M8 已顺延，MVP-2 优先）
 
 ### 5.0 M6.5 交付回顾（详见台账 §M6.5）
 
@@ -162,10 +173,9 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 - 未闭环：真实窗口截图/走查（A9 可视部分，**须含中文输入法输入与 125%/150% 缩放**）；
   `@` 补全仅文件候选；设计文档「实现前先提交」的仓库级证据无法满足（见设计文档 §11）。
 
-### 5.0.2 下一步 M8（Git 探针）
+### 5.0.2 下一步（已变更：MVP-2 3D 首页优先）
 
-北极星：新增 1 个 `PanelDescriptor`（SideDock）+ 1 个视图模块，既有布局文件改动 = 0；
-面板可切换、可键盘到达、可滚动、可截断、i18n 完整。数据来自 `xgent_plugin_git` 的 status。
+M8（Git 探针）**顺延**。下一期按 §0.1 的 MVP-2 边界开工：G7 性能 spike → S1 + 点击打开 → L1 文件/目录图 → 布局反转。M8 的北极星（新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）保留为后续参考。
 
 ### 5.1 M3 顺带修好的 12 个长期失败测试（别再当成"基线失败"）
 
@@ -183,7 +193,7 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 - **M5 槽位注册表**（⚠ 最大改动面，**已交付**）：`PanelRegistry` 取代 `SideViewContent` closed 枚举、派生可见性单一系统、`SplitTree` 分割模型。详见 §4.0。
 - **M6 会话内容**（**模型层 + M6.5 接线已交付**）：`Transcript` / Markdown / 补全 / `ContextSet` 已接产品；见 §5.0。
 - **M7 闭环**（**已交付**，`81d3060`）：快捷键单一来源、焦点栈、i18n 扩面、几何断言层。A1 的「函数指针 / 编译期」表述不成立，见台账 §10 勘误 46。
-- **M8 Git 探针**（**下一期**，北极星：新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）。
+- **M8 Git 探针**（**顺延**，MVP-2 优先；北极星：新增 1 个 `PanelDescriptor` + 1 个视图模块，既有布局文件改动 = 0）。
 - **M4 尾巴**：硬门槛 A 的 macOS / Linux 确认 + 终端按格定位的实机视觉确认（`ls -l` / 中文输出 / `top` / `vim`）。用户 2026-10-28 决定：**Windows 收尾后立刻排**。
 
 ---
@@ -208,13 +218,14 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 
 ---
 
-## 8. 下次开工的前 5 步
+## 8. 下次开工的前 6 步
 
 1. `git log --oneline -8` 确认 `b962f97`（M6.5）/ `5dde747`（启动修复）在 HEAD。
-2. 读本文 §5.0.2 + `docs/plans/ui-v8-tasks.md` §M8 与 §10 勘误 48–50。
-3. 复核 `xgent_plugin_git` 的 status 数据与 `PanelDescriptor` 注册路径（M8 只允许新增 1 注册 + 1 视图模块）。
-4. 读 `docs/design/ui-v8-layout-architecture.md` §3.1（注册表模型）与 §6（Transcript 有序树）。
-5. 开工前先跑基线：`cargo test -p xgent_ui -p xgent_terminal -p xui -j 2`（全绿 = 基线没被本轮弄坏）。
+2. 读本文 §0.1 + `docs/design/requirements.md` §4.2/§7.2 + `docs/design/ui-v8-3d-viewport.md` §7/§8。
+3. **先做 G7 spike**：2k 实例化节点 + 离屏纹理在默认 1280×800 窗口 / 本机 Windows（优先集显）能否 60fps（另记 1080p 压力值）；不过按 800 节点/关特效再验，仍不过则 3D 首页回退 2D。
+4. 复核 `xgent_spatial` S0（当前只产 crate 级 L0）与 L1 文件/目录图的差距，列 L1 扫描/聚合/忽略规则任务。
+5. 列布局迁移任务：对话 → SideDock；编辑器/终端 → Center；Center 默认 = 空间；2D fallback 偏好；SideDock 宽度/拖拽。
+6. 开工前先跑基线：`cargo test -p xgent_ui -p xgent_terminal -p xui -j 2`（全绿 = 基线没被本轮弄坏）。
 
 ---
 

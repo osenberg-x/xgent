@@ -8,7 +8,7 @@
 //! - PTY IO 桥接（ECS Messages → async backend，[`io`] 模块）
 //! - 输出历史渲染（vte 解析 → `RenderHistory` → 虚拟滚动，[`output`] 模块）
 //! - UI 侧行编辑（光标/Backspace/Enter，[`input`] 模块）
-//! - 视图切换（终端是 `Slot::SideDock` 的注册面板，与编辑器/差异互斥）
+//! - 视图切换（终端是 `Slot::Center` 的注册面板，与编辑器/差异/空间互斥）
 //!
 //! # 输入模式
 //!
@@ -39,7 +39,7 @@ use xgent_settings::Localizer;
 use xgent_terminal::{LocalPtyBackend, TerminalBackend};
 use xui::scroll_frame::ScrollFrame;
 
-/// 终端视图容器标记（挂于 [`crate::layout::SideViewMarker`] 下，初始隐藏）。
+/// 终端视图容器标记（挂于 [`crate::layout::CenterHostMarker`] 下，初始隐藏）。
 ///
 /// 显隐由 `derive_panel_visibility` 依据注册表中的 `terminal` 面板派生。
 #[derive(Component, Default)]
@@ -256,11 +256,11 @@ impl Plugin for TerminalPlugin {
 /// 启动时在右侧分屏容器内 spawn 终端视图（初始隐藏）。
 ///
 /// 终端视图是右侧分屏的内容之一（与编辑器/差异互斥）；分屏本身由
-/// [`crate::layout::SideViewMarker`] 容器承载，展开/收起由
-/// [`crate::panels::SlotLayout`] 的 `Slot::SideDock` 统一控制。
+/// [`crate::layout::CenterHostMarker`] 容器承载，显隐由
+/// [`crate::panels::SlotLayout`] 的 `Slot::Center` 统一控制。
 fn spawn_terminal_view(
     mut commands: Commands,
-    q_side: Query<Entity, With<crate::layout::SideViewMarker>>,
+    q_side: Query<Entity, With<crate::layout::CenterHostMarker>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
     fonts: Res<UiFonts>,
@@ -286,16 +286,16 @@ fn spawn_terminal_view(
             TerminalViewMarker,
             crate::panels::PanelVisibility::of_panel(
                 crate::panels::ids::TERMINAL,
-                crate::panels::Slot::SideDock,
+                crate::panels::Slot::Center,
             ),
         ))
         .id();
     commands.entity(side).add_child(terminal_view);
-    // v8 M5：注册为 `Slot::SideDock` 面板。
+    // v8 M5：注册为 `Slot::Center` 面板。
     register.write(crate::panels::PanelRegister {
         desc: crate::panels::PanelDescriptor::new(
             crate::panels::ids::TERMINAL,
-            crate::panels::Slot::SideDock,
+            crate::panels::Slot::Center,
             "panel-terminal",
             "terminal",
             2,
@@ -514,21 +514,19 @@ pub fn apply_terminal_view_focus(
     }
 }
 
-/// 处理 ✕ 关闭分屏按钮：切回对话 + 收起分屏。
+/// 处理 ✕ 关闭终端按钮：回主区首页（宇宙 → space，经典 → 对话）。
 fn handle_close_button(
     q_btn: Query<(), (With<TerminalCloseButtonMarker>, Added<Pressed>)>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
     mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
     mut activate: MessageWriter<crate::panels::PanelActivate>,
-    mut layout: ResMut<crate::panels::SlotLayout>,
 ) {
+    let home = mode.as_deref().copied().unwrap_or_default().home_panel();
     for _ in q_btn.iter() {
         deactivate.write(crate::panels::PanelDeactivate {
             id: crate::panels::ids::TERMINAL,
         });
-        activate.write(crate::panels::PanelActivate {
-            id: crate::panels::ids::CHAT,
-        });
-        layout.set_open(crate::panels::Slot::SideDock, false);
+        activate.write(crate::panels::PanelActivate { id: home });
     }
 }
 

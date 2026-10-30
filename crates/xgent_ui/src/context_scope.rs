@@ -24,6 +24,10 @@ use crate::theme::{Theme, space, type_scale};
 #[derive(Component, Default)]
 pub struct ContextScopeMarker;
 
+/// 上下文 chips 的弹性容器：吃掉剩余宽度、超出部分裁剪，保住右侧 token 计数。
+#[derive(Component, Default)]
+pub struct ContextChipsMarker;
+
 /// 条内固定标签标记（chips 重建时保留）。
 #[derive(Component, Default)]
 pub struct ContextScopeLabelMarker;
@@ -129,6 +133,11 @@ fn spawn_context_scope(
                     theme.text_muted,
                     type_scale::line_height::UI,
                 ),
+                // 对话侧栏只有 400px：标签不能参与收缩，否则会被挤成一列竖排字。
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
                 ContextScopeLabelMarker,
             ));
             row.spawn((
@@ -158,6 +167,19 @@ fn spawn_context_scope(
                     type_scale::line_height::UI,
                 ));
             });
+            // chips 容器：占满剩余宽度并裁剪；token 计数在其后固定显示。
+            row.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::ZERO,
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(space::XS),
+                    overflow: Overflow::clip_x(),
+                    ..default()
+                },
+                ContextChipsMarker,
+            ));
         })
         .id();
     commands.entity(panel).insert_children(0, &[row]);
@@ -295,10 +317,14 @@ fn rebuild_context_chips(
     global: Option<Res<xgent_settings::GlobalConfigRes>>,
     mut cached: Local<String>,
     q_row: Query<Entity, With<ContextScopeMarker>>,
+    q_chips_root: Query<Entity, With<ContextChipsMarker>>,
     chips: Query<Entity, With<ContextChipMarker>>,
     ratios: Query<Entity, With<ContextTokenRatioMarker>>,
 ) {
     let Ok(row) = q_row.single() else {
+        return;
+    };
+    let Ok(chips_root) = q_chips_root.single() else {
         return;
     };
 
@@ -336,7 +362,7 @@ fn rebuild_context_chips(
 
     for item in set.items() {
         let id = item.id.clone();
-        commands.entity(row).with_children(|row| {
+        commands.entity(chips_root).with_children(|row| {
             row.spawn((
                 Button,
                 Hovered::default(),

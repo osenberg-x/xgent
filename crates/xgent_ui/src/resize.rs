@@ -12,8 +12,10 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
+use xgent_settings::GlobalConfigRes;
 
 use crate::layout::MainAreaMarker;
+use crate::layout_mode::LayoutMode;
 use crate::panels::split::{Axis, LeafSize, SplitHandle, SplitTree, leaf_ids};
 use crate::theme::size;
 
@@ -48,6 +50,13 @@ pub struct SplitHandleMarker {
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ActiveResize(pub Option<&'static str>);
 
+/// 对话侧栏拖拽结束：把最终宽度交给宿主持久化（`preferences.chat_side_width`）。
+#[derive(Message, Debug, Clone, Copy)]
+pub struct SaveChatSideWidthMessage {
+    /// 最终宽度（逻辑像素）。
+    pub width: f32,
+}
+
 /// 拖拽调整大小插件。
 pub struct ResizePlugin;
 
@@ -55,10 +64,12 @@ impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SplitTree>()
             .init_resource::<ActiveResize>()
+            .add_message::<SaveChatSideWidthMessage>()
             .add_systems(
                 Update,
                 (
                     sync_split_handles,
+                    apply_chat_side_preference,
                     apply_split_sizes,
                     handle_resize_drag,
                     handle_double_click_reset,
@@ -208,8 +219,13 @@ fn handle_resize_drag(
     main_q: Query<&ComputedNode, With<MainAreaMarker>>,
     handles: Query<(&SplitHandleMarker, &Hovered, Has<Pressed>)>,
     mut q_handle_style: Query<(&SplitHandleMarker, &mut BackgroundColor, &mut BorderColor)>,
+    mode: Option<Res<LayoutMode>>,
+    mut save_width: MessageWriter<SaveChatSideWidthMessage>,
     theme: Res<crate::theme::Theme>,
 ) {
+    let universe = mode
+        .as_deref()
+        .is_none_or(|mode| *mode == LayoutMode::Universe);
     // 1. 启动：任一手柄被按下且正被悬停（鼠标在按下瞬间位于手柄上）。
     // hovered 门控防御 Pressed 残留：手柄极窄，按下后移出手柄再释放时
     // ButtonPlugin 的 Pressed 不会被移除（release 目标非手柄、位移小无
@@ -250,8 +266,11 @@ fn handle_resize_drag(
         return;
     }
 
-    // 3. 释放或鼠标键松开 → 结束
+    // 3. 释放或鼠标键松开 → 结束（对话侧栏拖完即持久化）
     if !mouse.pressed(MouseButton::Left) {
+        if let Some(width) = chat_side_width_to_save(active.0, universe, &tree) {
+            save_width.write(SaveChatSideWidthMessage { width });
+        }
         active.0 = None;
         return;
     }
@@ -290,7 +309,11 @@ fn handle_resize_drag(
         .map(|(m, _, _)| m.dir)
         .unwrap_or(1.0);
     let next = current.preferred() + delta * dir;
-    let clamped = clamp_leaf(leaf, axis, next, main_w);
+    let clamped = if universe && leaf == leaf_ids::SIDE_DOCK && axis == Axis::Horizontal {
+        clamp_chat_side(next, main_w)
+    } else {
+        clamp_leaf(leaf, axis, next, main_w)
+    };
     if clamped != current.preferred() {
         tree.set_leaf_size(leaf, current.with_current(clamped));
     }
@@ -318,6 +341,72 @@ pub fn clamp_leaf(id: &str, axis: Axis, value: f32, available: f32) -> f32 {
     value.clamp(min, max)
 }
 
+/// 对话侧栏宽度钳制（MVP-2）：320–560，且不超过可用宽度的 45%。
+///
+/// 与 [`clamp_leaf`] 分开是因为上界随布局模式变：宇宙模式下 `side-dock` 是对话
+/// 侧栏（必须给主区留出至少 55%），经典回退模式下它仍是编辑器坞（沿用
+/// `available − CHAT_MIN`）。
+pub fn clamp_chat_side(value: f32, available: f32) -> f32 {
+    let min = size::CHAT_SIDE_W_MIN;
+    let max = (available * size::CHAT_SIDE_MAX_RATIO)
+        .min(size::CHAT_SIDE_W_MAX)
+        .max(min);
+    value.clamp(min, max)
+}
+
+/// 拖拽结束时该不该持久化、持久化哪个宽度。
+///
+/// 只认宇宙模式下的 `side-dock`（对话侧栏）；经典回退里同一叶子是编辑器坞，
+/// 它的宽度不属于对话偏好。
+pub fn chat_side_width_to_save(
+    active: Option<&'static str>,
+    universe: bool,
+    tree: &SplitTree,
+) -> Option<f32> {
+    if !universe || active != Some(leaf_ids::SIDE_DOCK) {
+        return None;
+    }
+    tree.leaf_size(leaf_ids::SIDE_DOCK)
+        .map(|size| size.preferred())
+}
+
+/// 按当前布局模式把 `side-dock` 的偏好宽度落到分割树。
+///
+/// 只在宇宙模式生效；经典模式记录模式切换，回到宇宙时重新按偏好恢复。
+fn apply_chat_side_preference(
+    global: Option<Res<GlobalConfigRes>>,
+    mode: Option<Res<LayoutMode>>,
+    mut tree: ResMut<SplitTree>,
+    mut last: Local<Option<(LayoutMode, f32)>>,
+) {
+    let mode_now = mode.as_deref().copied().unwrap_or_default();
+    let requested = global
+        .as_deref()
+        .map_or(size::CHAT_SIDE_W_DEFAULT, |config| {
+            config.0.preferences.chat_side_width
+        });
+    let width = if requested.is_finite() {
+        requested.clamp(size::CHAT_SIDE_W_MIN, size::CHAT_SIDE_W_MAX)
+    } else {
+        size::CHAT_SIDE_W_DEFAULT
+    };
+    if mode_now != LayoutMode::Universe {
+        *last = Some((mode_now, width));
+        return;
+    }
+    if last.is_some_and(|(seen_mode, seen_width)| {
+        seen_mode == mode_now && (seen_width - width).abs() < 0.5
+    }) {
+        return;
+    }
+    if let Some(current) = tree.leaf_size(leaf_ids::SIDE_DOCK)
+        && (current.preferred() - width).abs() > 0.5
+    {
+        tree.set_leaf_size(leaf_ids::SIDE_DOCK, current.with_current(width));
+    }
+    *last = Some((mode_now, width));
+}
+
 /// 双击手柄：复位该叶子为默认宽度（300ms 内两次按下）。
 fn handle_double_click_reset(
     mut tree: ResMut<SplitTree>,
@@ -333,6 +422,7 @@ fn handle_double_click_reset(
             if let Some(current) = tree.leaf_size(marker.leaf) {
                 let reset = match marker.leaf {
                     leaf_ids::DRAWER => size::DRAWER_W_PREFERRED,
+                    leaf_ids::SIDE_DOCK => size::CHAT_SIDE_W_DEFAULT,
                     _ => size::CONTEXT_W_DEFAULT,
                 };
                 tree.set_leaf_size(marker.leaf, current.with_current(reset));
@@ -347,6 +437,7 @@ fn handle_double_click_reset(
 /// 窗口尺寸变化时统一钳制面板宽度（启动/缩窗溢出防护）。
 fn clamp_on_window_resize(
     main_q: Query<&ComputedNode, With<MainAreaMarker>>,
+    mode: Option<Res<LayoutMode>>,
     mut tree: ResMut<SplitTree>,
 ) {
     let Ok(node) = main_q.single() else {
@@ -356,6 +447,9 @@ fn clamp_on_window_resize(
     if main_w <= 0.0 {
         return;
     }
+    let universe = mode
+        .as_deref()
+        .is_none_or(|mode| *mode == LayoutMode::Universe);
     for id in tree.leaf_ids() {
         let Some(current) = tree.leaf_size(id) else {
             continue;
@@ -364,7 +458,11 @@ fn clamp_on_window_resize(
             continue;
         }
         let axis = tree.leaf_axis(id).unwrap_or(Axis::Horizontal);
-        let clamped = clamp_leaf(id, axis, current.preferred(), main_w);
+        let clamped = if universe && id == leaf_ids::SIDE_DOCK && axis == Axis::Horizontal {
+            clamp_chat_side(current.preferred(), main_w)
+        } else {
+            clamp_leaf(id, axis, current.preferred(), main_w)
+        };
         if clamped != current.preferred() {
             tree.set_leaf_size(id, current.with_current(clamped));
         }
@@ -374,10 +472,18 @@ fn clamp_on_window_resize(
 /// 窗口过窄时自动折叠上下文面板（对应原型 <1100px 断点）。
 ///
 /// 只自动收起、不自动展开——恢复走 rail 展开钮或终端快捷键。
+/// 宇宙模式下 SideDock 是常驻对话，收起它等于把对话藏掉，故不折叠。
 fn responsive_collapse(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
     mut layout: ResMut<crate::panels::SlotLayout>,
 ) {
+    if mode
+        .as_deref()
+        .is_some_and(|m| *m == crate::layout_mode::LayoutMode::Universe)
+    {
+        return;
+    }
     let Ok(w) = windows.single() else {
         return;
     };
@@ -427,6 +533,127 @@ mod tests {
         assert_eq!(
             clamp_leaf(leaf_ids::SIDE_DOCK, Axis::Horizontal, 720.0, 1600.0),
             720.0
+        );
+    }
+
+    /// MVP-2：对话侧栏 320–560，且不超过可用宽度 45%。
+    #[test]
+    fn chat_side_respects_range_and_ratio() {
+        assert_eq!(clamp_chat_side(200.0, 1600.0), 320.0, "低于下限钳到 320");
+        assert_eq!(clamp_chat_side(900.0, 1600.0), 560.0, "高于上限钳到 560");
+        assert_eq!(
+            clamp_chat_side(900.0, 1000.0),
+            450.0,
+            "1000 宽时 45% = 450，优先于 560"
+        );
+        assert_eq!(clamp_chat_side(480.0, 1600.0), 480.0);
+    }
+
+    /// 默认分割树仍按经典编辑器坞起步；宇宙模式的首帧把对话侧栏落到 400。
+    #[test]
+    fn default_side_dock_starts_at_editor_width() {
+        let tree = SplitTree::default();
+        let size = tree
+            .leaf_size(leaf_ids::SIDE_DOCK)
+            .expect("side-dock 应存在");
+        assert_eq!(size.preferred(), 720.0);
+        assert_eq!(size.min(), 320.0);
+    }
+
+    /// 只有宇宙模式下拖对话侧栏才持久化宽度。
+    #[test]
+    fn only_universe_side_dock_drag_is_persisted() {
+        let mut tree = SplitTree::default();
+        tree.set_leaf_size(leaf_ids::SIDE_DOCK, LeafSize::Min(320.0, 432.0));
+        assert_eq!(
+            chat_side_width_to_save(Some(leaf_ids::SIDE_DOCK), true, &tree),
+            Some(432.0)
+        );
+        assert_eq!(
+            chat_side_width_to_save(Some(leaf_ids::SIDE_DOCK), false, &tree),
+            None,
+            "经典回退里的编辑器坞宽度不是对话偏好"
+        );
+        assert_eq!(
+            chat_side_width_to_save(Some(leaf_ids::DRAWER), true, &tree),
+            None,
+            "拖抽屉不该写对话宽度"
+        );
+    }
+
+    /// 偏好宽度在宇宙模式落到分割树；切回经典不覆盖，回宇宙再恢复。
+    #[test]
+    fn chat_side_preference_applies_only_in_universe() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SplitTree>()
+            .init_resource::<GlobalConfigRes>()
+            .init_resource::<LayoutMode>()
+            .add_systems(Update, apply_chat_side_preference);
+        app.world_mut()
+            .resource_mut::<GlobalConfigRes>()
+            .0
+            .preferences
+            .chat_side_width = 480.0;
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SplitTree>()
+                .leaf_size(leaf_ids::SIDE_DOCK)
+                .unwrap()
+                .preferred(),
+            480.0,
+            "宇宙模式应按偏好宽度落树"
+        );
+
+        // 缺省偏好 400 也要真的落到分割树（不是只靠 SplitTree 默认值）。
+        app.world_mut()
+            .resource_mut::<GlobalConfigRes>()
+            .0
+            .preferences
+            .chat_side_width = xgent_settings_core::Preferences::default().chat_side_width;
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SplitTree>()
+                .leaf_size(leaf_ids::SIDE_DOCK)
+                .unwrap()
+                .preferred(),
+            400.0,
+            "缺省偏好应为 400"
+        );
+        app.world_mut()
+            .resource_mut::<GlobalConfigRes>()
+            .0
+            .preferences
+            .chat_side_width = 480.0;
+        app.update();
+
+        *app.world_mut().resource_mut::<LayoutMode>() = LayoutMode::Classic;
+        app.world_mut()
+            .resource_mut::<SplitTree>()
+            .set_leaf_size(leaf_ids::SIDE_DOCK, LeafSize::Min(320.0, 700.0));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SplitTree>()
+                .leaf_size(leaf_ids::SIDE_DOCK)
+                .unwrap()
+                .preferred(),
+            700.0,
+            "经典回退里编辑器坞宽度不该被对话偏好覆盖"
+        );
+
+        *app.world_mut().resource_mut::<LayoutMode>() = LayoutMode::Universe;
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SplitTree>()
+                .leaf_size(leaf_ids::SIDE_DOCK)
+                .unwrap()
+                .preferred(),
+            480.0,
+            "回到宇宙应恢复持久化的对话侧栏宽度"
         );
     }
 

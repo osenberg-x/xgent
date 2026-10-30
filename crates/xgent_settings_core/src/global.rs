@@ -277,6 +277,12 @@ pub struct Preferences {
     /// 界面密度档位（v8 M2b）
     #[serde(default)]
     pub density: Density,
+    /// 3D 首页偏好（MVP-2）：false 时回到 2D fallback。
+    #[serde(default = "default_three_d_home")]
+    pub three_d_home: bool,
+    /// 对话侧栏宽度（MVP-2，逻辑像素；拖拽结束后持久化）。
+    #[serde(default = "default_chat_side_width")]
+    pub chat_side_width: f32,
 }
 
 impl Default for Preferences {
@@ -285,8 +291,18 @@ impl Default for Preferences {
             language: default_language(),
             theme: default_theme(),
             density: Density::default(),
+            three_d_home: default_three_d_home(),
+            chat_side_width: default_chat_side_width(),
         }
     }
+}
+
+fn default_three_d_home() -> bool {
+    true
+}
+
+fn default_chat_side_width() -> f32 {
+    400.0
 }
 
 /// 界面密度档位（v8 M2b）。
@@ -393,6 +409,26 @@ mod tests {
             serde_json::to_string(&Density::Compact).unwrap(),
             r#""compact""#
         );
+    }
+
+    /// MVP-2：3D 首页偏好缺省为 true，老配置缺键也取 true。
+    #[test]
+    fn three_d_home_defaults_true_and_parses() {
+        assert!(Preferences::default().three_d_home);
+        let old: GlobalConfig = toml::from_str("[preferences]\nlanguage = \"zh-CN\"\n").unwrap();
+        assert!(old.preferences.three_d_home);
+        let cfg: GlobalConfig = toml::from_str("[preferences]\nthree_d_home = false\n").unwrap();
+        assert!(!cfg.preferences.three_d_home);
+    }
+
+    /// MVP-2：对话侧栏宽度缺省 400，老配置缺键也取 400。
+    #[test]
+    fn chat_side_width_defaults_to_400_and_parses() {
+        assert_eq!(Preferences::default().chat_side_width, 400.0);
+        let old: GlobalConfig = toml::from_str("[preferences]\nlanguage = \"zh-CN\"\n").unwrap();
+        assert_eq!(old.preferences.chat_side_width, 400.0);
+        let cfg: GlobalConfig = toml::from_str("[preferences]\nchat_side_width = 480.0\n").unwrap();
+        assert_eq!(cfg.preferences.chat_side_width, 480.0);
     }
 
     /// A2/A3 的换算依据：0.75 系数把 4px 网格全部落在整数像素上。

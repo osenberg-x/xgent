@@ -1,0 +1,18 @@
+{
+  "change": "mvp2-3d-home",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "task_hash_policy": "task-content-v1",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "2be8fb48e0243c4754aa29d0b22916eafb53b82ce32df6c9a39a72f2058b513e",
+  "files": [
+    { "path": "docs/openspec/changes/mvp2-3d-home/proposal.md", "sha256": "c2fbad31c35863bbb3ac4431a394dbec48f137cb22ae861ec4a41d2b65e7b716" },
+    { "path": "docs/openspec/changes/mvp2-3d-home/design.md", "sha256": "1f2684efed9a0c7ff12105f964d09a1ed64df0cbfa9f0945a41302d754819c94" },
+    { "path": "docs/openspec/changes/mvp2-3d-home/tasks.md", "sha256": "f661b1412bcf50a52bc75723e4345a2a7beb424063492a5162b0d41d7ed61e66" },
+    { "path": "docs/openspec/changes/mvp2-3d-home/.openspec.yaml", "sha256": "6803193cd4b83f73d2d65d3e3ce1f3b116fb4dba2543ef44a3ad6cc9791547ed" },
+    { "path": "docs/openspec/changes/mvp2-3d-home/specs/3d-home-view/spec.md", "sha256": "9bbd937c8180b23183f9c65eaf287b4abbcfd771d5dd39c74336e4fdd3575203" },
+    { "path": "docs/openspec/changes/mvp2-3d-home/specs/spatial-code-graph/spec.md", "sha256": "9063726e59863e9dc6a6732cbb7280d1227d28b2edcadfef0cac28ea6cb49275" },
+    { "path": "docs/openspec/changes/mvp2-3d-home/specs/workspace-layout/spec.md", "sha256": "ae534018ad74d501759bc31941c31a2d8162056272b8a936fd6b91970177b183" }
+  ]
+}

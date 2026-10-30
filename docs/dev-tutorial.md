@@ -4,7 +4,8 @@
 > **维护规则**：后续实现新功能或功能有变化，都需要更新这个文档（见 `AGENTS.md` 第 6 节）。
 >
 > 代码现状：19 个 crate 已实现（含 `xgent_terminal` / `xgent_spatial`），`cargo check --workspace` 通过，`crates/**/*.rs` 共 70002 行（2026-10-29 实测）。
-> MVP（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）+ UI v8 M1~M7 已落地。
+> MVP-1（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）+ UI v8 M1~M7 已落地。
+> **2026-10-30 规划变更**：MVP-2（3D 首页）进入主线，M8 Git 探针顺延；边界见 `docs/design/requirements.md` §4.2/§7.2 与 `docs/design/ui-v8-3d-viewport.md`。
 
 ---
 
@@ -12,7 +13,7 @@
 
 按需求 `docs/design/requirements.md` 的 F/NF 编号对照实现状态：
 
-### 1.1 核心功能（MVP + 已完成的 P1）
+### 1.1 核心功能（MVP-1 + 已完成的 P1）
 
 | 编号 | 功能 | 状态 | 实现位置 | 关键文档 |
 |:---|:---|:---|:---|:---|
@@ -26,7 +27,7 @@
 | F-08 | 命令面板 | ✅ | `xui/src/command_palette.rs`（通用组件）+ `xgent_ui/src/command_palette.rs`（业务命令注册） | `plans/step10`/`step11`、`design/ui-design.md` §8 |
 | F-09 | 快捷键体系 | ✅ | `xui/src/hotkeys.rs` + `xui/src/shortcuts.rs` + `xgent_ui/src/shortcuts.rs` | `design/ui-design.md`、`plans/step10` |
 | F-11 | 内置编辑器（P1） | ✅ | `xui/src/text_editor/`（buffer/find/highlight/render/undo/virtual_render）+ `xgent_ui/src/editor/`（buffer/command/conflict/io/state/tabs/at_syntax） | `design/editor-design.md`、ADR-0009/0010 |
-| F-19 | 内置终端（P1） | ✅ | `xgent_terminal/`（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty + vte，不依赖 Bevy；**`render.rs` 另有双宽单元格模型**：`display_width` / `layout_cells`）+ `xgent_ui/src/terminal/`（mod/io/tabs/input/output/metrics：PTY 桥接 + 多 tab + 行编辑 + **按格定位渲染** + **实测等宽度量** + SideView 集成）+ `xgent_app` 注入 `TerminalIoRuntime` | `design/terminal-design.md`、ADR-0011/0012、§5.23 |
+| F-19 | 内置终端（P1） | ✅ | `xgent_terminal/`（`TerminalBackend` trait + `LocalPtyBackend`，portable-pty + vte，不依赖 Bevy；**`render.rs` 另有双宽单元格模型**：`display_width` / `layout_cells`）+ `xgent_ui/src/terminal/`（mod/io/tabs/input/output/metrics：PTY 桥接 + 多 tab + 行编辑 + **按格定位渲染** + **实测等宽度量** + SideView 集成，MVP-2 起终端接管主区）+ `xgent_app` 注入 `TerminalIoRuntime` | `design/terminal-design.md`、ADR-0011/0012、§5.23 |
 | UI v8 M1 | 分层与模态 | ✅ | `xgent_ui/src/{layout,modal,overlay,picking,kit}.rs`：六静态层根 + `ModalStack` + `require_markers` 拾取白名单 + 抽屉统一裁决 + tooltip 顶层化；`xgent_app` 装配 `UiPickingSettings` | `design/ui-v8-layout-architecture.md`、`docs/comet/specs/ui-m1-layering/spec.md`、§5.17 |
 | UI v8 M3 | 滚动契约 / 填满契约 / 省略原语 / 虚拟列表 | ✅ | `xui/src/{scroll_frame,layout,ellipsis,virtual_list}.rs`：`ScrollFrame` 唯一可滚动入口（overflow 运行时回写）+ `region_fill()` 填满契约 + `Ellipsis`/`MidEllipsis` 省略原语（测量走 bevy 排版管线）+ `VirtualList` 不等高支持；`xgent_ui`：9 处假滚动归零、分屏三页改 `region_fill`、对话输入区自适应滚动、6 处省略截断点、文件树与会话历史虚拟化 | `plans/ui-v8-tasks.md` §M3、§5.20 |
 | UI v8 M4 | 跨平台字体与终端双宽 | ✅（macOS/Linux 硬门槛 A 待确认） | `xgent_ui/src/fonts.rs`（四槽位候选栈 + 等宽内嵌兜底）+ `xgent_terminal/src/render.rs`（`display_width`/`layout_cells` 双宽单元格模型）+ `xgent_ui/src/terminal/metrics.rs`（`MonoMetrics` 启动期实测 + 双宽校验 + `CellGrid`）+ `xgent_ui/src/terminal/output.rs`（按格定位渲染 + 实测列宽 + `legacy-terminal-layout` A/B feature） | `plans/ui-v8-tasks.md` §M4、§5.21–§5.23 |
@@ -52,7 +53,11 @@
 - **F-13 MCP 支持**（P1）：仅 trait 预留 `xgent_tools/src/mcp.rs::McpTransport`，无实现。
 - **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
-- **F-16 3D 可视化** / **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
+- **F-16 3D 可视化**（MVP-2，当前主线）：未实现；S0 数据内核（`xgent_spatial`，仅 crate 级 L0）与设计文档已就绪，第一里程碑为 S1 + 点击打开 + L1 文件/目录图（见 requirements §4.2）。
+- **F-20 时空回溯**（P1）：未实现；已有按轮文件检查点撤销（§5.14），完整时间线/时间锚点待 MVP-2 之后。
+- **F-21 代码智能管线**（P1）：未实现；目前只有 Rust 语法高亮与 `xgent_spatial` 的 manifest 依赖，符号/import/调用边未做。
+- **F-22 多 Agent 编排与沉浸式协作**（P2）：未实现。
+- **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
 - **插件系统**（架构设计）：✅ 已落地（WASM Component + wasmtime 29）。3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello` 测试 / `xgent_plugin_git` 参考）。插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider，动态安装卸载。详见 `docs/design/plugin-system-design.md` + 本指南 §5.13。
 - **Compaction**（optimization O9）：`xgent_agent/src/compaction.rs` 已落地——token 估算（`tokenizer.rs` 启发式）+ `should_compact`（reserve=max(15% window, 16384)）+ `find_cut_point`（保留最近 token 段，user/assistant 边界切）+ `LlmCompactor`（调 provider 生成摘要）+ `apply_compaction`（summary 前置 + kept）。`AgentEvent::Compacted` 通知 UI，`SessionEntry::Compaction` 持久化。
 
@@ -91,7 +96,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`（`chat` 返回 `(ErrorKind, String)`，ErrorKind 经 `ProviderError::to_error_kind` 映射，透传给 UI 避免误判 Network 重试）、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
 | `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolCtx.tool_policy` 为 `Arc<RwLock<ToolPolicyConfig>>`（改完下一次调用生效）、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自共享句柄 `with_shared_params(Arc<RwLock<ToolParams>>)`，`with_params(&ToolParams)` 取快照）；`policy_targets()` 列出已注册工具的 id+tier、`resolved_policy(id, policy)` 给设置面板显示解析后的三态、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError`；**双宽单元格模型**（M4-T2）：`display_width`/`display_width_str`（wcwidth）、`CellRun`/`layout_cells`（按格布局内核）、`RenderLine`/`StyledSpan`/`SpanStyle`/`Color`/`TerminalParser` |
-| `xgent_spatial` | `parse_manifest`/`ManifestInfo`、`scan(root)`（crate 图 + `DependsOn` 边 + cluster）、`layout`/`layout_incremental`、`LayoutConfig`/`LayoutReport`；类型在 `xgent_core::spatial`（`SpatialGraph`/`SpatialNode`/`SpatialEdge`/`SpatialCluster`） |
+| `xgent_spatial` | `parse_manifest`/`ManifestInfo`、`scan(root)`（crate 级 L0）、`scan_with_options(root, ScanOptions)`（L1 文件/目录图 + crate 叠加）、`layout`/`layout_incremental`、`LayoutConfig`/`LayoutReport`；类型在 `xgent_core::spatial`（`SpatialGraph`/`SpatialNode`/`SpatialEdge`/`SpatialCluster`，`SpatialGraph.omitted_nodes` 记录裁剪数） |
 | `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入快照、`with_shared_limits(Arc<RwLock<RetrievalLimits>>)` 供热应用，缺省等于原常量；每次检索开头取一份限额快照）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`/`build_context_provider_shared(strategy, root, Arc<RwLock<limits>>)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`/`retrieval_max_tokens`/`max_events_per_frame`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、**`ScrollFrame`（唯一可滚动入口：`vertical()`/`horizontal()`/`stick_bottom()` + `ScrollFrameMarker` + `scroll_to_child`）**、`StickToBottom`、`Scrollbar`、`region_fill()`/`fill_region()`（唯一填满契约）、**`Ellipsis`/`EllipsisMode`(End/Mid)/`EllipsisCache`/`compute_ellipsis`（单行省略原语）**、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、**`VirtualList`（含 `VirtualListItem`/不等高行高表 `build_measured_offsets`）**、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
@@ -536,6 +541,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 ### 5.11 上下文面板与文件抽屉（v7，ADR-0014）
 
+> 2026-10-30：MVP-2 起布局反转为「3D 首页 + 对话右栏 + 编辑器/终端接管主区」；本节描述 MVP-1 现状。运行期宇宙/经典回退与对话侧栏宽度见 §5.27。
+
 - **布局（v7 四列终态）**：`MainAreaMarker`（横向 row）下四子节点——`ActivityBarMarker`（图标轨 52px）+ `ChatPanelMarker`（flex:1 填充剩余）+ 右手柄 + `SideViewMarker`（上下文面板，默认展开 720px）。文件面板已抽屉化（M5-T6）：`FileDrawerOpen` Resource 驱动左侧 overlay（`DRAWER_W=320`、`surface` 底 + 右边框 + 遮罩点击关闭），rail 文件钮 / `filepanel.toggle`(Cmd+B) 切换；点文件条目发 `OpenFileRequest` 走上下文面板预览页（内嵌预览区已删除）。
 - **上下文面板三页签**（M5-T1）：`SideViewContent::{None, Editor, Preview, Diff, Terminal}`，`PageTabMarker` 页签条 38px（预览/差异/终端）；Editor/Preview 归一预览页（M5-T2）。差异页（M5-T4）`editor/diff_view.rs`：buffer `TextEditor.rope` vs `EditorBuffer.disk_content` 经共享 `diff.rs::line_diff` 渲染（add=st_ok/del=st_fail 行 tint）。
 - **展开/收起**：`SideViewCollapsed` Resource 驱动 `toggle_panel_visibility`；窗口 <1100px 自动收起（`responsive_collapse`）。
@@ -898,7 +905,51 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **ECS 查询条件是运行时的「存在性断言」**（2026-10-30，台账勘误 55/56）：`With<标记>` / `&组件` 写错或标记从没挂上，**既不编译失败也不 panic**，系统只是恒空转。已发生三例：① `kit.rs::position_tooltips` 对 UI 宿主查询 `&GlobalTransform`（0.20 的 UI 节点只有 `UiGlobalTransform`；注意 `TextLayoutInfo` 由 `TextLayout` `#[require]`，而 `EditableText` `#[require(TextLayout, …)]`，所以 `TextInput + EditableText` 不带 `Text` 也照样有它——别照着「缺组件」的猜测去加 `Text`，那会踩 `ContentSize` 争用）；② `editor/diff_view.rs` 查询 `DiffEmptyMarker` 但两个空态 spawn 点都没挂 → 空态文案每次改字符叠一份、清理循环认不出；③ `terminal/mod.rs` spawn 了 `TerminalClearButtonMarker` 却没有按压处理系统 → 「清屏」是死钮（同头的 ✕/＋ 都有 handler，可作对照模板）。新增或改动系统时，先确认标记/组件在 spawn 点真的挂上，再补一条**能观测状态位或消息翻转**的测试（`tooltip_anchor.rs`、`editor::diff_view::tests`、`terminal::tests` 是三个可抄的样板）。
 - **`EditorBackButtonMarker` 原本有两套**（编辑器顶栏 ✕ 与页签条 ✕）——M5 合一，侧区顶部只保留一个返回入口（页签条上的 ✕）。
 - **「展开面板」钮是恢复入口，语义与其它槽位跟随**相反**：分屏**折叠**时才出现（`PanelVisibility::of_closed_slot` 的反向跟随）。若照搬「跟随槽位开放」的写法，按钮会在分屏展开时出现、折叠时消失——恰好在最需要时不可用（Verifer 复验轮发现）。
-- **`Slot::Center` 只建模不接消费者**：首个消费者留给 F-16 的 3D 空间视图。
+- **`Slot::Center` 的占用者由 `LayoutMode` 决定**（MVP-2 已落地）：宇宙模式 = 3D / 编辑器 / 终端轮流占用，对话在右侧栏；经典回退 = 对话占用 Center，编辑器/终端回 SideDock。见 §5.27。
+
+### 5.25 L1 空间图扫描（MVP-2）
+
+`xgent_spatial` 在 S0 的 crate 图上新增了文件/目录级 L1 扫描：
+
+- **入口**：`scan(root)` 保持 L0 行为；`scan_with_options(root, ScanOptions { l1, node_limit, ignore })` 生成 L1。`node_limit=0` 表示不限，默认 2000；L1 上限会先扣掉 crate 节点数。
+- **遍历**：`ignore` crate（ripgrep 同款），`require_git(false)` 让非 git 项目也应用 `.gitignore`；`hidden(true)` 跳过隐藏文件；`SKIP_DIRS` 额外跳过 `target/`、`node_modules/`、`.git/`、`.xgent` 等。
+- **节点**：根目录/子目录 → `Module`，文件 → `File`，父子之间 `Contains`；有 `Cargo.toml` 时把 L0 的 crate 节点/`DependsOn` 边按偏移追加，crate 节点归入其顶层目录簇。
+- **权重**：文件 `ln(1 + 字节数)`，不读文件内容；目录为 `1 + 后代权重`；星团按顶层目录划分，根文件归根簇。
+- **裁剪**：先保目录（按深度浅优先），再按权重保留文件；被裁掉的节点数写入 `SpatialGraph.omitted_nodes`，绝不静默截断。
+- **确定性**：节点/边/簇按路径与 id 稳定排序；`generation` 由节点/边/簇的 FNV 哈希决定，同一快照逐位一致。
+- **测试**：`crates/xgent_spatial/tests/l1.rs` 覆盖 Rust/非 Rust 节点、`.gitignore`/依赖目录忽略、10k 文件裁剪到 2k、重复扫描一致；现有 `layout` 测试保持全绿。
+- **线程边界**：`scan_with_options` 是同步纯 CPU 函数；UI 侧接线时必须放进 `spawn_blocking` 并支持取消，不能在 ECS 主线程直接调用（任务 2.5）。
+
+### 5.26 3D 空间视口（MVP-2 S1）
+
+`xgent_ui::space` 已落地 3D 首页的最小闭环：
+
+- **装配**：`SpacePlugin` 在 `MainArea` 下挂一个 Center 面板；`ImageNode` 显示离屏纹理，`SpaceCamera`（`Camera3d` → `RenderTarget::Image`）渲染 3D；视口尺寸变化时按物理像素重建纹理。
+- **数据**：`SpaceGraph` 是唯一输入；`SpacePlugin` 读 `ProjectRoot`，用 `ScanJob` 在 `AsyncComputeTaskPool` 上做 L1 扫描 + 布局，完成后写入 `SpaceGraph`，再同步为实例化星体/边与 HUD 标签。
+- **交互**：`space.show` 命令面板入口；轨道相机（左键拖拽/滚轮/方向键/`+`/`-`，无惯性）；`Button + Hovered` 门控鼠标输入；CPU 拾取（NDC → 视口坐标 → 14px 半径），悬停/选中换材质 + 缩放；单击选中、双击或 Enter 经 `OpenFileRequest` 打开文件。
+- **首帧取景**：第一次拿到非空图时按节点包围球定相机注视点与距离（半径 × 2.8），星体半径 / 边粗细也随图半径缩放。默认布局簇半径 420，若沿用固定的相机距离 30，真实仓库会整张图落在视锥外、主区全黑。取景只做一次，之后数据刷新不移动用户调好的相机。
+- **HUD**：24 个投影标签（固定 160px + `Ellipsis`），右上角档位角标；内容态用 `Visibility`，不写 `Node.display`（`panel_registry_contract` 的硬约束）。
+- **降级**：`ViewQuality::{Full, Reduced, Static}`；Full 2k、Reduced 800（仍保留 HUD/选择）、Static 停用 3D 相机冻结最后一帧；面板不可见或窗口失焦时相机 `is_active=false`。档位目前由资源/测试强制，尚未接自动帧率探测。
+- **返回**：`Esc` 在编辑器/终端/差异可见时先关工作区面板并把主区还给 `space`，相机保持离开前位置；没有工作区面板时才中断对话（`space_panel::escape_returns_from_editor_to_space_and_keeps_camera`）。
+- **测试**：`space::scan`（后台扫描/取消）、`space::view`（target_size/orbit/NDC 命中/包围球）、`space_panel`（2k 星体、24 标签、主题、Enter 打开、Esc 返回、Reduced/Static/Full 切换）；UI 全量测试用 `-j 2`，默认并发可能触发 `LNK1102` OOM。
+- **边界**：完整 S2（键盘遍历/搜索飞行/2D↔3D 联动）、S3 时空回溯、S4 插件节点、自由飞行/惯性均未做；`space.show` 在经典回退下不可用。
+
+### 5.27 布局模式与对话侧栏（MVP-2 4.x）
+
+**两种模式的唯一权威**是 `GlobalConfigRes.preferences.three_d_home`：
+
+| 模式 | Center | SideDock | 首页 |
+|:---|:---|:---|:---|
+| `Universe`（默认） | `space` / 编辑器 / 差异 / 终端 | 对话（常驻） | `space` |
+| `Classic`（偏好 false） | 对话 | 编辑器 / 差异 / 终端 / `space`（隐藏） | 对话 |
+
+- **切换链路**（`xgent_ui::layout_mode`）：读偏好 → 对五个面板发 `PanelRetargetSlot` 改注册表槽位 → 把视图实体 `add_child` 到 `CenterHostMarker` / `SideViewMarker` → 同步 `PanelVisibility.slot` → 激活 `LayoutMode::home_panel()`。五块视图未齐时下一帧重试；设置面板的 3D 开关即改 `GlobalConfigRes`，下一帧切换。
+- **右侧分屏按需出现**：`SideView` 挂 `PanelVisibility::of_slot_panels(SideDock)`，槽内没有可见面板就整块 `display:none`。经典回退下对话在 Center，未打开编辑器/终端时不会留一条空侧栏。
+- **回退不暴露 3D**：`space` 在经典模式被搬到 SideDock 但失活；槽位页签过滤它，`space.show` 命令也忽略（否则侧栏会出现一个能点开的死视图）。
+- **对话侧栏宽度**：默认 400px，可拖拽，范围 320–560 且不超过主区可用宽度 45%（`resize::clamp_chat_side`）。拖拽结束发 `SaveChatSideWidthMessage`，由 `xgent_app::settings_io` 写 `preferences.chat_side_width`；重启后 `apply_chat_side_preference` 在宇宙模式落树。经典回退的编辑器坞保持 720 默认，不受对话宽度偏好覆盖。
+- **Esc / 关闭路径**：编辑器、差异、终端任一可见时，Esc 先关它们并把主区还给首页（宇宙 → `space`，经典 → 对话）；没有工作区面板才中断对话。终端 ✕、编辑器最后一个文档关闭、图标轨终端钮同样回首页。
+- **不折叠常驻侧栏**：宇宙模式下 `responsive_collapse` 直接返回，否则窗口 <1100px 会把对话一起收起。
+- **走查记录**：`docs/notes/mvp2-layout-walkthrough.md`（宇宙 / 经典 / 经典+编辑器三张截图与本轮修复项）。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

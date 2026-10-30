@@ -28,6 +28,12 @@ pub fn derive_panel_visibility(
     for (vis, mut node) in q.iter_mut() {
         let want = match vis.panel {
             Some(id) => layout.is_panel_visible(&registry, id),
+            None if vis.slot_panels => {
+                layout.is_open(vis.slot)
+                    && registry
+                        .iter_slot(vis.slot)
+                        .any(|entry| layout.is_panel_visible(&registry, entry.desc.id))
+            }
             None => {
                 let open = layout.is_open(vis.slot);
                 // 反向跟随：槽位**关闭**时可见（如 rail 的「展开面板」钮）。

@@ -305,12 +305,15 @@ pub fn handle_close_tab_requests(
     q_buffers: Query<&crate::editor::buffer::EditorBuffer>,
     q_dialog: Query<Entity, With<DirtyCloseDialogMarker>>,
     mut view: ResMut<crate::editor::EditorView>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
     mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
+    mut activate: MessageWriter<crate::panels::PanelActivate>,
     rt: ResMut<crate::editor::io::EditorIoRuntime>,
     theme: Res<crate::theme::Theme>,
     loc: Res<xgent_settings::Localizer>,
     mut commands: Commands,
 ) {
+    let home = mode.as_deref().copied().unwrap_or_default().home_panel();
     for req in reader.read() {
         // 脏 buffer + 非强制：弹确认或等待已有弹窗处理，绝不静默关闭
         if !req.force
@@ -333,6 +336,8 @@ pub fn handle_close_tab_requests(
                 deactivate.write(crate::panels::PanelDeactivate {
                     id: crate::panels::ids::EDITOR,
                 });
+                // 宇宙里关掉最后一个文档要把主区还给 space；经典里对话已在 Center。
+                activate.write(crate::panels::PanelActivate { id: home });
             }
         }
     }

@@ -1,0 +1,7 @@
+   Compiling wasmtime-wasi v29.0.1
+   Compiling xgent_plugin_git v0.1.0 (F:\ws\xgent\crates\xgent_plugin_git)
+   Compiling xgent_plugin_hello v0.1.0 (F:\ws\xgent\crates\xgent_plugin_hello)
+   Compiling xgent_plugin v0.1.0 (F:\ws\xgent\crates\xgent_plugin)
+   Compiling xgent_plugin_host v0.1.0 (F:\ws\xgent\crates\xgent_plugin_host)
+   Compiling xgent_app v0.1.0 (F:\ws\xgent\crates\xgent_app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 25s

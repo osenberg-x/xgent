@@ -44,7 +44,7 @@ classic:
   artifact_layout: docs
   # Artifact language used by Classic workflow documents.
   # language: en | zh-CN
-  language: en
+  language: zh-CN
   # Controls beta context compression for new Classic changes.
   # context_compression: off | beta
   context_compression: off

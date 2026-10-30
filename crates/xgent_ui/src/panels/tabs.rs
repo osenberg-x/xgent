@@ -100,8 +100,12 @@ pub fn spawn_slot_tab_bar(
 }
 
 /// 注册表变化时重建页签条目（槽位页签 = `Slot::SideDock` 面板）。
+///
+/// 经典回退（`three_d_home=false`）下 `space` 被搬到 SideDock 但**不暴露**：
+/// 它既不该出现在页签里，也不该被命令面板叫出来。
 pub fn sync_slot_tab_bar(
     registry: Res<PanelRegistry>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
     theme: Res<Theme>,
     loc: Res<Localizer>,
     mut commands: Commands,
@@ -109,8 +113,12 @@ pub fn sync_slot_tab_bar(
     q_tabs: Query<Entity, With<SlotTabMarker>>,
     mut signature: Local<Vec<(&'static str, i16)>>,
 ) {
+    let universe = mode
+        .as_deref()
+        .is_none_or(|m| *m == crate::layout_mode::LayoutMode::Universe);
     let wanted: Vec<(&'static str, i16)> = registry
         .iter_slot(Slot::SideDock)
+        .filter(|e| universe || e.desc.id != ids::SPACE)
         .map(|e| (e.desc.id, e.desc.order))
         .collect();
     if wanted == *signature {
@@ -200,18 +208,29 @@ pub fn update_slot_tab_indicators(
     }
 }
 
-/// 侧区返回入口：收起侧区（关闭 `Slot::SideDock`）并回到主区对话。
+/// 侧区返回入口：宇宙里回到空间首页；经典里收起侧区并回到主区对话。
 ///
 /// 全仓唯一的返回入口（`EditorBackButtonMarker` 只定义一次）。
 pub fn handle_back_button_click(
     q_btn: Query<(), (With<EditorBackButtonMarker>, Added<Pressed>)>,
     registry: Res<PanelRegistry>,
+    mode: Option<Res<crate::layout_mode::LayoutMode>>,
     mut deactivate: MessageWriter<crate::panels::PanelDeactivate>,
     mut activate: MessageWriter<PanelActivate>,
     mut layout: ResMut<SlotLayout>,
     mut view: ResMut<crate::editor::EditorView>,
 ) {
+    let universe = mode
+        .as_deref()
+        .is_none_or(|m| *m == crate::layout_mode::LayoutMode::Universe);
     for _ in q_btn.iter() {
+        if universe {
+            // 对话是常驻侧栏，返回入口的语义是「回主区首页」而不是藏掉对话。
+            activate.write(PanelActivate {
+                id: crate::panels::ids::SPACE,
+            });
+            continue;
+        }
         // 关闭侧区里的所有面板
         for entry in registry.iter_slot(Slot::SideDock) {
             deactivate.write(crate::panels::PanelDeactivate { id: entry.desc.id });
