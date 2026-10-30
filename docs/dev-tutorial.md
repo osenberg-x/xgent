@@ -550,7 +550,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 
 ### 5.12.1 v7 视觉体系（kit/fonts/theme）
 
-- **`kit.rs`（业务层小件库）**：`IconAssets`（`assets/icons/*.png` 白描边 2x PNG，ImageNode 乘法染色）+ `icon()`；`HoverTint` 数据驱动 hover 三态（单一 `hover_tint_system` 全局处理，禁止逐组件写 hover 系统）；`Tooltip`（悬停 500ms 延迟浮现）；构造器 `ghost_button/primary_button/icon_button/pill/kbd/section_label`；`ToastMessage` + `show_toast`（底部居中浮层，`tooltip_bg` 恒暗底，2.2s TTL 自动消隐，全局唯一节点替换式刷新）。
+- **`kit.rs`（业务层小件库）**：`IconAssets`（`assets/icons/*.png` 白描边 2x PNG，ImageNode 乘法染色）+ `icon()`；`HoverTint` 数据驱动 hover 三态（单一 `hover_tint_system` 全局处理，禁止逐组件写 hover 系统）；`Tooltip`（悬停 500ms 延迟浮现，`position_tooltips` 每帧按宿主矩形贴左侧/翻转右侧）；构造器 `ghost_button/primary_button/icon_button/pill/kbd/section_label`；`ToastMessage` + `show_toast`（底部居中浮层，`tooltip_bg` 恒暗底，2.2s TTL 自动消隐，全局唯一节点替换式刷新）。
+  - **0.20 的 UI 节点没有渲染侧 `GlobalTransform`**：`Node` 的 `#[require]` 给的是 `UiTransform`/`UiGlobalTransform`（位置取 `affine().translation`，物理像素，需再除 `scale_factor`）。对 UI 实体写 `Query<&GlobalTransform>` 不会报错也不会 panic——每个实体都 `Err`，系统静默变成 no-op（tooltip 曾因此恒停在窗口左上角，见台账 §10 勘误 55；护栏 `tests/tooltip_anchor.rs`）。同理 `Hovered` 是否真为 true 只能在**有坐标**的前提下判断：OS 级注入（`SetCursorPos`/`mouse_event`）在本机不把移动投递给窗口，`PointerLocation` 恒 `NONE` → 零命中，测到的只是注入器（勘误 55 末段）。
 - **`fonts.rs`**：`UiFonts{ui,mono}`（Inter Variable 直读模式 + Menlo，由 `xgent_app/startup.rs` 加载注入）；文本构造器 `ui_text(text,size,weight,color,line_height)` / `mono_text(_weighted)(...)`——**全部业务文本经构造器**（M6-T6 清点后仅 2 处例外：kit section_label 需 LetterSpacing、editor 行号列 editor_theme 动态字号）。
 - **`theme.rs`**：v3 字段全量（Linear 令牌：表面明度阶梯 bg/surface/elevated/code_bg、四级文字、靛紫 accent 组、Radix 状态色、warm 陪伴例外、tooltip 反色）；`size` 常量（TOP_BAR_H 52/STATUS_BAR_H 32/RAIL_W 52/CONTEXT_W_* /DRAWER_W 320）；`type_scale` 排版阶梯 8 档；`radius` 圆角阶梯。
 - **图标管线**：`docs/design/icons/export_png.py`（cairosvg，`currentColor`→`#FFFFFF` 强制）→ `crates/xgent_app/assets/icons/{name}@2x.png`。

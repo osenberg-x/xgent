@@ -289,7 +289,11 @@ fn kill_child(child: &mut tokio::process::Child) {
         }
     }
     #[cfg(not(unix))]
-    child.start_kill();
+    if let Err(error) = child.start_kill() {
+        // 已经退出的子进程也会走到这里报错，属预期；但若子进程仍在跑却没杀掉，
+        // 读管道的一方会永久挂起（agent 卡在 ToolRunning），必须留痕。
+        tracing::warn!(%error, "终止子进程失败（Windows）");
+    }
 }
 
 #[cfg(test)]

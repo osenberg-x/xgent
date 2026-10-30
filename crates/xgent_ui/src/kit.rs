@@ -9,7 +9,7 @@ use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontWeight, LetterSpacing, LineHeight};
-use bevy::ui::Pressed;
+use bevy::ui::{Pressed, UiGlobalTransform};
 use bevy::ui_widgets::{Button, observe};
 use std::collections::HashMap;
 
@@ -416,12 +416,16 @@ pub fn tooltip_left(
     }
 }
 
-/// tooltip 定位：按宿主 `ComputedNode` 与 `GlobalTransform` 计算屏幕位置；
+/// tooltip 定位：按宿主 `ComputedNode` 与 `UiGlobalTransform` 计算屏幕位置；
 /// 右缘不足时翻转到宿主左侧。每帧跟随（窗口缩放、滚动、布局变化都能跟上）。
+///
+/// 注意：0.20 的 UI 节点带的是 `UiGlobalTransform`（`Node` 的 `#[require]` 里没有渲染侧
+/// 的 GlobalTransform）。这里若误用后者，查询恒为 `Err` → 每个面板都 `continue` →
+/// tooltip 永远停在 spawn 时的 `left/top = 0`（窗口左上角）。
 fn position_tooltips(
     windows: Query<&Window>,
     mut tips: Query<(&TooltipPanel, &mut Node, &ComputedNode)>,
-    hosts: Query<(&ComputedNode, &GlobalTransform), Without<TooltipPanel>>,
+    hosts: Query<(&ComputedNode, &UiGlobalTransform), Without<TooltipPanel>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -434,7 +438,7 @@ fn position_tooltips(
             continue;
         };
         let host_size = host_computed.size() / scale;
-        let host_center = host_transform.translation().truncate() / scale;
+        let host_center = host_transform.affine().translation / scale;
         let host_left = host_center.x - host_size.x / 2.0;
         let host_top = host_center.y - host_size.y / 2.0;
         let host_right = host_center.x + host_size.x / 2.0;

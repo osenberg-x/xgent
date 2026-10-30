@@ -201,8 +201,9 @@ UI v8 的 **M1–M5、M7 已交付；M6 模型层 + M6.5 接线已交付并经�
 9. **M6.5 已接线，但真实窗口证据未闭环**（2026-10-29）：自动化测试覆盖顺序/Markdown/工具卡/通知/虚拟窗口；真实窗口截图与走查仍需用户完成（A9 可视部分）。
 10. **虚拟窗口的中间间隙**（2026-10-29，**已闭合**）：渲染窗口 = 可见区间 ∪ 当前轮；原实现只在两端放占位，两段不相邻时中间空档没有高度 → 流式中上翻历史会把当前轮贴到可见区正下方。现按**连续段**布局并逐段补占位（`transcript_render.rs` 的 `build_runs`/`push_gap`，段集合变化才重建），契约测试 `gap_between_visible_window_and_active_turn_is_spaced` 锁住。同类问题一并修：`ComputedNode::size`/`ScrollPosition` 是物理像素，必须乘 `inverse_scale_factor` 再与逻辑偏移表比较（`hidpi_window_matches_the_same_logical_geometry`）。
 11. **M7-A1 的保障强度**（2026-10-28）：`handler_name` 是字符串，启动期只比 id 集合；新增 action 时若只加清单不加分发表分支，不会失败，不要把它当已闭合的契约。
-12. **未闭环门槛**：mac/Linux 的 `mono` 启动日志与终端实机仍未确认（NF-01 是需求硬项）；`cargo test --workspace` 仍有既有红，M6.5 的「全绿」只对 `xgent_ui` + `xui` + `xgent_terminal` 成立。
-13. **tooltip 定位到窗口左上角**（2026-10-29 新发现，未修）：修好全局点击后 hover 才可见，实测悬停顶栏齿轮时「设置」提示出现在窗口 `(0,0)` 而非目标旁。拾取与 hover 已正常（`Hovered` 有值），坏的是 tooltip 浮层的坐标计算——排查方向是 TOOLTIP 层根的绝对定位与 `UiGlobalTransform`/物理像素换算（与勘误 51 的补全浮层锚点同一类）。
+12. **未闭环门槛**：mac/Linux 的 `mono` 启动日志与终端实机仍未确认（NF-01 是需求硬项）；`cargo test --workspace --no-fail-fast` 已 63 个 target 全绿（勘误 54），原先「仍有既有红」的记录过期。
+13. **tooltip 定位到窗口左上角**（2026-10-29 发现，**2026-10-30 已闭合**，见台账 §10 勘误 55）：成因既不是层根绝对定位也不是像素换算，而是 `kit.rs::position_tooltips` 对 UI 宿主查询 `&GlobalTransform`——0.20 的 UI 节点只有 `UiGlobalTransform`，查询恒 `Err` → 每个面板 `continue` → 停在 spawn 时的 `left/top = 0`，零日志。已改 `&UiGlobalTransform`；回归 `crates/xgent_ui/tests/tooltip_anchor.rs`（3 项）。
+14. **测量本身的教训：OS 级鼠标注入不可信**（2026-10-30）：`SetCursorPos` + 遗留 `mouse_event` 在本机不会把移动投递到该窗口，bevy 侧 `PointerLocation` 恒为 `NONE` → 拾取零命中 → 「hover 全废 / 点击无响应」的结论全部只测到了注入器（勘误 52 之后那句「hovered_true=0」就是这么来的，产品侧 hover 与点击都是好的）。可复现的口径是：在 xgent_app 内临时挂管线探针 + 用 `PointerInput` 消息驱动指针（`P9R4` 一次性诊断，未提交），确认 `hov>0`、命中实体、以及被点控件的状态位真的翻了，再谈红绿。
 
 ---
 
