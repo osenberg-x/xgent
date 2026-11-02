@@ -534,3 +534,19 @@ fn reduced_quality_removes_edges() {
     app.update();
     assert_eq!(edge_count(&mut app), 1, "回到 Full 应恢复边");
 }
+
+/// 数据刷新（重扫替换图）不得移动已经取好景的相机。
+#[test]
+fn graph_refresh_keeps_camera() {
+    let mut app = keyboard_space_app(synthetic_graph(3));
+    let before = space_camera_transform(&mut app);
+    app.insert_resource(SpaceGraph(synthetic_graph(5)));
+    for _ in 0..2 {
+        app.update();
+    }
+    let after = space_camera_transform(&mut app);
+    assert_eq!(
+        before.translation, after.translation,
+        "空间图刷新不应移动相机"
+    );
+}

@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: verify
+phase: build
 context_compression: off
 build_mode: autonomous
 build_pause: null
@@ -13,8 +13,8 @@ auto_transition: true
 base_ref: 5b6821148f928af33ab943a5b8f4c05417c03112
 design_doc: docs/openspec/changes/mvp2-3d-home/design.md
 plan: docs/superpowers/plans/2026-10-30-mvp2-3d-home.md
-verify_result: pending
-verify_failures: 1
+verify_result: fail
+verify_failures: 2
 verification_report: docs/superpowers/reports/2026-10-30-mvp2-3d-home-verify.md
 branch_status: pending
 created_at: 2026-10-30
@@ -28,4 +28,4 @@ handoff_hash: 229178aeac7c8c69071cd74f4758ca70d7e930afca8be7762dedf283ef0cc07a
 classic_profile: full
 classic_migration: 1
 run_id: ff0ea5ac-ef3b-4017-93c3-9a67928c04d7
-check_epoch: 5
+check_epoch: 6
