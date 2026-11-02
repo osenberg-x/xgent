@@ -1,0 +1,594 @@
+schema: comet.native.v4
+name: f21-code-intelligence
+language: zh-CN
+phase: archive
+status: done
+state_version: 8
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: 97d9cebc39944beb296846ed85bb21bbb0415da927208d86f5b5f83e35d9e48d
+spec_changes:
+  - capability: code-intelligence
+    operation: create
+    source: specs/code-intelligence/spec.md
+workspace:
+  isolation: worktree
+  change_branch: comet/f21-code-intelligence
+  target_branch: main
+  finish: merge
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1 **符号提取**：对 Rust fixture 解析出函数/结构体/枚举/trait/impl/module
+      的符号，名称、种类、文件与起止行正确；函数复杂度可计算；重复解析结果逐位一致。
+    result: passed
+    reason:
+      text: 独立运行 `CARGO_PROFILE_TEST_DEBUG=0 cargo test -p xgent_codeintel -p
+        xgent_context` 全绿（codeintel 9/9、context
+        54/54）。`extracts_symbols_ranges_and_complexity`
+        覆盖函数/方法/结构体/枚举/trait/impl/module/const/static/type alias 的名称与
+        kind；`symbol_ranges_match_known_lines` 精确断言 struct 行 1-1、fn 行
+        3-5；`scan_is_deterministic_and_incremental` 断言同快照两次扫描 FileEntry 与
+        generation 逐位相等。代码侧 `parse_source` 用 tree-sitter 节点位置生成 1-based 起止行、file
+        字段写相对路径。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: A2 **import/use 解析**：工作区内 `use`/`mod` 解析到对应文件或模块；外部依赖标记 external
+      且不产生工作区文件边；无法解析时不报错。
+    result: passed
+    reason:
+      text: "`resolves_workspace_imports_and_marks_external` 断言 `use
+        crate::foo::Hello` 与 `use crate::foo::bar::Nested` 解析到
+        src/foo.rs、src/foo/bar.rs，`use external_crate::Thing` 记
+        External；`unresolved_imports_stay_unresolved_without_error` 断言
+        `crate::missing` 与 `super::up` 记 Unresolved 且无任何 Workspace 边、扫描不报错。`mod
+        foo;` 由 `resolve_mod` 尝试 foo.rs / foo/mod.rs（代码核对）。"
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: A3 **增量更新**：修改一个文件后只更新该文件的符号/import，其他文件结果不变；删除文件后其符号消失；generation
+      随之变化且可重复。
+    result: passed
+    reason:
+      text: "`scan_is_deterministic_and_incremental` 断言 update_file 后其他文件 FileEntry
+        逐位相等、新符号可查，remove_file 后符号消失且 generation
+        改变；`update_from_disk_handles_removed_files`
+        覆盖磁盘删除。update_file/remove_file 均调用 generation_of 重算（代码核对：路径 + 内容 FNV
+        哈希确定性聚合）。"
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: A4 **RepoMap 检索**：`build_context_provider` 对 `repo_map` 返回
+      Ready；以符号/文件/当前文件查询返回相关结构化结果，受 token 预算约束；无结果返回空而不报错。
+    result: passed
+    reason:
+      text: "`repo_map_is_ready` 断言
+        build_context_provider(RepoMap)=Ready；`retrieves_matching_symbols`、`fil\
+        e_hints_and_path_queries_return_the_whole_file_map`、`current_file_is_pr\
+        ioritized_even_without_query_match`、`respects_token_budget`、`no_match_r\
+        eturns_empty_without_error` 全绿。实现按符号名精确 +20/包含 +8、路径命中 +3/词、当前文件 +50
+        评分，输出结构化 ContextChunk 并受 max_tokens 约束。"
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A5 **变更通知**：`RepoMapContextProvider::on_file_changed` 对 `.rs`
+      文件增量刷新索引，后续查询看到新符号；非 Rust 文件与不存在路径不破坏索引。
+    result: passed
+    reason:
+      text: "`on_file_changed_updates_index_and_ignores_non_rust` 断言 .rs 改名后检索到
+        new_name、README.md 与 missing.rs
+        后索引仍可用；`hub_broadcasts_file_changes_through_trait` 验证 ContextHub
+        广播。xgent_app 新增 ContextProviderHandle 与 forward_context_file_changed 把
+        FileChangedEvent 转发给 ContextHub（`cargo check --workspace` 通过，代码核对）。"
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: A6 **只读与后台**：索引过程不写项目文件；provider 首次构建在后台执行，查询调用不阻塞 UI 主线程；错误时返回空/降级而非
+      panic。
+    result: passed
+    reason:
+      text: "`scan_is_read_only_and_skips_unreadable_files` 与
+        `retrieve_and_change_notification_do_not_write_files`
+        断言扫描/检索/通知前后源文件字节一致；`missing_root_degrades_to_empty`
+        断言根缺失返回空。代码核对：首次索引与增量更新都在 tokio spawn_blocking 执行，scan 失败仅 warn 后返回
+        None（降级为空），无 panic。"
+      truncated: false
+  - id: A7
+    source: specs/code-intelligence/spec.md
+    text: 符号类别与范围 - **WHEN** 索引包含函数、结构体、枚举、trait、impl、module、const/static 的 fixture
+      - **THEN** 每类符号都能按文件与名称查询，起止行覆盖对应语法节点 - 验收：A1
+    result: passed
+    reason:
+      text: "`extracts_symbols_ranges_and_complexity` 的 fixture 同时含函数、方法（impl/trait
+        内）、结构体、枚举、trait、impl、module、const、static、type alias，逐项断言名称与
+        kind；`symbols_of`（按文件）与名称查找可用，impl 范围断言包含其方法。起止行由语法节点 position 直接生成。"
+      truncated: false
+  - id: A8
+    source: specs/code-intelligence/spec.md
+    text: 函数复杂度 - **WHEN** 函数体内包含 if/match/循环/`&&`/`||` 等决策点 - **THEN** 复杂度为 1
+      加决策点数量，且随源码变化可重算 - 验收：A1
+    result: passed
+    reason:
+      text: 复杂度 = 1 + 决策节点（if/match arm/while/loop/for/`?`/`&&`/`||`，跳过嵌套
+        function_item）；`symbol_ranges_match_known_lines` 精确断言单 if 函数复杂度为
+        2；复杂方法（if+&&+match）断言 >=4。update_file 走同一 parse_source
+        重新解析，随源码变化可重算（代码核对）。
+      truncated: false
+  - id: A9
+    source: specs/code-intelligence/spec.md
+    text: 忽略目录 - **WHEN** 工作区存在 `target/`、`node_modules/` 或 `.gitignore` 命中的 Rust 文件
+      - **THEN** 这些文件不进入索引 - 验收：A1
+    result: passed
+    reason:
+      text: "`skips_ignored_and_non_rust_files` 在同一 fixture 放置
+        target/、node_modules/、.gitignore 命中目录、隐藏 .hidden.rs 与非 Rust 文件，断言索引只保留
+        src/a.rs。扫描器启用
+        hidden/git_ignore/git_global/git_exclude/parents/require_git(false) 并叠加
+        SKIP_DIRS 过滤。"
+      truncated: false
+  - id: A10
+    source: specs/code-intelligence/spec.md
+    text: 工作区 use 解析 - **WHEN** 源文件包含 `use crate::foo::Bar` 或 `mod foo;` 且对应模块文件存在 -
+      **THEN** 产生从当前文件到目标文件/模块的 import 记录 - 验收：A2
+    result: passed
+    reason:
+      text: "`resolves_workspace_imports_and_marks_external` 断言 `use
+        crate::foo::Hello` 与 `use crate::foo::bar::Nested` 产生到
+        src/foo.rs、src/foo/bar.rs 的 Workspace import 记录；`mod foo;` 经
+        `resolve_mod` 解析到 foo.rs/foo/mod.rs（代码核对，与 use 共用 Workspace 断言）。"
+      truncated: false
+  - id: A11
+    source: specs/code-intelligence/spec.md
+    text: 外部依赖 - **WHEN** 源文件引用工作区外的 crate 或无法解析的路径 - **THEN** 记录标记为 external
+      或未解析，不产生工作区文件边、不报错 - 验收：A2
+    result: passed
+    reason:
+      text: "`unresolved_imports_stay_unresolved_without_error` 断言 external_crate 记
+        External、crate::missing 与 super::up 记 Unresolved，且不存在任何 Workspace
+        边；扫描成功、不返回错误、不 panic。"
+      truncated: false
+  - id: A12
+    source: specs/code-intelligence/spec.md
+    text: 重复扫描确定 - **WHEN** 对同一快照连续扫描两次 - **THEN** 符号、import 与 generation 完全一致 -
+      验收：A1、A3
+    result: passed
+    reason:
+      text: "`scan_is_deterministic_and_incremental` 对相同快照扫描两次，断言 generation
+        相等、FileEntry（含 symbols/imports/content_hash）逐位相等。实现用 BTreeMap +
+        符号按行/名、import 按 derive Ord 排序，保证顺序确定。"
+      truncated: false
+  - id: A13
+    source: specs/code-intelligence/spec.md
+    text: 单文件更新 - **WHEN** 调用 `update_file` 修改一个文件或调用 `remove_file` 删除一个文件 -
+      **THEN** 只有该文件相关条目变化，其他文件结果保持不变；generation 更新 - 验收：A3
+    result: passed
+    reason:
+      text: update_file 后只有目标文件 FileEntry 变化（其他文件逐位相等断言）、新符号可查；remove_file 后符号消失且
+        generation 断言改变；update_file 同样重算 generation（代码核对 generation_of）。
+      truncated: false
+  - id: A14
+    source: specs/code-intelligence/spec.md
+    text: 按文件查询 - **WHEN** 调用方查询一个已索引文件 - **THEN** 返回该文件的符号、import 与复杂度摘要 - 验收：A1、A6
+    result: passed
+    reason:
+      text: "`CodeIndex::file/symbols_of` 返回该文件 FileEntry（symbols 含
+        complexity、imports）；测试用同一 FileEntry 断言符号/kind 与 imports，并断言复杂度；RepoMap
+        chunk 渲染 path、kind/name/行范围/复杂度与工作区 import 摘要。"
+      truncated: false
+  - id: A15
+    source: specs/code-intelligence/spec.md
+    text: 未索引文件 - **WHEN** 调用方查询不存在或未索引的文件 - **THEN** 返回空结果而不是 panic - 验收：A6
+    result: passed
+    reason:
+      text: "`query_missing_file_returns_none_without_panic` 断言不存在/未索引路径 file 与
+        symbols_of 返回 None、symbols_named 返回空 Vec，不 panic。"
+      truncated: false
+  - id: A16
+    source: specs/code-intelligence/spec.md
+    text: 策略可用 - **WHEN** 以 `repo_map` 策略构造上下文 provider - **THEN** 返回 Ready，而不是
+      Unsupported - 验收：A4
+    result: passed
+    reason:
+      text: "`repo_map_is_ready` 断言 `ContextStrategy::RepoMap` 构造为
+        BuiltContextProvider::Ready；`unimplemented_strategies_report_unsupporte\
+        d` 已收窄为 Vector/Hybrid，仍禁止静默回退。"
+      truncated: false
+  - id: A17
+    source: specs/code-intelligence/spec.md
+    text: 结构化检索 - **WHEN** 用户消息或 hints 提到已索引的符号/文件 - **THEN** 返回相关文件与符号的 repo map
+      文本片段，token 总数不超过请求预算 - 验收：A4
+    result: passed
+    reason:
+      text: "`retrieves_matching_symbols`（符号名）、`file_hints_and_path_queries_return_th\
+        e_whole_file_map`（@file: hint
+        与路径）、`current_file_is_prioritized_even_without_query_match`（当前文件）、`resp\
+        ects_token_budget`（max_tokens=1 时 total_tokens<=1）全绿；chunk 为 path + 符号
+        kind/name/行范围/复杂度 + imports 摘要的结构化文本。"
+      truncated: false
+  - id: A18
+    source: specs/code-intelligence/spec.md
+    text: 无匹配 - **WHEN** 查询没有任何符号或文件匹配 - **THEN** 返回空 chunks，不报错、不阻塞 - 验收：A4
+    result: passed
+    reason:
+      text: "`no_match_returns_empty_without_error` 断言无符号/路径匹配时 chunks
+        为空、total_tokens=0，不报错；实现无匹配直接返回默认 ContextResult，不 panic、不阻塞。"
+      truncated: false
+  - id: A19
+    source: specs/code-intelligence/spec.md
+    text: 变更后检索 - **WHEN** 已构建索引后某 `.rs` 文件新增一个函数并触发 `on_file_changed` - **THEN**
+      后续查询能检索到新函数，其他文件结果不变 - 验收：A5
+    result: passed
+    reason:
+      text: "`on_file_changed_updates_index_and_ignores_non_rust` 已构建索引后改写 src/a.rs
+        并调用 on_file_changed，后续检索命中 new_name；更新路径 clone 现索引后仅对变更文件
+        update_file_from_disk，其他条目保持（代码核对）。"
+      truncated: false
+  - id: A20
+    source: specs/code-intelligence/spec.md
+    text: 非 Rust 变更 - **WHEN** `on_file_changed` 收到非 `.rs` 路径或不存在路径 - **THEN**
+      索引保持不变且不 panic - 验收：A5
+    result: passed
+    reason:
+      text: 同一测试对 README.md（非 .rs）与 missing.rs（不存在）调用 on_file_changed，随后检索仍命中且不
+        panic；extension 与前缀检查、NotFound 删除路径均不破坏索引。
+      truncated: false
+  - id: A21
+    source: specs/code-intelligence/spec.md
+    text: 不写盘 - **WHEN** 扫描与查询一个工作区 - **THEN** 项目文件字节不变 - 验收：A6
+    result: passed
+    reason:
+      text: "`scan_is_read_only_and_skips_unreadable_files` 断言扫描前后 a.rs 与 bad.rs
+        字节一致；`retrieve_and_change_notification_do_not_write_files` 断言 retrieve +
+        on_file_changed 后源文件字节一致。实现只读源码与 .gitignore。"
+      truncated: false
+  - id: A22
+    source: specs/code-intelligence/spec.md
+    text: 后台首次构建 - **WHEN** 首次调用 RepoMap 检索 - **THEN** 扫描在阻塞线程池执行，异步调用方在完成前不被同步阻塞 -
+      验收：A6
+    result: passed
+    reason:
+      text: "`ensure_index` 首次缺失时用 `tokio::task::spawn_blocking(CodeIndex::scan)` 并
+        await，扫描不占用 async worker、异步调用方不被同步阻塞；缓存存在时直接返回，build_lock
+        防并发重复扫描（代码核对，无专门时序测试）。"
+      truncated: false
+  - id: A23
+    source: specs/code-intelligence/spec.md
+    text: 解析失败降级 - **WHEN** 某个 Rust 文件无法读取或解析 - **THEN** 该文件被跳过，索引继续构建，不 panic -
+      验收：A6
+    result: passed
+    reason:
+      text: "`scan_is_read_only_and_skips_unreadable_files` 注入非法 UTF-8 的
+        src/bad.rs，断言扫描成功、坏文件被跳过、正常文件可查且不 panic；parse 失败路径返回空 FileEntry
+        继续（代码核对），符合 spec 的“跳过并降级为空/部分索引”。"
+      truncated: false
+builder_handoff:
+  candidate_id: 870dd545-c0ba-41a0-bdf9-997fa2c28dc6
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:cd4c1b7a-e5e2-43b2-b736-6aae85ed5146
+  iteration: 1
+  summary:
+    text: F-21 首期实现完成：新增无 Bevy 的 xgent_codeintel（tree-sitter Rust 符号/import/复杂度 +
+      确定性增量索引），在 xgent_context 实现 RepoMapContextProvider 并让 repo_map 策略返回
+      Ready，ContextHub 与 xgent_app fs 桥接把文件变更广播到
+      on_file_changed。补齐读取失败/只读/未索引文件/hint 路径检索等边界测试；cargo check --workspace 与全量
+      workspace 测试通过。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+    - A16
+    - A17
+    - A18
+    - A19
+    - A20
+    - A21
+    - A22
+    - A23
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::extracts_symbols_ranges_and_complexity
+        - crates/xgent_codeintel/src/lib.rs::tests::symbol_ranges_match_known_lines
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_deterministic_and_incremental
+      note: tree-sitter-rust 解析函数/方法/结构体/枚举/trait/impl/module/const/static/type
+        alias；fixture 逐类断言名称与 kind，并用已知行号断言 struct/function 起止行；复杂度
+        1+决策点；同一快照重复扫描 FileEntry 与 generation 一致。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::resolves_workspace_imports_and_marks_external
+        - crates/xgent_codeintel/src/lib.rs::tests::unresolved_imports_stay_unresolved_without_error
+      note: use crate::foo::Hello 与 use crate::foo::bar::Nested 解析到 src/foo.rs /
+        src/foo/bar.rs；mod foo; 解析到 foo.rs；外部 crate 记 External，缺失路径记
+        Unresolved，均不产生工作区边且不报错。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_deterministic_and_incremental
+        - crates/xgent_codeintel/src/lib.rs::tests::update_from_disk_handles_removed_files
+      note: update_file 只替换目标文件（其他 FileEntry 逐位相等），remove_file / update_file_from_disk
+        删除条目；generation 随内容变化。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/lib.rs::tests::repo_map_is_ready
+        - crates/xgent_context/src/repo_map.rs::tests::retrieves_matching_symbols
+        - crates/xgent_context/src/repo_map.rs::tests::file_hints_and_path_queries_return_the_whole_file_map
+        - crates/xgent_context/src/repo_map.rs::tests::respects_token_budget
+        - crates/xgent_context/src/repo_map.rs::tests::no_match_returns_empty_without_error
+      note: "build_context_provider(RepoMap) 返回 Ready；按符号名、@file: hint、路径与
+        current_file 检索并输出结构化 chunk；总 token 不超 max_tokens；无匹配返回空。"
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/repo_map.rs::tests::on_file_changed_updates_index_and_ignores_non_rust
+        - crates/xgent_context/src/hub.rs::file_change_tests::hub_broadcasts_file_changes_through_trait
+        - crates/xgent_app/src/fs_event_bridge.rs::forward_context_file_changed
+      note: on_file_changed 对根内 .rs 在阻塞线程池增量重解析并原子替换 Arc，后续检索看到新符号；非
+        Rust/不存在路径保持索引不变；ContextHub 经 trait 广播，app 桥接把 FileChangedEvent 转发给 hub。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_read_only_and_skips_unreadable_files
+        - crates/xgent_context/src/repo_map.rs::tests::retrieve_and_change_notification_do_not_write_files
+        - crates/xgent_context/src/repo_map.rs::tests::missing_root_degrades_to_empty
+        - crates/xgent_context/src/repo_map.rs::ensure_index
+      note: 扫描/检索前后源文件字节一致；首次索引在 tokio spawn_blocking 执行，async
+        调用方不被同步阻塞；根缺失/扫描失败返回空结果，不 panic。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::extracts_symbols_ranges_and_complexity
+      note: fixture 覆盖函数/方法/结构体/枚举/trait/impl/module/const/static/type
+        alias，符号按文件与名称可查，起止行覆盖语法节点。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::extracts_symbols_ranges_and_complexity
+        - crates/xgent_codeintel/src/lib.rs::tests::symbol_ranges_match_known_lines
+      note: 复杂度 = 1 + if / match arm / while / loop / for / ? / && / || 数量；fixture 断言含
+        if+&&+match 的方法 >=4、单 if 函数为 2。
+    - id: A9
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::skips_ignored_and_non_rust_files
+      note: fixture 同时放置 target/、node_modules/、.gitignore 命中目录、隐藏 .hidden.rs 与非 Rust
+        文件，索引只保留 src/a.rs；SKIP_DIRS 另含 .git/.worktrees 等。
+    - id: A10
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::resolves_workspace_imports_and_marks_external
+      note: use crate::foo::Bar 与 mod foo; 均产生到 src/foo.rs 的工作区 import 记录。
+    - id: A11
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::resolves_workspace_imports_and_marks_external
+        - crates/xgent_codeintel/src/lib.rs::tests::unresolved_imports_stay_unresolved_without_error
+      note: external_crate 首段标记 External；crate::missing::Thing 与 super::up::Other 标记
+        Unresolved；无工作区边、无报错。
+    - id: A12
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_deterministic_and_incremental
+      note: 同一 fixture 连续 scan 两次，FileEntry（含符号与 import）与 generation 完全一致。
+    - id: A13
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_deterministic_and_incremental
+      note: update_file 后其他文件 FileEntry 不变、新符号可查；remove_file 后符号消失且 generation 改变。
+    - id: A14
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::extracts_symbols_ranges_and_complexity
+        - crates/xgent_context/src/repo_map.rs::tests::retrieves_matching_symbols
+      note: symbols_of/file 返回单文件符号、import 与复杂度；RepoMap chunk 输出
+        path、kind/name/行范围/复杂度与工作区 import 摘要。
+    - id: A15
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::query_missing_file_returns_none_without_panic
+      note: 查询不存在/未索引文件时 file 与 symbols_of 返回 None，symbols_named 为空 Vec，不 panic。
+    - id: A16
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/lib.rs::tests::repo_map_is_ready
+      note: ContextStrategy::RepoMap 构造为
+        BuiltContextProvider::Ready(RepoMapContextProvider)，不再走 Unsupported。
+    - id: A17
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/repo_map.rs::tests::retrieves_matching_symbols
+        - crates/xgent_context/src/repo_map.rs::tests::file_hints_and_path_queries_return_the_whole_file_map
+        - crates/xgent_context/src/repo_map.rs::tests::current_file_is_prioritized_even_without_query_match
+        - crates/xgent_context/src/repo_map.rs::tests::respects_token_budget
+      note: "符号名精确/包含、@file: hint、路径与 current_file 均产生相关文件
+        chunk；当前文件即使无查询匹配也优先返回；chunk 总量受 max_tokens 约束。"
+    - id: A18
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/repo_map.rs::tests::no_match_returns_empty_without_error
+      note: 无符号/路径匹配时返回空 chunks、total_tokens=0，不报错。
+    - id: A19
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/repo_map.rs::tests::on_file_changed_updates_index_and_ignores_non_rust
+      note: 索引构建后把 src/a.rs 从 old_name 改为 new_name 并调用 on_file_changed，再检索 new_name
+        命中；旧索引被替换。
+    - id: A20
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/repo_map.rs::tests::on_file_changed_updates_index_and_ignores_non_rust
+      note: on_file_changed 收到 README.md 与 missing.rs 后索引保持可用，后续 new_name 检索仍命中，不
+        panic。
+    - id: A21
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_read_only_and_skips_unreadable_files
+        - crates/xgent_context/src/repo_map.rs::tests::retrieve_and_change_notification_do_not_write_files
+      note: scan 与 retrieve/on_file_changed 前后读取源文件字节完全一致。
+    - id: A22
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_context/src/repo_map.rs::ensure_index
+      note: 首次 ensure_index 用 tokio::task::spawn_blocking 执行 CodeIndex::scan，await
+        期间不占用 async worker；build_lock 防止并发重复扫描。
+    - id: A23
+      status: implemented-with-evidence
+      evidence:
+        - crates/xgent_codeintel/src/lib.rs::tests::scan_is_read_only_and_skips_unreadable_files
+      note: 注入非法 UTF-8 的 src/bad.rs 后扫描仍成功，坏文件被跳过、正常文件可查，不 panic；tree-sitter 解析失败时返回空
+        FileEntry 继续。
+  checks:
+    - name:
+        text: cargo check --workspace -j 2
+        truncated: false
+      result: passed
+      note:
+        text: F-21 worktree 全量编译检查通过（1m37s）。
+        truncated: false
+    - name:
+        text: CARGO_PROFILE_TEST_DEBUG=0 cargo test --workspace -j 2
+        truncated: false
+      result: passed
+      note:
+        text: 71 个测试套件全部 ok，0 failed；其中 xgent_codeintel 8、xgent_context 54、xgent_app 11
+          + ipc_integration。
+        truncated: false
+    - name:
+        text: cargo test -p xgent_codeintel -j 2
+        truncated: false
+      result: passed
+      note:
+        text: 新增 query_missing_file_returns_none_without_panic 后 9 passed, 0 failed。
+        truncated: false
+    - name:
+        text: cargo test -p xgent_codeintel -p xgent_context -j 2
+        truncated: false
+      result: passed
+      note:
+        text: 两个 crate 单测全绿（context 54 passed）。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 首期仅 Rust；直接调用边、Git 变更频率、多语言、3D L2 符号卫星/虫洞不在本期范围。
+      truncated: false
+    - text: 首次索引为全量扫描且不设硬文件上限；超大仓库的首次 RepoMap 延迟取决于后台扫描时间（不阻塞 UI）。
+      truncated: false
+    - text: 未做真实 daemon → IPC fs.changed → FileChangedEvent → RepoMap 的进程级端到端测试；已单测
+        ContextHub 广播，并编译验证 app 桥接接线。
+      truncated: false
+    - text: "模块解析为 best-effort：不支持 #[path]、复杂嵌套 use 分组、宏生成模块；无 crate/self/super
+        前缀的首段按外部 crate 处理。"
+      truncated: false
+    - text: "查询分词面向 ASCII 标识符；中文查询主要靠路径或 @file: hint 命中，不匹配 Rust 符号名。"
+      truncated: false
+    - text: 复杂度按语法决策点计数（match 每个 arm 计 1），不是认知复杂度。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-11-02T07:18:58.612Z
+blockers: []
+verification:
+  candidate_id: 870dd545-c0ba-41a0-bdf9-997fa2c28dc6
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:ef147804-429e-4c8d-b167-4ab230d97a45
+  iteration: 1
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks: []
+  summary:
+    text: "对候选 870dd545（f21-code-intelligence 未提交工作区）独立核对：新增
+      xgent_codeintel（符号/import/复杂度、确定性增量、忽略规则、只读）、xgent_context
+      RepoMapContextProvider（策略 Ready、评分检索、预算、on_file_changed）、ContextHub 广播与
+      xgent_app fs 桥接接线、Cargo 与文档同步。实际运行 `CARGO_PROFILE_TEST_DEBUG=0 cargo test
+      -p xgent_codeintel -p xgent_context -j 2`（9 + 54 全绿）与 `cargo check
+      --workspace -j 2`（通过）；`cargo test -p xgent_app` 因 F:
+      盘满（环境问题）未能完成，已列入风险。A1–A23 逐项核对均有测试或代码级证据，判定 pass。"
+    truncated: false
+  risks:
+    - text: '`cargo test -p xgent_app` 未能完成：编译 xgent_ui 测试变体时 rustc-LLVM 报 "IO failure
+        on output stream: no space on device"（F: 盘 100% 满，Avail 0）。该次构建未设置
+        CARGO_PROFILE_TEST_DEBUG=0，产生了完整调试信息的大量产物，属验证过程中的环境资源问题而非候选缺陷；xgent_app
+        侧接线仅由 `cargo check --workspace`（通过）与代码核对覆盖，未跑其测试套件。F: 盘仍为 0
+        可用，后续构建/归档前需要清理空间。'
+      truncated: false
+    - text: A3/A13 的“update_file 后 generation 变化”、A8 的“随源码变化可重算”、A19 的 provider
+        级“其他文件不变”、A22 的非阻塞时序只有代码级证据，无专门断言测试。
+      truncated: false
+    - text: 复杂度把每个 match arm 与 `?` 计为决策点（设计文档已注明）；测试仅对单 if 做精确数值断言，复杂函数用下界断言（>=4）。
+      truncated: false
+    - text: "`mod foo;` 与 `use` 在同一测试中共享到 src/foo.rs 的 Workspace 边断言，未单独区分；mod
+        解析正确性来自代码核对。"
+      truncated: false
+    - text: RepoMap 预算用 `max_tokens.max(1)` 作下限，若调用方传 max_tokens=0 仍可能返回 1
+        token；默认检索预算为 8000，当前未触发。
+      truncated: false
+    - text: "`ContextStrategy` 的文档注释仍写“MVP 仅用 OnDemand…其余为后续阶段占位”，与 RepoMap
+        已实现略有出入（不在本次验收要求的两份文档内）。"
+      truncated: false
+    - text: on_file_changed 每次深拷贝整个 CodeIndex 再原子替换，超大仓库下增量刷新有额外内存/CPU 成本（正确性无碍）。
+      truncated: false
+    - text: Builder handoff 的 known_limits 称“无 crate/self/super 前缀的首段按外部 crate
+        处理”，实际实现会先尝试工作区解析再记 External（说明性偏差，非仓库文档）。
+      truncated: false
+    - text: 无 daemon→IPC→RepoMap 的进程级端到端测试；ContextHub 广播与 app 桥接分别由单测和编译验证覆盖。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-11-02T07:48:45.182Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: "对候选 870dd545（f21-code-intelligence 未提交工作区）独立核对：新增
+        xgent_codeintel（符号/import/复杂度、确定性增量、忽略规则、只读）、xgent_context
+        RepoMapContextProvider（策略 Ready、评分检索、预算、on_file_changed）、ContextHub 广播与
+        xgent_app fs 桥接接线、Cargo 与文档同步。实际运行 `CARGO_PROFILE_TEST_DEBUG=0 cargo
+        test -p xgent_codeintel -p xgent_context -j 2`（9 + 54 全绿）与 `cargo check
+        --workspace -j 2`（通过）；`cargo test -p xgent_app` 因 F:
+        盘满（环境问题）未能完成，已列入风险。A1–A23 逐项核对均有测试或代码级证据，判定 pass。"
+      truncated: false
+    completed_at: 2026-11-02T07:48:45.182Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-11-02T06:18:55.755Z

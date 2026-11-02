@@ -7,6 +7,7 @@
 //! `Arc<dyn ContextProvider>` 注入 `AgentBridgeConfig.context`，agent 侧无感于
 //! 内置 vs 插件 provider 的区分（设计文档 §5.5：agent 从 ContextHub 取用）。
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -37,6 +38,20 @@ impl ContextHub {
     /// 动态注册插件 provider（full_id 已含 `plugin.` 前缀）。
     pub fn register_provider(&self, full_id: String, p: Arc<dyn ContextProvider>) {
         self.plugin_providers.write().push((full_id, p));
+    }
+
+    /// 广播文件变更给所有 provider（索引类实现增量刷新）。
+    ///
+    /// 先 clone Arc 出锁再 await，避免 parking_lot guard 跨 await。
+    pub async fn on_file_changed(&self, path: &PathBuf) {
+        let builtin: Vec<Arc<dyn ContextProvider>> = self.builtin.read().clone();
+        for provider in &builtin {
+            provider.on_file_changed(path).await;
+        }
+        let plugin: Vec<(String, Arc<dyn ContextProvider>)> = self.plugin_providers.read().clone();
+        for (_, provider) in &plugin {
+            provider.on_file_changed(path).await;
+        }
     }
 
     /// 按前缀移除（插件卸载时批量清理 `plugin.<id>.`）。
@@ -109,12 +124,17 @@ impl ContextProvider for ContextHub {
     async fn retrieve(&self, query: &ContextQuery) -> ContextResult {
         self.retrieve_all(query).await
     }
+
+    async fn on_file_changed(&self, path: &PathBuf) {
+        ContextHub::on_file_changed(self, path).await;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// 固定返回值的假 provider，用于验证合并与预算复核。
     struct Fixed {
@@ -259,5 +279,39 @@ mod tests {
         let (kept, total) = clamp_to_budget(chunks, 10);
         assert!(kept.is_empty(), "整块超预算应丢弃");
         assert_eq!(total, 0);
+    }
+}
+
+#[cfg(test)]
+mod file_change_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counting {
+        count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ContextProvider for Counting {
+        async fn retrieve(&self, _query: &ContextQuery) -> ContextResult {
+            ContextResult::default()
+        }
+
+        async fn on_file_changed(&self, _path: &PathBuf) {
+            self.count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn hub_broadcasts_file_changes_through_trait() {
+        let hub = ContextHub::default();
+        let count = Arc::new(AtomicUsize::new(0));
+        hub.set_builtin(vec![Arc::new(Counting {
+            count: count.clone(),
+        })]);
+        let provider: &dyn ContextProvider = &hub;
+        provider.on_file_changed(&PathBuf::from("src/a.rs")).await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 }

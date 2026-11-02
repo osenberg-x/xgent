@@ -160,7 +160,7 @@ fn main() {
             xgent_context::BuiltContextProvider::Unsupported(s) => {
                 tracing::error!(
                     strategy = ?s,
-                    "context_strategy 尚无实现，已中止启动（不静默回退到其他策略）。                     可用策略：on_demand"
+                    "context_strategy 尚无实现，已中止启动（不静默回退到其他策略）。                     可用策略：on_demand / repo_map"
                 );
                 std::process::exit(2);
             }
@@ -280,6 +280,9 @@ fn main() {
         client: ipc.clone(),
     })
     .insert_resource(NotifPump { rx: notif_rx })
+    .insert_resource(crate::fs_event_bridge::ContextProviderHandle(
+        context_hub.clone() as Arc<dyn xgent_context::ContextProvider>,
+    ))
     .insert_resource(xgent_agent::ProviderInfo {
         id: provider_id,
         model,

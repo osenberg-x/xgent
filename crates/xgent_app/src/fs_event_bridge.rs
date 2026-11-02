@@ -24,6 +24,10 @@ pub struct FileChangedMessage(pub FileChanged);
 #[derive(Message, Debug, Clone)]
 pub struct ConfigChangedMessage(pub serde_json::Value);
 
+/// 上下文 provider 句柄：文件变更时转发 `on_file_changed` 做增量索引。
+#[derive(Resource, Clone)]
+pub struct ContextProviderHandle(pub std::sync::Arc<dyn xgent_context::ContextProvider>);
+
 /// IPC 客户端 Resource（供桥接系统与 ProviderClient 共享）。
 #[derive(Resource, Clone)]
 pub struct IpcClientResource {
@@ -40,8 +44,32 @@ impl Plugin for FsEventBridgePlugin {
             .add_message::<xgent_ui::editor::io::BufferSavedEvent>()
             .add_systems(
                 Update,
-                (pump_notifications, bridge_file_changed, forward_save_event).chain(),
+                (
+                    pump_notifications,
+                    bridge_file_changed,
+                    forward_save_event,
+                    forward_context_file_changed,
+                )
+                    .chain(),
             );
+    }
+}
+
+/// 把 UI 的 `FileChangedEvent` 转给 ContextHub/RepoMap 增量刷新。
+fn forward_context_file_changed(
+    mut reader: MessageReader<xgent_ui::editor::conflict::FileChangedEvent>,
+    handle: Option<Res<ContextProviderHandle>>,
+    bridge: Res<xgent_agent::bridge::AgentBridge>,
+) {
+    let Some(handle) = handle else {
+        return;
+    };
+    for event in reader.read() {
+        let context = handle.0.clone();
+        let path = event.path.clone();
+        bridge.runtime.spawn(async move {
+            context.on_file_changed(&path).await;
+        });
     }
 }
 

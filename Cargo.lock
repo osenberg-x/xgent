@@ -9260,6 +9260,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xgent_codeintel"
+version = "0.1.0"
+dependencies = [
+ "ignore",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "xgent_context"
 version = "0.1.0"
 dependencies = [
@@ -9272,6 +9283,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "xgent_codeintel",
  "xgent_core",
  "xgent_settings_core",
 ]

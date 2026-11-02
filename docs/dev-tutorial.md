@@ -3,7 +3,7 @@
 > 本文档梳理 XGent 截至 2026-10-28 已实现的功能、对应的代码与文档、以及开发注意点。
 > **维护规则**：后续实现新功能或功能有变化，都需要更新这个文档（见 `AGENTS.md` 第 6 节）。
 >
-> 代码现状：19 个 crate 已实现（含 `xgent_terminal` / `xgent_spatial`），`cargo check --workspace` 通过，`crates/**/*.rs` 共 70002 行（2026-10-29 实测）。
+> 代码现状：20 个 crate 已实现（含 `xgent_terminal` / `xgent_spatial` / `xgent_codeintel`），`cargo check --workspace` 通过，`crates/**/*.rs` 共 78937 行（2026-11-02 实测）。
 > MVP-1（step1~step12）+ optimization 方案 O1~O10 + F-11 内置编辑器（P1）+ F-19 内置终端（P1）+ UI v8 M1~M7 已落地。
 > **2026-10-30 规划变更**：MVP-2（3D 首页）进入主线，M8 Git 探针顺延；边界见 `docs/design/requirements.md` §4.2/§7.2 与 `docs/design/ui-v8-3d-viewport.md`。
 
@@ -55,7 +55,7 @@
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化**（MVP-2，当前主线）：未实现；S0 数据内核（`xgent_spatial`，仅 crate 级 L0）与设计文档已就绪，第一里程碑为 S1 + 点击打开 + L1 文件/目录图（见 requirements §4.2）。
 - **F-20 时空回溯**（P1）：未实现；已有按轮文件检查点撤销（§5.14），完整时间线/时间锚点待 MVP-2 之后。
-- **F-21 代码智能管线**（P1）：未实现；目前只有 Rust 语法高亮与 `xgent_spatial` 的 manifest 依赖，符号/import/调用边未做。
+- **F-21 代码智能管线**（P1）：首期已实现（待独立验收）；`xgent_codeintel` 提供 Rust 符号/import/函数复杂度索引与 RepoMap provider；调用边/变更频率/多语言/3D L2 留后续。
 - **F-22 多 Agent 编排与沉浸式协作**（P2）：未实现。
 - **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
 - **插件系统**（架构设计）：✅ 已落地（WASM Component + wasmtime 29）。3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello` 测试 / `xgent_plugin_git` 参考）。插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider，动态安装卸载。详见 `docs/design/plugin-system-design.md` + 本指南 §5.13。
@@ -75,7 +75,8 @@ xgent_settings      ── Bevy Resource 包装 + fluent Localizer
 xgent_provider      ── LlmProvider trait + OpenAiCompat 实现，无 Bevy
 xgent_daemon        ── 独立 bin，纯 tokio：provider 池 + 配置协调 + 文件监听 + 多客户端同步
 xgent_tools         ── Tool trait + 安全策略 + 执行器 + 4 内置工具，无 Bevy
-xgent_context       ── ContextProvider trait + OnDemand 实现，无 Bevy
+xgent_codeintel     ── Rust 符号/import/复杂度索引 + RepoMap 数据源，无 Bevy（F-21）
+xgent_context       ── ContextProvider trait + OnDemand/RepoMap 实现，无 Bevy
 xgent_terminal      ── PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte）+ 双宽单元格模型（display_width/layout_cells），无 Bevy，UI 侧进程
 xgent_spatial       ── 3D 空间图 S0：Cargo.toml 依赖投影 + 确定性/增量布局，无 Bevy（F-16，与 UI 解耦）
 xgent_agent         ── agent loop + ECS 桥接 + SessionStore
@@ -97,7 +98,8 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolCtx.tool_policy` 为 `Arc<RwLock<ToolPolicyConfig>>`（改完下一次调用生效）、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自共享句柄 `with_shared_params(Arc<RwLock<ToolParams>>)`，`with_params(&ToolParams)` 取快照）；`policy_targets()` 列出已注册工具的 id+tier、`resolved_policy(id, policy)` 给设置面板显示解析后的三态、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError`；**双宽单元格模型**（M4-T2）：`display_width`/`display_width_str`（wcwidth）、`CellRun`/`layout_cells`（按格布局内核）、`RenderLine`/`StyledSpan`/`SpanStyle`/`Color`/`TerminalParser` |
 | `xgent_spatial` | `parse_manifest`/`ManifestInfo`、`scan(root)`（crate 级 L0）、`scan_with_options(root, ScanOptions)`（L1 文件/目录图 + crate 叠加）、`layout`/`layout_incremental`、`LayoutConfig`/`LayoutReport`；类型在 `xgent_core::spatial`（`SpatialGraph`/`SpatialNode`/`SpatialEdge`/`SpatialCluster`，`SpatialGraph.omitted_nodes` 记录裁剪数） |
-| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入快照、`with_shared_limits(Arc<RwLock<RetrievalLimits>>)` 供热应用，缺省等于原常量；每次检索开头取一份限额快照）、`RepoMap`/`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`/`build_context_provider_shared(strategy, root, Arc<RwLock<limits>>)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider）、`XgentContextPlugin` |
+| `xgent_codeintel` | `CodeIndex::scan/update_file/remove_file/update_file_from_disk`、`FileEntry`/`Symbol`/`SymbolKind`/`SourceRange`/`Import`/`ImportTarget`、确定性 `generation`；tree-sitter-rust 解析（F-21） |
+| `xgent_context` | `ContextProvider` trait、`OnDemandContextProvider`（完整：CJK bigram 分词 + rg 字面量检索 + `@file:` 线索 + spawn_blocking 遍历，见 §5.10；五个遍历/检索限额改为 `RetrievalLimits` 字段，`with_limits` 注入快照、`with_shared_limits(Arc<RwLock<RetrievalLimits>>)` 供热应用，缺省等于原常量；每次检索开头取一份限额快照）、`RepoMapContextProvider`（首期已实现：懒建索引 + 符号/路径/当前文件评分 + `on_file_changed` 增量）、`Vector`/`Lsp`/`Hybrid`（占位）、`build_context_provider(strategy, root, limits)`/`build_context_provider_shared(strategy, root, Arc<RwLock<limits>>)`、`ContextHub`（Bevy Resource，聚合内置+插件 provider，合并后按预算复核，impl ContextProvider + on_file_changed 广播）、`XgentContextPlugin` |
 | `xgent_agent` | `XgentAgentPlugin`、`AgentBridge`/`AgentCommand`(StartLoop/Abort/ConfirmDecision/Steering/FollowUp)/`AgentEvent`(含 `RetryAttempt`/`Compacted`)、`AgentBridgeConfig`(含 `compaction`/`context_window`/`compaction_settings`/`retrieval_max_tokens`/`max_events_per_frame`)、`RetryConfig`/`stream_with_retry`、`run_agent_loop`、`StreamOutcome`(tool_calls/usage/stop_reason/pending_steering)、`maybe_compact`、`Conversation`(含 `pending_tool_calls` 批次 + `flush_pending_tool_calls`)/`ConversationStatus`/`persist_compaction`、`SessionStore`、`CompactionProvider` trait + `LlmCompactor` 实现 + `CompactionSettings`/`should_compact`/`find_cut_point`/`apply_compaction`/`compaction_context_tokens`、`tokenizer`(estimate_message_tokens/estimate_messages_tokens)、`build_request`、events.rs（含插件 Message: `CommandResultMessage`/`PluginUnregisterMessage`/`PluginCommandTriggered`） |
 | `xui` | `TextEditor`/`Rope`/`HighlightCache`、**`ScrollFrame`（唯一可滚动入口：`vertical()`/`horizontal()`/`stick_bottom()` + `ScrollFrameMarker` + `scroll_to_child`）**、`StickToBottom`、`Scrollbar`、`region_fill()`/`fill_region()`（唯一填满契约）、**`Ellipsis`/`EllipsisMode`(End/Mid)/`EllipsisCache`/`compute_ellipsis`（单行省略原语）**、`CommandPalette`/`CommandRegistry`（含 `remove_by_prefix`/`try_register`）、`HotkeyRegistry`、`ChatInput`、`ShortcutsPlugin`、**`VirtualList`（含 `VirtualListItem`/不等高行高表 `build_measured_offsets`）**、`i18n_bridge`（`tr`/`tr_with`/`Strings`） |
 | `xgent_ui` | `XgentUiPlugin`、`chat_panel`/`file_panel`/`top_bar`/`status_bar`/`tool_panel`/`command_palette`/`confirm_dialog`/`settings_panel`/`shortcuts`/`theme`/`layout`/`i18n`、`editor/`（buffer/command/conflict/io/state/tabs/at_syntax）、`terminal/`（mod/io/tabs/input/output/**metrics**：PTY 桥接 + 多 tab + 行编辑 + **按格定位渲染** + **实测等宽度量** + SideView 集成）、`fonts`（四槽位候选栈 + `UiFonts` + `mono_text`）、`handle_palette_triggers` 路由 `plugin.` 前缀到 `PluginCommandTriggered` |
@@ -953,6 +955,17 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **不折叠常驻侧栏**：宇宙模式下 `responsive_collapse` 直接返回，否则窗口 <1100px 会把对话一起收起。
 - **自动退化**：release 下帧率持续不足会把 `three_d_home` 写回 false 并 toast 说明；这与用户手动关闭偏好走同一条布局切换链路。
 - **走查记录**：`docs/notes/mvp2-layout-walkthrough.md`（宇宙 / 经典 / 经典+编辑器三张截图与本轮修复项）。
+
+### 5.28 代码智能管线（F-21 首期）
+
+`xgent_codeintel` 是无 Bevy 的 Rust 代码索引：
+
+- **数据**：`CodeIndex` 按文件保存 `Symbol`（函数/方法/结构体/枚举/trait/impl/module/const/static/type alias，含起止行与函数决策复杂度）与 `Import`（`use`/`mod` 解析到工作区文件，外部/未解析单独标记）；路径相对项目根，符号/import 稳定排序，`generation` 由路径 + 内容哈希决定。
+- **解析**：tree-sitter-rust 0.23（D-06 随二进制）；`use` 支持 `crate`/`super`/`self`、`as` 与简单 `{a,b}`；`mod foo;` 尝试 `foo.rs`/`foo/mod.rs`；无法静态解析不猜测、不报错。
+- **增量**：`update_file`/`remove_file`/`update_file_from_disk` 只替换目标文件；provider 的 `ContextProvider::on_file_changed` 在阻塞线程池增量刷新；`ContextHub` 广播，`xgent_app` 的 fs 桥接把 `FileChangedEvent` 转发过来。
+- **RepoMap**：`build_context_provider(RepoMap)` 返回 Ready；首次检索后台建索引，按符号名/路径/当前文件评分，输出受 token 预算约束的 `ContextChunk`；无匹配/根缺失返回空结果。
+- **边界**：首期仅 Rust；无直接调用边、git 变更频率、3D L2 卫星/虫洞、多语言、LSP/类型推导。设计见 `docs/design/code-intelligence-design.md`。
+- **测试**：`cargo test -p xgent_codeintel`（符号/import/忽略/确定性/增量/删除）、`cargo test -p xgent_context`（RepoMap Ready/检索/变更/缺失根）。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

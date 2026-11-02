@@ -140,6 +140,7 @@ MVP-2 范围（3D 首页，当前主线）：
 
 - **布局**：3D 代码宇宙占 `Slot::Center`；打开文件/终端时主区让位，Esc 回宇宙；对话移到右侧栏常驻（写代码时仍可见）。
 - **3D 视口**：F-16，见 `docs/design/ui-v8-3d-viewport.md`；数据层 `xgent_spatial`（S0 已交付，MVP-2 扩 L1 文件/目录图；无 Bevy），视口与交互在 `xgent_ui`。
+- **代码智能**：F-21，见 `docs/design/code-intelligence-design.md`；数据层 `xgent_codeintel`（tree-sitter 符号/import/复杂度；无 Bevy），RepoMap 检索在 `xgent_context`。
 - **2D fallback**：偏好可关闭 3D 首页，回到 MVP-1 布局。
 
 预留（不在 MVP-2）：
@@ -165,6 +166,7 @@ xgent/                     workspace 根
 │   ├── xgent_tools/           # 工具枚举 + 安全策略 + 执行器（不依赖 Bevy）
 │   ├── xgent_context/         # 项目上下文检索（ContextProvider trait + A 方案实现，不依赖 Bevy）
 │   ├── xgent_terminal/      # (lib) 终端 PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty + vte，不依赖 Bevy）
+│   ├── xgent_codeintel/     # (lib) Rust 符号/import/复杂度索引 + RepoMap 数据源（tree-sitter，不依赖 Bevy，F-21）
 │   ├── xgent_agent/           # agent loop + 对话编排 + ECS 桥接
 │   ├── xui/                   # (lib) 通用 Bevy UI 组件库（可独立发布，纯依赖 bevy + xui_i18n）
 │   ├── xgent_ui/              # (lib) XGent 业务 UI：对话/工具/文件面板等（依赖 xui）
@@ -216,6 +218,7 @@ xgent_context ← xgent_agent
 xgent_settings ← xgent_daemon, xgent_agent, xgent_ui
      ↑
 xgent_terminal ← xgent_ui
+xgent_codeintel ← xgent_context
 xgent_agent ← xgent_ui
 xgent_pet ← xgent_ui（可选）
      ↑
