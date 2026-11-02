@@ -2,6 +2,8 @@
 comet_change: mvp2-3d-home
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-11-02-mvp2-3d-home
+status: final
 ---
 
 # Design
