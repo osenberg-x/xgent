@@ -58,8 +58,10 @@ pub fn build_context_provider_shared(
         ContextStrategy::OnDemand => BuiltContextProvider::Ready(Box::new(
             OnDemandContextProvider::with_shared_limits(project_root, limits),
         )),
-        // B/C/D/E 仍是占位（repo_map/vector/lsp/hybrid 返回空结果）
-        ContextStrategy::RepoMap => BuiltContextProvider::Unsupported(strategy),
+        ContextStrategy::RepoMap => {
+            BuiltContextProvider::Ready(Box::new(RepoMapContextProvider::new(project_root)))
+        }
+        // C/D/E 仍是占位（vector/lsp/hybrid 返回空结果）
         ContextStrategy::Vector => BuiltContextProvider::Unsupported(strategy),
         ContextStrategy::Hybrid => BuiltContextProvider::Unsupported(strategy),
     }
@@ -106,15 +108,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn repo_map_is_ready() {
+        match build_context_provider(
+            ContextStrategy::RepoMap,
+            PathBuf::from("/proj"),
+            RetrievalLimits::default(),
+        ) {
+            BuiltContextProvider::Ready(_) => {}
+            BuiltContextProvider::Unsupported(_) => panic!("RepoMap 应有实现"),
+        }
+    }
+
     /// 无实现的策略必须报 Unsupported，**不得**静默回退到 OnDemand——
     /// 否则误配置的项目看起来完全正常（R2-4）。
     #[test]
     fn unimplemented_strategies_report_unsupported() {
-        for s in [
-            ContextStrategy::RepoMap,
-            ContextStrategy::Vector,
-            ContextStrategy::Hybrid,
-        ] {
+        for s in [ContextStrategy::Vector, ContextStrategy::Hybrid] {
             match build_context_provider(s, PathBuf::from("/proj"), RetrievalLimits::default()) {
                 BuiltContextProvider::Unsupported(got) => {
                     assert_eq!(format!("{got:?}"), format!("{s:?}"), "应回报原策略");

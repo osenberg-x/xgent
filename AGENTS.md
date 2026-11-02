@@ -78,7 +78,7 @@ cargo clippy --workspace          # lint
 
 ## 4. crate 划分与依赖
 
-共 19 个 crate（下表为核心 13 个：MVP-1 的 12 个 + F-19 终端引入 `xgent_terminal`；另有插件系统 5 个（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`/`xgent_plugin_hello`/`xgent_plugin_git`）与 F-16 的 `xgent_spatial`（S0 已交付；MVP-2 扩 L1 文件/目录图），见 `docs/dev-tutorial.md` §2），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
+共 20 个 crate（下表为核心 14 个：MVP-1 的 12 个 + F-19 终端引入 `xgent_terminal` + F-21 代码智能 `xgent_codeintel`；另有插件系统 5 个（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`/`xgent_plugin_hello`/`xgent_plugin_git`）与 F-16 的 `xgent_spatial`（S0 已交付；MVP-2 扩 L1 文件/目录图），见 `docs/dev-tutorial.md` §2），按依赖关系自底向上实现（顺序见 `docs/plans/README.md`）：
 
 | crate | 类型 | 依赖 | 职责 |
 |:---|:---|:---|:---|
@@ -92,6 +92,7 @@ cargo clippy --workspace          # lint
 | xgent_context | lib | xgent_core, settings_core | ContextProvider trait + 方案 A 检索（不依赖 Bevy） |
 | xgent_agent | lib | core, provider, tools, context, settings | agent loop + ECS 桥接 |
 | xgent_terminal | lib | xgent_core, settings_core | PTY 抽象（TerminalBackend trait + LocalPtyBackend，portable-pty）+ ANSI 解析（vte）+ 双宽单元格模型（display_width / layout_cells）（不依赖 Bevy，UI 侧进程） |
+| xgent_codeintel | lib | tree-sitter, ignore | Rust 代码智能索引：符号/import/函数复杂度 + RepoMap 数据源（无 Bevy，F-21 首期） |
 | xui | lib | bevy, xui_i18n | 通用 Bevy UI 组件库（可独立发布，不依赖任何 xgent_*） |
 | xgent_ui | lib | xui, core, settings, agent, terminal | XGent 业务 UI（对话/工具/文件面板/终端等） |
 | xgent_app | bin | all UI-side | UI 进程入口：组装插件、daemon 拉起、IPC 客户端、项目打开 |
@@ -196,9 +197,9 @@ xgent_app → 组装所有 UI 侧 crate
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP-1 + F-11 编辑器 + F-19 终端已落地、MVP-2（3D 首页）首期 + S2 交互联动已交付的阶段。19 个 crate，`cargo check --workspace` 通过，约 7 万行 Rust（`crates/**/*.rs`，2026-10-29 实测 71276 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 已随 M6.5 接入 chat_panel）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP-1 + F-11 编辑器 + F-19 终端已落地、MVP-2（3D 首页）首期 + S2 交互联动已交付的阶段。20 个 crate，`cargo check --workspace` 通过，约 7.9 万行 Rust（`crates/**/*.rs`，2026-11-02 实测 78937 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 已随 M6.5 接入 chat_panel）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（Transcript 顺序权威/Markdown 终稿与内联组/`@` 补全/ContextSet+sidecar/消息虚拟窗口；实现提交 `9ac4daf` / `b962f97` / `5dde747`，复审修复 `e485d5e`（台账 §10 勘误 51））；**MVP-2 3D 首页**已交付首期 + S2 交互联动（G7 通过；L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback、Tab 遍历、搜索飞行、2D↔3D 联动、tooltip/详情卡）；M8 Git 探针顺延。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。后续迭代从 `docs/design/requirements.md` §4.3 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（Transcript 顺序权威/Markdown 终稿与内联组/`@` 补全/ContextSet+sidecar/消息虚拟窗口；实现提交 `9ac4daf` / `b962f97` / `5dde747`，复审修复 `e485d5e`（台账 §10 勘误 51））；**MVP-2 3D 首页**已交付首期 + S2 交互联动（G7 通过；L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback、Tab 遍历、搜索飞行、2D↔3D 联动、tooltip/详情卡）；M8 Git 探针顺延。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。F-21 代码智能管线首期已实现、待独立验收（Rust 符号/import/复杂度 + RepoMap）；后续迭代从 `docs/design/requirements.md` §4.3 的 P1/P2 项推进。
 
 ---
 
