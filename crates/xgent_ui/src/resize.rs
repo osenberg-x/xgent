@@ -391,6 +391,16 @@ fn apply_chat_side_preference(
         size::CHAT_SIDE_W_DEFAULT
     };
     if mode_now != LayoutMode::Universe {
+        // 经典回退的 `side-dock` 是编辑器坞：从宇宙切过来时恢复 720 默认；
+        // 只在这一帧切一次，用户之后拖的编辑器坞宽度不再覆盖。
+        if last.is_some_and(|(previous, _)| previous == LayoutMode::Universe)
+            && let Some(current) = tree.leaf_size(leaf_ids::SIDE_DOCK)
+        {
+            tree.set_leaf_size(
+                leaf_ids::SIDE_DOCK,
+                current.with_current(size::CONTEXT_W_DEFAULT),
+            );
+        }
         *last = Some((mode_now, width));
         return;
     }
@@ -410,10 +420,14 @@ fn apply_chat_side_preference(
 /// 双击手柄：复位该叶子为默认宽度（300ms 内两次按下）。
 fn handle_double_click_reset(
     mut tree: ResMut<SplitTree>,
+    mode: Option<Res<LayoutMode>>,
     handles: Query<&SplitHandleMarker, Added<Pressed>>,
     time: Res<Time>,
     mut last: Local<Option<f64>>,
 ) {
+    let universe = mode
+        .as_deref()
+        .is_none_or(|mode| *mode == LayoutMode::Universe);
     for marker in handles.iter() {
         let now = time.elapsed_secs_f64();
         if let Some(prev) = *last
@@ -422,7 +436,8 @@ fn handle_double_click_reset(
             if let Some(current) = tree.leaf_size(marker.leaf) {
                 let reset = match marker.leaf {
                     leaf_ids::DRAWER => size::DRAWER_W_PREFERRED,
-                    leaf_ids::SIDE_DOCK => size::CHAT_SIDE_W_DEFAULT,
+                    leaf_ids::SIDE_DOCK if universe => size::CHAT_SIDE_W_DEFAULT,
+                    leaf_ids::SIDE_DOCK => size::CONTEXT_W_DEFAULT,
                     _ => size::CONTEXT_W_DEFAULT,
                 };
                 tree.set_leaf_size(marker.leaf, current.with_current(reset));
@@ -630,6 +645,16 @@ mod tests {
         app.update();
 
         *app.world_mut().resource_mut::<LayoutMode>() = LayoutMode::Classic;
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<SplitTree>()
+                .leaf_size(leaf_ids::SIDE_DOCK)
+                .unwrap()
+                .preferred(),
+            720.0,
+            "从宇宙切到经典应恢复编辑器坞默认宽度"
+        );
         app.world_mut()
             .resource_mut::<SplitTree>()
             .set_leaf_size(leaf_ids::SIDE_DOCK, LeafSize::Min(320.0, 700.0));

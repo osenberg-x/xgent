@@ -15,7 +15,9 @@ use crate::error::SpatialError;
 use crate::manifest::{DependencyKind, ManifestDependency, parse_manifest_at};
 
 /// 扫描时跳过的目录名：构建产物、版本库、Agent 状态与工作树。
-const SKIP_DIRS: &[&str] = &[
+///
+/// `xgent_ui` 的文件变更刷新也复用这份名单，保证「扫描忽略」与「刷新忽略」同源。
+pub const SKIP_DIRS: &[&str] = &[
     "target",
     ".git",
     ".comet",
@@ -69,13 +71,28 @@ pub fn scan(root: &Path) -> Result<SpatialGraph, SpatialError> {
 }
 
 /// 按选项扫描：`l1=false` 保持 S0 的 crate 级行为。
-pub fn scan_with_options(
-    root: &Path,
-    options: ScanOptions,
-) -> Result<SpatialGraph, SpatialError> {
+pub fn scan_with_options(root: &Path, options: ScanOptions) -> Result<SpatialGraph, SpatialError> {
     let l0 = scan_l0(root)?;
     if !options.l1 {
         return Ok(l0);
+    }
+    if options.ignore {
+        // 规格要求「没有 .gitignore 或规则无法解析」时只警告一次，不阻塞扫描。
+        let gitignore = root.join(".gitignore");
+        if gitignore.is_file() {
+            let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+            if let Some(error) = builder.add(&gitignore) {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    tracing::warn!(path = %gitignore.display(), %error, ".gitignore 解析失败，L1 扫描仅使用内置忽略规则");
+                });
+            }
+        } else {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                tracing::warn!(root = %root.display(), "未找到 .gitignore，L1 扫描仅使用内置忽略规则");
+            });
+        }
     }
     build_l1(root, options, l0)
 }
@@ -160,7 +177,10 @@ fn build_l1(
         .collect();
     let mut dir_weights: BTreeMap<SpatialNodeId, f32> =
         dir_ids.values().map(|id| (*id, 1.0)).collect();
-    for node in nodes.iter().filter(|node| node.kind == SpatialNodeKind::File) {
+    for node in nodes
+        .iter()
+        .filter(|node| node.kind == SpatialNodeKind::File)
+    {
         if let Some(path) = &node.path {
             for ancestor in path.ancestors().skip(1) {
                 if let Some(id) = dir_ids.get(ancestor) {
@@ -189,9 +209,7 @@ fn build_l1(
         let Some(parent) = entry.path.parent() else {
             continue;
         };
-        if let (Some(&from), Some(&to)) =
-            (path_to_id.get(parent), path_to_id.get(&entry.path))
-        {
+        if let (Some(&from), Some(&to)) = (path_to_id.get(parent), path_to_id.get(&entry.path)) {
             edges.push(SpatialEdge {
                 from,
                 to,
@@ -282,7 +300,9 @@ fn collect_fs_entries(root: &Path, use_ignore: bool) -> Result<Vec<FsEntry>, Spa
 }
 
 fn is_skipped_dir(entry: &ignore::DirEntry) -> bool {
-    entry.file_type().is_some_and(|file_type| file_type.is_dir())
+    entry
+        .file_type()
+        .is_some_and(|file_type| file_type.is_dir())
         && entry
             .file_name()
             .to_str()
@@ -326,7 +346,12 @@ fn select_entries(entries: &[FsEntry], limit: usize) -> (Vec<FsEntry>, usize) {
     let mut files: Vec<&FsEntry> = entries
         .iter()
         .filter(|entry| entry.kind == FsKind::File)
-        .filter(|entry| entry.path.parent().is_some_and(|parent| kept_dirs.contains(parent)))
+        .filter(|entry| {
+            entry
+                .path
+                .parent()
+                .is_some_and(|parent| kept_dirs.contains(parent))
+        })
         .collect();
     files.sort_by(|a, b| {
         b.weight()
@@ -344,7 +369,10 @@ fn build_clusters(
     root: &Path,
     entries: &[FsEntry],
 ) -> (Vec<SpatialCluster>, BTreeMap<String, ClusterId>) {
-    let tops: BTreeSet<String> = entries.iter().filter_map(|entry| entry.top.clone()).collect();
+    let tops: BTreeSet<String> = entries
+        .iter()
+        .filter_map(|entry| entry.top.clone())
+        .collect();
     let mut clusters = vec![SpatialCluster {
         id: ClusterId(0),
         label: root_label(root),
@@ -472,10 +500,13 @@ fn scan_l0(root: &Path) -> Result<SpatialGraph, SpatialError> {
 
     let mut packages = Vec::new();
     for path in &manifest_paths {
-        let source = std::fs::read_to_string(path).map_err(|source| SpatialError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error, "跳过无法读取的 Cargo.toml");
+                continue;
+            }
+        };
         match parse_manifest_at(path, &source) {
             Ok(info) => {
                 let dir = path
@@ -490,7 +521,10 @@ fn scan_l0(root: &Path) -> Result<SpatialGraph, SpatialError> {
             }
             // 纯 [workspace] manifest 没有 package 名，跳过。
             Err(SpatialError::MissingPackage { .. }) => {}
-            Err(err) => return Err(err),
+            // 单个损坏的 manifest 不该让整张图失败：任意项目都要有目录/文件图。
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error, "跳过无法解析的 Cargo.toml");
+            }
         }
     }
 

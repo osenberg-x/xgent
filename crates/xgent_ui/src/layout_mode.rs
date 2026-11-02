@@ -94,6 +94,7 @@ fn apply_layout_mode(
     q_parent: Query<&ChildOf>,
     mut vis: Query<&mut PanelVisibility>,
     mut commands: Commands,
+    mut layout: ResMut<crate::panels::SlotLayout>,
     mut retarget: MessageWriter<PanelRetargetSlot>,
     mut activate: MessageWriter<PanelActivate>,
     mut deactivate: MessageWriter<PanelDeactivate>,
@@ -151,8 +152,10 @@ fn apply_layout_mode(
     }
 
     match want {
-        // 宇宙：空间回 Center 当首页；对话一直在 SideDock，不动。
+        // 宇宙：空间回 Center 当首页；对话常驻 SideDock，必须显式展开——
+        // 经典模式下的 Esc/窄窗折叠会留下 Closed 状态，否则对话整块消失。
         LayoutMode::Universe => {
+            layout.set_open(Slot::SideDock, true);
             activate.write(PanelActivate { id: ids::SPACE });
         }
         // 经典：对话回 Center；space 留在 SideDock 且失活，免得它顶掉对话。

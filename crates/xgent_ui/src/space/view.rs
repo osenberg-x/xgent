@@ -1,28 +1,35 @@
 //! 3D 空间视口：离屏纹理 + 实例化星体/边 + 投影 HUD（S1 首期）。
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::camera::RenderTarget;
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton};
+use bevy::input::mouse::{
+    AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseScrollUnit,
+};
+use bevy::input_focus::InputFocus;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::ui_widgets::Button;
-use bevy::window::PrimaryWindow;
+use bevy::window::{Monitor, PrimaryMonitor, PrimaryWindow, WindowOccluded};
 use xgent_core::spatial::{SpatialGraph, SpatialNode, SpatialNodeId, SpatialNodeKind};
-use xgent_settings::Localizer;
+use xgent_settings::{GlobalConfigRes, Localizer};
 use xgent_spatial::{LayoutConfig, layout};
 use xui::Ellipsis;
 
+use crate::editor::conflict::FileChangedEvent;
 use crate::editor::tabs::OpenFileRequest;
 use crate::file_panel::ProjectRoot;
 use crate::fonts::{ellipsis_text, ui_text};
-use crate::i18n::tr;
+use crate::i18n::{tr, tr_with};
+use crate::kit::ToastMessage;
 use crate::layout::CenterHostMarker;
+use crate::layout_mode::LayoutMode;
 use crate::panels::{
     PanelDescriptor, PanelRegister, PanelRegistry, PanelVisibility, Slot, SlotLayout, ids,
 };
+use crate::settings_panel::Save3DHomeMessage;
 use crate::space::scan::ScanJob;
 use crate::theme::Theme;
 
@@ -39,6 +46,65 @@ pub struct SpaceGraph(pub SpatialGraph);
 pub struct SpaceLoadState {
     job: Option<ScanJob>,
     loaded: bool,
+    root: Option<PathBuf>,
+}
+
+/// 文件变更后的重扫节奏（防抖，避免每次保存都全量重扫）。
+#[derive(Resource, Default)]
+struct SpaceRefresh {
+    dirty: bool,
+    last_event: f64,
+}
+
+/// 当前图的包围球半径：相机距离夹取与星体尺寸都按它缩放。
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct SpaceExtent {
+    /// 包围球半径（世界单位）。
+    pub radius: f32,
+}
+
+/// 运行期帧率观测（G7 退化梯的自动触发依据）。
+#[derive(Resource, Default)]
+struct SpacePerf {
+    /// 预热结束时刻（秒）；`None` = 尚未开始观测。
+    warmup_until: Option<f64>,
+    /// 连续超预算帧数。
+    over_frames: u32,
+}
+
+/// 窗口是否被完全遮挡：被遮挡时 DWM 会限帧，不能据此降级。
+#[derive(Resource, Default)]
+struct SpaceOccluded(bool);
+
+/// 连续超预算帧数达到该值时降一档（约 3 秒 @60fps）。
+const DEGRADE_AFTER_FRAMES: u32 = 180;
+/// 帧间隔超过该值视为“掉出 60fps”（22ms ≈ 45fps）。
+const FRAME_BUDGET_MS: f64 = 22.0;
+/// 预热时长（秒）：启动扫描/布局/首帧编译不计入。
+const DEGRADE_WARMUP_SECS: f64 = 5.0;
+
+/// 退化梯的下一步动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PerfAction {
+    /// 不动。
+    None,
+    /// 降到 800 档（关边、降节点上限）。
+    Reduce,
+    /// 停用 3D 首页，回退 2D。
+    Fallback2d,
+}
+
+/// 纯决策：当前档位 + 连续超预算帧数 → 下一步。
+fn degrade_after(quality: ViewQuality, over_frames: u32) -> PerfAction {
+    if over_frames < DEGRADE_AFTER_FRAMES {
+        return PerfAction::None;
+    }
+    match quality {
+        ViewQuality::Full => PerfAction::Reduce,
+        ViewQuality::Reduced => PerfAction::Fallback2d,
+        // Static 是手动/调试档，不再自动推进。
+        ViewQuality::Static => PerfAction::None,
+    }
 }
 
 /// 星体与边共享的 mesh/material。
@@ -93,6 +159,8 @@ pub struct OrbitCamera {
 pub struct SpatialStar {
     /// 空间节点 id。
     pub id: SpatialNodeId,
+    /// 节点类型（只有 `File` 可打开）。
+    pub kind: SpatialNodeKind,
     /// 展示名。
     pub label: String,
     /// 文件/目录路径。
@@ -158,19 +226,31 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpaceGraph>()
             .init_resource::<SpaceLoadState>()
+            .init_resource::<SpaceRefresh>()
+            .init_resource::<SpaceExtent>()
+            .init_resource::<SpacePerf>()
+            .init_resource::<SpaceOccluded>()
             .init_resource::<SpacePickState>()
             .init_resource::<ViewQuality>()
+            .add_message::<FileChangedEvent>()
+            .add_message::<WindowOccluded>()
+            .add_message::<ToastMessage>()
+            .add_message::<Save3DHomeMessage>()
             .add_systems(PostStartup, setup_space)
             .add_systems(
                 Update,
                 (
+                    mark_space_dirty,
+                    track_space_occlusion,
                     load_space_graph,
+                    reset_space_quality_on_mode,
                     sync_space_graph,
                     orbit_space_camera,
                     pick_space_stars,
                     sync_space_theme,
                     sync_space_quality_badge,
                     sync_space_camera_active,
+                    watch_space_performance,
                     update_space_hud,
                     resize_space_target,
                 )
@@ -189,6 +269,7 @@ fn setup_space(
     mut register: MessageWriter<PanelRegister>,
 ) {
     let Ok(center) = q_main.single() else {
+        tracing::warn!("缺少 CenterHostMarker，3D 空间视图未装配");
         return;
     };
 
@@ -338,18 +419,87 @@ fn setup_space(
     });
 }
 
+/// 文件变更 → 标记空间图待刷新（防抖在 `load_space_graph` 里做）。
+fn mark_space_dirty(
+    mut reader: MessageReader<FileChangedEvent>,
+    root: Option<Res<ProjectRoot>>,
+    time: Res<Time>,
+    mut refresh: ResMut<SpaceRefresh>,
+) {
+    let root = root.as_deref().map(|root| root.path.as_path());
+    for event in reader.read() {
+        if is_refresh_ignored(root, &event.path) {
+            continue;
+        }
+        refresh.dirty = true;
+        refresh.last_event = time.elapsed_secs_f64();
+    }
+}
+
+/// 变更路径是否落在空间图忽略目录下。
+///
+/// 只按**项目根内的目录分量**判断：项目本身放在 `.worktrees/`、`node_modules/`
+/// 之类目录下时不能把整个项目当成噪声；文件名恰好叫 `target` 也不忽略。
+fn is_refresh_ignored(root: Option<&Path>, path: &Path) -> bool {
+    let Some(relative) = root.and_then(|root| path.strip_prefix(root).ok()) else {
+        return false;
+    };
+    relative.ancestors().skip(1).any(|dir| {
+        dir.components().any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .is_some_and(|name| xgent_spatial::workspace::SKIP_DIRS.contains(&name))
+        })
+    })
+}
+
+/// 跟踪窗口遮挡状态：被遮挡时 DWM 可能把渲染限到 30fps。
+fn track_space_occlusion(
+    mut reader: MessageReader<WindowOccluded>,
+    mut occluded: ResMut<SpaceOccluded>,
+) {
+    for event in reader.read() {
+        occluded.0 = event.occluded;
+        tracing::info!(occluded = event.occluded, "空间视口遮挡状态变化");
+    }
+}
+
 fn load_space_graph(
     mut state: ResMut<SpaceLoadState>,
     root: Option<Res<ProjectRoot>>,
+    mode: Option<Res<LayoutMode>>,
+    time: Res<Time>,
+    mut refresh: ResMut<SpaceRefresh>,
     mut graph: ResMut<SpaceGraph>,
 ) {
-    if state.loaded {
+    let Some(root) = root else {
+        return;
+    };
+    if state.root.as_deref() != Some(root.path.as_path()) {
+        if let Some(job) = state.job.take() {
+            job.cancel();
+        }
+        state.root = Some(root.path.clone());
+        state.loaded = false;
+        refresh.dirty = false;
+    }
+    // 经典 2D 回退不扫描：用户看不到 3D，不必为整棵文件树付扫描成本。
+    if mode
+        .as_deref()
+        .is_some_and(|mode| *mode == LayoutMode::Classic)
+    {
         return;
     }
-    if state.job.is_none() {
-        let Some(root) = root else {
+    if state.loaded {
+        if refresh.dirty && time.elapsed_secs_f64() - refresh.last_event >= 0.8 {
+            state.loaded = false;
+            refresh.dirty = false;
+        } else {
             return;
-        };
+        }
+    }
+    if state.job.is_none() {
         state.job = Some(ScanJob::spawn(
             root.path.clone(),
             xgent_spatial::ScanOptions {
@@ -384,6 +534,25 @@ fn load_space_graph(
     }
 }
 
+/// 回到宇宙时恢复完整档位：自动退化留下的 `Static` 不能跨模式粘住。
+fn reset_space_quality_on_mode(
+    mode: Option<Res<LayoutMode>>,
+    mut last: Local<Option<LayoutMode>>,
+    mut quality: ResMut<ViewQuality>,
+    mut perf: ResMut<SpacePerf>,
+) {
+    let mode_now = mode.as_deref().copied().unwrap_or_default();
+    if *last == Some(mode_now) {
+        return;
+    }
+    *last = Some(mode_now);
+    if mode_now == LayoutMode::Universe && *quality != ViewQuality::Full {
+        *quality = ViewQuality::Full;
+        perf.warmup_until = None;
+        perf.over_frames = 0;
+    }
+}
+
 fn sync_space_graph(
     mut commands: Commands,
     graph: Res<SpaceGraph>,
@@ -391,6 +560,7 @@ fn sync_space_graph(
     materials: Option<Res<SpaceMaterials>>,
     stars: Query<Entity, With<SpatialStar>>,
     edges: Query<Entity, With<SpaceEdge>>,
+    mut extent: ResMut<SpaceExtent>,
     mut cameras: Query<(&mut Transform, &mut OrbitCamera), With<SpaceCamera>>,
     mut framed: Local<bool>,
 ) {
@@ -446,6 +616,7 @@ fn sync_space_graph(
     let Some((center, radius)) = graph_bounds(&positions) else {
         return;
     };
+    extent.radius = radius;
 
     // 首帧取景：按整张图的包围球定相机距离与注视点。布局簇半径默认 420，
     // 而相机初始距离只有 30——不取景的话真实仓库会是一片黑。
@@ -472,6 +643,7 @@ fn sync_space_graph(
             Transform::from_translation(*position).with_scale(Vec3::splat(scale)),
             SpatialStar {
                 id: node.id,
+                kind: node.kind,
                 label: node.label.clone(),
                 path: node.path.as_ref().map(|path| path.display().to_string()),
                 base_scale: scale,
@@ -480,30 +652,32 @@ fn sync_space_graph(
     }
 
     let mut edge_count = 0;
-    for edge in &data.edges {
-        if edge_count >= MAX_EDGES {
-            break;
+    if *quality == ViewQuality::Full {
+        for edge in &data.edges {
+            if edge_count >= MAX_EDGES {
+                break;
+            }
+            let (Some(from), Some(to)) = (positions.get(&edge.from.0), positions.get(&edge.to.0))
+            else {
+                continue;
+            };
+            let delta = *to - *from;
+            let length = delta.length();
+            if length < 0.001 {
+                continue;
+            }
+            let midpoint = (*from + *to) * 0.5;
+            let rotation = Quat::from_rotation_arc(Vec3::Y, delta.normalize());
+            commands.spawn((
+                Mesh3d(materials.edge_mesh.clone()),
+                MeshMaterial3d(materials.edge.clone()),
+                Transform::from_translation(midpoint)
+                    .with_rotation(rotation)
+                    .with_scale(Vec3::new(edge_thickness, length, edge_thickness)),
+                SpaceEdge,
+            ));
+            edge_count += 1;
         }
-        let (Some(from), Some(to)) = (positions.get(&edge.from.0), positions.get(&edge.to.0))
-        else {
-            continue;
-        };
-        let delta = *to - *from;
-        let length = delta.length();
-        if length < 0.001 {
-            continue;
-        }
-        let midpoint = (*from + *to) * 0.5;
-        let rotation = Quat::from_rotation_arc(Vec3::Y, delta.normalize());
-        commands.spawn((
-            Mesh3d(materials.edge_mesh.clone()),
-            MeshMaterial3d(materials.edge.clone()),
-            Transform::from_translation(midpoint)
-                .with_rotation(rotation)
-                .with_scale(Vec3::new(edge_thickness, length, edge_thickness)),
-            SpaceEdge,
-        ));
-        edge_count += 1;
     }
 }
 
@@ -523,6 +697,14 @@ fn graph_bounds(positions: &BTreeMap<u32, Vec3>) -> Option<(Vec3, f32)> {
     Some((center, radius))
 }
 
+/// 空间面板当前是否可见（缺注册表的极简装配按不可见处理）。
+fn space_visible(registry: Option<&PanelRegistry>, layout: Option<&SlotLayout>) -> bool {
+    match (registry, layout) {
+        (Some(registry), Some(layout)) => layout.is_panel_visible(registry, ids::SPACE),
+        _ => false,
+    }
+}
+
 fn orbit_space_camera(
     time: Option<Res<Time>>,
     keys: Option<Res<ButtonInput<KeyCode>>>,
@@ -531,14 +713,12 @@ fn orbit_space_camera(
     scroll: Option<Res<AccumulatedMouseScroll>>,
     registry: Option<Res<PanelRegistry>>,
     layout: Option<Res<SlotLayout>>,
+    extent: Option<Res<SpaceExtent>>,
+    input_focus: Option<Res<InputFocus>>,
     viewport: Query<&Hovered, With<SpaceViewportMarker>>,
     mut cameras: Query<(&mut Transform, &mut OrbitCamera)>,
 ) {
-    let visible = match (registry.as_ref(), layout.as_ref()) {
-        (Some(registry), Some(layout)) => layout.is_panel_visible(registry, ids::SPACE),
-        _ => false,
-    };
-    if !visible {
+    if !space_visible(registry.as_deref(), layout.as_deref()) {
         return;
     }
     let Ok((mut transform, mut orbit)) = cameras.single_mut() else {
@@ -548,6 +728,15 @@ fn orbit_space_camera(
         .single()
         .map(|hovered| hovered.get())
         .unwrap_or(false);
+    let typing = input_focus
+        .as_deref()
+        .is_some_and(|focus| focus.get().is_some());
+    let radius = extent.as_deref().map_or(0.0, |extent| extent.radius);
+    let (min_dist, max_dist) = if radius > 1.0 {
+        (radius * 0.15, radius * 6.0)
+    } else {
+        (6.0, 120.0)
+    };
 
     if hovered {
         if let (Some(mouse), Some(motion)) = (mouse.as_ref(), motion.as_ref())
@@ -556,15 +745,21 @@ fn orbit_space_camera(
             orbit.yaw -= motion.delta.x * 0.006;
             orbit.pitch = (orbit.pitch + motion.delta.y * 0.006).clamp(-1.2, 1.2);
         }
-        if let Some(scroll) = scroll.as_ref()
-            && scroll.delta.y != 0.0
-        {
-            orbit.dist = (orbit.dist * 0.9_f32.powf(scroll.delta.y)).clamp(6.0, 120.0);
+        if let Some(scroll) = scroll.as_ref() {
+            // 触控板/高精度滚轮给的是像素，机械滚轮给的是行：先归一到「行」。
+            let steps = match scroll.unit {
+                MouseScrollUnit::Line => scroll.delta.y,
+                MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
+            };
+            if steps != 0.0 {
+                orbit.dist = (orbit.dist * 0.9_f32.powf(steps)).clamp(min_dist, max_dist);
+            }
         }
     }
 
+    // 文本输入框有焦点时，方向键/Enter/`+`/`-` 属于输入法，不得转相机。
     let speed = time.as_ref().map_or(0.0, |time| 1.2 * time.delta_secs());
-    if let Some(keys) = keys.as_ref() {
+    if !typing && let Some(keys) = keys.as_ref() {
         if keys.pressed(KeyCode::ArrowLeft) {
             orbit.yaw -= speed;
         }
@@ -578,10 +773,10 @@ fn orbit_space_camera(
             orbit.pitch = (orbit.pitch - speed).max(-1.2);
         }
         if keys.pressed(KeyCode::Equal) {
-            orbit.dist = (orbit.dist * 0.98).max(6.0);
+            orbit.dist = (orbit.dist * 0.98).max(min_dist);
         }
         if keys.pressed(KeyCode::Minus) {
-            orbit.dist = (orbit.dist * 1.02).min(120.0);
+            orbit.dist = (orbit.dist * 1.02).min(max_dist);
         }
     }
 
@@ -607,6 +802,7 @@ fn pick_space_stars(
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     keys: Option<Res<ButtonInput<KeyCode>>>,
     time: Option<Res<Time>>,
+    mut input_focus: Option<ResMut<InputFocus>>,
     mut stars: Query<(
         &mut MeshMaterial3d<StandardMaterial>,
         &mut Transform,
@@ -614,25 +810,17 @@ fn pick_space_stars(
     )>,
     mut open: MessageWriter<OpenFileRequest>,
 ) {
-    let visible = match (registry.as_ref(), layout.as_ref()) {
-        (Some(registry), Some(layout)) => layout.is_panel_visible(registry, ids::SPACE),
-        _ => false,
-    };
-    if !visible {
+    if !space_visible(registry.as_deref(), layout.as_deref()) {
         state.hovered = None;
         return;
     }
-
-    let nodes: Vec<(SpatialNodeId, Vec3, Option<PathBuf>)> = stars
-        .iter()
-        .map(|(_, transform, star)| {
-            (
-                star.id,
-                transform.translation,
-                star.path.as_ref().map(PathBuf::from),
-            )
-        })
-        .collect();
+    let typing = input_focus
+        .as_deref()
+        .is_some_and(|focus| focus.get().is_some());
+    let viewport_hovered = viewport
+        .single()
+        .map(|(_, _, hovered)| hovered.get())
+        .unwrap_or(false);
 
     let hovered = if let (
         Ok(window),
@@ -650,11 +838,11 @@ fn pick_space_stars(
                 if local.x < 0.0 || local.y < 0.0 || local.x > size.x || local.y > size.y {
                     return None;
                 }
-                let candidates: Vec<(SpatialNodeId, Vec2)> = nodes
+                let candidates: Vec<(SpatialNodeId, Vec2)> = stars
                     .iter()
-                    .filter_map(|(id, position, _)| {
-                        let ndc = camera.world_to_ndc(camera_transform, *position)?;
-                        ndc_to_viewport(ndc, size).map(|screen| (*id, screen))
+                    .filter_map(|(_, transform, star)| {
+                        let ndc = camera.world_to_ndc(camera_transform, transform.translation)?;
+                        ndc_to_viewport(ndc, size).map(|screen| (star.id, screen))
                     })
                     .collect();
                 nearest_hit(local, &candidates, 14.0 * scale)
@@ -667,32 +855,66 @@ fn pick_space_stars(
     };
     state.hovered = hovered;
 
-    if let (Some(mouse), Some(time)) = (mouse.as_ref(), time.as_ref())
-        && mouse.just_pressed(MouseButton::Left)
-        && let Some(id) = hovered
-    {
-        let now = time.elapsed_secs_f64();
-        let double_click = state
-            .last_click
-            .is_some_and(|(last, at)| last == id && now - at < 0.35);
-        state.selected = Some(id);
-        if double_click {
-            state.last_click = None;
-            open_selected(&state, &nodes, &mut open);
+    // 键盘选中：[ / ] 在当前节点间循环（Tab 留给 UI 焦点导航）。
+    // 有文本输入焦点时不抢键，避免在对话/设置输入时改变宇宙选中项。
+    if !typing && let Some(keys) = keys.as_ref() {
+        let step = if keys.just_pressed(KeyCode::BracketRight) {
+            1
+        } else if keys.just_pressed(KeyCode::BracketLeft) {
+            -1
         } else {
-            state.last_click = Some((id, now));
+            0
+        };
+        if step != 0 {
+            let mut ids: Vec<SpatialNodeId> = stars.iter().map(|(_, _, star)| star.id).collect();
+            ids.sort_by_key(|id| id.0);
+            if !ids.is_empty() {
+                let index = state
+                    .selected
+                    .and_then(|selected| ids.iter().position(|id| *id == selected));
+                let next = match index {
+                    Some(index) => (index as isize + step).rem_euclid(ids.len() as isize) as usize,
+                    None if step > 0 => 0,
+                    None => ids.len() - 1,
+                };
+                state.selected = Some(ids[next]);
+                state.last_click = None;
+            }
         }
     }
 
-    if keys
-        .as_ref()
-        .is_some_and(|keys| keys.just_pressed(KeyCode::Enter))
+    if let (Some(mouse), Some(time)) = (mouse.as_ref(), time.as_ref())
+        && mouse.just_pressed(MouseButton::Left)
     {
-        open_selected(&state, &nodes, &mut open);
+        // 只有点视口才把键盘从输入框交还给宇宙；点对话/设置输入框不能误清焦点。
+        if viewport_hovered && let Some(focus) = input_focus.as_mut() {
+            focus.clear();
+        }
+        if let Some(id) = hovered {
+            let now = time.elapsed_secs_f64();
+            let double_click = state
+                .last_click
+                .is_some_and(|(last, at)| last == id && now - at < 0.35);
+            state.selected = Some(id);
+            if double_click {
+                state.last_click = None;
+                open_selected(&state, &mut stars, &mut open);
+            } else {
+                state.last_click = Some((id, now));
+            }
+        }
+    }
+
+    if !typing
+        && keys
+            .as_ref()
+            .is_some_and(|keys| keys.just_pressed(KeyCode::Enter))
+    {
+        open_selected(&state, &mut stars, &mut open);
     }
 
     if let Some(selected) = state.selected
-        && !nodes.iter().any(|(id, _, _)| *id == selected)
+        && !stars.iter().any(|(_, _, star)| star.id == selected)
     {
         state.selected = None;
     }
@@ -728,17 +950,30 @@ fn pick_space_stars(
 
 fn open_selected(
     state: &SpacePickState,
-    nodes: &[(SpatialNodeId, Vec3, Option<PathBuf>)],
+    stars: &mut Query<(
+        &mut MeshMaterial3d<StandardMaterial>,
+        &mut Transform,
+        &SpatialStar,
+    )>,
     open: &mut MessageWriter<OpenFileRequest>,
 ) {
     let Some(selected) = state.selected else {
         return;
     };
-    if let Some((_, _, Some(path))) = nodes.iter().find(|(id, _, _)| *id == selected) {
-        open.write(OpenFileRequest {
-            path: path.clone(),
-            line: None,
-        });
+    for (_, _, star) in stars.iter() {
+        if star.id != selected {
+            continue;
+        }
+        // 目录/星团不是文件：双击/Enter 不应把文件夹送进编辑器。
+        if star.kind == SpatialNodeKind::File
+            && let Some(path) = star.path.as_ref()
+        {
+            open.write(OpenFileRequest {
+                path: PathBuf::from(path),
+                line: None,
+            });
+        }
+        return;
     }
 }
 
@@ -802,10 +1037,11 @@ fn sync_space_theme(
 
 fn sync_space_quality_badge(
     quality: Res<ViewQuality>,
+    graph: Res<SpaceGraph>,
     loc: Res<Localizer>,
     mut badge: Query<&mut Text, With<SpaceQualityBadge>>,
 ) {
-    if !quality.is_changed() && !loc.is_changed() {
+    if !quality.is_changed() && !loc.is_changed() && !graph.is_changed() {
         return;
     }
     let key = match *quality {
@@ -813,7 +1049,17 @@ fn sync_space_quality_badge(
         ViewQuality::Reduced => "space-quality-reduced",
         ViewQuality::Static => "space-quality-static",
     };
-    let label = tr(&loc, key);
+    let mut label = tr(&loc, key);
+    if graph.0.omitted_nodes > 0 {
+        label = format!(
+            "{label} · {}",
+            tr_with(
+                &loc,
+                "space-omitted",
+                &[("count", graph.0.omitted_nodes.to_string())]
+            )
+        );
+    }
     for mut text in &mut badge {
         if text.0 != label {
             text.0 = label.clone();
@@ -825,15 +1071,14 @@ fn sync_space_camera_active(
     quality: Res<ViewQuality>,
     registry: Option<Res<PanelRegistry>>,
     layout: Option<Res<SlotLayout>>,
+    occluded: Option<Res<SpaceOccluded>>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<&mut Camera, With<SpaceCamera>>,
 ) {
-    let visible = match (registry.as_ref(), layout.as_ref()) {
-        (Some(registry), Some(layout)) => layout.is_panel_visible(registry, ids::SPACE),
-        _ => false,
-    };
+    let visible = space_visible(registry.as_deref(), layout.as_deref());
     let focused = window.single().map_or(true, |window| window.focused);
-    let active = *quality != ViewQuality::Static && visible && focused;
+    let occluded = occluded.as_deref().is_some_and(|occluded| occluded.0);
+    let active = *quality != ViewQuality::Static && visible && focused && !occluded;
     for mut camera in &mut cameras {
         if camera.is_active != active {
             camera.is_active = active;
@@ -841,8 +1086,92 @@ fn sync_space_camera_active(
     }
 }
 
+/// G7 退化梯的自动触发：连续 ~3 秒掉出 60fps 就降档；800 档仍不足则回退 2D。
+///
+/// 预热 5 秒，且只在相机真正渲染（可见 + 聚焦 + 非 Static）时计数；
+/// 偶发卡顿会被“连续”条件过滤，不会因为一次编译/切换窗口就降级。
+fn watch_space_performance(
+    time: Res<Time>,
+    mut quality: ResMut<ViewQuality>,
+    mut perf: ResMut<SpacePerf>,
+    registry: Option<Res<PanelRegistry>>,
+    layout: Option<Res<SlotLayout>>,
+    occluded: Option<Res<SpaceOccluded>>,
+    cameras: Query<&Camera, With<SpaceCamera>>,
+    monitors: Query<&Monitor, With<PrimaryMonitor>>,
+    loc: Res<Localizer>,
+    mut toast: MessageWriter<ToastMessage>,
+    mut save_3d_home: MessageWriter<Save3DHomeMessage>,
+    mut global: Option<ResMut<GlobalConfigRes>>,
+) {
+    // G7 的门槛是 release 帧率；debug 构建慢是预期，别让开发中的 `cargo run`
+    // 在 10 秒后自己掉进 2D。纯决策 `degrade_after` 仍有单测覆盖。
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let occluded = occluded.as_deref().is_some_and(|occluded| occluded.0);
+    let active = !occluded
+        && space_visible(registry.as_deref(), layout.as_deref())
+        && cameras.single().is_ok_and(|camera| camera.is_active);
+    if !active {
+        perf.over_frames = 0;
+        perf.warmup_until = None;
+        return;
+    }
+    let now = time.elapsed_secs_f64();
+    let warmup_until = *perf.warmup_until.get_or_insert(now + DEGRADE_WARMUP_SECS);
+    if now < warmup_until {
+        perf.over_frames = 0;
+        return;
+    }
+
+    let delta_ms = time.delta_secs_f64() * 1000.0;
+    // 30Hz 屏/远程会话的上限本来就是 33ms，不能按 60Hz 的预算判它不合格。
+    let refresh_hz = monitors
+        .single()
+        .ok()
+        .and_then(|monitor| monitor.refresh_rate_millihertz)
+        .map_or(60_000.0, |millihertz| f64::from(millihertz) / 1000.0);
+    let budget_ms = if refresh_hz > 1.0 {
+        (1000.0 / refresh_hz * 1.35).max(FRAME_BUDGET_MS)
+    } else {
+        FRAME_BUDGET_MS
+    };
+    if delta_ms > budget_ms {
+        perf.over_frames = perf.over_frames.saturating_add(1);
+    } else {
+        perf.over_frames = 0;
+    }
+
+    match degrade_after(*quality, perf.over_frames) {
+        PerfAction::None => {}
+        PerfAction::Reduce => {
+            *quality = ViewQuality::Reduced;
+            perf.over_frames = 0;
+            toast.write(ToastMessage {
+                text: tr(&loc, "space-degraded-800"),
+            });
+            tracing::warn!(delta_ms, "3D 视口帧率不足，降到 800 档");
+        }
+        PerfAction::Fallback2d => {
+            *quality = ViewQuality::Static;
+            perf.over_frames = 0;
+            if let Some(global) = global.as_mut() {
+                global.0.preferences.three_d_home = false;
+                save_3d_home.write(Save3DHomeMessage { enabled: false });
+            }
+            toast.write(ToastMessage {
+                text: tr(&loc, "space-degraded-2d"),
+            });
+            tracing::warn!(delta_ms, "3D 视口 800 档仍不足，回退 2D");
+        }
+    }
+}
+
 fn update_space_hud(
     theme: Res<Theme>,
+    registry: Option<Res<PanelRegistry>>,
+    layout: Option<Res<SlotLayout>>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
     stars: Query<(&Transform, &SpatialStar)>,
     window: Query<&Window, With<PrimaryWindow>>,
@@ -855,9 +1184,16 @@ fn update_space_hud(
         &mut Visibility,
     )>,
 ) {
-    let mut items: Vec<(SpatialNodeId, Vec3, String)> = stars
+    if !space_visible(registry.as_deref(), layout.as_deref()) {
+        for (_, _, _, _, _, mut visibility) in &mut labels {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+    // 只保留前 24 个节点，且用 `&str` 借用——2k 节点时不要每帧克隆标签。
+    let mut items: Vec<(SpatialNodeId, Vec3, &str)> = stars
         .iter()
-        .map(|(transform, star)| (star.id, transform.translation, star.label.clone()))
+        .map(|(transform, star)| (star.id, transform.translation, star.label.as_str()))
         .collect();
     items.sort_by_key(|(id, _, _)| *id);
     items.truncate(HUD_LABELS);
@@ -888,9 +1224,9 @@ fn update_space_hud(
         *visibility = Visibility::Visible;
         node.left = Val::Px(screen.x / scale);
         node.top = Val::Px(screen.y / scale);
-        if text.0.as_str() != name.as_str() {
-            text.0 = name.clone();
-            ellipsis.source = name.clone();
+        if text.0.as_str() != *name {
+            text.0 = name.to_string();
+            ellipsis.source = name.to_string();
         }
         color.0 = theme.text_muted;
     }
@@ -993,6 +1329,49 @@ mod tests {
         let (center, radius) = graph_bounds(&positions).expect("应有包围球");
         assert_eq!(center, Vec3::new(1.0, 0.0, 0.0));
         assert!((radius - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn degrade_ladder_thresholds() {
+        assert_eq!(degrade_after(ViewQuality::Full, 179), PerfAction::None);
+        assert_eq!(degrade_after(ViewQuality::Full, 180), PerfAction::Reduce);
+        assert_eq!(
+            degrade_after(ViewQuality::Reduced, 180),
+            PerfAction::Fallback2d
+        );
+        assert_eq!(
+            degrade_after(ViewQuality::Static, 180),
+            PerfAction::None,
+            "Static 是手动档，不再自动推进"
+        );
+    }
+
+    #[test]
+    fn refresh_ignore_is_relative_to_project_root() {
+        let root = Path::new("F:/proj");
+        assert!(!is_refresh_ignored(
+            Some(root),
+            Path::new("F:/proj/src/a.rs")
+        ));
+        assert!(is_refresh_ignored(
+            Some(root),
+            Path::new("F:/proj/target/a.rs")
+        ));
+        assert!(
+            !is_refresh_ignored(Some(root), Path::new("F:/proj/src/target")),
+            "文件名恰好叫 target 不是目录噪声"
+        );
+        assert!(
+            !is_refresh_ignored(
+                Some(Path::new("F:/ws/.worktrees/feat")),
+                Path::new("F:/ws/.worktrees/feat/src/a.rs")
+            ),
+            "项目根位于跳过目录下时不能整体静默"
+        );
+        assert!(
+            !is_refresh_ignored(Some(root), Path::new("F:/other/target/a.rs")),
+            "项目根之外的路径不参与忽略判断"
+        );
     }
 
     #[test]

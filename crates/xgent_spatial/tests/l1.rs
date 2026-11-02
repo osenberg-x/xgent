@@ -21,9 +21,9 @@ fn l1() -> ScanOptions {
 
 fn has_path(graph: &xgent_core::spatial::SpatialGraph, needle: &str) -> bool {
     graph.nodes.iter().any(|node| {
-        node.path.as_ref().is_some_and(|path| {
-            path.to_string_lossy().replace('\\', "/").contains(needle)
-        })
+        node.path
+            .as_ref()
+            .is_some_and(|path| path.to_string_lossy().replace('\\', "/").contains(needle))
     })
 }
 
@@ -90,7 +90,10 @@ fn ignore_rules_skip_dependency_dirs_and_gitignore() {
 
     assert!(!has_path(&graph, "node_modules"), "node_modules 应被忽略");
     assert!(!has_path(&graph, "target"), "target 应被忽略");
-    assert!(!has_path(&graph, "ignored.txt"), ".gitignore 命中的文件应被忽略");
+    assert!(
+        !has_path(&graph, "ignored.txt"),
+        ".gitignore 命中的文件应被忽略"
+    );
     assert!(has_path(&graph, "src/main.rs"), "正常源码应保留");
 }
 
@@ -169,4 +172,22 @@ fn l1_scan_is_deterministic() {
     assert_eq!(first.nodes, second.nodes);
     assert_eq!(first.edges, second.edges);
     assert_eq!(first.clusters, second.clusters);
+}
+
+/// 单个损坏的 Cargo.toml 不该让整张图失败：目录/文件节点仍要产出。
+#[test]
+fn malformed_manifest_still_yields_directory_graph() {
+    let temp = tempfile::tempdir().expect("临时目录");
+    let root = temp.path();
+    write(&root.join("Cargo.toml"), "[package\nname = broken");
+    write(&root.join("src/a.rs"), "pub fn a() {}\n");
+
+    let graph = scan_with_options(root, l1()).expect("损坏 manifest 不应阻塞 L1");
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|node| node.kind == SpatialNodeKind::File && node.label == "a.rs"),
+        "目录/文件图仍应包含 a.rs"
+    );
 }

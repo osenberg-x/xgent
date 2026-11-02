@@ -11,7 +11,9 @@ use xgent_settings_core::GlobalConfig;
 use xgent_ui::layout::{CenterHostMarker, ChatPanelMarker, LayoutPlugin, SideViewMarker};
 use xgent_ui::layout_mode::LayoutMode;
 use xgent_ui::panels::visibility::VisibilityPlugin;
-use xgent_ui::panels::{PanelDescriptor, PanelRegister, PanelRegistry, PanelVisibility, Slot, ids};
+use xgent_ui::panels::{
+    PanelDescriptor, PanelRegister, PanelRegistry, PanelVisibility, Slot, SlotLayout, ids,
+};
 
 fn find_one<M: Component>(app: &mut App) -> Entity {
     let world = app.world_mut();
@@ -205,6 +207,10 @@ fn re_enabling_three_d_home_returns_space_to_center() {
     assert_eq!(mode_of(&app), LayoutMode::Classic);
     assert_eq!(parent_of(&app, chat), Some(center));
 
+    // 经典模式里侧栏可能被 Esc/窄窗折叠；切回宇宙必须重新展开，否则对话消失。
+    app.world_mut()
+        .resource_mut::<SlotLayout>()
+        .set_open(Slot::SideDock, false);
     app.world_mut()
         .resource_mut::<GlobalConfigRes>()
         .0
@@ -215,6 +221,10 @@ fn re_enabling_three_d_home_returns_space_to_center() {
     }
 
     assert_eq!(mode_of(&app), LayoutMode::Universe);
+    assert!(
+        app.world().resource::<SlotLayout>().is_open(Slot::SideDock),
+        "回到宇宙应重新展开常驻对话侧栏"
+    );
     assert_eq!(parent_of(&app, space), Some(center));
     assert_eq!(parent_of(&app, chat), Some(side));
     assert_eq!(display_of(&app, space), Display::Flex);

@@ -54,3 +54,24 @@ cargo test -p xgent_settings_core
 - `crates/xgent_ui/tests/layout_mode.rs`：默认宇宙、关闭偏好回经典、重新打开、经典页签不含空间。
 - `crates/xgent_ui/tests/space_panel.rs`：`Esc` 从编辑器回 space 且相机位置不变。
 - `crates/xgent_ui/src/resize.rs`：320–560 / 45% 钳制、偏好落树、仅宇宙拖拽持久化。
+## 最终复审修复（2026-10-30）
+
+独立复审发现并已修复：
+
+- **键盘输入泄漏**：宇宙在文本输入框有焦点时不再响应 Enter/方向键/`+`/`-`；点击视口清焦点。`text_focus_blocks_enter_open` 覆盖。
+- **目录节点被当文件打开**：`SpatialStar` 带节点类型，只有 `File` 触发 `OpenFileRequest`；`enter_on_module_does_not_open_editor` 覆盖。
+- **首滚缩放跳变**：相机距离上下限随图的包围球半径缩放，滚轮像素档先归一到行。
+- **SideDock 常驻**：切回宇宙时显式展开 SideDock，避免经典模式的 Esc/窄窗折叠把对话藏掉。
+- **省略数/忽略警告/刷新**：HUD 角标显示「已省略 N」；无 `.gitignore` 或解析失败只警告一次；`FileChangedEvent` 防抖 0.8s 重扫。
+- **L1 健壮性**：损坏/不可读的 `Cargo.toml` 跳过并警告，目录/文件图仍产出。
+- **自动退化**：release 下连续 3 秒 >22ms 降 800 档，再持续 3 秒写 `three_d_home=false`、toast 说明并回退 2D；debug 跳过。
+- **键盘选中**：`[` / `]` 循环选中，Enter 打开；`bracket_keys_select_and_enter_opens_file` 覆盖。
+
+复审后回归：
+
+```bash
+cargo test -p xgent_spatial
+cargo test -p xgent_ui --lib space
+cargo test -p xgent_ui --test space_panel
+cargo test -p xgent_ui --test layout_mode
+```
