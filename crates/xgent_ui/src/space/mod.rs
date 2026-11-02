@@ -1,8 +1,10 @@
 //! 3D 空间视图（MVP-2）。
 
+pub mod s2;
 pub mod scan;
 pub mod view;
 
+pub use s2::{SpaceEscConsumed, SpaceSearchState};
 pub use scan::ScanJob;
 pub use view::{
     SpaceCamera, SpaceEdge, SpaceGraph, SpaceHudLabel, SpaceMaterials, SpacePickState, SpacePlugin,

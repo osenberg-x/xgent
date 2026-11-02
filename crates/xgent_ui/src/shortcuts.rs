@@ -217,6 +217,7 @@ pub(crate) fn handle_hotkey_triggers(
     modal_esc: Option<Res<crate::modal::ModalEscConsumed>>,
     completion_esc: Option<Res<crate::completion_ui::CompletionConsumed>>,
     layout_mode: Option<Res<LayoutMode>>,
+    space_esc: Option<Res<crate::space::SpaceEscConsumed>>,
     mut input_focus: Option<ResMut<bevy::input_focus::InputFocus>>,
     q_chat_input: Query<Entity, With<crate::chat_panel::ChatInputMarker>>,
 ) {
@@ -226,7 +227,8 @@ pub(crate) fn handle_hotkey_triggers(
     let esc_consumed = modal_esc.as_deref().is_some_and(|consumed| consumed.0)
         || completion_esc
             .as_deref()
-            .is_some_and(|consumed| consumed.esc);
+            .is_some_and(|consumed| consumed.esc)
+        || space_esc.as_deref().is_some_and(|consumed| consumed.0);
     if modal_open || esc_consumed {
         for _ in reader.read() {}
         return;

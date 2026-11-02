@@ -235,6 +235,7 @@ fn escape_returns_from_editor_to_space_and_keeps_camera() {
         .add_plugins(PanelsPlugin)
         .add_plugins(xgent_ui::panels::visibility::VisibilityPlugin)
         .add_plugins(SpacePlugin)
+        .insert_resource(SpaceGraph(synthetic_graph(2)))
         .add_message::<OpenFileRequest>()
         .add_message::<xui::shortcuts::HotkeyTriggered>()
         .add_message::<xgent_agent::AbortMessage>()
@@ -290,27 +291,71 @@ fn escape_returns_from_editor_to_space_and_keeps_camera() {
     );
 
     let camera_before = space_camera_transform(&mut app);
-    app.world_mut()
-        .write_message(xui::shortcuts::HotkeyTriggered {
-            id: "chat.abort".into(),
-        });
-    for _ in 0..2 {
-        app.update();
-    }
+    app.world_mut().resource_mut::<SpacePickState>().selected = Some(SpatialNodeId(0));
 
-    let registry = app.world().resource::<PanelRegistry>();
-    assert!(!registry.is_visible(ids::EDITOR), "Esc 应关闭编辑器");
-    assert!(registry.is_visible(ids::SPACE), "Esc 应回到空间首页");
-    assert_eq!(
-        app.world().get::<Node>(editor).unwrap().display,
-        Display::None,
-        "编辑器视图应让出主区"
+    // 第一次 Esc：编辑器回宇宙，选中保留。
+    press_escape(&mut app);
+    assert!(
+        !app.world()
+            .resource::<PanelRegistry>()
+            .is_visible(ids::EDITOR)
     );
+    assert!(
+        app.world()
+            .resource::<PanelRegistry>()
+            .is_visible(ids::SPACE)
+    );
+    assert_eq!(
+        app.world().resource::<SpacePickState>().selected,
+        Some(SpatialNodeId(0)),
+        "工作区回宇宙时保留 3D 选中"
+    );
+
+    // 第二次 Esc：只清 3D 选中，不中断对话。
+    press_escape(&mut app);
+    assert_eq!(
+        app.world().resource::<SpacePickState>().selected,
+        None,
+        "宇宙里 Esc 先清选中"
+    );
+    assert!(
+        app.world()
+            .resource::<Messages<xgent_agent::AbortMessage>>()
+            .is_empty(),
+        "清选中不得中断对话"
+    );
+
+    // 第三次 Esc：空宇宙才中断对话。
+    press_escape(&mut app);
+    assert!(
+        !app.world()
+            .resource::<Messages<xgent_agent::AbortMessage>>()
+            .is_empty(),
+        "空宇宙 Esc 才发送中断"
+    );
+
     let camera_after = space_camera_transform(&mut app);
     assert_eq!(
         camera_before.translation, camera_after.translation,
         "返回空间时相机应保持离开前的位置"
     );
+}
+
+fn press_escape(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Escape);
+    app.world_mut()
+        .write_message(xui::shortcuts::HotkeyTriggered {
+            id: "chat.abort".into(),
+        });
+    app.update();
+    {
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        input.release(KeyCode::Escape);
+        input.clear();
+    }
+    app.update();
 }
 
 /// 键盘路径的最小装配（与长测试同源，但只关心按键/消息）。
