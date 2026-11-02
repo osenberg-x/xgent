@@ -134,7 +134,7 @@
 | F-18 | Web 端 | 浏览器端形态，经服务端中转。 | P2（架构需考虑） |
 | F-19 | 内置终端 | 嵌入式用户人机交互终端，多 tab PTY，UI 侧行编辑；MVP-1 与编辑器/预览复用 SideView，MVP-2 起终端接管主区（3D 首页让位）。详见 `docs/design/terminal-design.md`。 | P1（已交付） |
 | F-20 | 时空回溯 | 时间锚点、每轮 diff/快照、时间线 UI、跳转与二分定位；分支探索后续。复用 F-03 的检查点，依赖 3D S3 与 D-3D-07。Ctrl+Z/Y 与编辑器撤销冲突，设计时需定；落地前补独立设计文档。 | P1 |
-| F-21 | 代码智能管线 | tree-sitter 符号/import/调用边、复杂度/变更频率；为 3D 依赖虫洞、热力图/诊断雷达与检索 C 提供数据。先 Rust 后多语言；首期已实现符号/import/复杂度 + RepoMap（待独立验收），调用边/变更频率/3D L2 留后续。 | P1（首期实现） |
+| F-21 | 代码智能管线 | tree-sitter 符号/import/调用边、复杂度/变更频率；为 3D 依赖虫洞、热力图/诊断雷达与检索 C 提供数据。先 Rust 后多语言；首期已交付符号/import/复杂度 + RepoMap（验收 23/23），调用边/变更频率/3D L2 留后续。 | P1（首期已交付） |
 | F-22 | 多 Agent 编排与沉浸式协作 | Solo/Split/Swarm/Adversarial、AgentAvatar、反思报告、ACP、Split-Testing、DoE 方案卡。落地前补独立设计文档。 | P2 |
 
 **README 功能到编号的补充映射**（避免「README 里有、需求里没有」）：

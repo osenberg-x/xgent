@@ -1,8 +1,8 @@
 # F-21 代码智能管线设计
 
 - 日期：2026-11-02
-- 状态：首期实现（Rust 符号 / import / 复杂度 + RepoMap）
-- 需求：`docs/design/requirements.md` F-21；验收见 `docs/comet/changes/f21-code-intelligence/`
+- 状态：首期已交付（Rust 符号 / import / 复杂度 + RepoMap；验收 23/23）
+- 需求：`docs/design/requirements.md` F-21；验收与归档见 `docs/comet/archive/2026-11-02-f21-code-intelligence/`
 
 ## 1. 目标与边界
 

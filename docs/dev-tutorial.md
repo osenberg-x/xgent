@@ -55,7 +55,7 @@
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化**（MVP-2，当前主线）：未实现；S0 数据内核（`xgent_spatial`，仅 crate 级 L0）与设计文档已就绪，第一里程碑为 S1 + 点击打开 + L1 文件/目录图（见 requirements §4.2）。
 - **F-20 时空回溯**（P1）：未实现；已有按轮文件检查点撤销（§5.14），完整时间线/时间锚点待 MVP-2 之后。
-- **F-21 代码智能管线**（P1）：首期已实现（待独立验收）；`xgent_codeintel` 提供 Rust 符号/import/函数复杂度索引与 RepoMap provider；调用边/变更频率/多语言/3D L2 留后续。
+- **F-21 代码智能管线**（P1）：首期已交付（验收 23/23）；`xgent_codeintel` 提供 Rust 符号/import/函数复杂度索引与 RepoMap provider；调用边/变更频率/多语言/3D L2 留后续。
 - **F-22 多 Agent 编排与沉浸式协作**（P2）：未实现。
 - **F-17 TUI** / **F-18 Web**（P2）：未实现，架构留口。
 - **插件系统**（架构设计）：✅ 已落地（WASM Component + wasmtime 29）。3 宿主 crate（`xgent_plugin_api`/`xgent_plugin`/`xgent_plugin_host`）+ 2 插件 crate（`xgent_plugin_hello` 测试 / `xgent_plugin_git` 参考）。插件经 WIT 注册 Agent 工具/命令面板命令/ContextProvider，动态安装卸载。详见 `docs/design/plugin-system-design.md` + 本指南 §5.13。
