@@ -30,6 +30,7 @@ use crate::panels::{
     PanelDescriptor, PanelRegister, PanelRegistry, PanelVisibility, Slot, SlotLayout, ids,
 };
 use crate::settings_panel::Save3DHomeMessage;
+use crate::space::s2;
 use crate::space::scan::ScanJob;
 use crate::theme::Theme;
 
@@ -184,6 +185,10 @@ pub struct SpaceHudLabel {
 #[derive(Component)]
 pub struct SpaceHudMarker;
 
+/// 空间视图根（搜索覆盖层挂在这里）。
+#[derive(Component)]
+pub struct SpaceViewRootMarker;
+
 /// 拾取/选择状态。
 #[derive(Resource, Default)]
 pub struct SpacePickState {
@@ -224,6 +229,7 @@ pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
+        s2::register(app);
         app.init_resource::<SpaceGraph>()
             .init_resource::<SpaceLoadState>()
             .init_resource::<SpaceRefresh>()
@@ -245,8 +251,15 @@ impl Plugin for SpacePlugin {
                     load_space_graph,
                     reset_space_quality_on_mode,
                     sync_space_graph,
+                    s2::handle_space_search_open,
                     orbit_space_camera,
+                    s2::sync_space_search_results,
+                    s2::handle_space_search_keys,
+                    s2::sync_space_search_ui,
+                    s2::traverse_space_selection,
                     pick_space_stars,
+                    s2::sync_selection_from_editor,
+                    s2::update_space_feedback,
                     sync_space_theme,
                     sync_space_quality_badge,
                     sync_space_camera_active,
@@ -255,6 +268,10 @@ impl Plugin for SpacePlugin {
                     resize_space_target,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                s2::consume_space_escape.before(crate::shortcuts::handle_hotkey_triggers),
             );
     }
 }
@@ -320,6 +337,7 @@ fn setup_space(
                 ..xui::region_fill()
             },
             PanelVisibility::of_panel(ids::SPACE, Slot::Center),
+            SpaceViewRootMarker,
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -373,6 +391,7 @@ fn setup_space(
                                 Visibility::Hidden,
                             ));
                     }
+                    s2::spawn_feedback_nodes(hud, &theme);
                 });
         })
         .id();
@@ -715,10 +734,14 @@ fn orbit_space_camera(
     layout: Option<Res<SlotLayout>>,
     extent: Option<Res<SpaceExtent>>,
     input_focus: Option<Res<InputFocus>>,
+    search: Option<Res<s2::SpaceSearchState>>,
     viewport: Query<&Hovered, With<SpaceViewportMarker>>,
     mut cameras: Query<(&mut Transform, &mut OrbitCamera)>,
 ) {
     if !space_visible(registry.as_deref(), layout.as_deref()) {
+        return;
+    }
+    if search.as_deref().is_some_and(|search| search.open) {
         return;
     }
     let Ok((mut transform, mut orbit)) = cameras.single_mut() else {
@@ -783,7 +806,7 @@ fn orbit_space_camera(
     apply_orbit(&mut transform, &orbit);
 }
 
-fn apply_orbit(transform: &mut Transform, orbit: &OrbitCamera) {
+pub(crate) fn apply_orbit(transform: &mut Transform, orbit: &OrbitCamera) {
     let (sy, cy) = orbit.yaw.sin_cos();
     let (sp, cp) = orbit.pitch.sin_cos();
     transform.translation =
@@ -803,6 +826,7 @@ fn pick_space_stars(
     keys: Option<Res<ButtonInput<KeyCode>>>,
     time: Option<Res<Time>>,
     mut input_focus: Option<ResMut<InputFocus>>,
+    mut search: Option<ResMut<s2::SpaceSearchState>>,
     mut stars: Query<(
         &mut MeshMaterial3d<StandardMaterial>,
         &mut Transform,
@@ -814,6 +838,13 @@ fn pick_space_stars(
         state.hovered = None;
         return;
     }
+    if search.as_deref().is_some_and(|search| search.open) {
+        state.hovered = None;
+        return;
+    }
+    let suppress_enter = search
+        .as_mut()
+        .is_some_and(|search| std::mem::take(&mut search.suppress_enter));
     let typing = input_focus
         .as_deref()
         .is_some_and(|focus| focus.get().is_some());
@@ -906,6 +937,7 @@ fn pick_space_stars(
     }
 
     if !typing
+        && !suppress_enter
         && keys
             .as_ref()
             .is_some_and(|keys| keys.just_pressed(KeyCode::Enter))

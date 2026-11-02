@@ -920,19 +920,21 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **测试**：`crates/xgent_spatial/tests/l1.rs` 覆盖 Rust/非 Rust 节点、`.gitignore`/依赖目录忽略、10k 文件裁剪到 2k、重复扫描一致；现有 `layout` 测试保持全绿。
 - **线程边界**：`scan_with_options` 是同步纯 CPU 函数；UI 侧接线时必须放进 `spawn_blocking` 并支持取消，不能在 ECS 主线程直接调用（任务 2.5）。
 
-### 5.26 3D 空间视口（MVP-2 S1）
+### 5.26 3D 空间视口（MVP-2 S1 + S2）
 
 `xgent_ui::space` 已落地 3D 首页的最小闭环：
 
 - **装配**：`SpacePlugin` 在 `MainArea` 下挂一个 Center 面板；`ImageNode` 显示离屏纹理，`SpaceCamera`（`Camera3d` → `RenderTarget::Image`）渲染 3D；视口尺寸变化时按物理像素重建纹理。
 - **数据**：`SpaceGraph` 是唯一输入；`SpacePlugin` 读 `ProjectRoot`，用 `ScanJob` 在 `AsyncComputeTaskPool` 上做 L1 扫描 + 布局，完成后写入 `SpaceGraph`，再同步为实例化星体/边与 HUD 标签。文件变更（`FileChangedEvent`）会把图标记为待刷新，防抖 0.8s 后重扫；经典 2D 回退下不扫描。
-- **交互**：`space.show` 命令面板入口；轨道相机（左键拖拽/滚轮/方向键/`+`/`-`，无惯性，距离上下限随图半径缩放，触控板像素滚动先归一到行）；`Button + Hovered` 门控鼠标输入；CPU 拾取（NDC → 视口坐标 → 14px 半径），悬停/选中换材质 + 缩放；单击选中、双击或 Enter 经 `OpenFileRequest` 打开**文件**节点（目录/星团不打开）。键盘 `[` / `]` 循环选中，Enter 打开，Esc 返回——文本输入框有焦点时这些键全部让位，点视口会清焦点。
+- **交互**：`space.show` 命令面板入口；轨道相机（左键拖拽/滚轮/方向键/`+`/`-`，无惯性，距离上下限随图半径缩放，触控板像素滚动先归一到行）；`Button + Hovered` 门控鼠标输入；CPU 拾取（NDC → 视口坐标 → 14px 半径），悬停/选中换材质 + 缩放；单击选中、双击或 Enter 经 `OpenFileRequest` 打开**文件**节点（目录/星团不打开）。
+- **S2 键盘与联动**：`Tab`/`Shift+Tab` 按屏幕极角在当前可见节点间循环（target 跟随、yaw/pitch/dist 不变）；`/` 打开视口内搜索（仅 File，↑↓ 选择，Enter 定位、再次 Enter 打开，Esc 只关搜索）；编辑器活动文件变化时同步选中同路径星体且不移动相机，文件不在图中则清选中。`[`/`]` 保留为选中别名。文本输入框有焦点时宇宙不抢键；点视口才交还焦点。
+- **S2 反馈**：悬停 120ms 显示 label/path tooltip；选中显示详情卡（label/path/类型/Enter 提示，无 LOC），不拦截视口拾取。
 - **首帧取景**：第一次拿到非空图时按节点包围球定相机注视点与距离（半径 × 2.8），星体半径 / 边粗细也随图半径缩放。默认布局簇半径 420，若沿用固定的相机距离 30，真实仓库会整张图落在视锥外、主区全黑。取景只做一次，之后数据刷新不移动用户调好的相机。
 - **HUD**：24 个投影标签（固定 160px + `Ellipsis`），右上角档位角标；图有裁剪时角标追加「已省略 N」；内容态用 `Visibility`，不写 `Node.display`（`panel_registry_contract` 的硬约束）。
 - **降级**：`ViewQuality::{Full, Reduced, Static}`；Full 2k、Reduced 800（关边、保留 HUD/选择）、Static 停用 3D 相机冻结最后一帧；面板不可见或窗口失焦时相机 `is_active=false`。release 下连续 3 秒超出帧预算（预算随主显示器刷新率调整，最低 22ms）自动 Full→Reduced，再持续 3 秒则写 `three_d_home=false` 回退 2D 并 toast 说明；预热 5 秒，debug 构建跳过自动降级（避免开发时误落 2D）。
-- **返回**：`Esc` 在编辑器/终端/差异可见时先关工作区面板并把主区还给 `space`，相机保持离开前位置；没有工作区面板时才中断对话（`space_panel::escape_returns_from_editor_to_space_and_keeps_camera`）。
-- **测试**：`space::scan`（后台扫描/取消）、`space::view`（target_size/orbit/NDC 命中/包围球/退化阈值/刷新忽略路径）、`space_panel`（2k 星体、24 标签、主题、Enter/`[`/`]` 键盘路径、输入焦点让位、目录不打开、Reduced 关边、省略角标、Esc 返回、Static 复位、Reduced/Static/Full 切换）；UI 全量测试用 `-j 2`，默认并发可能触发 `LNK1102` OOM。
-- **边界**：完整 S2（Tab 全量遍历/搜索飞行/2D↔3D 联动）、S3 时空回溯、S4 插件节点、自由飞行/惯性均未做；S1 已补 `[`/`]` 选中作为键盘可达的最小切片；`space.show` 在经典回退下不可用。
+- **Esc 逐级**：搜索 → 关闭搜索；编辑器/终端/差异 → 回宇宙并保留选中；宇宙有选中 → 只清选中；空宇宙才中断对话；相机保持离开前位置。搜索/选中的 Esc 由 `SpaceEscConsumed` 先于全局快捷键消费。
+- **测试**：`space::scan`（后台扫描/取消）、`space::view`（target_size/orbit/NDC 命中/包围球/退化阈值/刷新忽略路径/tooltip 120ms）、`space_panel`（2k 星体、24 标签、主题、Enter/`[`/`]` 键盘路径、输入焦点让位、目录不打开、Reduced 关边、省略角标、Esc 三级回退、Static 复位）、`space_s2`（Tab 遍历/回绕、搜索飞行、二次 Enter 打开、编辑器同步、搜索/选中 Esc、tooltip/详情卡、隐藏空间不响应）；UI 全量测试用 `-j 2`，默认并发可能触发 `LNK1102` OOM。
+- **边界**：S2 已交付；S3 时空回溯、S4 插件节点、L2 符号图、自由飞行/惯性仍未做；`space.show` 在经典回退下不可用。
 
 ### 5.27 布局模式与对话侧栏（MVP-2 4.x）
 
@@ -947,7 +949,7 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **右侧分屏按需出现**：`SideView` 挂 `PanelVisibility::of_slot_panels(SideDock)`，槽内没有可见面板就整块 `display:none`。经典回退下对话在 Center，未打开编辑器/终端时不会留一条空侧栏。
 - **回退不暴露 3D**：`space` 在经典模式被搬到 SideDock 但失活；槽位页签过滤它，`space.show` 命令也忽略（否则侧栏会出现一个能点开的死视图）。
 - **对话侧栏宽度**：默认 400px，可拖拽，范围 320–560 且不超过主区可用宽度 45%（`resize::clamp_chat_side`）。拖拽结束发 `SaveChatSideWidthMessage`，由 `xgent_app::settings_io` 写 `preferences.chat_side_width`；重启后 `apply_chat_side_preference` 在宇宙模式落树。经典回退的编辑器坞默认 720，不受对话宽度偏好覆盖；从宇宙切回经典时若 dock 仍停在对话宽度上会自动恢复 720，用户拖过的宽度不再覆盖。
-- **Esc / 关闭路径**：编辑器、差异、终端任一可见时，Esc 先关它们并把主区还给首页（宇宙 → `space`，经典 → 对话）；没有工作区面板才中断对话。终端 ✕、编辑器最后一个文档关闭、图标轨终端钮同样回首页。
+- **Esc / 关闭路径**：宇宙里 Esc 先关搜索、再关工作区（保留 3D 选中）、再清 3D 选中，最后才中断对话；经典里编辑器/差异/终端可见时先回首页（宇宙 → `space`，经典 → 对话）。终端 ✕、编辑器最后一个文档关闭、图标轨终端钮同样回首页。
 - **不折叠常驻侧栏**：宇宙模式下 `responsive_collapse` 直接返回，否则窗口 <1100px 会把对话一起收起。
 - **自动退化**：release 下帧率持续不足会把 `three_d_home` 写回 false 并 toast 说明；这与用户手动关闭偏好走同一条布局切换链路。
 - **走查记录**：`docs/notes/mvp2-layout-walkthrough.md`（宇宙 / 经典 / 经典+编辑器三张截图与本轮修复项）。
