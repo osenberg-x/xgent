@@ -1,0 +1,7 @@
+   Compiling xgent_settings v0.1.0 (F:\ws\xgent\crates\xgent_settings)
+   Compiling xgent_spatial v0.1.0 (F:\ws\xgent\crates\xgent_spatial)
+   Compiling xgent_agent v0.1.0 (F:\ws\xgent\crates\xgent_agent)
+   Compiling xgent_plugin_host v0.1.0 (F:\ws\xgent\crates\xgent_plugin_host)
+   Compiling xgent_ui v0.1.0 (F:\ws\xgent\crates\xgent_ui)
+   Compiling xgent_app v0.1.0 (F:\ws\xgent\crates\xgent_app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3m 01s

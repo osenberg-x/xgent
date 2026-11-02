@@ -230,3 +230,43 @@ fn re_enabling_three_d_home_returns_space_to_center() {
     assert_eq!(display_of(&app, space), Display::Flex);
     assert_eq!(display_of(&app, chat), Display::Flex);
 }
+
+/// 终端接管主区时对话仍可见；经典回退里终端回 SideDock，对话回 Center。
+#[test]
+fn terminal_handoff_keeps_chat_in_both_modes() {
+    let mut app = layout_app(true);
+    app.world_mut()
+        .write_message(xgent_ui::panels::PanelActivate { id: ids::TERMINAL });
+    for _ in 0..2 {
+        app.update();
+    }
+    let chat = find_one::<ChatPanelMarker>(&mut app);
+    let center = find_one::<CenterHostMarker>(&mut app);
+    let side = find_one::<SideViewMarker>(&mut app);
+    let terminal = view_of(&app, ids::TERMINAL);
+    assert_eq!(parent_of(&app, terminal), Some(center), "终端应接管 Center");
+    assert_eq!(display_of(&app, terminal), Display::Flex);
+    assert_eq!(parent_of(&app, chat), Some(side), "对话仍在 SideDock");
+    assert_eq!(display_of(&app, chat), Display::Flex);
+
+    app.world_mut()
+        .resource_mut::<GlobalConfigRes>()
+        .0
+        .preferences
+        .three_d_home = false;
+    for _ in 0..3 {
+        app.update();
+    }
+    let chat = find_one::<ChatPanelMarker>(&mut app);
+    let center = find_one::<CenterHostMarker>(&mut app);
+    let side = find_one::<SideViewMarker>(&mut app);
+    let terminal = view_of(&app, ids::TERMINAL);
+    assert_eq!(
+        parent_of(&app, terminal),
+        Some(side),
+        "回退后终端应在 SideDock"
+    );
+    assert_eq!(display_of(&app, terminal), Display::Flex);
+    assert_eq!(parent_of(&app, chat), Some(center), "回退后对话在 Center");
+    assert_eq!(display_of(&app, chat), Display::Flex);
+}
