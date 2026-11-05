@@ -3339,11 +3339,8 @@ fn abort_during_concurrent_group_pairs_every_call() {
         &["pa", "pb", "pc"],
         xgent_settings_core::project::defaults::MAX_PARALLEL_TOOLS,
     );
-    // 让三个探针都进入执行（确实在跑），再中止
-    for _ in 0..8 {
-        app.update();
-        std::thread::sleep(std::time::Duration::from_millis(4));
-    }
+    // 让三个探针都进入执行（墙钟轮询，避免固定帧在负载下未调度）
+    drive_within(&mut app, 2_000, |_| st.max() >= 3);
     assert_eq!(st.max(), 3, "前置条件：三个调用已同时在跑");
     app.world_mut().write_message(AbortMessage);
     for _ in 0..200 {

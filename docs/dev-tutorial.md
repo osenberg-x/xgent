@@ -765,7 +765,7 @@ v8 M1 把「浮层放在哪、谁吃点击、Esc 关谁」从散落实现收敛�
 - **实现是「间距属性写回」而非改调用点**（`density.rs`）：`DensityBase` 记下每个 `Node` 的基线 `padding/margin/row_gap/column_gap`；`capture_density_bases` 对新节点记基线并立即按当前档写回，`apply_density_on_change` 在 `ThemeHandle` 变化时按「基线 × 系数」重写。写入始终以基线为源，所以**重复应用不累乘**，切回舒适即逐像素还原。
 - **只缩间距**：`Val::Px` 参与换算，`Percent`/`Auto`/0 原样；字号、图标、`Node.width/height`、边框宽度都不动。系数 0.75 是刻意挑的——4px 网格 4→3、8→6、12→9、16→12、20→15、24→18、32→24 全部落在整数像素，不出半像素模糊。
 - **入口**：设置面板「语言」下方新增「密度」分段按钮（与语言同一枚 `segment_button`），点击即生效并发 `SaveDensityMessage`，**不进「保存」通路**；`xgent_app::settings_io::save_density` 经 `CONFIG_WRITE` 写 `preferences.density` 后重读快照。daemon 侧 `config_store` 的键白名单各加一条，写只接受 `comfortable`/`compact`（非法值报错，不静默回落）。
-- **启动即生效**：`request_preferences_on_startup` 在 Startup 读一次全局配置，只回填 `preferences`（`SnapshotResult.preferences_only`）。**别改成走面板快照**——面板快照会连带回填项目配置并重写 `LiveSettings`，而开机 `ProviderInfo` 还没就绪（provider id 为空），`resolve_context_window` 会回落内置缺省，把用户配的上下文窗口冲掉。
+- **启动即生效**：`request_preferences_on_startup` 在 Startup 读一次全局配置，回填 `preferences` 与 `pricing`（`SnapshotResult.preferences_only`）。**别改成走面板快照**——面板快照会连带回填项目配置并重写 `LiveSettings`，而开机 `ProviderInfo` 还没就绪（provider id 为空），`resolve_context_window` 会回落内置缺省，把用户配的上下文窗口冲掉。
 
 **hover 量化**（`kit.rs`）：
 

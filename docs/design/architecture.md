@@ -344,17 +344,17 @@ trait ContextProvider {
 - B 阶段：`RepoMapContextProvider`（tree-sitter 符号图）。
 - C 阶段：`VectorContextProvider`（本地嵌入 + 向量库）。
 
+- D 阶段：`LspContextProvider`（LSP/AST）。
+- E 阶段：`HybridContextProvider`（多路召回 + 融合排序）。
+- 演进切换：通过配置切换实现，调用方（AgentLoop）无感。
+- **EditorState trait（P1 编辑器引入）**：定义在 `xgent_core`，`xgent_ui` 实现，`xgent_context` 经 trait 查询——避免 `xgent_context` 依赖 `xgent_ui`（成环）。`EditorContextProvider`（C 阶段实现）查询 `EditorState` 处理用户在对话输入框的 @ 引用（`@file`/`@cursor`/`@selection`），组装为 `ContextChunk::EditorState`。C 阶段复用 tree-sitter AST 切片喂向量库。详见 `docs/design/editor-design.md` 6.3。
+
 ### 6.3a MCP 工具桥接（F-13 首期）
 
 - `xgent_tools::mcp` 提供 stdio MCP Client：`initialize`（2025-06-18）→ `tools/list` → `tools/call`。
 - 配置为全局 `~/.xgent/agent/mcp.toml` 与项目 `.xgent/mcp.toml`；项目配置默认被 `allow_project_servers=false` 忽略。
 - 发现的工具以 `mcp__<server>__<tool>` 注册进 `ToolExecutor`，固定 `Exec` 层、默认 `NeedsConfirmation`；`xgent_app` 的 `mcp_boot` 负责启动与退出清理。
 - 首期不做 HTTP/SSE、resources/prompts、3D 空间站、自动重连与 2026-07-28 无状态协议。
-
-- D 阶段：`LspContextProvider`（LSP/AST）。
-- E 阶段：`HybridContextProvider`（多路召回 + 融合排序）。
-- 演进切换：通过配置切换实现，调用方（AgentLoop）无感。
-- **EditorState trait（P1 编辑器引入）**：定义在 `xgent_core`，`xgent_ui` 实现，`xgent_context` 经 trait 查询——避免 `xgent_context` 依赖 `xgent_ui`（成环）。`EditorContextProvider`（C 阶段实现）查询 `EditorState` 处理用户在对话输入框的 @ 引用（`@file`/`@cursor`/`@selection`），组装为 `ContextChunk::EditorState`。C 阶段复用 tree-sitter AST 切片喂向量库。详见 `docs/design/editor-design.md` 6.3。
 
 ### 6.3b 成本统计（F-12）
 

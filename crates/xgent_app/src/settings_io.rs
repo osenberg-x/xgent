@@ -117,7 +117,7 @@ struct SnapshotResult {
     project: Option<ProjectConfig>,
     /// 失败原因（写进面板顶部，不把"读不到"演成"全是默认值"）
     error: String,
-    /// 只回填显示偏好（启动那次读取）：不碰项目配置、不动运行时句柄、不推进面板计数
+    /// 只回填显示偏好与价格（启动那次读取）：不碰项目配置、不动运行时句柄、不推进面板计数
     preferences_only: bool,
 }
 
@@ -203,7 +203,7 @@ fn request_snapshot(
 
 /// 启动时读一次显示偏好（v8 M2b）：磁盘上的密度 / 主题 / 语言在首帧就该生效。
 ///
-/// 只读全局配置、只回填 `preferences`——**不**走面板快照那条路。面板快照会连带
+/// 只读全局配置、回填 `preferences` 与 `pricing`——**不**走面板快照那条路。面板快照会连带
 /// 回填项目配置并重写 `LiveSettings`，而开机时 `ProviderInfo` 还没就绪（provider id
 /// 为空），`resolve_context_window` 会回落内置缺省，把用户配的窗口冲掉。
 fn request_preferences_on_startup(
