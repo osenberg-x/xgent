@@ -205,10 +205,9 @@ pub struct AgentBridge {
     /// 或 stream_llm_response，无法及时消费 Abort 命令）。修复 Confirming/ToolRunning
     /// 态下 Abort 无响应的 bug。用 Arc 共享给 task 与 ECS。
     pub current_cancel: Arc<parking_lot::Mutex<Option<tokio_util::sync::CancellationToken>>>,
-    /// 已注册工具的 schema 列表（启动时从 ToolExecutor 一次性提取，
-    /// 运行期工具集合不变；ECS 侧构造 ChatRequest 时注入为 `tools` 字段，
-    /// 修复工具 schema 从未注入导致 LLM 无法发起工具调用的 bug）。
-    pub tool_schemas: Arc<Vec<xgent_core::chat::ToolSchema>>,
+    /// 工具 schema 提供器（每次构造 ChatRequest 时从 ToolExecutor 取最新值；
+    /// 插件/MCP 可在运行期注册工具，不能再用启动时快照）。
+    pub tool_schemas: Arc<dyn Fn() -> Vec<xgent_core::chat::ToolSchema> + Send + Sync>,
     /// 有界执行的运行时可调上限（与 task 共享，测试与运行时调整用）。
     ///
     /// `None` = 不限。用 `parking_lot::RwLock` 而非裸字段，使 ECS 与异步
@@ -460,9 +459,10 @@ impl AgentBridge {
     /// 构造桥接并 spawn 异步 agent loop task。
     pub fn new(cfg: AgentBridgeConfig) -> Self {
         let project_root = cfg.project_root.clone();
-        // 启动时一次性提取工具 schema（运行期工具集合不变），
-        // 供 ECS 侧构造 ChatRequest 时注入为 tools 字段。
-        let tool_schemas = Arc::new(cfg.executor.schemas());
+        // 每轮从执行器取最新 schema：插件/MCP 可在运行期注册工具。
+        let executor_for_schemas = cfg.executor.clone();
+        let tool_schemas: Arc<dyn Fn() -> Vec<xgent_core::chat::ToolSchema> + Send + Sync> =
+            Arc::new(move || executor_for_schemas.schemas());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()

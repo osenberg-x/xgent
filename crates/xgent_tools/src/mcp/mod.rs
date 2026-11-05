@@ -1,11 +1,24 @@
-//! MCP（Model Context Protocol）传输层抽象。
+//! MCP（Model Context Protocol）客户端：stdio 传输、协议、工具适配与生命周期。
 //!
-//! 本模块定义 [`McpTransport`] trait 与 [`McpError`] 错误类型，用于抽象外部 MCP 服务端
-//! 的通信通道（stdio / SSE / WebSocket 等）。当前为 P2 预留，仅声明 trait，
-//! 不提供具体实现；后续阶段将在此 trait 基础上接入具体传输。
+//! 首期只支持 MCP `2025-06-18` 的 stdio + tools；HTTP/SSE、resources/prompts、
+//! 2026-07-28 无状态规范留后续。MCP 工具经 [`crate::Tool`] 注册进现有执行器，
+//! 安全策略与确认流程保持不变。
+
+pub mod client;
+pub mod manager;
+pub mod tool;
+pub mod transport;
+
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
+
+pub use client::McpClient;
+pub use manager::McpManager;
+pub use tool::McpTool;
+pub use transport::StdioTransport;
 
 /// MCP 传输层抽象。
 ///
@@ -27,6 +40,29 @@ pub trait McpTransport: Send + Sync {
     /// 返回服务端响应结果，失败时返回 [`McpError`]。
     async fn request(&self, method: &str, params: Value) -> Result<Value, McpError>;
 
+    /// 带指定超时的请求；默认实现忽略超时，由具体传输决定。
+    async fn request_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, McpError> {
+        let _ = timeout;
+        self.request(method, params).await
+    }
+
+    /// 可取消请求；默认实现忽略取消，由具体传输实现取消通知。
+    async fn request_cancellable(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<Value, McpError> {
+        let _ = cancel;
+        self.request_with_timeout(method, params, timeout).await
+    }
+
     /// 发送通知（无响应）。
     ///
     /// 通知失败时仅记录日志，不向上层传播错误。
@@ -44,7 +80,7 @@ pub trait McpTransport: Send + Sync {
 /// MCP 通信错误类型。
 ///
 /// 区分底层传输错误与协议层错误，便于上层（如 Tool 包装层）做差异化处理。
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum McpError {
     /// 底层传输错误：连接中断、IO 失败、超时等。
     #[error("{0}")]
@@ -53,4 +89,16 @@ pub enum McpError {
     /// 协议层错误：JSON-RPC 格式错误、方法未找到、参数不合法等。
     #[error("{0}")]
     Protocol(String),
+
+    /// 子进程启动失败。
+    #[error("{0}")]
+    Spawn(String),
+
+    /// 请求超时（秒）。
+    #[error("请求超时（{0}s）")]
+    Timeout(u64),
+
+    /// 调用方取消。
+    #[error("请求已取消")]
+    Cancelled,
 }

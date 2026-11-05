@@ -77,7 +77,7 @@ pub fn agent_poll_system(
             &context.result,
             &provider.id,
             &provider.model,
-            Some(bridge.tool_schemas.as_ref().clone()),
+            Some((bridge.tool_schemas)()),
         );
         let _ = bridge.cmd_tx.try_send(AgentCommand::StartLoop {
             req,

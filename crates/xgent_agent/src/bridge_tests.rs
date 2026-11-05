@@ -291,6 +291,22 @@ impl Tool for EchoTool {
 }
 
 #[test]
+fn tool_schemas_refresh_after_runtime_registration() {
+    let executor = Arc::new(ToolExecutor::new(Vec::new()));
+    let (app, _) =
+        test_app_with_executor(Vec::new(), executor.clone(), ToolPolicyConfig::default());
+    let bridge = app.world().resource::<AgentBridge>();
+    assert!((bridge.tool_schemas)().is_empty(), "初始应无工具");
+    executor.register(Arc::new(EchoTool));
+    assert!(
+        (bridge.tool_schemas)()
+            .iter()
+            .any(|schema| schema.name == "echo"),
+        "运行期注册的工具必须在下一轮请求可见"
+    );
+}
+
+#[test]
 fn delta_then_done_message_sequence() {
     let mut app = test_app(vec![
         ChatEvent::TextDelta {
