@@ -260,6 +260,6 @@ cost-history-title = History (including current session)
 cost-history = { $sessions } sessions: input { $prompt } tokens / output { $completion } tokens / cost { $cost }
 cost-history-loading = Scanning history…
 cost-history-empty = No historical usage
-cost-history-error = History scan failed: { $error }
+cost-history-error = History scan failed.
 cost-model = { $model }: input { $prompt } / output { $completion } / { $cost }
 cost-models-others = { $count } more models…

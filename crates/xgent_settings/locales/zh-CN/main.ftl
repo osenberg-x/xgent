@@ -261,6 +261,6 @@ cost-history-title = 历史累计（含当前会话）
 cost-history = { $sessions } 个会话：输入 { $prompt } tokens / 输出 { $completion } tokens / 成本 { $cost }
 cost-history-loading = 正在扫描历史会话…
 cost-history-empty = 暂无历史用量
-cost-history-error = 历史扫描失败：{ $error }
+cost-history-error = 历史扫描失败。
 cost-model = { $model }：输入 { $prompt } / 输出 { $completion } / { $cost }
 cost-models-others = 其余 { $count } 个模型…

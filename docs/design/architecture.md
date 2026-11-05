@@ -351,15 +351,16 @@ trait ContextProvider {
 - 发现的工具以 `mcp__<server>__<tool>` 注册进 `ToolExecutor`，固定 `Exec` 层、默认 `NeedsConfirmation`；`xgent_app` 的 `mcp_boot` 负责启动与退出清理。
 - 首期不做 HTTP/SSE、resources/prompts、3D 空间站、自动重连与 2026-07-28 无状态协议。
 
+- D 阶段：`LspContextProvider`（LSP/AST）。
+- E 阶段：`HybridContextProvider`（多路召回 + 融合排序）。
+- 演进切换：通过配置切换实现，调用方（AgentLoop）无感。
+- **EditorState trait（P1 编辑器引入）**：定义在 `xgent_core`，`xgent_ui` 实现，`xgent_context` 经 trait 查询——避免 `xgent_context` 依赖 `xgent_ui`（成环）。`EditorContextProvider`（C 阶段实现）查询 `EditorState` 处理用户在对话输入框的 @ 引用（`@file`/`@cursor`/`@selection`），组装为 `ContextChunk::EditorState`。C 阶段复用 tree-sitter AST 切片喂向量库。详见 `docs/design/editor-design.md` 6.3。
+
 ### 6.3b 成本统计（F-12）
 
 - `xgent_settings_core::pricing` 提供 USD / 1M tokens 默认价与按模型覆盖，以及成本公式；未定价返回 `None`。
 - `xgent_ui::cost` 从 `Conversation` 的 Assistant usage 重算当前会话；打开成本面板时后台线程只读扫描 `sessions/*.jsonl` 聚合历史（含当前会话，按模型）。
 - 状态栏成本段打开 overlay；设置面板“成本”分区编辑默认价，模型覆盖由配置文件维护。
-- D 阶段：`LspContextProvider`（LSP/AST）。
-- E 阶段：`HybridContextProvider`（多路召回 + 融合排序）。
-- 演进切换：通过配置切换实现，调用方（AgentLoop）无感。
-- **EditorState trait（P1 编辑器引入）**：定义在 `xgent_core`，`xgent_ui` 实现，`xgent_context` 经 trait 查询——避免 `xgent_context` 依赖 `xgent_ui`（成环）。`EditorContextProvider`（C 阶段实现）查询 `EditorState` 处理用户在对话输入框的 @ 引用（`@file`/`@cursor`/`@selection`），组装为 `ContextChunk::EditorState`。C 阶段复用 tree-sitter AST 切片喂向量库。详见 `docs/design/editor-design.md` 6.3。
 
 ### 6.4 配置抽象
 

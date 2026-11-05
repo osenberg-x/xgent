@@ -34,6 +34,15 @@ impl PricingConfig {
     /// 解析某模型的生效价格；输入/输出任一未定价则返回 `None`。
     pub fn price_for(&self, model: &str) -> Option<(f64, f64)> {
         let model_price = self.models.get(model);
+        warn_if_invalid("pricing.input_per_million", self.input_per_million);
+        warn_if_invalid("pricing.output_per_million", self.output_per_million);
+        if let Some(price) = model_price {
+            warn_if_invalid("pricing.models.input_per_million", price.input_per_million);
+            warn_if_invalid(
+                "pricing.models.output_per_million",
+                price.output_per_million,
+            );
+        }
         let input = model_price
             .and_then(|price| positive_price(price.input_per_million))
             .or_else(|| positive_price(self.input_per_million))?;
@@ -62,6 +71,12 @@ impl PricingConfig {
 
 fn positive_price(value: f64) -> Option<f64> {
     (PricingConfig::valid_price(value) && value > 0.0).then_some(value)
+}
+
+fn warn_if_invalid(key: &str, value: f64) {
+    if value != 0.0 && !PricingConfig::valid_price(value) {
+        tracing::warn!(key, value, "忽略非法模型价格（需有限且非负）");
+    }
 }
 
 #[cfg(test)]

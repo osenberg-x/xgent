@@ -332,7 +332,7 @@ fn parse_price_text(text: &str) -> Result<Option<f64>, FieldError> {
 /// 把价格输入转换为待写配置项；空串视为 0（未设置）。
 fn price_config_item(text: &str, key: &str, stored: f64) -> Result<Option<ConfigItem>, FieldError> {
     let value = parse_price_text(text)?.unwrap_or(0.0);
-    if (value - stored).abs() <= f64::EPSILON {
+    if value == stored {
         return Ok(None);
     }
     Ok(Some(ConfigItem {
@@ -346,14 +346,7 @@ fn format_price_input(value: f64) -> String {
     if !value.is_finite() || value <= 0.0 {
         return String::new();
     }
-    let mut text = format!("{value:.4}");
-    while text.ends_with('0') {
-        text.pop();
-    }
-    if text.ends_with('.') {
-        text.pop();
-    }
-    text
+    format!("{value}")
 }
 
 /// 解析输入框文本为待写值。
@@ -2116,6 +2109,7 @@ mod tests {
         assert!(parse_price_text("abc").is_err());
         assert!(parse_price_text("10000.1").is_err());
         assert_eq!(format_price_input(2.5), "2.5");
+        assert_eq!(format_price_input(0.00375), "0.00375");
         assert_eq!(format_price_input(0.0), "");
     }
 

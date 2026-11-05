@@ -77,6 +77,7 @@ fn spawn_cost_panel(
             },
             BackgroundColor(theme.overlay),
             Visibility::Hidden,
+            Pickable::default(),
             crate::kit::drawer_z(),
             CostPanelRoot,
         ))
@@ -148,6 +149,13 @@ fn spawn_cost_panel(
         .insert(CostCurrentText);
 
         card.spawn(ui_text(
+            tr(&loc, "cost-history-title"),
+            type_scale::BODY_SM,
+            400,
+            theme.text_muted,
+            type_scale::line_height::UI,
+        ));
+        card.spawn(ui_text(
             String::new(),
             type_scale::BODY_SM,
             400,
@@ -176,6 +184,7 @@ fn sync_cost_panel(
     mut pop: MessageWriter<crate::modal::ModalPop>,
     mut history: ResMut<CostHistoryState>,
     global: Res<GlobalConfigRes>,
+    focus: Option<Res<bevy::input_focus::InputFocus>>,
 ) {
     if !state.is_changed() {
         return;
@@ -196,7 +205,9 @@ fn sync_cost_panel(
             id: "cost",
             entity,
             dismiss: crate::modal::Dismiss::EscOnly,
-            opener_focus: None,
+            opener_focus: focus
+                .as_deref()
+                .and_then(bevy::input_focus::InputFocus::get),
         });
         history.start_scan(sessions_dir(), global.0.pricing.clone());
     } else if !state.open && contains {
@@ -266,10 +277,10 @@ fn update_cost_texts(
     if let Ok(mut text) = history_text.single_mut() {
         let next = if history.loading {
             tr(&loc, "cost-history-loading").to_string()
-        } else if let Some(error) = &history.error {
-            tr_with(&loc, "cost-history-error", &[("error", error.clone())])
+        } else if history.error.is_some() {
+            tr(&loc, "cost-history-error").to_string()
         } else if let Some(result) = &history.result {
-            if result.sessions == 0 {
+            if result.models.is_empty() {
                 tr(&loc, "cost-history-empty").to_string()
             } else {
                 tr_with(
