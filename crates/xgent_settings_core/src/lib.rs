@@ -5,12 +5,14 @@
 
 pub mod global;
 pub mod keychain;
+pub mod mcp;
 pub mod paths;
 pub mod project;
 pub mod store;
 
 pub use global::{Density, GlobalConfig, PluginConfig, Preferences, ProviderConfig, ProviderKind};
 pub use keychain::resolve_api_key;
+pub use mcp::{McpConfig, McpLoadOutcome, McpServerConfig, load_mcp_config};
 pub use project::{
     AgentConfig, ContextLimits, ContextStrategy, ProjectConfig, ToolConfig, ToolPolicyConfig,
 };

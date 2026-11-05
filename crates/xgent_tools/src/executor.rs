@@ -175,6 +175,20 @@ impl ToolExecutor {
         self.tools.write().insert(tool.id().to_string(), tool);
     }
 
+    /// 按完整 id 精确移除（MCP Server 关闭时清理其工具，避免前缀误删）。
+    pub fn remove_ids(&self, ids: &[String]) {
+        {
+            let mut tools = self.tools.write();
+            for id in ids {
+                tools.remove(id);
+            }
+        }
+        match self.allowed_all.try_lock() {
+            Ok(mut set) => set.retain(|id| !ids.contains(id)),
+            Err(_) => tracing::warn!("ToolExecutor::remove_ids: allowed_all 锁竞争，缓存未清理"),
+        }
+    }
+
     /// 按前缀移除（插件卸载时清理 plugin.<id>. 工具）。
     ///
     /// 照设计文档 §7.2。`&self`（interior mutability via RwLock），在 ECS 主线程
@@ -193,7 +207,11 @@ impl ToolExecutor {
 
     /// 列出所有已注册工具的 schema（供 provider 的 tools 参数）。
     pub fn schemas(&self) -> Vec<xgent_core::chat::ToolSchema> {
-        self.tools.read().values().map(|t| t.schema()).collect()
+        let mut schemas: Vec<xgent_core::chat::ToolSchema> =
+            self.tools.read().values().map(|t| t.schema()).collect();
+        // 运行期会注册插件/MCP 工具；稳定顺序避免每轮请求的工具前缀漂移。
+        schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        schemas
     }
 
     /// 该调用能否与相邻调用**同时**执行（R3-15 的调度判据）。

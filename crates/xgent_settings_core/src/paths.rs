@@ -60,6 +60,16 @@ pub fn global_config_file() -> PathBuf {
     agent_dir().join("config.toml")
 }
 
+/// 全局 MCP 配置路径（`<agent_dir>/mcp.toml`）。
+pub fn mcp_config_file() -> PathBuf {
+    agent_dir().join("mcp.toml")
+}
+
+/// 项目 MCP 配置路径（`<project_root>/.xgent/mcp.toml`）。
+pub fn project_mcp_config_file(project_root: &Path) -> PathBuf {
+    project_config_dir(project_root).join("mcp.toml")
+}
+
 /// 会话历史目录（`<agent_dir>/sessions/`）。
 ///
 /// 每个会话一个 JSONL 文件（ADR-0008）。跨项目共享，按 session_id 命名。

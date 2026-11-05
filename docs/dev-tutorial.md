@@ -50,7 +50,7 @@
 
 - **F-10 Git 集成**（P1）：✅ 已实现（`xgent_plugin_git` 插件，git_diff/git_log/git_status 工具 + 命令，经 `host.run_command("git", ...)`）。
 - **F-12 成本统计**（P1）：未实现（`TokenUsage` 类型已定义，无汇总 UI）。
-- **F-13 MCP 支持**（P1）：仅 trait 预留 `xgent_tools/src/mcp.rs::McpTransport`，无实现。
+- **F-13 MCP 支持**（P1）：首期已交付本地 stdio tools 桥接（`xgent_tools/src/mcp/`，2025-06-18）；HTTP/SSE、resources/prompts 留后续。
 - **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化**（MVP-2，当前主线）：未实现；S0 数据内核（`xgent_spatial`，仅 crate 级 L0）与设计文档已就绪，第一里程碑为 S1 + 点击打开 + L1 文件/目录图（见 requirements §4.2）。
@@ -95,7 +95,7 @@ xgent_app           ── UI 进程入口 bin：组装插件 + daemon 拉起 + 
 | `xgent_settings` | `Localizer`（impl StringSource）、`GlobalConfigRes`/`ProjectConfigRes`、`XgentSettingsPlugin` |
 | `xgent_provider` | `LlmProvider` trait、`OpenAiCompatProvider`（完整）、`ResponseApiProvider`/`AnthropicProvider`/`CustomApiProvider`（占位）、`build_provider(id, cfg)`、`ChatStream`；R3-17 后适配器经 `with_first_event_timeout_secs` / `with_max_output_tokens` 承接 `ProviderConfig`（`build_provider` 与 `CustomApiProvider::with_config` 负责取值），缺省仍等于原 `FIRST_EVENT_TIMEOUT_SECS`/`8192` 常量 |
 | `xgent_daemon` | `Server`（JSON-RPC over Unix socket/named pipe）、`ProviderPool`（`chat` 返回 `(ErrorKind, String)`，ErrorKind 经 `ProviderError::to_error_kind` 映射，透传给 UI 避免误判 Network 重试）、`FsWatcher`、`ConfigStore`、`registry`（多客户端订阅广播）、`lifecycle` |
-| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolCtx.tool_policy` 为 `Arc<RwLock<ToolPolicyConfig>>`（改完下一次调用生效）、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自共享句柄 `with_shared_params(Arc<RwLock<ToolParams>>)`，`with_params(&ToolParams)` 取快照）；`policy_targets()` 列出已注册工具的 id+tier、`resolved_policy(id, policy)` 给设置面板显示解析后的三态、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`McpTransport`（占位） |
+| `xgent_tools` | `Tool` trait（tier/approval_for/concurrency/execute(signal,on_update)）、`ToolTier`(Read/Write/Exec/UiOnly)、`Concurrency`(Shared/Exclusive)、`ToolError`、`ToolCtx.tool_policy` 为 `Arc<RwLock<ToolPolicyConfig>>`（改完下一次调用生效）、`ToolExecutor`（`execute` 的 `NeedsConfirmation` 路径 `rx.await` 监听 `signal.cancelled()`，Abort 可中断确认等待；确认时长来自共享句柄 `with_shared_params(Arc<RwLock<ToolParams>>)`，`with_params(&ToolParams)` 取快照）；`policy_targets()` 列出已注册工具的 id+tier、`resolved_policy(id, policy)` 给设置面板显示解析后的三态、`ToolExecutorResource`（Arc 共享包装）、`ConfirmCallback`、`resolve_policy`、4 内置工具（`search_files` 支持 `regex`/`case_insensitive`/`glob`/`file_type`，非法参数在遍历前报 `is_error`，见 §5 注意点 28）、`ToolParams`（`[tools]` 派生的命令超时/输出上限/确认超时）、`default_tools(&ToolParams)`、`truncate_output`/`truncate_output_to`、`glob`（crate 内 glob→正则）、`EditorTool`（UiOnly）、`mcp`（stdio 传输/协议/工具/manager，F-13） |
 | `xgent_terminal` | `TerminalBackend` trait（spawn/write/resize/kill/subscribe）、`LocalPtyBackend`（portable-pty）、`TerminalEvent`(Output/Exited)、`SpawnRequest`、`ShellSpec`(Powershell/FromEnv)、`TerminalId`、`TerminalError`；**双宽单元格模型**（M4-T2）：`display_width`/`display_width_str`（wcwidth）、`CellRun`/`layout_cells`（按格布局内核）、`RenderLine`/`StyledSpan`/`SpanStyle`/`Color`/`TerminalParser` |
 | `xgent_spatial` | `parse_manifest`/`ManifestInfo`、`scan(root)`（crate 级 L0）、`scan_with_options(root, ScanOptions)`（L1 文件/目录图 + crate 叠加）、`layout`/`layout_incremental`、`LayoutConfig`/`LayoutReport`；类型在 `xgent_core::spatial`（`SpatialGraph`/`SpatialNode`/`SpatialEdge`/`SpatialCluster`，`SpatialGraph.omitted_nodes` 记录裁剪数） |
 | `xgent_codeintel` | `CodeIndex::scan/update_file/remove_file/update_file_from_disk`、`FileEntry`/`Symbol`/`SymbolKind`/`SourceRange`/`Import`/`ImportTarget`、确定性 `generation`；tree-sitter-rust 解析（F-21） |
@@ -966,6 +966,30 @@ M3 把「哪里能滚、哪里填满、超长了怎么办、列表大了怎么�
 - **RepoMap**：`build_context_provider(RepoMap)` 返回 Ready；首次检索后台建索引，按符号名/路径/当前文件评分，输出受 token 预算约束的 `ContextChunk`；无匹配/根缺失返回空结果。
 - **边界**：首期仅 Rust；无直接调用边、git 变更频率、3D L2 卫星/虫洞、多语言、LSP/类型推导。设计见 `docs/design/code-intelligence-design.md`。
 - **测试**：`cargo test -p xgent_codeintel`（符号/import/忽略/确定性/增量/删除）、`cargo test -p xgent_context`（RepoMap Ready/检索/变更/缺失根）。
+
+### 5.29 MCP 支持（F-13 首期）
+
+全局配置放 `~/.xgent/agent/mcp.toml`（Windows 为 `%USERPROFILE%\.xgent\agent\mcp.toml`）：
+
+```toml
+allow_project_servers = false
+
+[[servers]]
+id = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+env = { TOKEN = "${TOKEN}" }
+cwd = "."
+enabled = true
+auto_start = true
+```
+
+- **字段**：`id`、`command`、`args`、`env`、`cwd`、`enabled`、`auto_start`；`cwd` 相对项目根解析，所有字符串支持 `${VAR}`，变量缺失时跳过该 Server。
+- **项目配置**：`.xgent/mcp.toml` 仅在全局 `allow_project_servers = true` 时读取；同名 `id` 整项覆盖全局，其他追加。默认关闭，避免打开不可信仓库即执行其中命令。
+- **工具**：Server 的 tools 自动注册为 `mcp__<server>__<tool>`；固定 `Exec` 层、默认每次确认，可在 `[tool_policy]` 按完整 id 提升。
+- **接线**：`xgent_app::mcp_boot` 在 bridge 的 tokio runtime 上启动 `McpManager`，作为 `McpRuntime` Resource 持有；`AppExit` 时调用 `shutdown` 终止子进程。`AgentBridge` 每轮从 `ToolExecutor` 读取 schema，后台注册的工具在下一轮对话可见。连接/发现失败只影响该 Server。
+- **测试**：`cargo test -p xgent_settings_core mcp`、`cargo test -p xgent_tools mcp`、`cargo test -p xgent_tools --test mcp_manager`（真实 fixture 子进程）、`cargo test -p xgent_app mcp_boot`。
+- **首期边界**：仅 stdio 与 2025-06-18 握手；不做 HTTP/SSE、resources/prompts、设置面板、3D 空间站、自动重连、list_changed 热刷新与配置热重载（改 `mcp.toml` 后重启）。子进程继承父进程环境变量，敏感值应放 `env` 或后续白名单；Windows 无扩展名命令会按 PATHEXT 解析 `.cmd`/`.bat`/`.exe`。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

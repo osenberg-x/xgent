@@ -1,0 +1,9 @@
+{
+  "action": "pr",
+  "targetBranch": "comet/f13-mcp-support",
+  "remote": "origin",
+  "schemaVersion": 1,
+  "changeIdentity": "run:65180ada-05f2-4232-9416-567c1c42a4d8",
+  "authorizationId": "b95c6d4d-e2b1-4e24-989b-8b76a0be8e17",
+  "authorizedRemoteUrl": "git@github.com:osenberg-x/xgent.git"
+}

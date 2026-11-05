@@ -1,0 +1,391 @@
+    Finished `test` profile [unoptimized] target(s) in 1.25s
+     Running unittests src\lib.rs (target\debug\deps\xgent_agent-173ca4b5b7bf4e94.exe)
+
+running 79 tests
+test bridge_tests::abort_before_later_groups_places_placeholders_for_them ... ok
+test bridge_tests::abort_cancels_upstream_stream ... ok
+test bridge_tests::abort_during_concurrent_group_pairs_every_call ... ok
+test bridge_tests::abort_interrupts_confirming_state ... ok
+test bridge_tests::abort_then_new_conversation_still_streams ... ok
+test bridge_tests::approved_read_tools_actually_overlap ... ok
+test bridge_tests::busy_state_ignores_new_input ... ok
+test bridge_tests::cap_one_serialises_even_approved_read_tools ... ok
+test bridge_tests::cap_two_bounds_the_group ... ok
+test bridge_tests::compaction_preserves_system_prompt_in_req ... ok
+test bridge_tests::compaction_syncs_conv_messages ... ok
+test bridge_tests::compaction_triggers_when_over_threshold ... ok
+test bridge_tests::confirm_decision_sets_tool_running_status ... ok
+test bridge_tests::confirmations_are_asked_one_at_a_time_and_never_overlap ... ok
+test bridge_tests::context_sidecar_roundtrip_and_legacy_array_format ... ok
+test bridge_tests::default_config_parallelises_nothing_even_for_auto_approved_ui_only ... ok
+test bridge_tests::delta_then_done_message_sequence ... ok
+test bridge_tests::drain_bound_is_read_from_bridge_not_a_literal ... ok
+test bridge_tests::error_message_propagates ... ok
+test bridge_tests::exclusive_call_is_a_barrier_for_its_neighbours ... ok
+test bridge_tests::frame_event_cap_defers_events_without_dropping_them ... ok
+test bridge_tests::frame_event_cap_written_to_handle_is_read_next_frame ... ok
+test bridge_tests::http_status_maps_to_error_kind ... ok
+test bridge_tests::infinite_retry_can_be_aborted ... ok
+test bridge_tests::length_truncation_pairs_tool_call_and_result_in_conv ... ok
+test bridge_tests::max_parallel_tools_written_to_handle_bounds_next_turn ... ok
+test bridge_tests::multi_tool_calls_single_assistant_message ... ok
+test bridge_tests::non_retryable_error_fails_immediately ... ok
+test bridge_tests::none_max_retries_is_clamped_to_finite_default ... ok
+test bridge_tests::normal_completion_backfills_assistant_text_to_req ... ok
+test bridge_tests::rate_limit_and_server_error_are_retryable ... ok
+test bridge_tests::results_keep_model_order_even_when_completion_differs ... ok
+test bridge_tests::retrieval_budget_from_config_reaches_context_query ... ok
+test bridge_tests::retrieval_budget_written_to_handle_reaches_next_query ... ok
+test bridge_tests::retry_after_overrides_computed_backoff ... ok
+test bridge_tests::retry_preserves_partial_assistant_text_in_req ... ok
+test bridge_tests::retryable_error_retries_then_succeeds ... ok
+test bridge_tests::runtime_narrowed_window_drives_the_next_compaction_decision ... ok
+test bridge_tests::session_jsonl_persists_header_and_assistant_message ... ok
+test bridge_tests::steering_interrupt_preserves_assistant_text_in_req ... ok
+test bridge_tests::steering_interrupts_streaming_and_continues ... ok
+test bridge_tests::stream_none_triggers_retryable_error ... ok
+test bridge_tests::tool_call_executes_approved_tool ... ok
+test bridge_tests::tool_call_with_text_preserves_assistant_text_in_req ... ok
+test bridge_tests::tool_loop_stops_at_iteration_ceiling ... ok
+test bridge_tests::tool_loop_stops_at_token_ceiling ... ok
+test bridge_tests::tool_policy_imports ... ok
+test bridge_tests::tool_policy_written_to_handle_stops_asking_next_turn ... ok
+test bridge_tests::tool_schemas_refresh_after_runtime_registration ... ok
+test compaction::tests::apply_compaction_empty_summary_returns_kept ... ok
+test compaction::tests::apply_compaction_prepends_summary ... ok
+test compaction::tests::find_cut_point_cuts_at_user_boundary ... ok
+test compaction::tests::find_cut_point_empty ... ok
+test compaction::tests::find_cut_point_never_cuts_mid_toolresult ... ok
+test compaction::tests::find_cut_point_under_budget_no_cut ... ok
+test compaction::tests::resolve_threshold_clamped_below_window ... ok
+test compaction::tests::resolve_threshold_respects_reserve ... ok
+test compaction::tests::should_compact_above_threshold_true ... ok
+test compaction::tests::should_compact_below_threshold_false ... ok
+test compaction::tests::should_compact_disabled_never ... ok
+test compaction::tests::should_compact_floor_by_local_estimate ... ok
+test format::tests::build_request_filters_notification ... ok
+test format::tests::build_request_includes_system_and_history ... ok
+test format::tests::build_request_injects_context ... ok
+test format::tests::pinned_context_is_clamped_to_remaining_budget ... ok
+test format::tests::pinned_context_replaces_retrieved_chunk_by_path ... ok
+test format::tests::pinned_context_truncates_to_leftover_budget ... ok
+test session_store::tests::append_creates_parent_dirs ... ok
+test session_store::tests::append_then_load_all_roundtrip ... ok
+test session_store::tests::append_three_different_types_roundtrip ... ok
+test session_store::tests::load_all_on_missing_file_returns_empty ... ok
+test session_store::tests::load_all_skips_empty_lines ... ok
+test session_store::tests::session_file_path_layout ... ok
+test tokenizer::tests::chinese_text_uses_char_count ... ok
+test tokenizer::tests::empty_text_only_overhead ... ok
+test tokenizer::tests::english_text_approx_4_chars_per_token ... ok
+test tokenizer::tests::image_fixed_estimate ... ok
+test tokenizer::tests::sum_over_messages ... ok
+test tokenizer::tests::toolcall_args_estimated_by_json_bytes ... ok
+
+test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.09s
+
+     Running unittests src\main.rs (target\debug\deps\xgent_app-4e6870c93cd3f2a7.exe)
+
+running 14 tests
+test mcp_boot::tests::corrupt_config_is_noop_without_panic ... ok
+test mcp_boot::tests::disabled_server_creates_manager_without_connections ... ok
+test mcp_boot::tests::missing_config_is_noop ... ok
+test provider_client::tests::rpc_error_data_bare_kind_still_parses ... ok
+test provider_client::tests::rpc_error_data_null_yields_provider_error ... ok
+test provider_client::tests::rpc_error_data_object_yields_kind_and_retry_after ... ok
+test settings_io::tests::a_clean_save_surfaces_a_re_read_failure_and_a_rejected_one_does_not ... ok
+test settings_io::tests::a_failed_save_leaves_the_rejected_value_in_the_real_panel_frame ... ok
+test settings_io::tests::apply_snapshot_replaces_every_handle ... ok
+test settings_io::tests::apply_snapshot_returns_to_defaults_when_unset_again ... ok
+test settings_io::tests::concerns_root_filters_peer_changes_by_scope_and_root ... ok
+test settings_io::tests::drain_save_advances_the_render_counter_only_when_every_key_landed ... ok
+test settings_io::tests::new_handles_carry_effective_values ... ok
+test settings_io::tests::provider_writes_are_detected_from_the_report ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests\ipc_integration.rs (target\debug\deps\ipc_integration-3657df67aaf66353.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ipc_proto.rs (target\debug\deps\ipc_proto-0903523ebf1ff942.exe)
+
+running 5 tests
+test error_response_parses ... ok
+test notification_parses_no_id ... ok
+test request_serializes_with_id ... ok
+test response_parses_with_id ... ok
+test route_provider_event_notification_to_chat_event ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\xgent_settings_core-eefc4bcd04d7104d.exe)
+
+running 57 tests
+test global::tests::chat_side_width_defaults_to_400_and_parses ... ok
+test global::tests::compact_scaling_lands_on_integer_pixels ... ok
+test global::tests::context_window_precedence_is_model_then_provider_then_fallback ... ok
+test global::tests::density_defaults_and_parses ... ok
+test global::tests::explicit_zero_means_unset_for_provider_limits ... ok
+test global::tests::global_config_default_empty ... ok
+test global::tests::global_config_roundtrip ... ok
+test global::tests::global_resolve_context_window_handles_missing_provider ... ok
+test global::tests::new_provider_keys_default_to_previous_constants ... ok
+test global::tests::provider_config_default_values ... ok
+test global::tests::provider_config_retries_serde ... ok
+test global::tests::provider_kind_serde_snake_case ... ok
+test global::tests::provider_new_keys_roundtrip_and_keep_zero ... ok
+test global::tests::retry_mode_serde_snake_case ... ok
+test global::tests::three_d_home_defaults_true_and_parses ... ok
+test global::tests::toml_without_new_keys_resolves_to_builtin_defaults ... ok
+test keychain::tests::account_differs_per_provider ... ok
+test keychain::tests::credential_path_under_config_dir ... ok
+test keychain::tests::delete_unknown_entry_is_ok ... ok
+test keychain::tests::persist_rejects_empty_value ... ok
+test keychain::tests::read_unknown_entry_returns_none ... ok
+test keychain::tests::resolve_falls_back_to_toml ... ok
+test mcp::tests::disabled_server_is_retained_but_not_started ... ok
+test mcp::tests::doc_example_parses ... ok
+test mcp::tests::env_vars_expand_and_missing_ones_skip_server ... ok
+test mcp::tests::invalid_or_duplicate_servers_are_skipped_or_last_wins ... ok
+test mcp::tests::malformed_global_is_empty_without_panic ... ok
+test mcp::tests::malformed_project_falls_back_to_global ... ok
+test mcp::tests::project_can_disable_global_server_without_command ... ok
+test mcp::tests::project_is_ignored_by_default ... ok
+test mcp::tests::project_overrides_and_appends_when_allowed ... ok
+test paths::tests::agent_dir_default_under_home ... ok
+test paths::tests::agent_dir_env_empty_falls_back_to_home ... ok
+test paths::tests::agent_dir_env_integration ... ok
+test paths::tests::agent_dir_env_override ... ok
+test paths::tests::agent_dir_env_tilde_expansion ... ok
+test paths::tests::daemon_socket_env_override ... ok
+test paths::tests::daemon_socket_path_nonempty ... ok
+test paths::tests::global_config_file_is_config_toml ... ok
+test paths::tests::project_config_paths ... ok
+test paths::tests::session_file_path_layout ... ok
+test paths::tests::sessions_db_under_agent_dir ... ok
+test paths::tests::sessions_dir_under_agent_dir ... ok
+test project::tests::context_strategy_default_is_ondemand ... ok
+test project::tests::context_strategy_serde_snake_case ... ok
+test project::tests::explicit_zero_means_unset_not_unlimited ... ok
+test project::tests::max_parallel_tools_zero_means_default_not_unlimited ... ok
+test project::tests::new_sections_default_to_previous_constants ... ok
+test project::tests::new_sections_values_are_honoured_and_roundtrip ... ok
+test project::tests::project_config_default ... ok
+test project::tests::project_config_roundtrip ... ok
+test project::tests::toml_without_new_sections_resolves_to_builtin_defaults ... ok
+test store::tests::global_store_load_missing_returns_default ... ok
+test store::tests::global_store_save_then_load_roundtrip ... ok
+test store::tests::project_store_load_missing_returns_default ... ok
+test store::tests::project_store_save_then_load_roundtrip ... ok
+test store::tests::save_creates_parent_dirs ... ok
+
+test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\lib.rs (target\debug\deps\xgent_tools-921ecec4d991787c.exe)
+
+running 162 tests
+test builtins::edit_file::tests::deletes_lines_with_empty_new_content ... ok
+test builtins::edit_file::tests::end_before_start_errors ... ok
+test builtins::edit_file::tests::end_line_past_eof_clamps ... ok
+test builtins::edit_file::tests::matching_old_content_proceeds ... ok
+test builtins::edit_file::tests::mismatched_old_content_reports_error ... ok
+test builtins::edit_file::tests::missing_new_content_errors ... ok
+test builtins::edit_file::tests::missing_start_line_errors ... ok
+test builtins::edit_file::tests::negative_start_errors ... ok
+test builtins::edit_file::tests::old_content_ignores_trailing_space ... ok
+test builtins::edit_file::tests::preserves_trailing_newline ... ok
+test builtins::edit_file::tests::replaces_line_range ... ok
+test builtins::edit_file::tests::replaces_single_line ... ok
+test builtins::edit_file::tests::replacing_middle_line_with_multi_line_keeps_surrounding ... ok
+test builtins::edit_file::tests::replacing_single_line_with_multi_line_expands_it ... ok
+test builtins::edit_file::tests::start_line_past_eof_errors ... ok
+test builtins::edit_file::tests::truncated_output_stays_near_cap ... ok
+test builtins::read_file::tests::slice_limit_only_reads_from_start ... ok
+test builtins::read_file::tests::slice_limit_past_end_clamps ... ok
+test builtins::read_file::tests::slice_negative_limit_errors ... ok
+test builtins::read_file::tests::slice_negative_offset_errors ... ok
+test builtins::read_file::tests::slice_no_params_returns_whole ... ok
+test builtins::read_file::tests::slice_non_integer_errors ... ok
+test builtins::read_file::tests::slice_offset_only_reads_to_end ... ok
+test builtins::read_file::tests::slice_offset_past_end_returns_empty_not_error ... ok
+test builtins::read_file::tests::slice_preserves_cjk_whole_lines ... ok
+test builtins::read_file::tests::slice_within_bounds ... ok
+test builtins::run_command::tests::approval_for_dangerous_command_returns_dangerous ... ok
+test builtins::run_command::tests::approval_for_normal_command_returns_exec ... ok
+test builtins::run_command::tests::command_timeout_written_to_shared_handle_applies_next_call ... ok
+test builtins::run_command::tests::configured_command_timeout_kills_slow_command ... ok
+test builtins::run_command::tests::configured_output_cap_truncates_capture ... ok
+test builtins::run_command::tests::default_params_equal_previous_constants ... ok
+test builtins::run_command::tests::output_cap_written_to_shared_handle_applies_next_call ... ok
+test builtins::run_command::tests::run_echo ... ok
+test builtins::run_command::tests::run_failing_command ... ok
+test builtins::run_command::tests::run_large_output_does_not_deadlock ... ok
+test builtins::run_command::tests::run_writes_to_project_dir ... ok
+test builtins::run_command::tests::summarize_includes_command ... ok
+test builtins::search_files::tests::abort_during_filtered_search_returns_aborted ... ok
+test builtins::search_files::tests::case_insensitive_applies_to_both_modes ... ok
+test builtins::search_files::tests::extension_rules ... ok
+test builtins::search_files::tests::file_type_filter_selects_extensions ... ok
+test builtins::search_files::tests::filtered_files_do_not_consume_result_cap ... ok
+test builtins::search_files::tests::glob_and_file_type_intersect ... ok
+test builtins::search_files::tests::glob_extension_filter_narrows_files ... ok
+test builtins::search_files::tests::glob_path_filter_with_globstar ... ok
+test builtins::search_files::tests::ignores_common_dirs ... ok
+test builtins::search_files::tests::invalid_glob_is_reported_before_traversal ... ok
+test builtins::search_files::tests::invalid_regex_is_reported_before_traversal ... ok
+test builtins::search_files::tests::literal_pattern_is_literal ... ok
+test builtins::search_files::tests::lookaround_and_backreference_are_invalid_patterns ... ok
+test builtins::search_files::tests::regex_mode_matches_by_pattern ... ok
+test builtins::search_files::tests::schema_documents_new_arguments_and_type_list ... ok
+test builtins::search_files::tests::search_finds_matches ... ok
+test builtins::search_files::tests::search_ignores_target_dir ... ok
+test builtins::search_files::tests::search_no_match ... ok
+test builtins::search_files::tests::summarize_reports_active_filters ... ok
+test builtins::search_files::tests::summarize_with_path ... ok
+test builtins::search_files::tests::unknown_file_type_lists_supported_names ... ok
+test checkpoint::tests::created_file_is_marked_created_and_has_no_blob ... ok
+test checkpoint::tests::created_file_is_removed_on_undo ... ok
+test checkpoint::tests::created_then_deleted_by_user_reports_already_absent ... ok
+test checkpoint::tests::empty_turn_does_not_reuse_turn_number ... ok
+test checkpoint::tests::executor_driven_write_file_is_undone ... ok
+test checkpoint::tests::externally_modified_file_is_skipped_and_others_still_restore ... ok
+test checkpoint::tests::fnv1a_is_stable_and_distinguishing ... ok
+test checkpoint::tests::paths_outside_the_project_are_ignored ... ok
+test checkpoint::tests::retention_keeps_only_the_newest_turns ... ok
+test checkpoint::tests::snapshot_records_pre_state_and_no_backup_file ... ok
+test checkpoint::tests::three_writes_in_a_single_turn_undo_to_pre_turn_content ... ok
+test checkpoint::tests::turn_number_continues_after_restart ... ok
+test checkpoint::tests::undo_is_scoped_to_the_session ... ok
+test checkpoint::tests::unwritable_checkpoint_dir_degrades_without_blocking_the_write ... ok
+test checkpoint::tests::user_deleted_file_is_not_resurrected ... ok
+test checkpoint::tests::write_file_declares_its_resolved_target ... ok
+test confirm::tests::confirm_decision_roundtrip ... ok
+test confirm::tests::confirm_request_defaults_none ... ok
+test confirm::tests::confirm_request_roundtrip ... ok
+test editor_tool::tests::execute_emits_command_and_returns_summary ... ok
+test editor_tool::tests::execute_returns_error_on_bad_input ... ok
+test editor_tool::tests::execute_returns_error_when_sink_fails ... ok
+test editor_tool::tests::parse_goto_without_col ... ok
+test editor_tool::tests::parse_open_file_with_line ... ok
+test editor_tool::tests::parse_unknown_action_errors ... ok
+test editor_tool::tests::resolve_policy_uionly_default_approved ... ok
+test editor_tool::tests::tier_is_uionly ... ok
+test executor::tests::abort_beats_confirm_timeout ... ok
+test executor::tests::allow_all_skips_future_confirmations ... ok
+test executor::tests::approved_run_command_still_confirms_dangerous_input ... ok
+test executor::tests::approved_tool_auto_executes ... ok
+test executor::tests::approved_tool_stops_asking_after_policy_handle_changes ... ok
+test executor::tests::cancel_returns_aborted_error ... ok
+test executor::tests::configured_confirm_timeout_expires ... ok
+test executor::tests::confirm_timeout_written_to_handle_expires_next_request ... ok
+test executor::tests::denied_tool_is_refused_after_policy_handle_changes ... ok
+test executor::tests::denied_tool_rejected ... ok
+test executor::tests::edit_file_registered_by_default_and_edits ... ok
+test executor::tests::edit_file_rejects_content_mismatch ... ok
+test executor::tests::forwards_update_callback_to_tool ... ok
+test executor::tests::needs_confirmation_allow_executes ... ok
+test executor::tests::needs_confirmation_deny_rejected ... ok
+test executor::tests::parallel_safe_flips_after_allow_all ... ok
+test executor::tests::parallel_safe_requires_all_three_signals ... ok
+test executor::tests::read_file_honors_offset_and_limit ... ok
+test executor::tests::read_file_truncates_oversized_output ... ok
+test executor::tests::read_only_tools_declare_no_write_targets ... ok
+test executor::tests::resolved_policy_agrees_with_execution_rules ... ok
+test executor::tests::schemas_present ... ok
+test executor::tests::unknown_tool_errors ... ok
+test executor::tests::write_file_returns_side_effect ... ok
+test executor::tests::write_tools_record_checkpoints_instead_of_backup_files ... ok
+test glob::tests::alternation_branches ... ok
+test glob::tests::bare_extension_glob_matches_name_at_any_depth ... ok
+test glob::tests::globstar_crosses_directories ... ok
+test glob::tests::invalid_patterns_report_reason ... ok
+test glob::tests::literal_dots_are_not_wildcards ... ok
+test glob::tests::pattern_with_slash_is_not_name_only ... ok
+test glob::tests::question_mark_is_one_char ... ok
+test glob::tests::star_does_not_cross_directories ... ok
+test mcp::client::tests::call_tool_joins_text_and_maps_is_error ... ok
+test mcp::client::tests::connect_sends_initialize_then_initialized ... ok
+test mcp::client::tests::invalid_tools_are_skipped ... ok
+test mcp::client::tests::list_tools_follows_cursor ... ok
+test mcp::client::tests::list_tools_is_capped ... ok
+test mcp::client::tests::list_tools_stops_when_cursor_never_ends ... ok
+test mcp::client::tests::protocol_errors_propagate ... ok
+test mcp::client::tests::unsupported_protocol_version_is_rejected ... ok
+test mcp::tool::tests::execute_maps_text_and_is_error ... ok
+test mcp::tool::tests::execute_maps_transport_errors ... ok
+test mcp::tool::tests::id_is_namespaced_and_sanitized ... ok
+test mcp::tool::tests::invalid_server_or_huge_schema_is_rejected ... ok
+test mcp::tool::tests::long_names_are_capped_and_distinct ... ok
+test mcp::tool::tests::non_object_input_is_rejected_without_call ... ok
+test mcp::tool::tests::output_is_truncated ... ok
+test mcp::tool::tests::policy_defaults_to_confirmation_and_can_be_approved ... ok
+test mcp::tool::tests::readonly_annotation_does_not_change_tier ... ok
+test mcp::transport::tests::cancellation_sends_notification_and_returns_cancelled ... ok
+test mcp::transport::tests::eof_fails_pending_and_marks_disconnected ... ok
+test mcp::transport::tests::out_of_order_responses_still_route ... ok
+test mcp::transport::tests::oversized_line_is_rejected_without_unbounded_read ... ok
+test mcp::transport::tests::request_routes_response_by_id ... ok
+test mcp::transport::tests::server_ping_is_answered_and_unknown_method_is_rejected ... ok
+test mcp::transport::tests::string_id_server_request_gets_matching_response ... ok
+test mcp::transport::tests::timeout_fails_and_marks_request_done ... ok
+test mcp::transport::tests::windows_resolves_cmd_via_pathext ... ok
+test path::tests::absolute_path_inside_project_ok ... ok
+test path::tests::absolute_path_outside_project_rejected ... ok
+test path::tests::dot_segments_collapsed ... ok
+test path::tests::escape_via_subdir_parent_rejected ... ok
+test path::tests::exactly_project_root_ok ... ok
+test path::tests::parent_escape_rejected ... ok
+test path::tests::relative_path_resolves_in_project ... ok
+test security::tests::approved_config_returns_approved ... ok
+test security::tests::dangerous_input_forces_confirmation_even_when_approved ... ok
+test security::tests::dangerous_static_tier_needs_confirmation ... ok
+test security::tests::default_needs_confirmation_for_all_tiers ... ok
+test security::tests::denied_config_returns_denied ... ok
+test security::tests::denied_overrides_approved_config ... ok
+test security::tests::dynamic_approval_for_called ... ok
+test security::tests::policy_matrix_9_combinations ... ok
+test security::tests::uionly_tier_default_approved ... ok
+test security::tests::uionly_tier_denied_overrides ... ok
+
+test result: ok. 162 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.71s
+
+     Running unittests src\bin\xgent_mcp_fixture.rs (target\debug\deps\xgent_mcp_fixture-20d0b87138c635d9.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\mcp_manager.rs (target\debug\deps\mcp_manager-a65a490f8ee99426.exe)
+
+running 7 tests
+test broken_server_does_not_block_good_server ... ok
+test crash_after_init_does_not_register_tools ... ok
+test duplicate_sanitized_tool_ids_register_only_first ... ok
+test fixture_connects_directly ... ok
+test manager_registers_fixture_tools_and_executes_them ... ok
+test mcp_client_does_not_write_project_files ... ok
+test stderr_flood_does_not_block_handshake ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+   Doc-tests xgent_agent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests xgent_settings_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests xgent_tools
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

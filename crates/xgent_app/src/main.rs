@@ -7,6 +7,7 @@ mod config_bridge;
 mod daemon;
 mod fs_event_bridge;
 mod ipc_client;
+mod mcp_boot;
 mod provider_client;
 mod settings_io;
 mod startup;
@@ -188,6 +189,9 @@ fn main() {
         checkpoints: Some(checkpoints),
     });
 
+    // MCP：按全局/项目 mcp.toml 在 bridge runtime 上后台连接，退出时 shutdown。
+    let mcp_runtime = mcp_boot::start(&project_root, executor.clone(), bridge.runtime.handle());
+
     // 通知订阅端（fs/config 桥接用）
     let notif_rx = ipc.subscribe();
     // 终端复用 agent bridge 的 tokio runtime handle（bridge 在下方 insert_resource 移动）
@@ -290,6 +294,7 @@ fn main() {
         kind: None,
     })
     .insert_resource(ToolExecutorResource(executor.clone()))
+    .insert_resource(mcp_boot::McpRuntime(mcp_runtime))
     // 项目配置的读模型：设置面板打开前要看到真实值（此前从未被插入，
     // 注释却写着"由 xgent_app 在打开项目时插入"）
     .insert_resource(xgent_settings::ProjectConfigRes(project_config.clone()))
@@ -316,6 +321,10 @@ fn main() {
         (crate::startup::load_fonts, crate::startup::open_project),
     );
     app.add_systems(Update, crate::startup::ui_screenshot_tool);
+    app.add_systems(
+        Last,
+        mcp_boot::shutdown_on_exit.in_set(bevy::app::OnAppExitSystems),
+    );
     // ===== 临时诊断探测（XGENT_AUTOPLAY=<项目相对路径>）=====
     // 自动开文件 → 模拟持续滚轮 → 阶段性截图 + 每 60 帧打帧耗时 → 自动退出。
     // 仅用于定位预览区滚动卡顿与行号错位，诊断完成后删除。

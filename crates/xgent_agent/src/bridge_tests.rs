@@ -291,6 +291,22 @@ impl Tool for EchoTool {
 }
 
 #[test]
+fn tool_schemas_refresh_after_runtime_registration() {
+    let executor = Arc::new(ToolExecutor::new(Vec::new()));
+    let (app, _) =
+        test_app_with_executor(Vec::new(), executor.clone(), ToolPolicyConfig::default());
+    let bridge = app.world().resource::<AgentBridge>();
+    assert!((bridge.tool_schemas)().is_empty(), "初始应无工具");
+    executor.register(Arc::new(EchoTool));
+    assert!(
+        (bridge.tool_schemas)()
+            .iter()
+            .any(|schema| schema.name == "echo"),
+        "运行期注册的工具必须在下一轮请求可见"
+    );
+}
+
+#[test]
 fn delta_then_done_message_sequence() {
     let mut app = test_app(vec![
         ChatEvent::TextDelta {
@@ -729,10 +745,10 @@ fn infinite_retry_can_be_aborted() {
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
     });
-    // 让首次失败 + 若干次重试发生
-    for _ in 0..30 {
-        app.update();
-    }
+    // 让首次失败 + 若干次重试发生（墙钟轮询，负载下不依赖帧数）
+    drive_until(&mut app, |app| {
+        !app.world().resource::<RetryCollected>().retries.is_empty()
+    });
     // 断言确实在重试（有重试通知，无最终错误）
     {
         let collected = app.world().resource::<RetryCollected>();
@@ -741,17 +757,16 @@ fn infinite_retry_can_be_aborted() {
     }
     // 发中断
     app.world_mut().write_message(AbortMessage);
-    for _ in 0..80 {
-        app.update();
-    }
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            == ConversationStatus::Idle
+    });
 
     let conv = app.world().resource::<crate::conversation::Conversation>();
-    // 中断后不应停留在 Error（被 abort 终止，返回空 Done → Idle）
-    assert_ne!(
-        conv.status,
-        ConversationStatus::Error,
-        "中断后不应是 Error 态"
-    );
+    // 中断后应回到 Idle（被 abort 终止，返回空 Done）
+    assert_eq!(conv.status, ConversationStatus::Idle, "中断后应回到 Idle");
     let collected = app.world().resource::<RetryCollected>();
     assert!(collected.done, "中断应产生 Done");
     assert!(collected.errors.is_empty(), "中断不应产生错误");
@@ -3106,6 +3121,13 @@ fn approved_read_tools_actually_overlap() {
         2,
         "已批准的连续只读调用应并发执行（串行时这里停在 1）"
     );
+    // 结果事件与 Idle 状态由两个系统分帧处理；负载下别用「结果已到」推断状态已落。
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            == ConversationStatus::Idle
+    });
     assert_eq!(
         app.world()
             .resource::<crate::conversation::Conversation>()
