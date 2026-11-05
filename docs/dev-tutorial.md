@@ -50,7 +50,7 @@
 
 - **F-10 Git 集成**（P1）：✅ 已实现（`xgent_plugin_git` 插件，git_diff/git_log/git_status 工具 + 命令，经 `host.run_command("git", ...)`）。
 - **F-12 成本统计**（P1）：未实现（`TokenUsage` 类型已定义，无汇总 UI）。
-- **F-13 MCP 支持**（P1）：仅 trait 预留 `xgent_tools/src/mcp.rs::McpTransport`，无实现。
+- **F-13 MCP 支持**（P1）：首期已实现本地 stdio tools 桥接（`xgent_tools/src/mcp/`，2025-06-18）；HTTP/SSE、resources/prompts 留后续。
 - **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
 - **F-16 3D 可视化**（MVP-2，当前主线）：未实现；S0 数据内核（`xgent_spatial`，仅 crate 级 L0）与设计文档已就绪，第一里程碑为 S1 + 点击打开 + L1 文件/目录图（见 requirements §4.2）。
@@ -978,7 +978,7 @@ allow_project_servers = false
 id = "filesystem"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
-env = { TOKEN = "${MCP_TOKEN}" }
+env = { TOKEN = "${TOKEN}" }
 cwd = "."
 enabled = true
 auto_start = true
@@ -986,10 +986,10 @@ auto_start = true
 
 - **字段**：`id`、`command`、`args`、`env`、`cwd`、`enabled`、`auto_start`；`cwd` 相对项目根解析，所有字符串支持 `${VAR}`，变量缺失时跳过该 Server。
 - **项目配置**：`.xgent/mcp.toml` 仅在全局 `allow_project_servers = true` 时读取；同名 `id` 整项覆盖全局，其他追加。默认关闭，避免打开不可信仓库即执行其中命令。
-- **工具**：Server 的 tools 自动注册为 `mcp.<server>.<tool>`；固定 `Exec` 层、默认每次确认，可在 `[tool_policy]` 按完整 id 提升。
+- **工具**：Server 的 tools 自动注册为 `mcp__<server>__<tool>`；固定 `Exec` 层、默认每次确认，可在 `[tool_policy]` 按完整 id 提升。
 - **接线**：`xgent_app::mcp_boot` 在 bridge 的 tokio runtime 上启动 `McpManager`，作为 `McpRuntime` Resource 持有；`AppExit` 时调用 `shutdown` 终止子进程。`AgentBridge` 每轮从 `ToolExecutor` 读取 schema，后台注册的工具在下一轮对话可见。连接/发现失败只影响该 Server。
 - **测试**：`cargo test -p xgent_settings_core mcp`、`cargo test -p xgent_tools mcp`、`cargo test -p xgent_tools --test mcp_manager`（真实 fixture 子进程）、`cargo test -p xgent_app mcp_boot`。
-- **首期边界**：仅 stdio 与 2025-06-18 握手；不做 HTTP/SSE、resources/prompts、设置面板、3D 空间站、自动重连、list_changed 热刷新与配置热重载（改 `mcp.toml` 后重启）。
+- **首期边界**：仅 stdio 与 2025-06-18 握手；不做 HTTP/SSE、resources/prompts、设置面板、3D 空间站、自动重连、list_changed 热刷新与配置热重载（改 `mcp.toml` 后重启）。子进程继承父进程环境变量，敏感值应放 `env` 或后续白名单；Windows 无扩展名命令会按 PATHEXT 解析 `.cmd`/`.bat`/`.exe`。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

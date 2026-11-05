@@ -144,8 +144,11 @@ fn insert_servers(
     warnings: &mut Vec<String>,
 ) {
     for mut server in servers {
-        if server.id.trim().is_empty() {
-            warnings.push("MCP server 缺少 id，已跳过".to_string());
+        if !valid_server_id(&server.id) {
+            warnings.push(format!(
+                "MCP server id `{}` 非法（需字母/数字开头，仅含字母数字_-，且不超过 24 字符），已跳过",
+                server.id
+            ));
             continue;
         }
         if server.command.trim().is_empty() && server.enabled {
@@ -162,6 +165,16 @@ fn insert_servers(
             )),
         }
     }
+}
+
+fn valid_server_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    id.len() <= 24
+        && first.is_ascii_alphanumeric()
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
 }
 
 fn expand_server(
@@ -368,11 +381,15 @@ id = "dup"
 command = "second"
 [[servers]]
 id = "no-command"
+[[servers]]
+id = "bad id"
+command = "bad"
 "#,
             None,
         );
         assert!(!outcome.config.servers.contains_key(""));
         assert!(!outcome.config.servers.contains_key("no-command"));
+        assert!(!outcome.config.servers.contains_key("bad id"));
         assert_eq!(
             outcome
                 .config

@@ -107,6 +107,27 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_config_is_noop_without_panic() {
+        let temp = tempfile::tempdir().expect("临时目录");
+        let global = temp.path().join("global.toml");
+        write(
+            &global,
+            "[[servers
+id = ",
+        );
+        let rt = runtime();
+        let executor = Arc::new(ToolExecutor::new(Vec::new()));
+        let manager = start_with_paths(
+            &global,
+            &temp.path().join("project.toml"),
+            temp.path(),
+            executor,
+            rt.handle(),
+        );
+        assert!(manager.is_none());
+    }
+
+    #[test]
     fn disabled_server_creates_manager_without_connections() {
         let temp = tempfile::tempdir().expect("临时目录");
         let global = temp.path().join("global.toml");

@@ -561,6 +561,8 @@ enum McpTrustLevel {
 }
 ```
 
+> 以下为愿景示例；首期实际配置路径与字段见 `docs/dev-tutorial.md` §5.29（`~/.xgent/agent/mcp.toml`，无 `trust_level`，MCP 工具统一默认确认）。
+
 **MCP 配置示例** (`~/.xgent/mcp.toml`)：
 
 ```toml

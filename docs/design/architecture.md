@@ -348,7 +348,7 @@ trait ContextProvider {
 
 - `xgent_tools::mcp` 提供 stdio MCP Client：`initialize`（2025-06-18）→ `tools/list` → `tools/call`。
 - 配置为全局 `~/.xgent/agent/mcp.toml` 与项目 `.xgent/mcp.toml`；项目配置默认被 `allow_project_servers=false` 忽略。
-- 发现的工具以 `mcp.<server>.<tool>` 注册进 `ToolExecutor`，固定 `Exec` 层、默认 `NeedsConfirmation`；`xgent_app` 的 `mcp_boot` 负责启动与退出清理。
+- 发现的工具以 `mcp__<server>__<tool>` 注册进 `ToolExecutor`，固定 `Exec` 层、默认 `NeedsConfirmation`；`xgent_app` 的 `mcp_boot` 负责启动与退出清理。
 - 首期不做 HTTP/SSE、resources/prompts、3D 空间站、自动重连与 2026-07-28 无状态协议。
 - D 阶段：`LspContextProvider`（LSP/AST）。
 - E 阶段：`HybridContextProvider`（多路召回 + 融合排序）。

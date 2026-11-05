@@ -13,6 +13,8 @@ use super::{McpError, McpTransport};
 pub const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 /// 单个 Server 最多接受的工具数。
 pub const MAX_TOOLS_PER_SERVER: usize = 256;
+/// 工具列表最大页数，防止异常 Server 用不断变化的 cursor 无限翻页。
+pub const MAX_LIST_PAGES: usize = 32;
 const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -79,6 +81,11 @@ impl McpClient {
             .and_then(Value::as_str)
             .unwrap_or(MCP_PROTOCOL_VERSION)
             .to_string();
+        if protocol_version != MCP_PROTOCOL_VERSION {
+            return Err(McpError::Protocol(format!(
+                "不支持的 MCP 协议版本：{protocol_version}"
+            )));
+        }
         transport
             .notify("notifications/initialized", json!({}))
             .await;
@@ -104,7 +111,17 @@ impl McpClient {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
         let mut seen_cursors = BTreeSet::new();
+        let mut pages = 0usize;
         loop {
+            pages += 1;
+            if pages > MAX_LIST_PAGES {
+                tracing::warn!(
+                    server = %self.server_id,
+                    limit = MAX_LIST_PAGES,
+                    "MCP tools/list 超过页数上限，已停止翻页"
+                );
+                break;
+            }
             let params = cursor
                 .as_ref()
                 .map(|cursor| json!({ "cursor": cursor }))
@@ -376,6 +393,40 @@ mod tests {
             .expect("调用");
         assert_eq!(result.output, "line1\nline2");
         assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn list_tools_stops_when_cursor_never_ends() {
+        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter_for_handler = counter.clone();
+        let transport = FakeTransport::new(Arc::new(move |method, _| {
+            if method == "initialize" {
+                return Ok(json!({"protocolVersion": MCP_PROTOCOL_VERSION}));
+            }
+            let page = counter_for_handler.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!({"tools": [], "nextCursor": format!("page-{page}")}))
+        }));
+        let client = McpClient::connect(transport.clone(), "fake")
+            .await
+            .expect("握手");
+        let tools = client.list_tools().await.expect("列表");
+        assert!(tools.is_empty());
+        let list_calls = transport
+            .requests
+            .lock()
+            .iter()
+            .filter(|(method, _)| method == "tools/list")
+            .count();
+        assert_eq!(list_calls, MAX_LIST_PAGES);
+    }
+
+    #[tokio::test]
+    async fn unsupported_protocol_version_is_rejected() {
+        let transport = FakeTransport::new(Arc::new(|_, _| {
+            Ok(json!({"protocolVersion": "2026-07-28"}))
+        }));
+        let result = McpClient::connect(transport, "fake").await;
+        assert!(matches!(result, Err(McpError::Protocol(_))));
     }
 
     #[tokio::test]

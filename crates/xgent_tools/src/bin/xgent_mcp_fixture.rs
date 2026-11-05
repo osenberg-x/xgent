@@ -12,6 +12,13 @@ async fn main() {
         .nth(1)
         .unwrap_or_else(|| "normal".to_string());
     eprintln!("xgent mcp fixture started ({mode})");
+    if mode == "stderr-heavy" {
+        for index in 0..20_000 {
+            eprintln!(
+                "fixture stderr line {index} ................................................"
+            );
+        }
+    }
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -35,6 +42,15 @@ async fn main() {
             "tools/list" => {
                 if mode == "no-tools" {
                     json!({"jsonrpc": "2.0", "id": id, "result": {"tools": []}})
+                } else if mode == "duplicates" {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {"tools": [
+                            {"name": "dup.one", "description": "first", "inputSchema": {"type": "object"}},
+                            {"name": "dup_one", "description": "second", "inputSchema": {"type": "object"}},
+                        ]},
+                    })
                 } else {
                     json!({
                         "jsonrpc": "2.0",

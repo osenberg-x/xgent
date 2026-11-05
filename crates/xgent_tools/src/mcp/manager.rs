@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -30,6 +31,7 @@ pub struct McpManager {
     connections: Arc<Mutex<Vec<ManagedConnection>>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     registration: tokio::sync::Mutex<()>,
+    shutting_down: AtomicBool,
 }
 
 impl McpManager {
@@ -43,6 +45,7 @@ impl McpManager {
             connections: Arc::new(Mutex::new(Vec::new())),
             tasks: Mutex::new(Vec::new()),
             registration: tokio::sync::Mutex::new(()),
+            shutting_down: AtomicBool::new(false),
         });
         for server in servers {
             if !server.enabled || !server.auto_start {
@@ -65,6 +68,9 @@ impl McpManager {
         executor: Arc<ToolExecutor>,
         project_root: PathBuf,
     ) {
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return;
+        }
         let server_id = server.id.clone();
         let transport = match StdioTransport::spawn(&server, &project_root, CONNECT_TIMEOUT) {
             Ok(transport) => transport,
@@ -90,7 +96,16 @@ impl McpManager {
             }
         };
 
+        if self.shutting_down.load(Ordering::SeqCst) {
+            transport.close().await;
+            return;
+        }
         let _guard = self.registration.lock().await;
+        if self.shutting_down.load(Ordering::SeqCst) {
+            drop(_guard);
+            transport.close().await;
+            return;
+        }
         let mut existing: HashSet<String> = executor
             .policy_targets()
             .into_iter()
@@ -112,6 +127,10 @@ impl McpManager {
         }
         drop(_guard);
 
+        if self.shutting_down.load(Ordering::SeqCst) {
+            transport.close().await;
+            return;
+        }
         self.connections.lock().push(ManagedConnection {
             server_id: server_id.clone(),
             transport,
@@ -149,6 +168,7 @@ impl McpManager {
 
     /// 关闭全部连接并终止子进程。
     pub async fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
         let tasks: Vec<JoinHandle<()>> = self.tasks.lock().drain(..).collect();
         for task in tasks {
             task.abort();
@@ -162,6 +182,7 @@ impl McpManager {
 
 impl Drop for McpManager {
     fn drop(&mut self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
         for task in self.tasks.get_mut().drain(..) {
             task.abort();
         }

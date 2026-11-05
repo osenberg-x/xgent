@@ -137,7 +137,7 @@ fn valid_server_id(server_id: &str) -> bool {
 }
 
 fn full_tool_id(server_id: &str, tool_name: &str) -> String {
-    let prefix = format!("mcp.{server_id}.");
+    let prefix = format!("mcp__{server_id}__");
     let sanitized: String = tool_name
         .chars()
         .map(|ch| {
@@ -156,7 +156,7 @@ fn full_tool_id(server_id: &str, tool_name: &str) -> String {
     let available = MAX_TOOL_ID_LEN.saturating_sub(prefix.len());
     if name.len() > available {
         let hash = crate::fnv1a64(tool_name.as_bytes());
-        let suffix = format!("_{}", &hash[..8]);
+        let suffix = format!("_{}", &hash[..12]);
         let keep = available.saturating_sub(suffix.len());
         name = format!("{}{}", &name[..keep.min(name.len())], suffix);
     }
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn id_is_namespaced_and_sanitized() {
         let tool = tool_with(default_transport(), "srv", tool_def("read.file/../x"));
-        assert_eq!(tool.id(), "mcp.srv.read_file____x");
+        assert_eq!(tool.id(), "mcp__srv__read_file____x");
         assert!(tool.id().len() <= MAX_TOOL_ID_LEN);
         assert_eq!(tool.original_name(), "read.file/../x");
         assert_eq!(tool.tier(), ToolTier::Exec);

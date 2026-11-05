@@ -66,23 +66,23 @@ async fn manager_registers_fixture_tools_and_executes_them() {
 
     wait_until(|| manager.registered_tool_ids().len() == 2).await;
     let ids = manager.registered_tool_ids();
-    assert!(ids.contains(&"mcp.fixture.echo".to_string()));
-    assert!(ids.contains(&"mcp.fixture.fail".to_string()));
+    assert!(ids.contains(&"mcp__fixture__echo".to_string()));
+    assert!(ids.contains(&"mcp__fixture__fail".to_string()));
     assert!(
         executor
             .schemas()
             .iter()
-            .any(|schema| schema.name == "mcp.fixture.echo")
+            .any(|schema| schema.name == "mcp__fixture__echo")
     );
 
     let policy = ToolPolicyConfig {
-        approved: vec!["mcp.fixture.echo".to_string()],
+        approved: vec!["mcp__fixture__echo".to_string()],
         ..Default::default()
     };
     let ctx = ToolCtx::with_policy(root.path().to_path_buf(), policy);
     let result = executor
         .execute(
-            "mcp.fixture.echo",
+            "mcp__fixture__echo",
             serde_json::json!({"text": "hi"}),
             &ctx,
             CancellationToken::new(),
@@ -125,7 +125,7 @@ async fn broken_server_does_not_block_good_server() {
     assert!(
         manager
             .registered_tool_ids()
-            .contains(&"mcp.good.echo".to_string())
+            .contains(&"mcp__good__echo".to_string())
     );
     manager.shutdown().await;
 }
@@ -146,6 +146,33 @@ async fn crash_after_init_does_not_register_tools() {
 }
 
 #[tokio::test]
+async fn stderr_flood_does_not_block_handshake() {
+    let root = tempfile::tempdir().expect("临时目录");
+    let executor = Arc::new(ToolExecutor::new(Vec::new()));
+    let manager = McpManager::start(
+        vec![fixture("noisy", Some("stderr-heavy"))],
+        executor,
+        root.path().to_path_buf(),
+    );
+    wait_until(|| manager.registered_tool_ids().len() == 2).await;
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn duplicate_sanitized_tool_ids_register_only_first() {
+    let root = tempfile::tempdir().expect("临时目录");
+    let executor = Arc::new(ToolExecutor::new(Vec::new()));
+    let manager = McpManager::start(
+        vec![fixture("dups", Some("duplicates"))],
+        executor,
+        root.path().to_path_buf(),
+    );
+    wait_until(|| manager.registered_tool_ids().len() == 1).await;
+    assert_eq!(manager.registered_tool_ids(), vec!["mcp__dups__dup_one"]);
+    manager.shutdown().await;
+}
+
+#[tokio::test]
 async fn mcp_client_does_not_write_project_files() {
     let root = tempfile::tempdir().expect("临时目录");
     let project_file = root.path().join("keep.txt");
@@ -153,10 +180,26 @@ async fn mcp_client_does_not_write_project_files() {
     let executor = Arc::new(ToolExecutor::new(Vec::new()));
     let manager = McpManager::start(
         vec![fixture("fixture", None)],
-        executor,
+        executor.clone(),
         root.path().to_path_buf(),
     );
     wait_until(|| manager.registered_tool_ids().len() == 2).await;
+    let policy = ToolPolicyConfig {
+        approved: vec!["mcp__fixture__echo".to_string()],
+        ..Default::default()
+    };
+    let ctx = ToolCtx::with_policy(root.path().to_path_buf(), policy);
+    executor
+        .execute(
+            "mcp__fixture__echo",
+            serde_json::json!({"text": "no-write"}),
+            &ctx,
+            CancellationToken::new(),
+            &NeverConfirm,
+            None,
+        )
+        .await
+        .expect("执行");
     manager.shutdown().await;
     assert_eq!(
         std::fs::read_to_string(&project_file).expect("读文件"),

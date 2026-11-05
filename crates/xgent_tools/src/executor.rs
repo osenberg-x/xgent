@@ -193,7 +193,11 @@ impl ToolExecutor {
 
     /// 列出所有已注册工具的 schema（供 provider 的 tools 参数）。
     pub fn schemas(&self) -> Vec<xgent_core::chat::ToolSchema> {
-        self.tools.read().values().map(|t| t.schema()).collect()
+        let mut schemas: Vec<xgent_core::chat::ToolSchema> =
+            self.tools.read().values().map(|t| t.schema()).collect();
+        // 运行期会注册插件/MCP 工具；稳定顺序避免每轮请求的工具前缀漂移。
+        schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        schemas
     }
 
     /// 该调用能否与相邻调用**同时**执行（R3-15 的调度判据）。

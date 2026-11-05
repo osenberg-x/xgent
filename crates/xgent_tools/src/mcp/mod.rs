@@ -31,7 +31,7 @@ pub use transport::StdioTransport;
 /// - [`close`](Self::close)：关闭传输通道，释放底层资源。
 /// - [`is_connected`](Self::is_connected)：查询当前连接状态。
 ///
-/// 该 trait 当前为 P2 预留，尚无实现。
+/// 首期由 [`StdioTransport`] 实现；HTTP/SSE 传输留后续。
 #[async_trait]
 pub trait McpTransport: Send + Sync {
     /// 发起 JSON-RPC 请求。

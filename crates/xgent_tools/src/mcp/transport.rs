@@ -1,7 +1,7 @@
 //! MCP stdio 传输：子进程 + 换行分隔 JSON-RPC + 请求路由。
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex as AsyncMutex, oneshot};
 use tokio::task::JoinHandle;
@@ -18,8 +18,9 @@ use xgent_settings_core::McpServerConfig;
 
 use super::{McpError, McpTransport};
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, McpError>>>>>;
+type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, McpError>>>>>;
 type BoxWriter = Box<dyn AsyncWrite + Send + Unpin>;
+const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
 struct Inner {
     pending: Pending,
@@ -60,11 +61,66 @@ impl Inner {
     }
 }
 
+struct PendingGuard<'a> {
+    inner: &'a Inner,
+    key: String,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.inner.pending.lock().remove(&self.key);
+    }
+}
+
 /// 基于 stdio 的 MCP 传输。
 pub struct StdioTransport {
     inner: Arc<Inner>,
     child: Mutex<Option<Child>>,
     reader_task: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Windows 的 `CreateProcessW` 不会按 PATHEXT 解析 `npx` 这类无扩展名命令；
+/// 在 PATH/PATHEXT 中查找 `.cmd`/`.bat`/`.exe`，其他平台原样返回。
+fn resolve_program(command: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let path = Path::new(command);
+        if path.extension().is_some() || path.is_absolute() || path.components().count() > 1 {
+            return path.to_path_buf();
+        }
+        if let Some(found) = find_in_path(command, std::env::var_os("PATH").as_deref()) {
+            return found;
+        }
+    }
+    PathBuf::from(command)
+}
+
+#[cfg(windows)]
+fn find_in_path(command: &str, path_var: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    find_in_path_with(command, path_var?, &pathext)
+}
+
+#[cfg(windows)]
+fn find_in_path_with(command: &str, path_var: &std::ffi::OsStr, pathext: &str) -> Option<PathBuf> {
+    let extensions: Vec<&str> = pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .collect();
+    for dir in std::env::split_paths(path_var) {
+        for extension in &extensions {
+            let candidate = dir.join(format!("{command}{extension}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        let candidate = dir.join(command);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 impl StdioTransport {
@@ -74,7 +130,8 @@ impl StdioTransport {
         project_root: &Path,
         timeout: Duration,
     ) -> Result<Arc<Self>, McpError> {
-        let mut command = Command::new(&config.command);
+        let program = resolve_program(&config.command);
+        let mut command = Command::new(&program);
         command.args(&config.args);
         command.envs(&config.env);
         if let Some(cwd) = &config.cwd {
@@ -153,20 +210,25 @@ impl StdioTransport {
             return Err(McpError::Transport("MCP 连接已关闭".to_string()));
         }
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        let key = id.to_string();
         let (tx, rx) = oneshot::channel();
-        self.inner.pending.lock().insert(id, tx);
+        self.inner.pending.lock().insert(key.clone(), tx);
+        let _guard = PendingGuard {
+            inner: &self.inner,
+            key: key.clone(),
+        };
+        // EOF 可能在首次检查与 insert 之间发生；插入后复检，避免等到超时。
+        if self.inner.closed.load(Ordering::SeqCst) {
+            return Err(McpError::Transport("MCP 连接已关闭".to_string()));
+        }
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         if let Err(error) = self.inner.write_value(&message).await {
-            self.inner.pending.lock().remove(&id);
             return Err(error);
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(McpError::Transport("响应通道已关闭".to_string())),
-            Err(_) => {
-                self.inner.pending.lock().remove(&id);
-                Err(McpError::Timeout(timeout.as_secs()))
-            }
+            Err(_) => Err(McpError::Timeout(timeout.as_secs().max(1))),
         }
     }
 
@@ -182,11 +244,18 @@ impl StdioTransport {
             return Err(McpError::Transport("MCP 连接已关闭".to_string()));
         }
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        let key = id.to_string();
         let (tx, rx) = oneshot::channel();
-        self.inner.pending.lock().insert(id, tx);
+        self.inner.pending.lock().insert(key.clone(), tx);
+        let _guard = PendingGuard {
+            inner: &self.inner,
+            key: key.clone(),
+        };
+        if self.inner.closed.load(Ordering::SeqCst) {
+            return Err(McpError::Transport("MCP 连接已关闭".to_string()));
+        }
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         if let Err(error) = self.inner.write_value(&message).await {
-            self.inner.pending.lock().remove(&id);
             return Err(error);
         }
         let timer = tokio::time::sleep(timeout);
@@ -194,7 +263,6 @@ impl StdioTransport {
         let result = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
-                self.inner.pending.lock().remove(&id);
                 let _ = self.inner.write_value(&json!({
                     "jsonrpc": "2.0",
                     "method": "notifications/cancelled",
@@ -203,8 +271,7 @@ impl StdioTransport {
                 return Err(McpError::Cancelled);
             }
             _ = &mut timer => {
-                self.inner.pending.lock().remove(&id);
-                return Err(McpError::Timeout(timeout.as_secs()));
+                return Err(McpError::Timeout(timeout.as_secs().max(1)));
             }
             response = rx => response,
         };
@@ -281,9 +348,9 @@ async fn read_loop<R>(inner: Arc<Inner>, reader: R)
 where
     R: AsyncRead + Send + Unpin,
 {
-    let mut lines = BufReader::new(reader).lines();
+    let mut lines = BufReader::new(reader);
     loop {
-        match lines.next_line().await {
+        match read_line_capped(&mut lines, MAX_MESSAGE_BYTES).await {
             Ok(Some(line)) => {
                 let line = line.trim();
                 if line.is_empty() {
@@ -312,13 +379,54 @@ where
     }
 }
 
+/// 读取一行但限制内存；超过上限直接报错并断开，避免恶意/异常 Server 撑爆进程。
+async fn read_line_capped<R>(reader: &mut R, cap: usize) -> std::io::Result<Option<String>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut output = Vec::new();
+    loop {
+        let buffer = reader.fill_buf().await?;
+        if buffer.is_empty() {
+            if output.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(String::from_utf8_lossy(&output).into_owned()));
+        }
+        if let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
+            if output.len() + newline > cap {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "MCP 消息超过大小上限",
+                ));
+            }
+            output.extend_from_slice(&buffer[..=newline]);
+            reader.consume(newline + 1);
+            return Ok(Some(String::from_utf8_lossy(&output).into_owned()));
+        }
+        if output.len() + buffer.len() > cap {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "MCP 消息超过大小上限",
+            ));
+        }
+        let len = buffer.len();
+        output.extend_from_slice(buffer);
+        reader.consume(len);
+    }
+}
+
 async fn handle_incoming(inner: &Arc<Inner>, value: Value) {
-    let id = value.get("id").and_then(Value::as_u64);
+    let id_value = value.get("id").cloned();
     let method = value.get("method").and_then(Value::as_str);
-    match (id, method) {
-        (Some(id), None) => {
-            let Some(sender) = inner.pending.lock().remove(&id) else {
-                tracing::debug!(server = %inner.server_id, id, "MCP 收到未知请求 id 的响应");
+    match (id_value, method) {
+        (Some(id_value), None) => {
+            let Some(key) = id_key(&id_value) else {
+                tracing::debug!(server = %inner.server_id, "MCP 响应 id 类型非法");
+                return;
+            };
+            let Some(sender) = inner.pending.lock().remove(&key) else {
+                tracing::debug!(server = %inner.server_id, id = %key, "MCP 收到未知请求 id 的响应");
                 return;
             };
             if let Some(error) = value.get("error") {
@@ -335,14 +443,15 @@ async fn handle_incoming(inner: &Arc<Inner>, value: Value) {
                 let _ = sender.send(Ok(result));
             }
         }
-        (Some(id), Some(method)) => {
+        (Some(id_value), Some(method)) => {
             // Server 主动请求：只支持 ping，其余明确回 Method not found。
+            // 回显原始 id（JSON-RPC 允许 number/string）。
             let response = if method == "ping" {
-                json!({"jsonrpc": "2.0", "id": id, "result": {}})
+                json!({"jsonrpc": "2.0", "id": id_value, "result": {}})
             } else {
                 json!({
                     "jsonrpc": "2.0",
-                    "id": id,
+                    "id": id_value,
                     "error": {"code": -32601, "message": format!("Method not found: {method}")},
                 })
             };
@@ -357,6 +466,14 @@ async fn handle_incoming(inner: &Arc<Inner>, value: Value) {
     }
 }
 
+fn id_key(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(text) => Some(format!("s:{text}")),
+        _ => None,
+    }
+}
+
 fn spawn_stderr_logger<R>(server_id: String, stderr: R)
 where
     R: AsyncRead + Send + Unpin + 'static,
@@ -365,7 +482,8 @@ where
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let line: String = line.chars().take(2048).collect();
-            tracing::warn!(server = %server_id, "MCP stderr: {line}");
+            // stderr 可能带凭据；默认降到 debug，避免 WARN 落盘时泄露。
+            tracing::debug!(server = %server_id, "MCP stderr: {line}");
         }
     });
 }
@@ -512,6 +630,63 @@ mod tests {
             .expect("最终响应");
         assert_eq!(result, json!("done"));
         peer.await.expect("peer");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolves_cmd_via_pathext() {
+        let temp = tempfile::tempdir().expect("临时目录");
+        let path = temp.path().join("npx.cmd");
+        std::fs::write(&path, "").expect("写 cmd");
+        let found = find_in_path_with("npx", temp.path().as_os_str(), ".CMD").expect("应找到");
+        assert!(found.is_file(), "应解析到真实 cmd 文件");
+        assert_eq!(
+            found
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_lowercase),
+            Some("npx.cmd".to_string())
+        );
+        assert_eq!(resolve_program("npx.cmd"), PathBuf::from("npx.cmd"));
+    }
+
+    #[tokio::test]
+    async fn string_id_server_request_gets_matching_response() {
+        let (transport, mut reader, mut writer) = pair(Duration::from_secs(1));
+        let peer = tokio::spawn(async move {
+            let mut request = String::new();
+            reader.read_line(&mut request).await.expect("读请求");
+            let request: Value = serde_json::from_str(request.trim()).expect("请求");
+            write_json(
+                &mut writer,
+                json!({"jsonrpc": "2.0", "id": "abc", "method": "ping"}),
+            )
+            .await;
+            let mut ping = String::new();
+            reader.read_line(&mut ping).await.expect("ping 响应");
+            let ping: Value = serde_json::from_str(ping.trim()).expect("ping");
+            assert_eq!(ping["id"], "abc");
+            write_json(
+                &mut writer,
+                json!({"jsonrpc": "2.0", "id": request["id"], "result": "done"}),
+            )
+            .await;
+        });
+        let result = transport
+            .request_with_timeout("call", json!({}), Duration::from_secs(1))
+            .await
+            .expect("最终响应");
+        assert_eq!(result, json!("done"));
+        peer.await.expect("peer");
+    }
+
+    #[tokio::test]
+    async fn oversized_line_is_rejected_without_unbounded_read() {
+        let (mut client, mut peer) = tokio::io::duplex(1024);
+        peer.write_all(&vec![b'x'; 64]).await.expect("写大行");
+        let mut reader = BufReader::new(&mut client);
+        let error = read_line_capped(&mut reader, 16).await.expect_err("应拒绝");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[tokio::test]

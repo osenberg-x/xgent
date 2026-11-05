@@ -321,7 +321,10 @@ fn main() {
         (crate::startup::load_fonts, crate::startup::open_project),
     );
     app.add_systems(Update, crate::startup::ui_screenshot_tool);
-    app.add_systems(Last, mcp_boot::shutdown_on_exit);
+    app.add_systems(
+        Last,
+        mcp_boot::shutdown_on_exit.in_set(bevy::app::OnAppExitSystems),
+    );
     // ===== 临时诊断探测（XGENT_AUTOPLAY=<项目相对路径>）=====
     // 自动开文件 → 模拟持续滚轮 → 阶段性截图 + 每 60 帧打帧耗时 → 自动退出。
     // 仅用于定位预览区滚动卡顿与行号错位，诊断完成后删除。
