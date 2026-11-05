@@ -3122,6 +3122,13 @@ fn approved_read_tools_actually_overlap() {
         2,
         "已批准的连续只读调用应并发执行（串行时这里停在 1）"
     );
+    // 结果事件与 Idle 状态由两个系统分帧处理；负载下别用「结果已到」推断状态已落。
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            == ConversationStatus::Idle
+    });
     assert_eq!(
         app.world()
             .resource::<crate::conversation::Conversation>()
