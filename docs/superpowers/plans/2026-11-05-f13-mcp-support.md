@@ -2,6 +2,7 @@
 change: f13-mcp-support
 design-doc: docs/openspec/changes/f13-mcp-support/design.md
 base-ref: 22bd0ffb2a2673c1aa3b0077526faef3b72b86b6
+archived-with: 2026-11-05-f13-mcp-support
 ---
 
 <!-- comet-task-authority: docs/openspec/changes/f13-mcp-support/tasks.md -->

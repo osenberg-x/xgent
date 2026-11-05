@@ -1,0 +1,16 @@
+{
+  "change": "f13-mcp-support",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "task_hash_policy": "task-content-v1",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "224c08917ec73e4b7c56d33cd074a90de90066e6720d7f574df05345055ff6ec",
+  "files": [
+    { "path": "docs/openspec/changes/f13-mcp-support/proposal.md", "sha256": "96adf9e844d00ff42aebf488ed0bf16bf07489f7db03888bce0d55079d375ffb" },
+    { "path": "docs/openspec/changes/f13-mcp-support/design.md", "sha256": "6ee767cc62e7504d731f544b322bedde9385c5cbb3eb7c151c85ace401badee0" },
+    { "path": "docs/openspec/changes/f13-mcp-support/tasks.md", "sha256": "e8195bd4804ad9188da580534b4656effa79aeb598ca82c6b825cbbdc2cea495" },
+    { "path": "docs/openspec/changes/f13-mcp-support/.openspec.yaml", "sha256": "3e16994612e657a7bbaefe38b70ef46f3e8e9f382f092dcaceb60ebabe7a5da0" },
+    { "path": "docs/openspec/changes/f13-mcp-support/specs/mcp-client/spec.md", "sha256": "5736ccbcd727f8b5b8555ff24a9b4d6ef31648bccc4c87d03d32f10a099f102c" }
+  ]
+}

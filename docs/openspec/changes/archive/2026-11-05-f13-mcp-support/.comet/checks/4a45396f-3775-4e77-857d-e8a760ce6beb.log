@@ -1,0 +1,5 @@
+error: unexpected argument '--json' found
+
+Usage: cargo.exe check --workspace --jobs <N>
+
+For more information, try '--help'.
