@@ -49,7 +49,7 @@
 ### 1.3 未实现（P1/P2 留白）
 
 - **F-10 Git 集成**（P1）：✅ 已实现（`xgent_plugin_git` 插件，git_diff/git_log/git_status 工具 + 命令，经 `host.run_command("git", ...)`）。
-- **F-12 成本统计**（P1）：首期已实现当前会话/历史 token 与成本、状态栏入口与成本面板（待独立验收）。
+- **F-12 成本统计**（P1）：首期已交付当前会话/历史 token 与成本、状态栏入口与成本面板。
 - **F-13 MCP 支持**（P1）：首期已交付本地 stdio tools 桥接（`xgent_tools/src/mcp/`，2025-06-18）；HTTP/SSE、resources/prompts 留后续。
 - **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
