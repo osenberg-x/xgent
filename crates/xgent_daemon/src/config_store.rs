@@ -89,6 +89,9 @@ impl ConfigCoordinator {
             "preferences.density" => json!(self.config.preferences.density.as_str()),
             "preferences.three_d_home" => json!(self.config.preferences.three_d_home),
             "preferences.chat_side_width" => json!(self.config.preferences.chat_side_width),
+            "pricing" => json!(self.config.pricing),
+            "pricing.input_per_million" => json!(self.config.pricing.input_per_million),
+            "pricing.output_per_million" => json!(self.config.pricing.output_per_million),
             "providers" => json!(self.config.providers),
             other if other.starts_with("providers.") => {
                 let parts: Vec<&str> = other.split('.').collect();
@@ -160,6 +163,12 @@ impl ConfigCoordinator {
                     return Err(XgentError::Config(format!("{key} 只接受有限数字")));
                 }
                 self.config.preferences.chat_side_width = (width as f32).clamp(320.0, 560.0);
+            }
+            "pricing.input_per_million" => {
+                self.config.pricing.input_per_million = parse_price(key, &value)?;
+            }
+            "pricing.output_per_million" => {
+                self.config.pricing.output_per_million = parse_price(key, &value)?;
             }
             "providers" => {
                 // 整体替换 providers map
@@ -319,6 +328,22 @@ fn parse_string_list(key: &str, value: &Value) -> XgentResult<Vec<String>> {
                 .ok_or_else(|| XgentError::Config(format!("配置 {key} 含非字符串元素: {v}")))
         })
         .collect()
+}
+
+/// 解析价格（USD / 1M tokens）：有限数，0..=10000。
+fn parse_price(key: &str, value: &Value) -> XgentResult<f64> {
+    let price = match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(raw) => raw.parse::<f64>().ok(),
+        _ => None,
+    };
+    let Some(price) = price else {
+        return Err(XgentError::Config(format!("{key} 只接受有限数字")));
+    };
+    if !price.is_finite() || !(0.0..=10_000.0).contains(&price) {
+        return Err(XgentError::Config(format!("{key} 必须在 0 到 10000 之间")));
+    }
+    Ok(price)
 }
 
 /// 解析非负整数。
@@ -582,6 +607,31 @@ mod tests {
             Some("https://isolated.test/v1"),
             "内存里的写入要真的进磁盘"
         );
+    }
+
+    #[test]
+    fn pricing_global_keys_roundtrip_and_validate() {
+        let dir = isolate_agent_dir();
+        let _io = lock_config_io();
+        let mut c = ConfigCoordinator::with_config(empty_config());
+        c.write("pricing.input_per_million", json!(2.5))
+            .expect("写默认输入价");
+        c.write("pricing.output_per_million", json!("10"))
+            .expect("写默认输出价");
+        assert_eq!(c.read("pricing.input_per_million"), json!(2.5));
+        assert_eq!(c.read("pricing.output_per_million"), json!(10.0));
+
+        let file = dir.join("config.toml");
+        let on_disk = GlobalConfigStore::load_from(&file).expect("磁盘配置可解析");
+        assert_eq!(on_disk.pricing.input_per_million, 2.5);
+        assert_eq!(on_disk.pricing.output_per_million, 10.0);
+
+        for bad in [json!(-1.0), json!("abc"), json!(10001.0)] {
+            assert!(
+                c.write("pricing.input_per_million", bad.clone()).is_err(),
+                "非法价格应被拒绝: {bad}"
+            );
+        }
     }
 
     /// 配置失败原因会被设置面板逐键显示（英文界面里也一样），所以这些串不能带

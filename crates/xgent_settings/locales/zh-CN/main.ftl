@@ -188,6 +188,10 @@ undo-list-sep = 、
 settings-loading = 正在读取当前配置……
 settings-section-provider = 模型服务
 settings-section-tool-policy = 工具信任级别
+settings-section-pricing = 成本
+settings-pricing-hint = USD / 1M tokens；留空表示未定价，只显示 token
+settings-pricing-input = 默认输入单价
+settings-pricing-output = 默认输出单价
 settings-tool-policy-hint = 默认每个工具都要确认；危险命令（如 rm -rf）即使设为自动执行也仍会询问
 settings-policy-auto = 自动执行
 settings-policy-ask = 询问
@@ -249,3 +253,14 @@ context-token-ratio = { $used } / { $window } tokens（{ $pct }%）
 
 # --- M6.5: code block copy ---
 copy = 复制
+
+cost-title = 成本统计
+cost-close = 关闭
+cost-current = 当前会话：输入 { $prompt } tokens / 输出 { $completion } tokens / 成本 { $cost }
+cost-history-title = 历史累计（含当前会话）
+cost-history = { $sessions } 个会话：输入 { $prompt } tokens / 输出 { $completion } tokens / 成本 { $cost }
+cost-history-loading = 正在扫描历史会话…
+cost-history-empty = 暂无历史用量
+cost-history-error = 历史扫描失败。
+cost-model = { $model }：输入 { $prompt } / 输出 { $completion } / { $cost }
+cost-models-others = 其余 { $count } 个模型…

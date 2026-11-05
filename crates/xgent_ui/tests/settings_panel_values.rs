@@ -15,8 +15,8 @@ use xgent_settings_core::ProjectConfig;
 use xgent_settings_core::global::{ProviderConfig, ProviderKind};
 use xgent_ui::settings_panel::{
     LanguageButton, NumMode, ParsedField, PolicyButton, PolicyDraft, PolicyRow, PolicyState,
-    SaveSettingsMessage, SettingsPanelState, parse_num_field, policy_lists, project_num_fields,
-    provider_num_fields,
+    PricingField, PricingInput, SaveSettingsMessage, SettingsPanelState, parse_num_field,
+    policy_lists, project_num_fields, provider_num_fields,
 };
 use xui_i18n::StringSource;
 
@@ -209,6 +209,68 @@ fn empty_input_means_unset_or_unchanged_by_mode() {
         parse_num_field("64", 64, NumMode::Sentinel),
         Ok(ParsedField::Value(64))
     );
+}
+
+/// F-12：默认价格显示、脏键写入与非法值拦截。
+#[test]
+fn pricing_fields_show_save_and_validate() {
+    let mut app = common::panel_app();
+    let mut global = configured_global();
+    global.pricing.input_per_million = 2.5;
+    global.pricing.output_per_million = 10.0;
+    common::set_global(&mut app, global);
+    common::open_panel(&mut app);
+
+    let price_entity = |app: &mut App, field: PricingField| {
+        let mut q = app.world_mut().query::<(Entity, &PricingInput)>();
+        q.iter(app.world())
+            .find(|(_, input)| input.field == field)
+            .map(|(entity, _)| entity)
+            .expect("价格输入框")
+    };
+    let input = price_entity(&mut app, PricingField::Input);
+    let output = price_entity(&mut app, PricingField::Output);
+    assert_eq!(
+        app.world()
+            .get::<EditableText>(input)
+            .unwrap()
+            .value()
+            .to_string(),
+        "2.5"
+    );
+    assert_eq!(
+        app.world()
+            .get::<EditableText>(output)
+            .unwrap()
+            .value()
+            .to_string(),
+        "10"
+    );
+
+    *app.world_mut().get_mut::<EditableText>(input).unwrap() = EditableText::new("3.0");
+    common::press_save(&mut app);
+    let msgs = saved_messages(&app);
+    assert!(msgs.iter().any(|msg| msg.global.iter().any(|item| {
+        item.key == "pricing.input_per_million" && item.value == serde_json::json!(3.0)
+    })));
+}
+
+/// F-12：非法价格阻止整批写入。
+#[test]
+fn invalid_price_blocks_save() {
+    let mut app = common::panel_app();
+    common::set_global(&mut app, configured_global());
+    common::open_panel(&mut app);
+    let input = {
+        let mut q = app.world_mut().query::<(Entity, &PricingInput)>();
+        q.iter(app.world())
+            .find(|(_, input)| input.field == PricingField::Input)
+            .map(|(entity, _)| entity)
+            .expect("价格输入框")
+    };
+    *app.world_mut().get_mut::<EditableText>(input).unwrap() = EditableText::new("abc");
+    common::press_save(&mut app);
+    assert!(saved_messages(&app).is_empty());
 }
 
 /// A9 的写入侧半段：任一字段非法 → 一条都不写，并把原因写进状态行。

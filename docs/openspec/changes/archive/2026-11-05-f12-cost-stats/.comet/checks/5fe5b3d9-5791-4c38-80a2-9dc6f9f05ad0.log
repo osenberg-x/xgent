@@ -1,0 +1,10 @@
+Check timed out.
+   Compiling xgent_provider v0.1.0 (F:\ws\xgent\crates\xgent_provider)
+   Compiling xgent_context v0.1.0 (F:\ws\xgent\crates\xgent_context)
+   Compiling xgent_settings v0.1.0 (F:\ws\xgent\crates\xgent_settings)
+   Compiling xgent_tools v0.1.0 (F:\ws\xgent\crates\xgent_tools)
+   Compiling xgent_agent v0.1.0 (F:\ws\xgent\crates\xgent_agent)
+   Compiling xgent_ui v0.1.0 (F:\ws\xgent\crates\xgent_ui)
+   Compiling xgent_plugin_host v0.1.0 (F:\ws\xgent\crates\xgent_plugin_host)
+   Compiling xgent_app v0.1.0 (F:\ws\xgent\crates\xgent_app)
+   Compiling xgent_daemon v0.1.0 (F:\ws\xgent\crates\xgent_daemon)

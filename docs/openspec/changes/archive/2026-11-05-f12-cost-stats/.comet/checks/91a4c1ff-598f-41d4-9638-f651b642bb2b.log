@@ -1,0 +1,26 @@
+Check timed out.
+   Compiling xgent_settings_core v0.1.0 (F:\ws\xgent\crates\xgent_settings_core)
+   Compiling xgent_provider v0.1.0 (F:\ws\xgent\crates\xgent_provider)
+   Compiling xgent_context v0.1.0 (F:\ws\xgent\crates\xgent_context)
+   Compiling xgent_settings v0.1.0 (F:\ws\xgent\crates\xgent_settings)
+   Compiling xgent_tools v0.1.0 (F:\ws\xgent\crates\xgent_tools)
+   Compiling xgent_agent v0.1.0 (F:\ws\xgent\crates\xgent_agent)
+   Compiling xgent_ui v0.1.0 (F:\ws\xgent\crates\xgent_ui)
+   Compiling xgent_plugin_host v0.1.0 (F:\ws\xgent\crates\xgent_plugin_host)
+   Compiling xgent_app v0.1.0 (F:\ws\xgent\crates\xgent_app)
+   Compiling xgent_daemon v0.1.0 (F:\ws\xgent\crates\xgent_daemon)
+warning: function `assert_truncated_in_width` is never used
+   --> crates\xgent_ui\tests\layout_geometry.rs:100:4
+    |
+100 | fn assert_truncated_in_width(app: &App, text_entity: Entity) {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `assert_pickable_leaf` is never used
+   --> crates\xgent_ui\tests\layout_geometry.rs:123:4
+    |
+123 | fn assert_pickable_leaf(app: &App, entity: Entity) {
+    |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: `xgent_ui` (test "layout_geometry") generated 2 warnings

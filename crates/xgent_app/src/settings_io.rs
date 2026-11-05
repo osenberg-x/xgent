@@ -117,7 +117,7 @@ struct SnapshotResult {
     project: Option<ProjectConfig>,
     /// 失败原因（写进面板顶部，不把"读不到"演成"全是默认值"）
     error: String,
-    /// 只回填显示偏好（启动那次读取）：不碰项目配置、不动运行时句柄、不推进面板计数
+    /// 只回填显示偏好与价格（启动那次读取）：不碰项目配置、不动运行时句柄、不推进面板计数
     preferences_only: bool,
 }
 
@@ -203,7 +203,7 @@ fn request_snapshot(
 
 /// 启动时读一次显示偏好（v8 M2b）：磁盘上的密度 / 主题 / 语言在首帧就该生效。
 ///
-/// 只读全局配置、只回填 `preferences`——**不**走面板快照那条路。面板快照会连带
+/// 只读全局配置、回填 `preferences` 与 `pricing`——**不**走面板快照那条路。面板快照会连带
 /// 回填项目配置并重写 `LiveSettings`，而开机时 `ProviderInfo` 还没就绪（provider id
 /// 为空），`resolve_context_window` 会回落内置缺省，把用户配的窗口冲掉。
 fn request_preferences_on_startup(
@@ -255,6 +255,16 @@ async fn read_global(ipc: &Arc<crate::ipc_client::IpcClient>) -> Result<GlobalCo
     >(providers)
     {
         cfg.providers = map;
+    }
+    if let Ok(pricing) = ipc
+        .call_ok(
+            methods::CONFIG_READ,
+            config_read_params(ConfigScope::Global, "pricing", None),
+        )
+        .await
+        && let Ok(parsed) = serde_json::from_value::<xgent_settings_core::PricingConfig>(pricing)
+    {
+        cfg.pricing = parsed;
     }
     for key in [
         "default_provider",
@@ -344,6 +354,7 @@ fn drain_snapshot(
         if r.preferences_only {
             if let Some(g) = r.global.as_ref() {
                 apply_preferences(&mut global, &mut loc, g);
+                global.0.pricing = g.pricing.clone();
             } else if !r.error.is_empty() {
                 tracing::warn!("启动读取显示偏好失败: {}", r.error);
             }
@@ -355,6 +366,7 @@ fn drain_snapshot(
             global.0.providers = g.providers.clone();
             global.0.default_provider = g.default_provider.clone();
             global.0.default_model = g.default_model.clone();
+            global.0.pricing = g.pricing.clone();
         }
         if let Some(p) = r.project.as_ref() {
             project.0 = p.clone();
@@ -557,6 +569,7 @@ fn apply_save_result(
         global.0.providers = g.providers.clone();
         global.0.default_provider = g.default_provider.clone();
         global.0.default_model = g.default_model.clone();
+        global.0.pricing = g.pricing.clone();
         apply_preferences(global, loc, g);
     }
     if let Some(p) = snap.project.as_ref() {
@@ -1183,6 +1196,27 @@ mod tests {
             .add_systems(Update, (drain_snapshot, drain_save));
         app.world_mut().spawn(Camera::default());
         app
+    }
+
+    #[test]
+    fn snapshot_applies_pricing_to_resource() {
+        let mut app = save_app();
+        let mut global = GlobalConfig::default();
+        global.pricing.input_per_million = 2.5;
+        global.pricing.output_per_million = 10.0;
+        let tx = app.world().resource::<SnapshotTx>().0.clone();
+        let _ = tx.try_send(SnapshotResult {
+            global: Some(global),
+            project: None,
+            error: String::new(),
+            preferences_only: false,
+        });
+        for _ in 0..4 {
+            app.update();
+        }
+        let resource = app.world().resource::<GlobalConfigRes>();
+        assert_eq!(resource.0.pricing.input_per_million, 2.5);
+        assert_eq!(resource.0.pricing.output_per_million, 10.0);
     }
 
     /// 投一份"打开面板后取回的快照"（与保存通路不同，它不写报告、也不会关面板）。
