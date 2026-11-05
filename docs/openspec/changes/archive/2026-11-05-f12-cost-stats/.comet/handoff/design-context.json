@@ -1,0 +1,16 @@
+{
+  "change": "f12-cost-stats",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "task_hash_policy": "task-content-v1",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "d401d760b9bc03e62d941bcb8a44711dc62f3ce066dbaf2f59faff4f4ca29f33",
+  "files": [
+    { "path": "docs/openspec/changes/f12-cost-stats/proposal.md", "sha256": "e4921cdec840354c4d990cd5c3a1204f679e643a6ac17122b67b52500b9ebba1" },
+    { "path": "docs/openspec/changes/f12-cost-stats/design.md", "sha256": "1c49a6154168eae19cc0055579b1be1bcffe4ae1eafdb4bde4769e73cecaf1c0" },
+    { "path": "docs/openspec/changes/f12-cost-stats/tasks.md", "sha256": "2f18dc6824f962ac654b888f79f567a2faab0f70a0d4a7f4ddd63bfafbc9b976" },
+    { "path": "docs/openspec/changes/f12-cost-stats/.openspec.yaml", "sha256": "3e16994612e657a7bbaefe38b70ef46f3e8e9f382f092dcaceb60ebabe7a5da0" },
+    { "path": "docs/openspec/changes/f12-cost-stats/specs/cost-accounting/spec.md", "sha256": "e3c6c058a096752dc52f330257f586c9c46a6a96ceda2a6c84c57406511def8a" }
+  ]
+}

@@ -1,0 +1,116 @@
+warning: function `assert_truncated_in_width` is never used
+   --> crates\xgent_ui\tests\layout_geometry.rs:100:4
+    |
+100 | fn assert_truncated_in_width(app: &App, text_entity: Entity) {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `assert_pickable_leaf` is never used
+   --> crates\xgent_ui\tests\layout_geometry.rs:123:4
+    |
+123 | fn assert_pickable_leaf(app: &App, entity: Entity) {
+    |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: `xgent_ui` (test "layout_geometry") generated 2 warnings
+    Finished `test` profile [unoptimized] target(s) in 3.87s
+     Running unittests src\lib.rs (target\debug\deps\xgent_agent-02449874e1105798.exe)
+
+running 79 tests
+test bridge_tests::abort_before_later_groups_places_placeholders_for_them ... ok
+test bridge_tests::abort_cancels_upstream_stream ... ok
+test bridge_tests::abort_during_concurrent_group_pairs_every_call ... FAILED
+test bridge_tests::abort_interrupts_confirming_state ... ok
+test bridge_tests::abort_then_new_conversation_still_streams ... ok
+test bridge_tests::approved_read_tools_actually_overlap ... ok
+test bridge_tests::busy_state_ignores_new_input ... ok
+test bridge_tests::cap_one_serialises_even_approved_read_tools ... ok
+test bridge_tests::cap_two_bounds_the_group ... ok
+test bridge_tests::compaction_preserves_system_prompt_in_req ... ok
+test bridge_tests::compaction_syncs_conv_messages ... ok
+test bridge_tests::compaction_triggers_when_over_threshold ... ok
+test bridge_tests::confirm_decision_sets_tool_running_status ... ok
+test bridge_tests::confirmations_are_asked_one_at_a_time_and_never_overlap ... ok
+test bridge_tests::context_sidecar_roundtrip_and_legacy_array_format ... ok
+test bridge_tests::default_config_parallelises_nothing_even_for_auto_approved_ui_only ... ok
+test bridge_tests::delta_then_done_message_sequence ... ok
+test bridge_tests::drain_bound_is_read_from_bridge_not_a_literal ... ok
+test bridge_tests::error_message_propagates ... ok
+test bridge_tests::exclusive_call_is_a_barrier_for_its_neighbours ... ok
+test bridge_tests::frame_event_cap_defers_events_without_dropping_them ... ok
+test bridge_tests::frame_event_cap_written_to_handle_is_read_next_frame ... ok
+test bridge_tests::http_status_maps_to_error_kind ... ok
+test bridge_tests::infinite_retry_can_be_aborted ... ok
+test bridge_tests::length_truncation_pairs_tool_call_and_result_in_conv ... ok
+test bridge_tests::max_parallel_tools_written_to_handle_bounds_next_turn ... ok
+test bridge_tests::multi_tool_calls_single_assistant_message ... ok
+test bridge_tests::non_retryable_error_fails_immediately ... ok
+test bridge_tests::none_max_retries_is_clamped_to_finite_default ... ok
+test bridge_tests::normal_completion_backfills_assistant_text_to_req ... ok
+test bridge_tests::rate_limit_and_server_error_are_retryable ... ok
+test bridge_tests::results_keep_model_order_even_when_completion_differs ... ok
+test bridge_tests::retrieval_budget_from_config_reaches_context_query ... ok
+test bridge_tests::retrieval_budget_written_to_handle_reaches_next_query ... ok
+test bridge_tests::retry_after_overrides_computed_backoff ... ok
+test bridge_tests::retry_preserves_partial_assistant_text_in_req ... ok
+test bridge_tests::retryable_error_retries_then_succeeds ... ok
+test bridge_tests::runtime_narrowed_window_drives_the_next_compaction_decision ... ok
+test bridge_tests::session_jsonl_persists_header_and_assistant_message ... ok
+test bridge_tests::steering_interrupt_preserves_assistant_text_in_req ... ok
+test bridge_tests::steering_interrupts_streaming_and_continues ... ok
+test bridge_tests::stream_none_triggers_retryable_error ... ok
+test bridge_tests::tool_call_executes_approved_tool ... ok
+test bridge_tests::tool_call_with_text_preserves_assistant_text_in_req ... ok
+test bridge_tests::tool_loop_stops_at_iteration_ceiling ... ok
+test bridge_tests::tool_loop_stops_at_token_ceiling ... ok
+test bridge_tests::tool_policy_imports ... ok
+test bridge_tests::tool_policy_written_to_handle_stops_asking_next_turn ... ok
+test bridge_tests::tool_schemas_refresh_after_runtime_registration ... ok
+test compaction::tests::apply_compaction_empty_summary_returns_kept ... ok
+test compaction::tests::apply_compaction_prepends_summary ... ok
+test compaction::tests::find_cut_point_cuts_at_user_boundary ... ok
+test compaction::tests::find_cut_point_empty ... ok
+test compaction::tests::find_cut_point_never_cuts_mid_toolresult ... ok
+test compaction::tests::find_cut_point_under_budget_no_cut ... ok
+test compaction::tests::resolve_threshold_clamped_below_window ... ok
+test compaction::tests::resolve_threshold_respects_reserve ... ok
+test compaction::tests::should_compact_above_threshold_true ... ok
+test compaction::tests::should_compact_below_threshold_false ... ok
+test compaction::tests::should_compact_disabled_never ... ok
+test compaction::tests::should_compact_floor_by_local_estimate ... ok
+test format::tests::build_request_filters_notification ... ok
+test format::tests::build_request_includes_system_and_history ... ok
+test format::tests::build_request_injects_context ... ok
+test format::tests::pinned_context_is_clamped_to_remaining_budget ... ok
+test format::tests::pinned_context_replaces_retrieved_chunk_by_path ... ok
+test format::tests::pinned_context_truncates_to_leftover_budget ... ok
+test session_store::tests::append_creates_parent_dirs ... ok
+test session_store::tests::append_then_load_all_roundtrip ... ok
+test session_store::tests::append_three_different_types_roundtrip ... ok
+test session_store::tests::load_all_on_missing_file_returns_empty ... ok
+test session_store::tests::load_all_skips_empty_lines ... ok
+test session_store::tests::session_file_path_layout ... ok
+test tokenizer::tests::chinese_text_uses_char_count ... ok
+test tokenizer::tests::empty_text_only_overhead ... ok
+test tokenizer::tests::english_text_approx_4_chars_per_token ... ok
+test tokenizer::tests::image_fixed_estimate ... ok
+test tokenizer::tests::sum_over_messages ... ok
+test tokenizer::tests::toolcall_args_estimated_by_json_bytes ... ok
+
+failures:
+
+---- bridge_tests::abort_during_concurrent_group_pairs_every_call stdout ----
+
+thread 'bridge_tests::abort_during_concurrent_group_pairs_every_call' (38172) panicked at crates\xgent_agent\src\bridge_tests.rs:3347:5:
+assertion `left == right` failed: 前置条件：三个调用已同时在跑
+  left: 0
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    bridge_tests::abort_during_concurrent_group_pairs_every_call
+
+test result: FAILED. 78 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.23s
+
+error: test failed, to rerun pass `-p xgent_agent --lib`
