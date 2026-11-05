@@ -7,9 +7,10 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::Pressed;
 use bevy::ui_widgets::Button;
-use xgent_agent::{Conversation, ConversationStatus, DoneMessage, ProviderInfo};
+use xgent_agent::{Conversation, ConversationStatus, ProviderInfo};
 use xgent_core::chat::AgentMessage;
 
+use crate::cost::{CostPanelState, CostStats, format_cost};
 use crate::fonts::ui_text;
 use crate::layout::StatusBarMarker;
 use crate::theme::{Theme, space, type_scale};
@@ -25,6 +26,14 @@ pub struct ProviderTextMarker;
 /// token 用量文本节点标记。
 #[derive(Component, Default)]
 pub struct TokenTextMarker;
+
+/// 成本文本节点标记。
+#[derive(Component, Default)]
+pub struct CostTextMarker;
+
+/// 成本段按钮标记。
+#[derive(Component, Default)]
+pub struct CostToggleMarker;
 
 /// 会话段文本标记（#id · N 轮）。
 #[derive(Component, Default)]
@@ -48,18 +57,13 @@ impl Default for CompanionOn {
     }
 }
 
-/// 累计 token 用量（UI 侧粗略估算）。
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct TokenUsage {
-    pub total: u64,
-}
-
 /// 状态栏插件。
 pub struct StatusBarPlugin;
 
 impl Plugin for StatusBarPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TokenUsage>()
+        app.init_resource::<CostStats>()
+            .init_resource::<CostPanelState>()
             .init_resource::<CompanionOn>()
             .add_systems(
                 Startup,
@@ -75,7 +79,7 @@ impl Plugin for StatusBarPlugin {
                     update_companion_text,
                     toggle_companion,
                     update_status_dot,
-                    track_token_usage,
+                    handle_cost_toggle,
                 ),
             );
     }
@@ -148,17 +152,26 @@ fn spawn_status_bar(
                     TokenTextMarker,
                 ));
             });
-        // 成本段（占位，OQ-10 成本统计细化后接入）
-        p.spawn((segment_node(), BorderColor::all(theme.line)))
-            .with_children(|seg| {
-                seg.spawn(ui_text(
-                    "$0.00",
+        // 成本段（F-12）：点击打开成本面板
+        p.spawn((
+            Button,
+            Hovered::default(),
+            segment_node(),
+            BorderColor::all(theme.line),
+            CostToggleMarker,
+        ))
+        .with_children(|seg| {
+            seg.spawn((
+                ui_text(
+                    format_cost(None),
                     micro,
                     400,
                     dim,
                     type_scale::line_height::UI,
-                ));
-            });
+                ),
+                CostTextMarker,
+            ));
+        });
         // spacer
         p.spawn((Node {
             flex_grow: 1.0,
@@ -206,11 +219,12 @@ fn spawn_status_bar(
 /// 每帧更新 provider/token 文本（有变更检测，避免每帧分配 i18n 字符串）。
 fn update_status_segments(
     info: Res<ProviderInfo>,
-    tokens: Res<TokenUsage>,
+    tokens: Res<CostStats>,
     loc: Res<xgent_settings::Localizer>,
     mut q: ParamSet<(
         Query<(&mut Text, &mut xui::Ellipsis), With<ProviderTextMarker>>,
         Query<&mut Text, With<TokenTextMarker>>,
+        Query<&mut Text, With<CostTextMarker>>,
     )>,
 ) {
     if !info.is_changed() && !loc.is_changed() {
@@ -232,11 +246,19 @@ fn update_status_segments(
     if tokens.is_changed()
         && let Ok(mut text) = q.p1().single_mut()
     {
-        let label = if tokens.total > 0 {
-            format!("↑ {} tokens", format_tokens(tokens.total))
+        let label = if tokens.total_tokens() > 0 {
+            format!("↑ {} tokens", format_tokens(tokens.total_tokens()))
         } else {
             String::new()
         };
+        if text.0 != label {
+            text.0 = label;
+        }
+    }
+    if (tokens.is_changed() || loc.is_changed())
+        && let Ok(mut text) = q.p2().single_mut()
+    {
+        let label = format_cost(tokens.cost);
         if text.0 != label {
             text.0 = label;
         }
@@ -340,12 +362,13 @@ fn update_status_dot(
     }
 }
 
-/// 收到 DoneMessage 时累加真实 token 用量。
-fn track_token_usage(mut reader: MessageReader<DoneMessage>, mut tokens: ResMut<TokenUsage>) {
-    for ev in reader.read() {
-        if let Some(u) = &ev.usage {
-            tokens.total += u.prompt as u64 + u.completion as u64;
-        }
+/// 点击成本段：打开/关闭成本面板。
+fn handle_cost_toggle(
+    q: Query<(), (With<CostToggleMarker>, Added<Pressed>)>,
+    mut panel: ResMut<CostPanelState>,
+) {
+    for _ in q.iter() {
+        panel.open = !panel.open;
     }
 }
 

@@ -17,6 +17,8 @@ pub mod completion_ui;
 pub mod confirm_dialog;
 pub mod context_scope;
 pub mod context_set;
+pub mod cost;
+pub mod cost_panel;
 pub mod cursor;
 pub mod density;
 pub mod diff;
@@ -89,6 +91,8 @@ impl Plugin for XgentUiPlugin {
         ))
         .add_plugins((
             cursor::CursorStylePlugin,
+            cost::CostPlugin,
+            cost_panel::CostPanelPlugin,
             session_history::SessionHistoryPlugin,
             space::SpacePlugin,
             confirm_dialog::ConfirmDialogPlugin,

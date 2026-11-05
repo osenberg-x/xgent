@@ -65,6 +65,22 @@ pub struct ApiKeyInput;
 #[derive(Component, Default)]
 pub struct ModelInput;
 
+/// 价格字段种类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PricingField {
+    /// 默认输入价
+    Input,
+    /// 默认输出价
+    Output,
+}
+
+/// 默认价格输入框标记。
+#[derive(Component)]
+pub struct PricingInput {
+    /// 输入或输出价
+    pub field: PricingField,
+}
+
 /// 保存按钮标记。
 #[derive(Component, Default)]
 pub struct SettingsSaveButtonMarker;
@@ -298,6 +314,46 @@ impl NumField {
     pub fn is_unset(&self) -> bool {
         matches!(self.mode, NumMode::Sentinel) && self.stored == 0
     }
+}
+
+/// 解析价格输入：空 = 未设置（写 0），合法有限小数 `0..=10000`。
+fn parse_price_text(text: &str) -> Result<Option<f64>, FieldError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let value: f64 = text.parse().map_err(|_| FieldError::NotANumber)?;
+    if !value.is_finite() || !(0.0..=10_000.0).contains(&value) {
+        return Err(FieldError::OutOfRange { max: 10_000 });
+    }
+    Ok(Some(value))
+}
+
+/// 把价格输入转换为待写配置项；空串视为 0（未设置）。
+fn price_config_item(text: &str, key: &str, stored: f64) -> Result<Option<ConfigItem>, FieldError> {
+    let value = parse_price_text(text)?.unwrap_or(0.0);
+    if (value - stored).abs() <= f64::EPSILON {
+        return Ok(None);
+    }
+    Ok(Some(ConfigItem {
+        key: key.to_string(),
+        value: serde_json::json!(value),
+    }))
+}
+
+/// 输入框显示价格：未设置显示空串，其余去掉多余的 0。
+fn format_price_input(value: f64) -> String {
+    if !value.is_finite() || value <= 0.0 {
+        return String::new();
+    }
+    let mut text = format!("{value:.4}");
+    while text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
 }
 
 /// 解析输入框文本为待写值。
@@ -598,20 +654,26 @@ impl Plugin for SettingsPanelPlugin {
             .add_systems(
                 Update,
                 (
-                    toggle_panel,
-                    push_settings_modal_on_spawn,
-                    dismiss_on_modal_request,
-                    close_on_scrim_click,
-                    handle_kind_button,
-                    handle_panel_dismiss,
-                    handle_density_choice,
-                    handle_3d_home_choice,
-                    handle_policy_button,
-                    handle_save_button,
-                    handle_fetch_models,
-                    handle_model_list_results,
-                    handle_model_click,
-                    apply_save_report,
+                    (
+                        toggle_panel,
+                        push_settings_modal_on_spawn,
+                        dismiss_on_modal_request,
+                        close_on_scrim_click,
+                        handle_kind_button,
+                        handle_panel_dismiss,
+                        handle_density_choice,
+                    )
+                        .chain(),
+                    (
+                        handle_3d_home_choice,
+                        handle_policy_button,
+                        handle_save_button,
+                        handle_fetch_models,
+                        handle_model_list_results,
+                        handle_model_click,
+                        apply_save_report,
+                    )
+                        .chain(),
                 )
                     .chain(),
             );
@@ -882,6 +944,44 @@ fn spawn_panel(
                     spawn_num_field(card, theme, loc, font, &f, true, tab_counter);
                     tab_counter += 10;
                 }
+
+                // ── 成本（F-12）────────────────────────────
+                section(card, theme, loc, "settings-section-pricing");
+                card.spawn(ui_text(
+                    tr(loc, "settings-pricing-hint"),
+                    type_scale::BODY_SM,
+                    400,
+                    theme.text_muted,
+                    type_scale::line_height::UI,
+                ));
+                spawn_labelled_input(
+                    card,
+                    theme,
+                    loc,
+                    font,
+                    "settings-pricing-input",
+                    &format_price_input(global.pricing.input_per_million),
+                    PricingInput {
+                        field: PricingField::Input,
+                    },
+                    false,
+                    tab_counter,
+                );
+                tab_counter += 10;
+                spawn_labelled_input(
+                    card,
+                    theme,
+                    loc,
+                    font,
+                    "settings-pricing-output",
+                    &format_price_input(global.pricing.output_per_million),
+                    PricingInput {
+                        field: PricingField::Output,
+                    },
+                    false,
+                    tab_counter,
+                );
+                tab_counter += 10;
 
                 // ── 工具策略 ─────────────────────────────────
                 section(card, theme, loc, "settings-section-tool-policy");
@@ -1569,6 +1669,7 @@ fn handle_save_button(
     q_base: Query<&EditableText, With<ApiBaseInput>>,
     q_key: Query<&EditableText, With<ApiKeyInput>>,
     q_model: Query<&EditableText, With<ModelInput>>,
+    q_prices: Query<(&EditableText, &PricingInput)>,
     q_nums: Query<(&EditableText, &SettingsNumInput)>,
     mut q_status: Query<&mut Text, With<SettingsStatusMarker>>,
     kind_selector: Res<KindSelector>,
@@ -1622,6 +1723,42 @@ fn handle_save_button(
                     &[
                         ("key", field_label_text(&loc, meta.key)),
                         ("reason", field_error_text(&loc, &e)),
+                    ],
+                )),
+            }
+        }
+        if !rejected.is_empty() {
+            set_status(
+                &mut q_status,
+                &theme,
+                &rejected.join(&tr(&loc, "settings-list-sep")),
+            );
+            return;
+        }
+
+        // 1b. 默认价格：空 = 未设置（0）；非法值同样阻止整批写入
+        for (text, input) in q_prices.iter() {
+            let (key, label_key, stored) = match input.field {
+                PricingField::Input => (
+                    "pricing.input_per_million",
+                    "settings-pricing-input",
+                    global.pricing.input_per_million,
+                ),
+                PricingField::Output => (
+                    "pricing.output_per_million",
+                    "settings-pricing-output",
+                    global.pricing.output_per_million,
+                ),
+            };
+            match price_config_item(&text.value().to_string(), key, stored) {
+                Ok(Some(item)) => msg.global.push(item),
+                Ok(None) => {}
+                Err(error) => rejected.push(crate::i18n::tr_with(
+                    &loc,
+                    "settings-failed-item",
+                    &[
+                        ("key", tr(&loc, label_key)),
+                        ("reason", field_error_text(&loc, &error)),
                     ],
                 )),
             }
@@ -1964,5 +2101,39 @@ fn tr_with_saved(loc: &Localizer, n: usize) -> String {
         tr(loc, "settings-nothing-to-save")
     } else {
         crate::i18n::tr_with(loc, "settings-saved-count", &[("count", n.to_string())])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn price_text_parses_and_validates() {
+        assert_eq!(parse_price_text("").expect("空"), None);
+        assert_eq!(parse_price_text(" 2.5 ").expect("小数"), Some(2.5));
+        assert!(parse_price_text("-1").is_err());
+        assert!(parse_price_text("abc").is_err());
+        assert!(parse_price_text("10000.1").is_err());
+        assert_eq!(format_price_input(2.5), "2.5");
+        assert_eq!(format_price_input(0.0), "");
+    }
+
+    #[test]
+    fn price_item_only_when_dirty() {
+        assert!(
+            price_config_item("2.5", "pricing.input_per_million", 2.5)
+                .expect("解析")
+                .is_none()
+        );
+        let item = price_config_item("3.0", "pricing.input_per_million", 2.5)
+            .expect("解析")
+            .expect("应写");
+        assert_eq!(item.key, "pricing.input_per_million");
+        assert_eq!(item.value, serde_json::json!(3.0));
+        let cleared = price_config_item("", "pricing.input_per_million", 2.5)
+            .expect("解析")
+            .expect("应写 0");
+        assert_eq!(cleared.value, serde_json::json!(0.0));
     }
 }

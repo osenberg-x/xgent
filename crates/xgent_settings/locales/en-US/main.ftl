@@ -187,6 +187,10 @@ undo-list-sep = ,{" "}
 settings-loading = Loading current configuration…
 settings-section-provider = Provider
 settings-section-tool-policy = Tool trust levels
+settings-section-pricing = Cost
+settings-pricing-hint = USD / 1M tokens; leave blank to show tokens only
+settings-pricing-input = Default input price
+settings-pricing-output = Default output price
 settings-tool-policy-hint = Every tool asks by default; a dangerous command (such as rm -rf) still asks even when set to auto
 settings-policy-auto = Auto
 settings-policy-ask = Ask
@@ -248,3 +252,14 @@ context-token-ratio = { $used } / { $window } tokens ({ $pct }%)
 
 # --- M6.5: code block copy ---
 copy = Copy
+
+cost-title = Cost
+cost-close = Close
+cost-current = Current session: input { $prompt } tokens / output { $completion } tokens / cost { $cost }
+cost-history-title = History (including current session)
+cost-history = { $sessions } sessions: input { $prompt } tokens / output { $completion } tokens / cost { $cost }
+cost-history-loading = Scanning history…
+cost-history-empty = No historical usage
+cost-history-error = History scan failed: { $error }
+cost-model = { $model }: input { $prompt } / output { $completion } / { $cost }
+cost-models-others = { $count } more models…

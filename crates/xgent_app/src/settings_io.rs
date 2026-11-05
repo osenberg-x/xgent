@@ -256,6 +256,16 @@ async fn read_global(ipc: &Arc<crate::ipc_client::IpcClient>) -> Result<GlobalCo
     {
         cfg.providers = map;
     }
+    if let Ok(pricing) = ipc
+        .call_ok(
+            methods::CONFIG_READ,
+            config_read_params(ConfigScope::Global, "pricing", None),
+        )
+        .await
+        && let Ok(parsed) = serde_json::from_value::<xgent_settings_core::PricingConfig>(pricing)
+    {
+        cfg.pricing = parsed;
+    }
     for key in [
         "default_provider",
         "default_model",

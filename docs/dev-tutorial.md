@@ -50,6 +50,7 @@
 
 - **F-10 Git 集成**（P1）：✅ 已实现（`xgent_plugin_git` 插件，git_diff/git_log/git_status 工具 + 命令，经 `host.run_command("git", ...)`）。
 - **F-12 成本统计**（P1）：未实现（`TokenUsage` 类型已定义，无汇总 UI）。
+- **F-12 成本统计**（P1）：首期已实现当前会话/历史 token 与成本、状态栏入口与成本面板（待独立验收）。
 - **F-13 MCP 支持**（P1）：首期已交付本地 stdio tools 桥接（`xgent_tools/src/mcp/`，2025-06-18）；HTTP/SSE、resources/prompts 留后续。
 - **F-14 自定义工具**（P2）：✅ 部分实现（插件系统即自定义工具的实现方式——用户编写 WASM 插件注册工具）。
 - **F-15 虚拟宠物**（P1）：未实现（`xgent_pet` crate 未建）。
@@ -990,6 +991,25 @@ auto_start = true
 - **接线**：`xgent_app::mcp_boot` 在 bridge 的 tokio runtime 上启动 `McpManager`，作为 `McpRuntime` Resource 持有；`AppExit` 时调用 `shutdown` 终止子进程。`AgentBridge` 每轮从 `ToolExecutor` 读取 schema，后台注册的工具在下一轮对话可见。连接/发现失败只影响该 Server。
 - **测试**：`cargo test -p xgent_settings_core mcp`、`cargo test -p xgent_tools mcp`、`cargo test -p xgent_tools --test mcp_manager`（真实 fixture 子进程）、`cargo test -p xgent_app mcp_boot`。
 - **首期边界**：仅 stdio 与 2025-06-18 握手；不做 HTTP/SSE、resources/prompts、设置面板、3D 空间站、自动重连、list_changed 热刷新与配置热重载（改 `mcp.toml` 后重启）。子进程继承父进程环境变量，敏感值应放 `env` 或后续白名单；Windows 无扩展名命令会按 PATHEXT 解析 `.cmd`/`.bat`/`.exe`。
+
+### 5.30 成本统计（F-12）
+
+全局配置文件 `~/.xgent/agent/config.toml` 可配置 USD / 1M tokens 单价：
+
+```toml
+[pricing]
+input_per_million = 2.5
+output_per_million = 10.0
+
+[pricing.models."gpt-4o-mini"]
+input_per_million = 0.15
+output_per_million = 0.6
+```
+
+- 模型覆盖优先于默认价；某个字段为 0 时该字段回落到默认价。
+- 未配置价格（或为 0/非法）时只显示 token，成本显示 `—`，不按 0 元计。
+- 设置面板的“成本”分区编辑默认价；模型覆盖通过配置文件维护。
+- 成本 = prompt/1e6 × 输入单价 + completion/1e6 × 输出单价；历史扫描只读 `sessions/*.jsonl`。
 
 ## 6. 开发流程（与 AGENTS.md 第 6 节对齐）
 

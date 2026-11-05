@@ -34,6 +34,10 @@ pub struct GlobalConfig {
     /// 插件全局配置（启用/禁用、自动更新）。照设计文档 §10.2。
     #[serde(default)]
     pub plugin: PluginConfig,
+
+    /// 模型价格（F-12）：默认单价 + 按模型覆盖。
+    #[serde(default)]
+    pub pricing: crate::pricing::PricingConfig,
 }
 
 /// 插件配置（全局配置的一部分）。照设计文档 §10.2。
