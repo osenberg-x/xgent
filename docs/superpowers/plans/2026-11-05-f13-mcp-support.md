@@ -62,7 +62,7 @@ base-ref: 22bd0ffb2a2673c1aa3b0077526faef3b72b86b6
 
 **结果**：`McpTool` 把 MCP 工具完整接入现有 `Tool`/确认链路。
 
-- 完整 id：`mcp.<server>.<tool>`；server id 校验，工具名清洗为 `[A-Za-z0-9_-]`，超长截断加稳定哈希，完整 id ≤64；保留原始工具名用于调用。
+- 完整 id：`mcp__<server>__<tool>`；server id 校验，工具名清洗为 `[A-Za-z0-9_-]`，超长截断加稳定哈希，完整 id ≤64；保留原始工具名用于调用。
 - schema 描述截断 2 KiB、schema 64 KiB；`tier=Exec`、`concurrency=Exclusive`；`summarize` 含 server/tool 与输入摘要。
 - 结果：文本块按序拼接、无文本时 JSON、输出截断 64 KiB、`isError` → `ToolResult { is_error: true }`；协议/超时/断连 → `ToolError`；取消发 `notifications/cancelled` 并返回 `Aborted`。
 - 测试（RED→GREEN）：id 清洗/冲突、schema 上限、结果拼接/截断、isError、默认 `NeedsConfirmation`、`[tool_policy]` 提升、只读标注不改变策略。

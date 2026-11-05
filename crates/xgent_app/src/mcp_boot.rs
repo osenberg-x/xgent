@@ -37,7 +37,9 @@ fn start_with_paths(
     executor: Arc<ToolExecutor>,
     handle: &tokio::runtime::Handle,
 ) -> Option<Arc<McpManager>> {
-    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let env: BTreeMap<String, String> = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
     let outcome = load_mcp_config(global_path, project_path, &env);
     for warning in &outcome.warnings {
         tracing::warn!("{warning}");

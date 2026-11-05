@@ -222,8 +222,10 @@ impl StdioTransport {
             return Err(McpError::Transport("MCP 连接已关闭".to_string()));
         }
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        if let Err(error) = self.inner.write_value(&message).await {
-            return Err(error);
+        match tokio::time::timeout(timeout, self.inner.write_value(&message)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err(McpError::Timeout(timeout.as_secs().max(1))),
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => result,
@@ -255,19 +257,24 @@ impl StdioTransport {
             return Err(McpError::Transport("MCP 连接已关闭".to_string()));
         }
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        if let Err(error) = self.inner.write_value(&message).await {
-            return Err(error);
+        match tokio::time::timeout(timeout, self.inner.write_value(&message)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err(McpError::Timeout(timeout.as_secs().max(1))),
         }
         let timer = tokio::time::sleep(timeout);
         tokio::pin!(timer);
         let result = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
-                let _ = self.inner.write_value(&json!({
-                    "jsonrpc": "2.0",
-                    "method": "notifications/cancelled",
-                    "params": {"requestId": id, "reason": "cancelled"},
-                })).await;
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    self.inner.write_value(&json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/cancelled",
+                        "params": {"requestId": id, "reason": "cancelled"},
+                    })),
+                ).await;
                 return Err(McpError::Cancelled);
             }
             _ = &mut timer => {
@@ -310,8 +317,14 @@ impl McpTransport for StdioTransport {
 
     async fn notify(&self, method: &str, params: Value) {
         let message = json!({"jsonrpc": "2.0", "method": method, "params": params});
-        if let Err(error) = self.inner.write_value(&message).await {
-            tracing::warn!(server = %self.inner.server_id, %error, "MCP 通知发送失败");
+        match tokio::time::timeout(Duration::from_secs(2), self.inner.write_value(&message)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(server = %self.inner.server_id, %error, "MCP 通知发送失败");
+            }
+            Err(_) => {
+                tracing::warn!(server = %self.inner.server_id, "MCP 通知发送超时");
+            }
         }
     }
 
@@ -479,11 +492,20 @@ where
     R: AsyncRead + Send + Unpin + 'static,
 {
     tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let line: String = line.chars().take(2048).collect();
-            // stderr 可能带凭据；默认降到 debug，避免 WARN 落盘时泄露。
-            tracing::debug!(server = %server_id, "MCP stderr: {line}");
+        let mut reader = BufReader::new(stderr);
+        loop {
+            match read_line_capped(&mut reader, 64 * 1024).await {
+                Ok(Some(line)) => {
+                    let line: String = line.chars().take(2048).collect();
+                    // stderr 可能带凭据；默认降到 debug，避免 WARN 落盘时泄露。
+                    tracing::debug!(server = %server_id, "MCP stderr: {line}");
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::debug!(server = %server_id, %error, "MCP stderr 读取失败");
+                    break;
+                }
+            }
         }
     });
 }

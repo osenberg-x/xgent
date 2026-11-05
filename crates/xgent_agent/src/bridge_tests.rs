@@ -745,10 +745,10 @@ fn infinite_retry_can_be_aborted() {
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
     });
-    // 让首次失败 + 若干次重试发生
-    for _ in 0..30 {
-        app.update();
-    }
+    // 让首次失败 + 若干次重试发生（墙钟轮询，负载下不依赖帧数）
+    drive_until(&mut app, |app| {
+        !app.world().resource::<RetryCollected>().retries.is_empty()
+    });
     // 断言确实在重试（有重试通知，无最终错误）
     {
         let collected = app.world().resource::<RetryCollected>();
@@ -757,9 +757,12 @@ fn infinite_retry_can_be_aborted() {
     }
     // 发中断
     app.world_mut().write_message(AbortMessage);
-    for _ in 0..80 {
-        app.update();
-    }
+    drive_until(&mut app, |app| {
+        app.world()
+            .resource::<crate::conversation::Conversation>()
+            .status
+            != ConversationStatus::Error
+    });
 
     let conv = app.world().resource::<crate::conversation::Conversation>();
     // 中断后不应停留在 Error（被 abort 终止，返回空 Done → Idle）

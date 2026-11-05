@@ -128,14 +128,28 @@ impl McpManager {
         drop(_guard);
 
         if self.shutting_down.load(Ordering::SeqCst) {
+            executor.remove_by_prefix(&format!("mcp__{server_id}__"));
             transport.close().await;
             return;
         }
-        self.connections.lock().push(ManagedConnection {
-            server_id: server_id.clone(),
-            transport,
-            tool_ids: tool_ids.clone(),
-        });
+        let leftover = {
+            let mut connections = self.connections.lock();
+            connections.push(ManagedConnection {
+                server_id: server_id.clone(),
+                transport,
+                tool_ids: tool_ids.clone(),
+            });
+            if self.shutting_down.load(Ordering::SeqCst) {
+                connections.pop()
+            } else {
+                None
+            }
+        };
+        if let Some(connection) = leftover {
+            executor.remove_by_prefix(&format!("mcp__{server_id}__"));
+            connection.transport.close().await;
+            return;
+        }
         tracing::info!(
             server = %server_id,
             tools = tool_ids.len(),
