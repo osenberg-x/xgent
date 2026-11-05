@@ -175,6 +175,20 @@ impl ToolExecutor {
         self.tools.write().insert(tool.id().to_string(), tool);
     }
 
+    /// 按完整 id 精确移除（MCP Server 关闭时清理其工具，避免前缀误删）。
+    pub fn remove_ids(&self, ids: &[String]) {
+        {
+            let mut tools = self.tools.write();
+            for id in ids {
+                tools.remove(id);
+            }
+        }
+        match self.allowed_all.try_lock() {
+            Ok(mut set) => set.retain(|id| !ids.contains(id)),
+            Err(_) => tracing::warn!("ToolExecutor::remove_ids: allowed_all 锁竞争，缓存未清理"),
+        }
+    }
+
     /// 按前缀移除（插件卸载时清理 plugin.<id>. 工具）。
     ///
     /// 照设计文档 §7.2。`&self`（interior mutability via RwLock），在 ECS 主线程

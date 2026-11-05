@@ -128,7 +128,7 @@ impl McpManager {
         drop(_guard);
 
         if self.shutting_down.load(Ordering::SeqCst) {
-            executor.remove_by_prefix(&format!("mcp__{server_id}__"));
+            executor.remove_ids(&tool_ids);
             transport.close().await;
             return;
         }
@@ -146,7 +146,7 @@ impl McpManager {
             }
         };
         if let Some(connection) = leftover {
-            executor.remove_by_prefix(&format!("mcp__{server_id}__"));
+            executor.remove_ids(&tool_ids);
             connection.transport.close().await;
             return;
         }

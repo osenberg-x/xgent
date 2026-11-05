@@ -224,8 +224,14 @@ impl StdioTransport {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         match tokio::time::timeout(timeout, self.inner.write_value(&message)).await {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Err(McpError::Timeout(timeout.as_secs().max(1))),
+            Ok(Err(error)) => {
+                self.inner.mark_closed("写 MCP 请求失败");
+                return Err(error);
+            }
+            Err(_) => {
+                self.inner.mark_closed("写 MCP 请求超时");
+                return Err(McpError::Timeout(timeout.as_secs().max(1)));
+            }
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => result,
@@ -259,8 +265,14 @@ impl StdioTransport {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         match tokio::time::timeout(timeout, self.inner.write_value(&message)).await {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Err(McpError::Timeout(timeout.as_secs().max(1))),
+            Ok(Err(error)) => {
+                self.inner.mark_closed("写 MCP 请求失败");
+                return Err(error);
+            }
+            Err(_) => {
+                self.inner.mark_closed("写 MCP 请求超时");
+                return Err(McpError::Timeout(timeout.as_secs().max(1)));
+            }
         }
         let timer = tokio::time::sleep(timeout);
         tokio::pin!(timer);

@@ -761,16 +761,12 @@ fn infinite_retry_can_be_aborted() {
         app.world()
             .resource::<crate::conversation::Conversation>()
             .status
-            != ConversationStatus::Error
+            == ConversationStatus::Idle
     });
 
     let conv = app.world().resource::<crate::conversation::Conversation>();
-    // 中断后不应停留在 Error（被 abort 终止，返回空 Done → Idle）
-    assert_ne!(
-        conv.status,
-        ConversationStatus::Error,
-        "中断后不应是 Error 态"
-    );
+    // 中断后应回到 Idle（被 abort 终止，返回空 Done）
+    assert_eq!(conv.status, ConversationStatus::Idle, "中断后应回到 Idle");
     let collected = app.world().resource::<RetryCollected>();
     assert!(collected.done, "中断应产生 Done");
     assert!(collected.errors.is_empty(), "中断不应产生错误");
