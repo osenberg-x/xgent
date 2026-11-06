@@ -1,0 +1,16 @@
+{
+  "change": "f20-s3-timeline",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "task_hash_policy": "task-content-v1",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "24b725568827a15130bae715c2568865d143c2a34a7105c7c828e85ab1537ea1",
+  "files": [
+    { "path": "docs/openspec/changes/f20-s3-timeline/proposal.md", "sha256": "41c4c1c0ba465b3ee5ccddbc794eb1fe050f01b2d883b8a59e6d2cc54a1f9e3b" },
+    { "path": "docs/openspec/changes/f20-s3-timeline/design.md", "sha256": "c1f736a06ad96f68d5a6778d39b9f3c0883387ef78a7cc6297d8098f68ca7807" },
+    { "path": "docs/openspec/changes/f20-s3-timeline/tasks.md", "sha256": "92b4fa00134a7cf53d803a54c979037bb2eed8e191e13c1addcce65bfede1e7b" },
+    { "path": "docs/openspec/changes/f20-s3-timeline/.openspec.yaml", "sha256": "3e16994612e657a7bbaefe38b70ef46f3e8e9f382f092dcaceb60ebabe7a5da0" },
+    { "path": "docs/openspec/changes/f20-s3-timeline/specs/spatial-timeline/spec.md", "sha256": "71e9eefcd20e7463325eb8d3be8040baa948baafe0eb4f606a75daee6c6bd5f6" }
+  ]
+}
