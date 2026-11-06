@@ -270,6 +270,19 @@ fn chat_panel_uses_flex_grow() {
     );
 }
 
+/// Transcript 渲染器按 `VirtualList` 查询消息列表；缺它会导致消息永远空白。
+#[test]
+fn message_list_has_virtual_list() {
+    let mut app = layout_app();
+    let list = find_one::<xgent_ui::chat_panel::MessageListMarker>(&mut app);
+    assert!(
+        app.world()
+            .get::<xui::virtual_list::VirtualList>(list)
+            .is_some(),
+        "消息列表必须挂 VirtualList，否则 transcript_render 查询恒空"
+    );
+}
+
 /// F2 回归：StatusBar 存在且有合理高度（Node.height 是固定值）。
 #[test]
 fn status_bar_has_fixed_height() {

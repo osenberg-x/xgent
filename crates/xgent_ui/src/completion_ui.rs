@@ -181,18 +181,6 @@ fn sync_completion_state(
         }
     }
 
-    let signature = signature(&state);
-    if cache.signature == Some(signature) {
-        return;
-    }
-    cache.signature = Some(signature);
-    for entity in q_popups.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    let Some((layer, _)) = q_layers.iter().find(|(_, band)| band.0 == z::DROPDOWN) else {
-        return;
-    };
     // 锚点与尺寸取自 ComputedNode / UiGlobalTransform（**物理**像素），浮层的
     // left/top 是逻辑像素；HiDPI 下不换算会让浮层离输入框偏 (scale-1) 倍距离。
     let (anchor, input_size) = q_card
@@ -207,6 +195,21 @@ fn sync_completion_state(
         .single()
         .map(|window| Vec2::new(window.width(), window.height()))
         .unwrap_or(Vec2::new(1280.0, 720.0));
+
+    // 窗口尺寸/输入框位置也进签名：窗口变窄后必须重新钳制浮层，
+    // 否则它会停在旧坐标（可能已在屏外）。
+    let signature = signature(&state, anchor, input_size, viewport);
+    if cache.signature == Some(signature) {
+        return;
+    }
+    cache.signature = Some(signature);
+    for entity in q_popups.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    let Some((layer, _)) = q_layers.iter().find(|(_, band)| band.0 == z::DROPDOWN) else {
+        return;
+    };
     spawn_completion_popup(
         &mut commands,
         &state,
@@ -243,11 +246,17 @@ fn hold_suppresses_popup(state: &mut CompletionState, text: &str) -> bool {
     }
 }
 
-fn signature(state: &CompletionState) -> u64 {
+fn signature(state: &CompletionState, anchor: Vec2, input_size: Vec2, viewport: Vec2) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     state.active.hash(&mut hasher);
     state.trigger_position.hash(&mut hasher);
     state.selected_index.hash(&mut hasher);
+    anchor.x.to_bits().hash(&mut hasher);
+    anchor.y.to_bits().hash(&mut hasher);
+    input_size.x.to_bits().hash(&mut hasher);
+    input_size.y.to_bits().hash(&mut hasher);
+    viewport.x.to_bits().hash(&mut hasher);
+    viewport.y.to_bits().hash(&mut hasher);
     for candidate in &state.candidates {
         candidate.label.hash(&mut hasher);
         candidate.insert_text.hash(&mut hasher);
@@ -348,6 +357,63 @@ mod tests {
         app.update();
         assert!(!app.world().resource::<CompletionState>().active);
         assert!(app.world().resource::<CompletionConsumed>().enter);
+    }
+
+    #[test]
+    fn arrow_keys_move_selection_and_are_consumed() {
+        let mut app = App::new();
+        app.init_resource::<CompletionState>()
+            .init_resource::<CompletionConsumed>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .add_systems(
+                PreUpdate,
+                (reset_completion_consumed, handle_completion_keys).chain(),
+            );
+        app.world_mut()
+            .spawn((bevy::text::EditableText::new("hi @fi"), ChatInputMarker));
+        {
+            let mut state = app.world_mut().resource_mut::<CompletionState>();
+            state.activate(
+                vec![
+                    CompletionCandidate {
+                        label: "a.rs".into(),
+                        insert_text: "@file:a.rs ".into(),
+                        kind: CompletionKind::File,
+                    },
+                    CompletionCandidate {
+                        label: "b.rs".into(),
+                        insert_text: "@file:b.rs ".into(),
+                        kind: CompletionKind::File,
+                    },
+                ],
+                3,
+            );
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowDown);
+        app.update();
+        assert_eq!(
+            app.world().resource::<CompletionState>().selected_index,
+            1,
+            "Down 应移动候选"
+        );
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .just_pressed(KeyCode::ArrowDown),
+            "补全应消费 Down，避免同时滚对话/相机"
+        );
+
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.clear();
+        keys.press(KeyCode::ArrowUp);
+        app.update();
+        assert_eq!(
+            app.world().resource::<CompletionState>().selected_index,
+            0,
+            "Up 应回退候选"
+        );
     }
 
     #[test]

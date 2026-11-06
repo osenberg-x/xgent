@@ -158,7 +158,16 @@ pub(crate) fn spawn_chat_panel(
     let (mut frame, stick) = ScrollFrame::stick_bottom();
     frame.style().padding = UiRect::all(px(space::XXL));
     frame.style().row_gap = px(space::XL);
-    let message_list = commands.spawn((frame, stick, MessageListMarker)).id();
+    // Transcript 渲染器按 `VirtualList` 做窗口化；缺它会让消息列表查询恒空，
+    // 表现为有会话但对话区永远空白。
+    let message_list = commands
+        .spawn((
+            frame,
+            stick,
+            xui::virtual_list::VirtualList::new(0, 120.0),
+            MessageListMarker,
+        ))
+        .id();
 
     // 浮动输入卡
     // v8 M3-T3：改成「外框 + 内层可滚动文本区」两段式——文本到上限（200px）

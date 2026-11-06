@@ -108,7 +108,8 @@ fn capture_density_bases(
     for (entity, mut node) in nodes.iter_mut() {
         let base = DensityBase::capture(&node);
         base.write(&mut node, density);
-        commands.entity(entity).insert(base);
+        // 同一帧内被布局/列表系统 despawn 的新节点不应让命令队列 panic。
+        commands.entity(entity).try_insert(base);
     }
 }
 
