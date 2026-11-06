@@ -18,8 +18,8 @@ use bevy::picking::hover::Hovered;
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::{Pressed, UiGlobalTransform};
-use bevy::ui_widgets::{Button, observe};
+use bevy::ui::UiGlobalTransform;
+use bevy::ui_widgets::{Activate, Button, observe};
 use crossbeam_channel::{Receiver, TryRecvError, unbounded};
 use xgent_agent::Conversation;
 use xgent_core::chat::AgentMessage;
@@ -99,6 +99,15 @@ pub struct VisibilityPlan {
     pub missing: usize,
 }
 
+/// 时间轴硬失败。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimelineError {
+    /// 加载线程异常退出（未发送数据）。
+    ThreadExited,
+    /// 无法创建加载线程。
+    SpawnFailed(String),
+}
+
 /// 时间轴状态：`position == None` 表示“现在”。
 #[derive(Resource, Default)]
 pub struct TimelineState {
@@ -109,7 +118,7 @@ pub struct TimelineState {
     /// 是否正在后台加载
     pub loading: bool,
     /// 线程创建等硬失败
-    pub error: Option<String>,
+    pub error: Option<TimelineError>,
     /// 数据代数（UI 重建标记）
     revision: u64,
     saved_selected: Option<SpatialNodeId>,
@@ -260,26 +269,47 @@ pub struct SpaceTimelineReturnText;
 #[derive(Component)]
 pub struct SpaceTimelineFrameMarker;
 
-/// 从当前 L1 图收集文件/目录路径。
-pub fn current_paths(graph: &SpaceGraph) -> (BTreeSet<String>, BTreeSet<String>) {
+/// 从当前 L1 图收集文件/目录路径（相对项目根，`/` 分隔）。
+///
+/// 扫描节点是绝对路径，而检查点与 git 树是项目相对路径；必须先剥掉项目根，
+/// 否则回放时两边永远不相交，历史视图会把所有节点隐藏。项目根目录自身
+/// 归一为空串，由可见文件决定显隐。
+pub fn current_paths(
+    graph: &SpaceGraph,
+    project_root: &Path,
+) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut files = BTreeSet::new();
     let mut dirs = BTreeSet::new();
     for node in &graph.0.nodes {
         let Some(path) = &node.path else {
             continue;
         };
-        let path = normalize(&path.display().to_string());
+        let Some(relative) = relative_path(&path.display().to_string(), project_root) else {
+            continue;
+        };
         match node.kind {
             SpatialNodeKind::File => {
-                files.insert(path);
+                files.insert(relative);
             }
             SpatialNodeKind::Module => {
-                dirs.insert(path);
+                dirs.insert(relative);
             }
             _ => {}
         }
     }
     (files, dirs)
+}
+
+/// 绝对路径 → 相对项目根的 `/` 路径；项目根自身返回空串，根外返回 `None`。
+fn relative_path(path: &str, project_root: &Path) -> Option<String> {
+    let path = normalize(path);
+    let root = normalize(&project_root.display().to_string());
+    let root = root.trim_end_matches('/');
+    if path == root {
+        return Some(String::new());
+    }
+    let relative = path.strip_prefix(root)?;
+    Some(relative.strip_prefix('/').unwrap_or(relative).to_string())
 }
 
 /// 合并锚点：时间升序；同一时刻 commit 在 turn 前；只保留最近上限。
@@ -362,6 +392,8 @@ pub fn load_timeline(
         Err(error) => data.warnings.push(format!("git 不可用: {error}")),
     }
 
+    // git log 是最新在前；先翻成时间正序，同一秒的提交才能保持“先旧后新”。
+    commit_anchors.reverse();
     data.anchors = merge_anchors(turn_anchors, commit_anchors);
     data
 }
@@ -417,6 +449,9 @@ pub fn visible_dirs(data: &TimelineData, files: &BTreeSet<String>) -> BTreeSet<S
     data.current_dirs
         .iter()
         .filter(|dir| {
+            if dir.is_empty() {
+                return !files.is_empty();
+            }
             let prefix = format!("{dir}/");
             files.iter().any(|file| file.starts_with(&prefix))
         })
@@ -462,6 +497,15 @@ fn read_checkpoint_created(
         return BTreeSet::new();
     };
     match serde_json::from_slice::<TurnManifest>(&bytes) {
+        Ok(manifest) if manifest.session != session || manifest.turn != turn => {
+            warnings.push(format!(
+                "检查点 {}: 会话/轮号不匹配（{} / {}）",
+                path.display(),
+                manifest.session,
+                manifest.turn
+            ));
+            BTreeSet::new()
+        }
         Ok(manifest) => manifest
             .entries
             .into_iter()
@@ -512,14 +556,24 @@ fn git_log(project_root: &Path) -> Result<Vec<(String, i64, String)>, String> {
 fn git_tree(project_root: &Path, hash: &str, prefix: &str) -> Result<BTreeSet<String>, String> {
     let output = run_git(
         project_root,
-        &["ls-tree", "-r", "--name-only", "--full-tree", hash],
+        &[
+            "-c",
+            "core.quotePath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "--full-tree",
+            hash,
+        ],
     )?;
     let mut files = BTreeSet::new();
     for line in output.lines() {
         let path = normalize(line);
-        let path = path.strip_prefix(prefix).unwrap_or(&path);
-        if !path.is_empty() {
-            files.insert(path.to_string());
+        let Some(relative) = path.strip_prefix(prefix) else {
+            continue;
+        };
+        if !relative.is_empty() {
+            files.insert(relative.to_string());
         }
     }
     Ok(files)
@@ -553,7 +607,6 @@ pub fn register(app: &mut App) {
                 poll_timeline_job,
                 drive_timeline_loader,
                 handle_timeline_keys,
-                handle_timeline_return_press,
                 apply_timeline_visibility,
                 sync_timeline_ui,
             )
@@ -643,7 +696,11 @@ pub fn spawn_timeline_nodes(hud: &mut ChildSpawnerCommands, theme: &Theme, loc: 
                         let fraction = (start + event.distance.x / width).clamp(0.0, 1.0);
                         let count = timeline.anchor_count();
                         if let Some(slot) = slot_from_fraction(fraction, count) {
-                            timeline.go_to_slot(slot, &mut pick);
+                            let current = timeline.position;
+                            let at_now = slot >= count;
+                            if current != Some(slot) && !(at_now && current.is_none()) {
+                                timeline.go_to_slot(slot, &mut pick);
+                            }
                         }
                     },
                 );
@@ -673,7 +730,11 @@ pub fn spawn_timeline_nodes(hud: &mut ChildSpawnerCommands, theme: &Theme, loc: 
                         };
                         let count = timeline.anchor_count();
                         if let Some(slot) = slot_from_fraction(fraction, count) {
-                            timeline.go_to_slot(slot, &mut pick);
+                            let current = timeline.position;
+                            let at_now = slot >= count;
+                            if current != Some(slot) && !(at_now && current.is_none()) {
+                                timeline.go_to_slot(slot, &mut pick);
+                            }
                         }
                     },
                 );
@@ -732,6 +793,13 @@ pub fn spawn_timeline_nodes(hud: &mut ChildSpawnerCommands, theme: &Theme, loc: 
                     BackgroundColor(theme.surface),
                     SpaceTimelineReturnMarker,
                     Visibility::Hidden,
+                    observe(
+                        |_activate: On<Activate>,
+                         mut timeline: ResMut<TimelineState>,
+                         mut pick: ResMut<SpacePickState>| {
+                            timeline.return_now(&mut pick);
+                        },
+                    ),
                 ))
                 .with_children(|button| {
                     button.spawn((
@@ -798,9 +866,18 @@ fn poll_loader(
     };
     match rx.try_recv() {
         Ok(data) => {
+            // 项目根/会话已经换了：旧结果属于上一目标，直接丢弃，别让时间轴闪一下旧历史。
+            let stale = loader.pending.as_ref().is_some_and(|pending| {
+                loader.current.as_ref().is_some_and(|current| {
+                    pending.signature.root != current.root
+                        || pending.signature.session != current.session
+                })
+            });
             loader.rx = None;
             loader.applied = loader.current.take();
-            timeline.apply_data(data, pick);
+            if !stale {
+                timeline.apply_data(data, pick);
+            }
             if let Some(next) = loader.pending.take() {
                 start_job(loader, timeline, next);
             } else {
@@ -810,9 +887,10 @@ fn poll_loader(
         Err(TryRecvError::Empty) => {}
         Err(TryRecvError::Disconnected) => {
             loader.rx = None;
-            loader.current = None;
+            // 记下已尝试的签名，避免同签名断连后每帧重启线程、错误反复闪。
+            loader.applied = loader.current.take();
             timeline.loading = false;
-            timeline.error = Some("时间轴加载线程异常退出".to_string());
+            timeline.error = Some(TimelineError::ThreadExited);
         }
     }
 }
@@ -853,7 +931,7 @@ fn drive_timeline_loader(
     {
         return;
     }
-    let (current_files, current_dirs) = current_paths(&graph);
+    let (current_files, current_dirs) = current_paths(&graph, &root.path);
     let input = TimelineJobInput {
         signature,
         turn_times,
@@ -900,7 +978,7 @@ fn start_job(loader: &mut TimelineLoader, timeline: &mut TimelineState, input: T
         Err(error) => {
             loader.applied = Some(job_signature);
             timeline.loading = false;
-            timeline.error = Some(format!("无法启动时间轴加载线程: {error}"));
+            timeline.error = Some(TimelineError::SpawnFailed(error.to_string()));
         }
     }
 }
@@ -946,21 +1024,11 @@ fn handle_timeline_keys(
     timeline.step(delta, &mut pick);
 }
 
-/// 点击“回到现在”。
-fn handle_timeline_return_press(
-    q: Query<(), (With<SpaceTimelineReturnMarker>, Added<Pressed>)>,
-    mut timeline: ResMut<TimelineState>,
-    mut pick: ResMut<SpacePickState>,
-) {
-    if q.iter().next().is_some() {
-        timeline.return_now(&mut pick);
-    }
-}
-
 /// 按历史锚点回放当前图节点/目录/边的可见性；now 全显示。
 fn apply_timeline_visibility(
     timeline: Res<TimelineState>,
     graph: Res<SpaceGraph>,
+    root: Option<Res<ProjectRoot>>,
     added: Query<(), Added<SpatialStar>>,
     mut stars: Query<(&SpatialStar, &mut Visibility), Without<SpaceEdge>>,
     mut edges: Query<(&SpaceEdge, &mut Visibility), Without<SpatialStar>>,
@@ -993,7 +1061,10 @@ fn apply_timeline_visibility(
     }
     let mut visible_ids = BTreeSet::new();
     for (star, mut visibility) in &mut stars {
-        let path = star.path.as_deref().map(normalize);
+        let path = star.path.as_deref().and_then(|path| match root.as_deref() {
+            Some(root) => relative_path(path, &root.path),
+            None => Some(normalize(path)),
+        });
         let visible = match star.kind {
             SpatialNodeKind::File => path
                 .as_deref()
@@ -1081,7 +1152,14 @@ fn sync_timeline_ui(
     }
     let count = timeline.anchor_count();
     let label = if let Some(error) = &timeline.error {
-        format!("{} · {error}", tr(&loc, "space-timeline-error"))
+        match error {
+            TimelineError::ThreadExited => tr(&loc, "space-timeline-error-thread"),
+            TimelineError::SpawnFailed(detail) => tr_with(
+                &loc,
+                "space-timeline-error-spawn",
+                &[("detail", detail.clone())],
+            ),
+        }
     } else if let Some(data) = &timeline.data {
         if data.anchors.is_empty() {
             tr(&loc, "space-timeline-empty")
@@ -1293,6 +1371,22 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_checkpoint_degrades_with_warning() {
+        let temp = tempfile::tempdir().expect("临时目录");
+        let path = checkpoint_manifest_path(temp.path(), 1, 1);
+        fs::create_dir_all(path.parent().unwrap()).expect("目录");
+        fs::write(&path, b"{not json").expect("损坏清单");
+        let data = load_timeline(temp.path(), 1, &[100], BTreeSet::new(), BTreeSet::new());
+        assert!(
+            data.warnings
+                .iter()
+                .any(|warning| warning.contains("检查点")),
+            "损坏清单应留下可读 warning"
+        );
+        assert!(data.turn_created.get(&1).is_some_and(BTreeSet::is_empty));
+    }
+
+    #[test]
     fn git_timeline_reads_tree_and_degrades_without_git() {
         if Command::new("git").arg("--version").output().is_err() {
             return;
@@ -1334,6 +1428,44 @@ mod tests {
             data.commit_trees.values().any(|tree| tree.contains("b.rs")),
             "第二次提交的树应可读取"
         );
+    }
+
+    #[test]
+    fn git_tree_strips_nested_project_prefix() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("临时目录");
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(temp.path())
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(output.status.success(), "git {args:?} 失败");
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "test"]);
+        fs::create_dir_all(temp.path().join("sub")).expect("sub");
+        fs::write(temp.path().join("sub/a.rs"), "fn a() {}").expect("a");
+        fs::write(temp.path().join("outside.rs"), "fn o() {}").expect("o");
+        git(&["add", "."]);
+        git(&["commit", "-m", "nested"]);
+
+        let data = load_timeline(
+            &temp.path().join("sub"),
+            1,
+            &[],
+            BTreeSet::new(),
+            BTreeSet::new(),
+        );
+        assert!(data.has_git);
+        let tree = data.commit_trees.values().next().expect("树");
+        assert!(tree.contains("a.rs"), "应剥掉项目前缀");
+        assert!(!tree.contains("sub/a.rs"));
+        assert!(!tree.contains("outside.rs"), "项目根外的文件不得进入回放集");
     }
 
     #[test]
@@ -1507,7 +1639,7 @@ mod tests {
         let mut timeline = TimelineState::default();
         let mut pick = SpacePickState::default();
         poll_loader(&mut loader, &mut timeline, &mut pick);
-        assert!(timeline.error.is_some());
+        assert_eq!(timeline.error, Some(TimelineError::ThreadExited));
         assert!(!timeline.loading);
     }
 
@@ -1524,11 +1656,28 @@ mod tests {
         }
     }
 
+    const TEST_ROOT: &str = "F:/proj";
+
     fn test_graph() -> SpaceGraph {
         let mut graph = SpatialGraph::default();
-        graph.nodes.push(node(0, SpatialNodeKind::File, "src/a.rs"));
-        graph.nodes.push(node(1, SpatialNodeKind::File, "src/b.rs"));
-        graph.nodes.push(node(2, SpatialNodeKind::Module, "src"));
+        graph.nodes.push(node(
+            0,
+            SpatialNodeKind::File,
+            &format!("{TEST_ROOT}/src/a.rs"),
+        ));
+        graph.nodes.push(node(
+            1,
+            SpatialNodeKind::File,
+            &format!("{TEST_ROOT}/src/b.rs"),
+        ));
+        graph.nodes.push(node(
+            2,
+            SpatialNodeKind::Module,
+            &format!("{TEST_ROOT}/src"),
+        ));
+        graph
+            .nodes
+            .push(node(3, SpatialNodeKind::Module, TEST_ROOT));
         SpaceGraph(graph)
     }
 
@@ -1537,9 +1686,22 @@ mod tests {
             id: SpatialNodeId(id),
             kind,
             label: path.to_string(),
-            path: Some(path.to_string()),
+            path: Some(format!("{TEST_ROOT}/{path}")),
             base_scale: 1.0,
         }
+    }
+
+    #[test]
+    fn current_paths_strip_project_root() {
+        let (files, dirs) = current_paths(&test_graph(), Path::new(TEST_ROOT));
+        assert!(files.contains("src/a.rs"));
+        assert!(files.contains("src/b.rs"));
+        assert!(dirs.contains("src"));
+        assert!(dirs.contains(""), "项目根目录归一为空串");
+        assert!(
+            !files.iter().any(|path| path.starts_with("F:")),
+            "不得保留绝对前缀"
+        );
     }
 
     #[test]
@@ -1547,6 +1709,9 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<TimelineState>()
             .insert_resource(test_graph())
+            .insert_resource(ProjectRoot {
+                path: PathBuf::from(TEST_ROOT),
+            })
             .add_systems(Update, apply_timeline_visibility);
 
         let star_a = app
@@ -1730,9 +1895,23 @@ mod tests {
         assert_eq!(pick.selected, None);
         app.insert_resource(timeline)
             .insert_resource(pick)
-            .add_systems(Update, handle_timeline_return_press);
-        app.world_mut().spawn((SpaceTimelineReturnMarker, Pressed));
+            .insert_resource(Theme::default())
+            .insert_resource(Localizer::default())
+            .add_systems(
+                Startup,
+                |mut commands: Commands, theme: Res<Theme>, loc: Res<Localizer>| {
+                    let root = commands.spawn_empty().id();
+                    commands.entity(root).with_children(|hud| {
+                        spawn_timeline_nodes(hud, &theme, &loc);
+                    });
+                },
+            );
         app.update();
+        let mut returns = app
+            .world_mut()
+            .query_filtered::<Entity, With<SpaceTimelineReturnMarker>>();
+        let entity = returns.single(app.world()).expect("回到现在按钮");
+        app.world_mut().trigger(Activate { entity });
         assert_eq!(app.world().resource::<TimelineState>().position, None);
         assert_eq!(
             app.world().resource::<SpacePickState>().selected,
@@ -1754,7 +1933,10 @@ mod tests {
         assert_eq!(pick.selected, None);
 
         let mut app = App::new();
-        app.insert_resource(timeline)
+        let (registry, layout) = visible_space_panels();
+        app.insert_resource(registry)
+            .insert_resource(layout)
+            .insert_resource(timeline)
             .insert_resource(pick)
             .init_resource::<crate::space::s2::SpaceSearchState>()
             .init_resource::<crate::space::s2::SpaceEscConsumed>()
@@ -1773,6 +1955,41 @@ mod tests {
             app.world()
                 .resource::<crate::space::s2::SpaceEscConsumed>()
                 .0
+        );
+    }
+
+    #[test]
+    fn escape_does_not_steal_shortcuts_when_space_hidden() {
+        let mut data = TimelineData::default();
+        data.anchors = vec![turn_anchor(1, 1)];
+        let mut timeline = TimelineState {
+            data: Some(data),
+            ..Default::default()
+        };
+        let mut pick = SpacePickState::default();
+        timeline.go_to_slot(0, &mut pick);
+
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .insert_resource(pick)
+            .init_resource::<crate::space::s2::SpaceSearchState>()
+            .init_resource::<crate::space::s2::SpaceEscConsumed>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, crate::space::s2::consume_space_escape);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert_eq!(
+            app.world().resource::<TimelineState>().position,
+            Some(0),
+            "空间不可见时 Esc 不得改历史位置"
+        );
+        assert!(
+            !app.world()
+                .resource::<crate::space::s2::SpaceEscConsumed>()
+                .0,
+            "空间不可见时 Esc 应留给对话/编辑器"
         );
     }
 
@@ -1856,6 +2073,8 @@ mod tests {
             "space-timeline-loading",
             "space-timeline-empty",
             "space-timeline-error",
+            "space-timeline-error-thread",
+            "space-timeline-error-spawn",
             "space-timeline-degraded",
             "space-timeline-return-now",
         ] {

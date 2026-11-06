@@ -861,7 +861,8 @@ pub(crate) fn consume_space_escape(
         return;
     }
     // 历史回放优先于清除选中：Esc 先把视图退回“现在”。
-    if let Some(timeline) = timeline.as_mut()
+    if space_visible(registry.as_deref(), layout.as_deref())
+        && let Some(timeline) = timeline.as_mut()
         && timeline.position.is_some()
     {
         timeline.return_now(&mut pick);
