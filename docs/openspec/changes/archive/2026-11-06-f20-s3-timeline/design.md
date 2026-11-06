@@ -2,6 +2,8 @@
 comet_change: f20-s3-timeline
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-11-06-f20-s3-timeline
+status: final
 ---
 
 # Design
