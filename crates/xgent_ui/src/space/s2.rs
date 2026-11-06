@@ -317,7 +317,7 @@ pub(crate) fn sync_space_search_ui(
     view_roots: Query<Entity, With<SpaceViewRootMarker>>,
     lists: Query<Entity, With<SpaceSearchListMarker>>,
     items: Query<Entity, With<SpaceSearchItemMarker>>,
-    mut empty: Query<&mut Visibility, With<SpaceSearchEmptyMarker>>,
+    mut empty: Query<&mut Visibility, (With<SpaceSearchEmptyMarker>, Without<SpatialStar>)>,
     stars: Query<(&SpatialStar, &Visibility)>,
     mut input_focus: Option<ResMut<InputFocus>>,
     mut search: ResMut<SpaceSearchState>,

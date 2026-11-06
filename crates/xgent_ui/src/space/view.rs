@@ -1250,7 +1250,7 @@ fn update_space_hud(
     registry: Option<Res<PanelRegistry>>,
     layout: Option<Res<SlotLayout>>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
-    stars: Query<(&Transform, &SpatialStar, &Visibility)>,
+    stars: Query<(&Transform, &SpatialStar, &Visibility), Without<SpaceHudLabel>>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut labels: Query<(
         &SpaceHudLabel,

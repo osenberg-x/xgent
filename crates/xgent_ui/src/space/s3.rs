@@ -302,14 +302,20 @@ pub fn current_paths(
 
 /// 绝对路径 → 相对项目根的 `/` 路径；项目根自身返回空串，根外返回 `None`。
 fn relative_path(path: &str, project_root: &Path) -> Option<String> {
-    let path = normalize(path);
     let root = normalize(&project_root.display().to_string());
-    let root = root.trim_end_matches('/');
+    relative_path_normalized(path, &root)
+}
+
+/// 已归一化根路径的版本：回放循环里避免为每个星体重建根字符串。
+fn relative_path_normalized(path: &str, normalized_root: &str) -> Option<String> {
+    let path = normalize(path);
+    let root = normalized_root.trim_end_matches('/');
     if path == root {
         return Some(String::new());
     }
-    let relative = path.strip_prefix(root)?;
-    Some(relative.strip_prefix('/').unwrap_or(relative).to_string())
+    // 必须按路径分量匹配：`F:/proj` 不能吃掉 `F:/proj2/x`。
+    let relative = path.strip_prefix(root)?.strip_prefix('/')?;
+    Some(relative.to_string())
 }
 
 /// 合并锚点：时间升序；同一时刻 commit 在 turn 前；只保留最近上限。
@@ -852,6 +858,9 @@ fn poll_timeline_job(
     mut timeline: ResMut<TimelineState>,
     mut pick: ResMut<SpacePickState>,
 ) {
+    if loader.rx.is_none() {
+        return;
+    }
     poll_loader(&mut loader, &mut timeline, &mut pick);
 }
 
@@ -1059,12 +1068,18 @@ fn apply_timeline_visibility(
             "时间轴回放只覆盖当前图已有节点，历史文件不会重建星体"
         );
     }
+    let normalized_root = root
+        .as_deref()
+        .map(|root| normalize(&root.path.display().to_string()));
     let mut visible_ids = BTreeSet::new();
     for (star, mut visibility) in &mut stars {
-        let path = star.path.as_deref().and_then(|path| match root.as_deref() {
-            Some(root) => relative_path(path, &root.path),
-            None => Some(normalize(path)),
-        });
+        let path = star
+            .path
+            .as_deref()
+            .and_then(|path| match normalized_root.as_deref() {
+                Some(root) => relative_path_normalized(path, root),
+                None => Some(normalize(path)),
+            });
         let visible = match star.kind {
             SpatialNodeKind::File => path
                 .as_deref()
@@ -1113,7 +1128,7 @@ fn anchor_label(loc: &Localizer, anchor: &TimelineAnchor) -> String {
             let short: String = hash.chars().take(7).collect();
             let subject = anchor.label.trim();
             if subject.is_empty() {
-                tr_with(loc, "space-timeline-commit-short", &[("hash", short)])
+                short
             } else {
                 tr_with(
                     loc,
@@ -1702,6 +1717,43 @@ mod tests {
             !files.iter().any(|path| path.starts_with("F:")),
             "不得保留绝对前缀"
         );
+        assert_eq!(
+            relative_path("F:/proj2/x.rs", Path::new("F:/proj")),
+            None,
+            "前缀匹配必须按路径分量，不能把 proj2 当成 proj"
+        );
+    }
+
+    #[test]
+    fn git_accepts_canonical_project_root() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("临时目录");
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(temp.path())
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(output.status.success(), "git {args:?} 失败");
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "test"]);
+        fs::write(temp.path().join("a.rs"), "fn a() {}").expect("a");
+        git(&["add", "."]);
+        git(&["commit", "-m", "first"]);
+
+        let canonical = std::fs::canonicalize(temp.path()).expect("canonicalize");
+        let data = load_timeline(&canonical, 1, &[], BTreeSet::new(), BTreeSet::new());
+        assert!(
+            data.has_git,
+            "canonicalized project root 必须能被 git -C 使用：{:?}",
+            data.warnings
+        );
+        assert!(data.commit_trees.values().any(|tree| tree.contains("a.rs")));
     }
 
     #[test]
@@ -2069,10 +2121,8 @@ mod tests {
             "space-timeline-now",
             "space-timeline-turn",
             "space-timeline-commit",
-            "space-timeline-commit-short",
             "space-timeline-loading",
             "space-timeline-empty",
-            "space-timeline-error",
             "space-timeline-error-thread",
             "space-timeline-error-spawn",
             "space-timeline-degraded",
