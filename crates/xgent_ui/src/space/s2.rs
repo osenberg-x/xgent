@@ -170,10 +170,12 @@ fn text_focused(input_focus: Option<&InputFocus>, text: &Query<(), With<Editable
         .is_some_and(|entity| text.get(entity).is_ok())
 }
 
-fn refill_results(search: &mut SpaceSearchState, stars: &Query<&SpatialStar>) {
+fn refill_results(search: &mut SpaceSearchState, stars: &Query<(&SpatialStar, &Visibility)>) {
     let query = search.query.to_lowercase();
     let mut items: Vec<&SpatialStar> = stars
         .iter()
+        .filter(|(_, visibility)| **visibility != Visibility::Hidden)
+        .map(|(star, _)| star)
         .filter(|star| star.kind == SpatialNodeKind::File)
         .filter(|star| {
             if query.is_empty() {
@@ -200,7 +202,7 @@ pub(crate) fn handle_space_search_open(
     modal: Option<Res<crate::modal::ModalStack>>,
     input_focus: Option<Res<InputFocus>>,
     text: Query<(), With<EditableText>>,
-    stars: Query<&SpatialStar>,
+    stars: Query<(&SpatialStar, &Visibility)>,
     mut search: ResMut<SpaceSearchState>,
 ) {
     if search.open {
@@ -228,7 +230,7 @@ pub(crate) fn handle_space_search_open(
 /// 搜索输入变化 → 重新过滤 File 节点。
 pub(crate) fn sync_space_search_results(
     input: Query<&EditableText, With<SpaceSearchInputMarker>>,
-    stars: Query<&SpatialStar>,
+    stars: Query<(&SpatialStar, &Visibility)>,
     mut search: ResMut<SpaceSearchState>,
 ) {
     if !search.open {
@@ -248,7 +250,7 @@ pub(crate) fn sync_space_search_results(
 /// 搜索结果键盘操作：↑/↓ 选择，Enter 选中并飞行（不打开编辑器）。
 pub(crate) fn handle_space_search_keys(
     keys: Option<Res<ButtonInput<KeyCode>>>,
-    stars: Query<(&Transform, &SpatialStar), Without<SpaceCamera>>,
+    stars: Query<(&Transform, &SpatialStar, &Visibility), Without<SpaceCamera>>,
     mut cameras: Query<(&mut Transform, &mut OrbitCamera), With<SpaceCamera>>,
     extent: Option<Res<SpaceExtent>>,
     mut pick: ResMut<SpacePickState>,
@@ -282,11 +284,14 @@ pub(crate) fn handle_space_search_keys(
 
 fn fly_to_node(
     id: SpatialNodeId,
-    stars: &Query<(&Transform, &SpatialStar), Without<SpaceCamera>>,
+    stars: &Query<(&Transform, &SpatialStar, &Visibility), Without<SpaceCamera>>,
     cameras: &mut Query<(&mut Transform, &mut OrbitCamera), With<SpaceCamera>>,
     extent: Option<&SpaceExtent>,
 ) {
-    let Some((star_transform, _)) = stars.iter().find(|(_, star)| star.id == id) else {
+    let Some((star_transform, _, _)) = stars
+        .iter()
+        .find(|(_, star, visibility)| star.id == id && **visibility != Visibility::Hidden)
+    else {
         return;
     };
     let Ok((mut camera_transform, mut orbit)) = cameras.single_mut() else {
@@ -313,7 +318,7 @@ pub(crate) fn sync_space_search_ui(
     lists: Query<Entity, With<SpaceSearchListMarker>>,
     items: Query<Entity, With<SpaceSearchItemMarker>>,
     mut empty: Query<&mut Visibility, With<SpaceSearchEmptyMarker>>,
-    stars: Query<&SpatialStar>,
+    stars: Query<(&SpatialStar, &Visibility)>,
     mut input_focus: Option<ResMut<InputFocus>>,
     mut search: ResMut<SpaceSearchState>,
 ) {
@@ -359,7 +364,11 @@ pub(crate) fn sync_space_search_ui(
         commands.entity(item).despawn();
     }
     for (index, id) in search.results.iter().copied().enumerate() {
-        let Some(star) = stars.iter().find(|star| star.id == id) else {
+        let Some(star) = stars
+            .iter()
+            .find(|(star, visibility)| star.id == id && **visibility != Visibility::Hidden)
+            .map(|(star, _)| star)
+        else {
             continue;
         };
         let label = match star.path.as_deref() {
@@ -532,7 +541,7 @@ pub(crate) fn traverse_space_selection(
     input_focus: Option<Res<InputFocus>>,
     text: Query<(), With<EditableText>>,
     search: Res<SpaceSearchState>,
-    stars: Query<(&Transform, &SpatialStar), Without<SpaceCamera>>,
+    stars: Query<(&Transform, &SpatialStar, &Visibility), Without<SpaceCamera>>,
     window: Query<&Window, With<PrimaryWindow>>,
     viewport: Query<(&ComputedNode, &UiGlobalTransform, &Hovered), With<SpaceViewportMarker>>,
     read_camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
@@ -590,7 +599,10 @@ pub(crate) fn traverse_space_selection(
     pick.selected = Some(id);
     traversal.last_selected = Some(id);
     if let Ok((mut camera_transform, mut orbit)) = cameras.single_mut() {
-        if let Some((transform, _)) = stars.iter().find(|(_, star)| star.id == id) {
+        if let Some((transform, _, _)) = stars
+            .iter()
+            .find(|(_, star, visibility)| star.id == id && **visibility != Visibility::Hidden)
+        {
             orbit.target = transform.translation;
             apply_orbit(&mut camera_transform, &orbit);
         }
@@ -598,7 +610,7 @@ pub(crate) fn traverse_space_selection(
 }
 
 fn project_order(
-    stars: &Query<(&Transform, &SpatialStar), Without<SpaceCamera>>,
+    stars: &Query<(&Transform, &SpatialStar, &Visibility), Without<SpaceCamera>>,
     window: &Query<&Window, With<PrimaryWindow>>,
     viewport: &Query<(&ComputedNode, &UiGlobalTransform, &Hovered), With<SpaceViewportMarker>>,
     camera: &Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
@@ -609,7 +621,10 @@ fn project_order(
     {
         let size = computed.size();
         let center = Vec2::new(size.x * 0.5, size.y * 0.5);
-        for (transform, star) in stars.iter() {
+        for (transform, star, visibility) in stars.iter() {
+            if *visibility == Visibility::Hidden {
+                continue;
+            }
             let Some(ndc) = camera.world_to_ndc(camera_transform, transform.translation) else {
                 continue;
             };
@@ -621,7 +636,11 @@ fn project_order(
         }
     }
     if collected.is_empty() {
-        let mut ids: Vec<SpatialNodeId> = stars.iter().map(|(_, star)| star.id).collect();
+        let mut ids: Vec<SpatialNodeId> = stars
+            .iter()
+            .filter(|(_, _, visibility)| **visibility != Visibility::Hidden)
+            .map(|(_, star, _)| star.id)
+            .collect();
         ids.sort_by_key(|id| id.0);
         return ids;
     }
@@ -634,7 +653,7 @@ pub(crate) fn sync_selection_from_editor(
     tabs: Option<Res<EditorTabs>>,
     buffers: Query<&EditorBuffer>,
     graph: Res<SpaceGraph>,
-    stars: Query<&SpatialStar>,
+    stars: Query<(&SpatialStar, &Visibility)>,
     mut pick: ResMut<SpacePickState>,
     mut last_path: Local<Option<PathBuf>>,
 ) {
@@ -665,14 +684,15 @@ pub(crate) fn sync_selection_from_editor(
     *last_path = Some(active.clone());
     let selected = stars
         .iter()
-        .find(|star| {
-            star.kind == SpatialNodeKind::File
+        .find(|(star, visibility)| {
+            **visibility != Visibility::Hidden
+                && star.kind == SpatialNodeKind::File
                 && star
                     .path
                     .as_deref()
                     .is_some_and(|path| std::path::Path::new(path) == active)
         })
-        .map(|star| star.id);
+        .map(|(star, _)| star.id);
     pick.selected = selected;
 }
 
@@ -809,6 +829,7 @@ pub(crate) fn consume_space_escape(
     completion_esc: Option<Res<crate::completion_ui::CompletionConsumed>>,
     mut input_focus: Option<ResMut<InputFocus>>,
     mut search: ResMut<SpaceSearchState>,
+    mut timeline: Option<ResMut<crate::space::s3::TimelineState>>,
     mut pick: ResMut<SpacePickState>,
     mut consumed: ResMut<SpaceEscConsumed>,
 ) {
@@ -836,6 +857,14 @@ pub(crate) fn consume_space_escape(
             focus.clear();
         }
         search.focus = None;
+        consumed.0 = true;
+        return;
+    }
+    // 历史回放优先于清除选中：Esc 先把视图退回“现在”。
+    if let Some(timeline) = timeline.as_mut()
+        && timeline.position.is_some()
+    {
+        timeline.return_now(&mut pick);
         consumed.0 = true;
         return;
     }

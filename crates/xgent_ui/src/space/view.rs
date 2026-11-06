@@ -47,7 +47,20 @@ pub struct SpaceGraph(pub SpatialGraph);
 pub struct SpaceLoadState {
     job: Option<ScanJob>,
     loaded: bool,
+    revision: u64,
     root: Option<PathBuf>,
+}
+
+impl SpaceLoadState {
+    /// 当前项目是否已完成一次扫描（成功或失败都会置位）。
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// 扫描完成代数；每次扫描落盘都递增（时间轴据此刷新提交/工作区口径）。
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
 }
 
 /// 文件变更后的重扫节奏（防抖，避免每次保存都全量重扫）。
@@ -171,8 +184,13 @@ pub struct SpatialStar {
 }
 
 /// 一条边实例。
-#[derive(Component)]
-pub struct SpaceEdge;
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpaceEdge {
+    /// 起点节点。
+    pub from: SpatialNodeId,
+    /// 终点节点。
+    pub to: SpatialNodeId,
+}
 
 /// HUD 标签池中的一项。
 #[derive(Component, Debug, Clone, Copy)]
@@ -230,6 +248,7 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         s2::register(app);
+        crate::space::s3::register(app);
         app.init_resource::<SpaceGraph>()
             .init_resource::<SpaceLoadState>()
             .init_resource::<SpaceRefresh>()
@@ -280,6 +299,7 @@ fn setup_space(
     mut commands: Commands,
     q_main: Query<Entity, With<CenterHostMarker>>,
     theme: Res<Theme>,
+    loc: Res<Localizer>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -392,6 +412,7 @@ fn setup_space(
                             ));
                     }
                     s2::spawn_feedback_nodes(hud, &theme);
+                    crate::space::s3::spawn_timeline_nodes(hud, &theme, &loc);
                 });
         })
         .id();
@@ -542,11 +563,13 @@ fn load_space_graph(
             );
             graph.0 = scanned;
             state.loaded = true;
+            state.revision = state.revision.wrapping_add(1);
             state.job = None;
         }
         Some(Err(error)) => {
             tracing::warn!(%error, "空间图扫描失败");
             state.loaded = true;
+            state.revision = state.revision.wrapping_add(1);
             state.job = None;
         }
         None => {}
@@ -667,6 +690,7 @@ fn sync_space_graph(
                 path: node.path.as_ref().map(|path| path.display().to_string()),
                 base_scale: scale,
             },
+            Visibility::Visible,
         ));
     }
 
@@ -693,7 +717,11 @@ fn sync_space_graph(
                 Transform::from_translation(midpoint)
                     .with_rotation(rotation)
                     .with_scale(Vec3::new(edge_thickness, length, edge_thickness)),
-                SpaceEdge,
+                SpaceEdge {
+                    from: edge.from,
+                    to: edge.to,
+                },
+                Visibility::Visible,
             ));
             edge_count += 1;
         }
@@ -735,6 +763,7 @@ fn orbit_space_camera(
     extent: Option<Res<SpaceExtent>>,
     input_focus: Option<Res<InputFocus>>,
     search: Option<Res<s2::SpaceSearchState>>,
+    timeline: Option<Res<crate::space::s3::TimelineState>>,
     viewport: Query<&Hovered, With<SpaceViewportMarker>>,
     mut cameras: Query<(&mut Transform, &mut OrbitCamera)>,
 ) {
@@ -781,13 +810,19 @@ fn orbit_space_camera(
     }
 
     // 文本输入框有焦点时，方向键/Enter/`+`/`-` 属于输入法，不得转相机。
+    // 时间轴有锚点时左/右归它切换历史位置，避免同一次按键既转相机又跳锚点。
+    let timeline_yaw = timeline
+        .as_deref()
+        .is_some_and(|timeline| timeline.has_anchors());
     let speed = time.as_ref().map_or(0.0, |time| 1.2 * time.delta_secs());
     if !typing && let Some(keys) = keys.as_ref() {
-        if keys.pressed(KeyCode::ArrowLeft) {
-            orbit.yaw -= speed;
-        }
-        if keys.pressed(KeyCode::ArrowRight) {
-            orbit.yaw += speed;
+        if !timeline_yaw {
+            if keys.pressed(KeyCode::ArrowLeft) {
+                orbit.yaw -= speed;
+            }
+            if keys.pressed(KeyCode::ArrowRight) {
+                orbit.yaw += speed;
+            }
         }
         if keys.pressed(KeyCode::ArrowUp) {
             orbit.pitch = (orbit.pitch + speed).min(1.2);
@@ -831,6 +866,7 @@ fn pick_space_stars(
         &mut MeshMaterial3d<StandardMaterial>,
         &mut Transform,
         &SpatialStar,
+        &Visibility,
     )>,
     mut open: MessageWriter<OpenFileRequest>,
 ) {
@@ -871,7 +907,8 @@ fn pick_space_stars(
                 }
                 let candidates: Vec<(SpatialNodeId, Vec2)> = stars
                     .iter()
-                    .filter_map(|(_, transform, star)| {
+                    .filter(|(_, _, _, visibility)| **visibility != Visibility::Hidden)
+                    .filter_map(|(_, transform, star, _)| {
                         let ndc = camera.world_to_ndc(camera_transform, transform.translation)?;
                         ndc_to_viewport(ndc, size).map(|screen| (star.id, screen))
                     })
@@ -897,7 +934,11 @@ fn pick_space_stars(
             0
         };
         if step != 0 {
-            let mut ids: Vec<SpatialNodeId> = stars.iter().map(|(_, _, star)| star.id).collect();
+            let mut ids: Vec<SpatialNodeId> = stars
+                .iter()
+                .filter(|(_, _, _, visibility)| **visibility != Visibility::Hidden)
+                .map(|(_, _, star, _)| star.id)
+                .collect();
             ids.sort_by_key(|id| id.0);
             if !ids.is_empty() {
                 let index = state
@@ -946,7 +987,7 @@ fn pick_space_stars(
     }
 
     if let Some(selected) = state.selected
-        && !stars.iter().any(|(_, _, star)| star.id == selected)
+        && !stars.iter().any(|(_, _, star, _)| star.id == selected)
     {
         state.selected = None;
     }
@@ -954,7 +995,7 @@ fn pick_space_stars(
     if let Some(materials) = materials.as_ref() {
         let selected = state.selected;
         let hovered = state.hovered;
-        for (mut material, mut transform, star) in &mut stars {
+        for (mut material, mut transform, star, _) in &mut stars {
             let target = if Some(star.id) == selected {
                 materials.selected.clone()
             } else if Some(star.id) == hovered {
@@ -986,13 +1027,17 @@ fn open_selected(
         &mut MeshMaterial3d<StandardMaterial>,
         &mut Transform,
         &SpatialStar,
+        &Visibility,
     )>,
     open: &mut MessageWriter<OpenFileRequest>,
 ) {
     let Some(selected) = state.selected else {
         return;
     };
-    for (_, _, star) in stars.iter() {
+    for (_, _, star, visibility) in stars.iter() {
+        if *visibility == Visibility::Hidden {
+            continue;
+        }
         if star.id != selected {
             continue;
         }
@@ -1205,7 +1250,7 @@ fn update_space_hud(
     registry: Option<Res<PanelRegistry>>,
     layout: Option<Res<SlotLayout>>,
     camera: Query<(&Camera, &GlobalTransform), With<SpaceCamera>>,
-    stars: Query<(&Transform, &SpatialStar)>,
+    stars: Query<(&Transform, &SpatialStar, &Visibility)>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut labels: Query<(
         &SpaceHudLabel,
@@ -1225,7 +1270,8 @@ fn update_space_hud(
     // 只保留前 24 个节点，且用 `&str` 借用——2k 节点时不要每帧克隆标签。
     let mut items: Vec<(SpatialNodeId, Vec3, &str)> = stars
         .iter()
-        .map(|(transform, star)| (star.id, transform.translation, star.label.as_str()))
+        .filter(|(_, _, visibility)| **visibility != Visibility::Hidden)
+        .map(|(transform, star, _)| (star.id, transform.translation, star.label.as_str()))
         .collect();
     items.sort_by_key(|(id, _, _)| *id);
     items.truncate(HUD_LABELS);

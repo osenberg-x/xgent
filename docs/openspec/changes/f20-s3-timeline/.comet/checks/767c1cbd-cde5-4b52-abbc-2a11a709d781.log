@@ -1,0 +1,30 @@
+   Compiling serde v1.0.228
+   Compiling wasmparser v0.201.0
+   Compiling wit-parser v0.221.3
+   Compiling wasm-encoder v0.201.0
+   Compiling heck v0.4.1
+   Compiling wit-bindgen-rt v0.22.0
+   Compiling xgent_settings v0.1.0 (F:\ws\xgent\crates\xgent_settings)
+   Compiling xgent_daemon v0.1.0 (F:\ws\xgent\crates\xgent_daemon)
+   Compiling xgent_tools v0.1.0 (F:\ws\xgent\crates\xgent_tools)
+   Compiling wasmtime-wit-bindgen v29.0.1
+   Compiling wasmtime-component-macro v29.0.1
+   Compiling wit-parser v0.201.0
+   Compiling wasm-metadata v0.201.0
+   Compiling xgent_agent v0.1.0 (F:\ws\xgent\crates\xgent_agent)
+   Compiling wasmtime v29.0.1
+   Compiling wit-bindgen-core v0.22.0
+   Compiling wit-component v0.201.0
+   Compiling xgent_ui v0.1.0 (F:\ws\xgent\crates\xgent_ui)
+   Compiling wit-bindgen-rust v0.22.0
+   Compiling wit-bindgen-rust-macro v0.22.0
+   Compiling wit-bindgen v0.22.0
+   Compiling xgent_plugin_api v0.1.0 (F:\ws\xgent\crates\xgent_plugin_api)
+   Compiling xgent_plugin_hello v0.1.0 (F:\ws\xgent\crates\xgent_plugin_hello)
+   Compiling xgent_plugin_git v0.1.0 (F:\ws\xgent\crates\xgent_plugin_git)
+   Compiling wiggle v29.0.1
+   Compiling wasmtime-wasi v29.0.1
+   Compiling xgent_plugin v0.1.0 (F:\ws\xgent\crates\xgent_plugin)
+   Compiling xgent_plugin_host v0.1.0 (F:\ws\xgent\crates\xgent_plugin_host)
+   Compiling xgent_app v0.1.0 (F:\ws\xgent\crates\xgent_app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 54s

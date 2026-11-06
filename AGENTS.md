@@ -13,7 +13,7 @@
 - 语言：Rust（edition 2024）
 - 引擎：Bevy 0.20.0（正式版），依赖通过 path 指向本地源码 `../bevy`（检出上游 `v0.20.0` tag，便于调试）
 - Rust 工具链：bevy 0.20.0 要求 `rust-version >= 1.97.1`
-- 当前阶段：MVP-1 已交付（2D agent IDE + 编辑器 + 终端）；MVP-2（3D 首页）已交付首期 + S2 交互联动（L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback、Tab 遍历、搜索飞行、2D↔3D 联动、tooltip/详情卡）；F-21 代码智能管线首期已交付；F-13 MCP 支持首期已交付；F-12 成本统计首期已交付；下一步从 P1 项推进；TUI/Web/宠物留待后续。
+- 当前阶段：MVP-1 已交付（2D agent IDE + 编辑器 + 终端）；MVP-2（3D 首页）已交付首期 + S2 交互联动（L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback、Tab 遍历、搜索飞行、2D↔3D 联动、tooltip/详情卡）；F-20 的 S3 时间轴依赖已交付首期（回合/提交锚点、只读回放当前 L1 图节点）；F-21 代码智能管线首期已交付；F-13 MCP 支持首期已交付；F-12 成本统计首期已交付；下一步从 P1 项推进；TUI/Web/宠物留待后续。
 
 **权威设计文档**（README 保留愿景，requirements 定阶段）：
 - `README.md` — 产品愿景（四大支柱与详细设想；冲突时以 `requirements.md` 的阶段与验收为准）
@@ -197,9 +197,9 @@ xgent_app → 组装所有 UI 侧 crate
 ---
 
 ## 7. 当前实现状态
-项目处于 MVP-1 + F-11 编辑器 + F-19 终端已落地、MVP-2（3D 首页）首期 + S2 交互联动已交付的阶段。20 个 crate，`cargo check --workspace` 通过，约 7.9 万行 Rust（`crates/**/*.rs`，2026-11-02 实测 78937 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 已随 M6.5 接入 chat_panel）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
+项目处于 MVP-1 + F-11 编辑器 + F-19 终端已落地、MVP-2（3D 首页）首期 + S2 交互联动 + F-20 S3 时间轴依赖已交付的阶段。20 个 crate，`cargo check --workspace` 通过，约 7.9 万行 Rust（`crates/**/*.rs`，2026-11-02 实测 78937 行）。台账 R3 缺口中已闭合 R3-1/-3/-8/-9/-11/-13/-15/-17（检索中文分词、正则搜索、遍历出 async、预算复核、文件检查点撤销、**设置面板覆盖两份配置 + 配置热应用**、工具并发、运行参数转配置）；未闭合的主要是 R3-2（B/C/D/E 检索，阻塞于嵌入模型与向量库选型；其中 C 阶段按 ADR-0010 已随编辑器上线到期）、R3-5（Markdown 已随 M6.5 接入 chat_panel）、R3-21（编辑器查找替换：`xui::FindState` 在 `xgent_ui` 里零消费者，产品内不可达）与 R3-14（主题只有一套预设）。已实现功能总览、crate 拓扑、ADR 落地点与开发注意点见 **`docs/dev-tutorial.md`**。插件系统设计已完成（`docs/design/plugin-system-design.md`），后续 F-10 Git 集成、F-14 自定义工具等功能将以插件形式实现。
 
-实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（Transcript 顺序权威/Markdown 终稿与内联组/`@` 补全/ContextSet+sidecar/消息虚拟窗口；实现提交 `9ac4daf` / `b962f97` / `5dde747`，复审修复 `e485d5e`（台账 §10 勘误 51））；**MVP-2 3D 首页**已交付首期 + S2 交互联动（G7 通过；L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback、Tab 遍历、搜索飞行、2D↔3D 联动、tooltip/详情卡）；M8 Git 探针顺延。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。F-21 代码智能管线首期已交付（Rust 符号/import/复杂度 + RepoMap，验收 23/23）；F-13 MCP 支持首期已交付（本地 stdio tools，验收通过）；F-12 成本统计首期已交付（当前会话/历史/面板，验收通过）；后续迭代从 `docs/design/requirements.md` §4.3 的 P1/P2 项推进。
+实现顺序见 `docs/plans/README.md`（step1~step12，已全部完成）+ `docs/plans/optimization-from-omp.md`（O1~O10，已全部落地）。**UI v8 交互架构层重建**的 M1~M5、M7 已交付，**M6 模型层 + M6.5 接线已交付并经一轮只读复审修复**（Transcript 顺序权威/Markdown 终稿与内联组/`@` 补全/ContextSet+sidecar/消息虚拟窗口；实现提交 `9ac4daf` / `b962f97` / `5dde747`，复审修复 `e485d5e`（台账 §10 勘误 51））；**MVP-2 3D 首页**已交付首期 + S2 交互联动（G7 通过；L1 扫描、3D 视口、点击打开、布局反转 + 2D fallback、Tab 遍历、搜索飞行、2D↔3D 联动、tooltip/详情卡）；**F-20 S3 时间轴依赖**已交付首期（`xgent_ui::space::s3`：回合/提交锚点合并、后台加载、HUD rail 点击/拖动/键盘、历史边框、只读回放当前 L1 图节点；不重建历史图、不写 git）；M8 Git 探针顺延。台账与勘误见 `docs/plans/ui-v8-tasks.md`，交接与下一步见 `docs/plans/ui-v8-handoff.md`。F-21 代码智能管线首期已交付（Rust 符号/import/复杂度 + RepoMap，验收 23/23）；F-13 MCP 支持首期已交付（本地 stdio tools，验收通过）；F-12 成本统计首期已交付（当前会话/历史/面板，验收通过）；后续迭代从 `docs/design/requirements.md` §4.3 的 P1/P2 项推进。
 
 ---
 

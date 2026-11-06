@@ -140,6 +140,7 @@ MVP-2 范围（3D 首页，当前主线）：
 
 - **布局**：3D 代码宇宙占 `Slot::Center`；打开文件/终端时主区让位，Esc 回宇宙；对话移到右侧栏常驻（写代码时仍可见）。
 - **3D 视口**：F-16，见 `docs/design/ui-v8-3d-viewport.md`；数据层 `xgent_spatial`（S0 已交付，MVP-2 扩 L1 文件/目录图；无 Bevy），视口与交互在 `xgent_ui`。
+- **时空回溯（S3 依赖）**：F-20 的 3D 时间轴首期，见 `xgent_ui::space::s3`；合并当前会话回合与 git 提交锚点，只读回放**当前 L1 图已有节点**的可见性（不重建已删除文件），相机不写。
 - **代码智能**：F-21，见 `docs/design/code-intelligence-design.md`；数据层 `xgent_codeintel`（tree-sitter 符号/import/复杂度；无 Bevy），RepoMap 检索在 `xgent_context`。
 - **2D fallback**：偏好可关闭 3D 首页，回到 MVP-1 布局。
 
@@ -471,6 +472,8 @@ TUI/Web/宠物在架构上预留，不在 MVP-2 范围、不阻塞；3D 已从�
 ### 10.3 3D（F-16，已移入 MVP-2）
 
 3D 不再是扩展点：它进入 MVP-2，是默认首页。数据层 `xgent_spatial`（S0 已交付；MVP-2 扩 L1 文件/目录图）保持无 Bevy、只读投影；视口与交互在 `xgent_ui`。详见 `docs/design/ui-v8-3d-viewport.md`。
+
+F-20 的 S3 依赖已按「只读回放」落地在 `xgent_ui::space::s3`：锚点数据来自当前会话用户消息与 git `log`/`ls-tree`，后台线程加载；回放只控制当前 L1 图已有星体/目录/边的可见性，历史中存在但当前图缺失的文件不重建，git 只执行只读命令。完整 F-20（时间锚点编辑、二分定位、diff UI、分支探索）不在本期。
 
 ### 10.4 宠物（F-15）
 
