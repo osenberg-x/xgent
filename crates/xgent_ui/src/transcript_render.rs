@@ -167,6 +167,10 @@ fn render_transcript(
                 commands.entity(entity).despawn();
             }
         }
+        if window.generation != generation {
+            // 旧会话的行高与当前块无关；不清掉会让恢复后的虚拟偏移沿用旧高度。
+            vlist.measured.clear();
+        }
         window.generation = generation;
         window.runs = runs.clone();
     }

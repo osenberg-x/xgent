@@ -19,6 +19,8 @@ pub struct UserInputMessage {
     pub editor_queries: Vec<xgent_core::EditorQuery>,
     /// 用户在上下文条里显式保留的上下文项（随请求进入 system 消息）。
     pub pinned_context: Vec<xgent_context::ContextChunk>,
+    /// 用户显式移除的上下文路径（相对项目根）；检索结果必须剔除这些路径。
+    pub removed_context: Vec<std::path::PathBuf>,
 }
 
 /// 中断当前对话（UI → agent）。

@@ -143,6 +143,17 @@ fn sync_completion_state(
         // 选区索引含 preedit），且用户正在选词，不该重开或关闭浮层。
         return;
     }
+    if state.suppress_hold {
+        // `accept_candidate` 的 queue_edit 要到下一帧才生效；在文本真正变成
+        // 关闭时的快照前，保持关闭，不能让旧文本把浮层重新拉起。
+        if state.suppress_text.as_deref() == Some(text.as_str()) {
+            state.suppress_hold = false;
+        } else {
+            state.deactivate();
+            close_popup(&mut commands, &mut cache, &q_popups);
+            return;
+        }
+    }
     if state.suppress_text.as_deref() == Some(text.as_str()) {
         // 用户已主动关闭（Esc/点击/接受）：不但要停用状态，还要把浮层收掉，
         // 否则它会一直停在 DROPDOWN 层直到文本再次变化。

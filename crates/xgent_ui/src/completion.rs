@@ -44,6 +44,12 @@ pub struct CompletionState {
     pub trigger_position: usize,
     /// 停用时的输入文本快照：文本未变化前不再自动重开浮层。
     pub suppress_text: Option<String>,
+    /// 主动关闭后等待文本真正落到 `suppress_text`；期间禁止同步重开。
+    ///
+    /// 接受候选时通过 `queue_edit` 写入新文本，编辑要到下一帧才生效；
+    /// 若同一帧的 `sync_completion_state` 读旧文本，会把抑制清掉并按旧
+    /// `@query` 重新拉起浮层。
+    pub suppress_hold: bool,
 }
 
 impl CompletionState {
@@ -54,6 +60,7 @@ impl CompletionState {
         self.selected_index = 0;
         self.trigger_position = trigger_pos;
         self.suppress_text = None;
+        self.suppress_hold = false;
     }
 
     /// 停用补全。
@@ -67,6 +74,7 @@ impl CompletionState {
     pub fn dismiss(&mut self, text: &str) {
         self.deactivate();
         self.suppress_text = Some(text.to_string());
+        self.suppress_hold = true;
     }
 
     /// 向下选择。
@@ -188,6 +196,10 @@ pub fn handle_completion_item_click(
     for (marker, _) in q.iter_mut() {
         if let Some(candidate) = state.candidates.get(marker.index).cloned() {
             if let Ok(mut editable) = q_input.single_mut() {
+                // 组合期索引含 preedit、可见文本不含；此时接受会替换错区间。
+                if editable.is_composing() {
+                    continue;
+                }
                 accept_candidate(&mut editable, &mut state, &candidate);
             }
             state.deactivate();

@@ -167,6 +167,57 @@ fn tool_card_reflects_status_and_result() {
 }
 
 #[test]
+fn live_tool_result_updates_nested_status_label() {
+    let mut app = app();
+    app.add_plugins(xgent_ui::tool_panel::ToolPanelPlugin)
+        .add_message::<xgent_agent::ToolResultMessage>()
+        .add_message::<xgent_agent::ToolProgressMessage>();
+    {
+        let mut transcript = app.world_mut().resource_mut::<Transcript>();
+        let (turn, _) = transcript.push_user_message("run".into());
+        transcript.push_tool_call(
+            turn,
+            "tc1".into(),
+            "read_file".into(),
+            "{\"path\":\"src/main.rs\"}".into(),
+        );
+    }
+    app.update();
+
+    let mut query = app
+        .world_mut()
+        .query_filtered::<&Text, With<ToolStatusLabelMarker>>();
+    let labels: Vec<String> = query.iter(app.world()).map(|text| text.0.clone()).collect();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("执行中") || label.contains("Running")),
+        "工具卡初始应为运行态：{labels:?}"
+    );
+
+    app.world_mut()
+        .write_message(xgent_agent::ToolResultMessage {
+            tool_call_id: "tc1".into(),
+            tool_id: "read_file".into(),
+            output: "done".into(),
+            is_error: false,
+            denied: false,
+        });
+    app.update();
+
+    let mut query = app
+        .world_mut()
+        .query_filtered::<&Text, With<ToolStatusLabelMarker>>();
+    let labels: Vec<String> = query.iter(app.world()).map(|text| text.0.clone()).collect();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("完成") || label.contains("Completed")),
+        "收到结果后嵌套状态药丸必须刷新：{labels:?}"
+    );
+}
+
+#[test]
 fn notices_render_and_order_is_monotonic() {
     let mut app = app();
     {

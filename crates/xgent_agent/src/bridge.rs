@@ -256,6 +256,8 @@ pub enum AgentCommand {
         session: u64,
         /// 上下文条中用户显式保留的项。
         pinned_context: Vec<xgent_context::ContextChunk>,
+        /// 用户显式移除的上下文路径（相对项目根）。
+        removed_context: Vec<std::path::PathBuf>,
     },
     /// 中断当前对话
     Abort,
@@ -574,6 +576,7 @@ async fn agent_loop_task(
                 mut editor_queries,
                 mut session,
                 mut pinned_context,
+                mut removed_context,
             } => {
                 // run_agent_loop 可能在停等期收到迟到的新 StartLoop（ECS Done 置
                 // Idle 后的新用户输入）并上返回——此处循环接手，立即开新对话。
@@ -622,6 +625,7 @@ async fn agent_loop_task(
                         &pinned_context,
                         settings.retrieval_max_tokens,
                     );
+                    crate::format::remove_excluded_chunks(&mut result, &removed_context);
                     crate::format::refresh_system_message(&mut req, &result);
                     let next = run_agent_loop(
                         &cfg.provider,
@@ -645,11 +649,12 @@ async fn agent_loop_task(
                     // 对话结束：清除 current_cancel，ECS Abort 不再误触发
                     *current_cancel.lock() = None;
                     match next {
-                        Some((new_req, new_queries, new_session, new_pinned)) => {
+                        Some((new_req, new_queries, new_session, new_pinned, new_removed)) => {
                             req = new_req;
                             editor_queries = new_queries;
                             session = new_session;
                             pinned_context = new_pinned;
+                            removed_context = new_removed;
                         }
                         None => break,
                     }
@@ -776,6 +781,7 @@ async fn run_agent_loop(
     Vec<xgent_core::EditorQuery>,
     u64,
     Vec<xgent_context::ContextChunk>,
+    Vec<std::path::PathBuf>,
 )> {
     use xgent_core::chat::{ContentBlock, Role};
     // 对话级快照：本对话期间配置固定，运行时刷新下次对话生效
@@ -1227,6 +1233,7 @@ async fn run_agent_loop(
             Vec<xgent_core::EditorQuery>,
             u64,
             Vec<xgent_context::ContextChunk>,
+            Vec<std::path::PathBuf>,
         )> = None;
         while let Ok(cmd) = steering_rx.try_recv() {
             match cmd {
@@ -1242,12 +1249,19 @@ async fn run_agent_loop(
                     editor_queries,
                     session,
                     pinned_context,
+                    removed_context,
                 } => {
                     // Done 已发、ECS 即将 Idle：新对话请求可能已在本函数阻塞
                     // 前入队。立即上返回顶层循环处理，不得丢弃（丢弃会让
                     // ECS 已置 Thinking 的会话永久卡死）。会话号一并上返：新建会话后
                     // 它可能已变，沿用旧值会把这一轮的写入记到别的会话上。
-                    pending_start = Some((req, editor_queries, session, pinned_context));
+                    pending_start = Some((
+                        req,
+                        editor_queries,
+                        session,
+                        pinned_context,
+                        removed_context,
+                    ));
                     break;
                 }
                 _ => {}
@@ -1281,11 +1295,18 @@ async fn run_agent_loop(
                     editor_queries,
                     session,
                     pinned_context,
+                    removed_context,
                 }) => {
                     // 新对话请求在停等期到达：ECS 收到 Done 置 Idle 后，新用户
                     // 输入走 StartLoop。若在此丢弃，ECS 已置 Thinking 的会话
                     // 永久卡死——上返回顶层循环立即开新对话。
-                    return Some((new_req, editor_queries, session, pinned_context));
+                    return Some((
+                        new_req,
+                        editor_queries,
+                        session,
+                        pinned_context,
+                        removed_context,
+                    ));
                 }
                 Some(AgentCommand::Abort) | None => {
                     // 中断对话：发 Done 通知 ECS 切回 Idle（修复前直接 return 不发 Done，

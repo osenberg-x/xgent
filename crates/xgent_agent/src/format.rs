@@ -94,6 +94,22 @@ pub fn merge_pinned_context(
     result.total_tokens = result.chunks.iter().map(|chunk| chunk.token_estimate).sum();
 }
 
+/// 从检索结果中剔除用户显式移除的上下文路径。
+///
+/// `excluded` 必须是项目相对路径（与 `ContextChunk.path` 同形）；调用方在
+/// 发送前把 chip 的绝对 id 归一成相对路径。
+pub fn remove_excluded_chunks(result: &mut ContextResult, excluded: &[std::path::PathBuf]) {
+    if excluded.is_empty() {
+        return;
+    }
+    result.chunks.retain(|chunk| {
+        !excluded
+            .iter()
+            .any(|path| path.as_path() == chunk.path.as_path())
+    });
+    result.total_tokens = result.chunks.iter().map(|chunk| chunk.token_estimate).sum();
+}
+
 /// 把上下文片段裁剪到给定 token 预算（与检索侧同一 1 token ≈ 4 字符口径）。
 fn truncate_chunk_to_tokens(
     chunk: &xgent_context::provider::ContextChunk,
@@ -247,6 +263,22 @@ mod tests {
             relevance: "retrieval".into(),
             token_estimate: tokens,
         }
+    }
+
+    #[test]
+    fn excluded_context_is_removed_from_retrieval() {
+        let mut result = ContextResult {
+            chunks: vec![
+                chunk("src/main.rs", "removed", 10),
+                chunk("src/lib.rs", "keep", 20),
+            ],
+            tree_summary: None,
+            total_tokens: 30,
+        };
+        remove_excluded_chunks(&mut result, &[PathBuf::from("src/main.rs")]);
+        assert_eq!(result.chunks.len(), 1);
+        assert_eq!(result.chunks[0].path, PathBuf::from("src/lib.rs"));
+        assert_eq!(result.total_tokens, 20);
     }
 
     #[test]

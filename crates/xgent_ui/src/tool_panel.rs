@@ -28,8 +28,11 @@ pub struct ToolCardMarker {
 }
 
 /// 工具卡片状态文本节点标记。
-#[derive(Component, Default)]
-pub struct ToolStatusLabelMarker;
+#[derive(Component, Debug, Clone)]
+pub struct ToolStatusLabelMarker {
+    /// 所属工具调用 id
+    pub tool_call_id: String,
+}
 
 /// 工具卡片结果文本节点标记。
 ///
@@ -48,8 +51,11 @@ pub struct ToolResultTextMarker {
 pub struct ToolResultAreaMarker;
 
 /// 工具卡片状态点（dot）标记。
-#[derive(Component, Default)]
-pub struct ToolStatusDotMarker;
+#[derive(Component, Debug, Clone)]
+pub struct ToolStatusDotMarker {
+    /// 所属工具调用 id。
+    pub tool_call_id: String,
+}
 
 /// 工具卡片 head（点击 toggle 展开/折叠）。
 #[derive(Component, Default)]
@@ -264,7 +270,9 @@ pub(crate) fn spawn_tool_card_entity(
                                     ..default()
                                 },
                                 BackgroundColor(dot_color),
-                                ToolStatusDotMarker,
+                                ToolStatusDotMarker {
+                                    tool_call_id: tool_call_id.to_string(),
+                                },
                             ));
                             pill.spawn((
                                 ui_text(
@@ -274,7 +282,9 @@ pub(crate) fn spawn_tool_card_entity(
                                     status_color,
                                     type_scale::line_height::UI,
                                 ),
-                                ToolStatusLabelMarker,
+                                ToolStatusLabelMarker {
+                                    tool_call_id: tool_call_id.to_string(),
+                                },
                             ));
                         });
                 });
@@ -369,9 +379,9 @@ fn update_tool_result(
     mut reader: MessageReader<ToolResultMessage>,
     mut q_cards: Query<(&mut ToolCardMarker, &Children), With<ToolCardMarker>>,
     mut params: ParamSet<(
-        Query<(&mut Text, &mut TextColor), With<ToolStatusLabelMarker>>,
+        Query<(&mut Text, &mut TextColor, &ToolStatusLabelMarker)>,
         Query<(&mut Text, &ToolResultTextMarker), With<ToolResultTextMarker>>,
-        Query<&mut BackgroundColor, With<ToolStatusDotMarker>>,
+        Query<(&mut BackgroundColor, &ToolStatusDotMarker)>,
         Query<&mut Text, With<ToolFoldMarker>>,
         Query<&mut Node, With<ToolResultAreaMarker>>,
     )>,
@@ -410,9 +420,10 @@ fn update_tool_result(
             );
             card.expanded = true;
             {
+                // 状态药丸在 card → head → pill 的孙层，不能只遍历 card 的直接子节点。
                 let mut q_status = params.p0();
-                for child in children.iter() {
-                    if let Ok((mut text, mut color)) = q_status.get_mut(child) {
+                for (mut text, mut color, marker) in q_status.iter_mut() {
+                    if marker.tool_call_id == ev.tool_call_id {
                         text.0 = status_label.clone();
                         color.0 = status_color;
                     }
@@ -438,8 +449,8 @@ fn update_tool_result(
             }
             {
                 let mut q_dot = params.p2();
-                for child in children.iter() {
-                    if let Ok(mut bg) = q_dot.get_mut(child) {
+                for (mut bg, marker) in q_dot.iter_mut() {
+                    if marker.tool_call_id == ev.tool_call_id {
                         *bg = dot_color;
                     }
                 }

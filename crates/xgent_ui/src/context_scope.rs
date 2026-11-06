@@ -64,34 +64,68 @@ pub struct ContextSetUiState {
     skip_tab_sync: bool,
 }
 
+/// 一次 sidecar 写入。
+struct ContextSidecarWrite {
+    session_id: String,
+    items: Vec<xgent_core::session::ContextSnapshot>,
+    removed: Vec<String>,
+}
+
+/// sidecar 串行写线程的发送端。
+#[derive(Resource)]
+struct ContextSidecarWriter(crossbeam_channel::Sender<ContextSidecarWrite>);
+
 /// 上下文条插件。
 pub struct ContextScopePlugin;
 
 impl Plugin for ContextScopePlugin {
     fn build(&self, app: &mut App) {
+        let (tx, rx) = crossbeam_channel::unbounded::<ContextSidecarWrite>();
+        let writer = match std::thread::Builder::new()
+            .name("xgent-context-sidecar".into())
+            .spawn(move || {
+                for write in rx {
+                    if let Err(error) = xgent_agent::session_store::save_context_set(
+                        &write.session_id,
+                        &write.items,
+                        &write.removed,
+                    ) {
+                        tracing::warn!(%error, "上下文 sidecar 写入失败：会话恢复后 chip 会丢失");
+                    }
+                }
+            }) {
+            Ok(_) => Some(ContextSidecarWriter(tx)),
+            Err(error) => {
+                tracing::warn!(%error, "无法启动上下文 sidecar 写线程，将退回同步写入");
+                None
+            }
+        };
         app.init_resource::<ContextSet>()
             .init_resource::<ContextSetUiState>()
-            .add_message::<ContextSetRemove>()
-            .add_systems(
-                Startup,
-                spawn_context_scope
-                    .after(crate::layout::spawn_layout)
-                    .after(crate::chat_panel::spawn_chat_panel),
+            .add_message::<ContextSetRemove>();
+        if let Some(writer) = writer {
+            app.insert_resource(writer);
+        }
+        app.add_systems(
+            Startup,
+            spawn_context_scope
+                .after(crate::layout::spawn_layout)
+                .after(crate::chat_panel::spawn_chat_panel),
+        )
+        .add_systems(
+            Update,
+            (
+                clear_context_on_new_session,
+                sync_context_from_tabs,
+                handle_chip_remove_click,
+                apply_context_remove,
+                restore_context_set,
+                rebuild_context_chips,
+                handle_add_click,
+                save_context_on_change,
             )
-            .add_systems(
-                Update,
-                (
-                    clear_context_on_new_session,
-                    sync_context_from_tabs,
-                    handle_chip_remove_click,
-                    apply_context_remove,
-                    restore_context_set,
-                    rebuild_context_chips,
-                    handle_add_click,
-                    save_context_on_change,
-                )
-                    .chain(),
-            );
+                .chain(),
+        );
     }
 }
 
@@ -276,7 +310,13 @@ fn restore_context_set(
 }
 
 /// 把 ContextSet 写入会话 sidecar（会话内持久化）。
-fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Conversation>>) {
+///
+/// 全量内容序列化与写盘交给串行后台线程，避免在 UI 帧里同步写大文件。
+fn save_context_on_change(
+    set: Res<ContextSet>,
+    conv: Option<Res<xgent_agent::Conversation>>,
+    writer: Option<Res<ContextSidecarWriter>>,
+) {
     if !set.is_changed() {
         return;
     }
@@ -299,11 +339,23 @@ fn save_context_on_change(set: Res<ContextSet>, conv: Option<Res<xgent_agent::Co
         })
         .collect();
     let removed = set.removed_ids();
-    if let Err(error) =
-        xgent_agent::session_store::save_context_set(&conv.id.0.to_string(), &snapshots, &removed)
-    {
-        // 静默失败会让用户以为 chip 已持久化，重启后却发现集合是空的。
-        tracing::warn!(%error, "上下文 sidecar 写入失败：会话恢复后 chip 会丢失");
+    let session_id = conv.id.0.to_string();
+    match writer {
+        Some(writer) => {
+            let _ = writer.0.send(ContextSidecarWrite {
+                session_id,
+                items: snapshots,
+                removed,
+            });
+        }
+        None => {
+            // 极简装配或写线程启动失败：保留同步写入，不能静默丢持久化。
+            if let Err(error) =
+                xgent_agent::session_store::save_context_set(&session_id, &snapshots, &removed)
+            {
+                tracing::warn!(%error, "上下文 sidecar 写入失败：会话恢复后 chip 会丢失");
+            }
+        }
     }
 }
 
@@ -315,6 +367,7 @@ fn rebuild_context_chips(
     icons: Res<IconAssets>,
     loc: Res<xgent_settings::Localizer>,
     global: Option<Res<xgent_settings::GlobalConfigRes>>,
+    provider: Option<Res<xgent_agent::ProviderInfo>>,
     mut cached: Local<String>,
     q_row: Query<Entity, With<ContextScopeMarker>>,
     q_chips_root: Query<Entity, With<ContextChipsMarker>>,
@@ -328,13 +381,28 @@ fn rebuild_context_chips(
         return;
     };
 
+    let (provider_id, model) = provider
+        .as_deref()
+        .map(|provider| (provider.id.clone(), provider.model.clone()))
+        .filter(|(id, _)| !id.is_empty())
+        .unwrap_or_else(|| {
+            global
+                .as_deref()
+                .map(|global| {
+                    (
+                        global.default_provider.clone(),
+                        global.default_model.clone(),
+                    )
+                })
+                .unwrap_or_default()
+        });
     let window = global
         .as_deref()
         .and_then(|global| {
             global
                 .providers
-                .get(&global.default_provider)
-                .map(|provider| provider.resolve_context_window(&global.default_model).0)
+                .get(&provider_id)
+                .map(|provider| provider.resolve_context_window(&model).0)
         })
         .unwrap_or(xgent_settings_core::global::defaults::CONTEXT_WINDOW);
     let signature_base = set
@@ -344,7 +412,7 @@ fn rebuild_context_chips(
         .collect::<Vec<_>>()
         .join("\u{1}");
     let signature = format!(
-        "{}|{}|{signature_base}",
+        "{}|{}|{window}|{signature_base}",
         set.total_tokens(),
         set.removed_ids().len()
     );

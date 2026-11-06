@@ -534,10 +534,20 @@ pub fn forward_input_submission(
                         .collect()
                 })
                 .unwrap_or_default();
+            let removed_context = context_set
+                .as_deref()
+                .map(|set| {
+                    set.removed_ids()
+                        .iter()
+                        .map(|id| pinned_path(id, root))
+                        .collect()
+                })
+                .unwrap_or_default();
             user_writer.write(UserInputMessage {
                 text,
                 editor_queries: queries,
                 pinned_context,
+                removed_context,
             });
         } else {
             steering_writer.write(SteeringMessage {

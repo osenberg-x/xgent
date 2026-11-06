@@ -164,22 +164,35 @@ fn render_list(
                 } else {
                     "• ".to_string()
                 };
-                parent.spawn((Node::default(),)).with_children(|row| {
-                    row.spawn(ui_text(
-                        &prefix,
-                        type_scale::BODY,
-                        400,
-                        theme.text_muted,
-                        type_scale::line_height::BODY,
-                    ));
-                    row.spawn(ui_text(
-                        &item.text,
-                        type_scale::BODY,
-                        400,
-                        theme.text,
-                        type_scale::line_height::BODY,
-                    ));
-                });
+                parent
+                    .spawn((Node {
+                        width: Val::Percent(100.0),
+                        ..default()
+                    },))
+                    .with_children(|row| {
+                        row.spawn(ui_text(
+                            &prefix,
+                            type_scale::BODY,
+                            400,
+                            theme.text_muted,
+                            type_scale::line_height::BODY,
+                        ));
+                        row.spawn((Node {
+                            flex_grow: 1.0,
+                            flex_shrink: 1.0,
+                            min_width: Val::ZERO,
+                            ..default()
+                        },))
+                            .with_children(|body| {
+                                body.spawn(ui_text(
+                                    &item.text,
+                                    type_scale::BODY,
+                                    400,
+                                    theme.text,
+                                    type_scale::line_height::BODY,
+                                ));
+                            });
+                    });
             }
         })
         .id()
@@ -257,21 +270,19 @@ fn render_code_block(
                     });
                 });
 
-            // 代码内容
-            parent
-                .spawn((Node {
-                    padding: UiRect::all(Val::Px(12.0)),
-                    ..default()
-                },))
-                .with_children(|code_area| {
-                    code_area.spawn(mono_text(
-                        fonts,
-                        code,
-                        type_scale::CODE,
-                        theme.text,
-                        type_scale::line_height::CTRL,
-                    ));
-                });
+            // 代码内容：长行横向滚动，不在消息列里撑破或强行折行。
+            let mut code_area = xui::ScrollFrame::horizontal();
+            code_area.content_sized();
+            code_area.style().padding = UiRect::all(Val::Px(12.0));
+            parent.spawn(code_area).with_children(|code_area| {
+                code_area.spawn(mono_text(
+                    fonts,
+                    code,
+                    type_scale::CODE,
+                    theme.text,
+                    type_scale::line_height::CTRL,
+                ));
+            });
         })
         .id()
 }

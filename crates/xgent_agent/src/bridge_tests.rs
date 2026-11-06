@@ -325,6 +325,7 @@ fn delta_then_done_message_sequence() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
 
     // 跑若干帧让事件流转
@@ -363,6 +364,7 @@ fn error_message_propagates() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     drive_until(&mut app, |app| {
         app.world()
@@ -388,6 +390,7 @@ fn busy_state_ignores_new_input() {
         text: "first".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     app.update();
     // 在 Thinking/Streaming 时发第二条
@@ -395,6 +398,7 @@ fn busy_state_ignores_new_input() {
         text: "second".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..20 {
         app.update();
@@ -456,6 +460,7 @@ fn tool_call_executes_approved_tool() {
         text: "do echo".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         app.update();
@@ -487,6 +492,7 @@ fn session_jsonl_persists_header_and_assistant_message() {
         text: "hello".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         app.update();
@@ -659,6 +665,7 @@ fn retryable_error_retries_then_succeeds() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..80 {
         app.update();
@@ -711,6 +718,7 @@ fn non_retryable_error_fails_immediately() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..40 {
         app.update();
@@ -744,6 +752,7 @@ fn infinite_retry_can_be_aborted() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     // 让首次失败 + 若干次重试发生（墙钟轮询，负载下不依赖帧数）
     drive_until(&mut app, |app| {
@@ -906,6 +915,7 @@ fn compaction_triggers_when_over_threshold() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         app.update();
@@ -946,6 +956,7 @@ fn runtime_narrowed_window_drives_the_next_compaction_decision() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         wide.update();
@@ -986,6 +997,7 @@ fn runtime_narrowed_window_drives_the_next_compaction_decision() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         narrowed.update();
@@ -1066,6 +1078,7 @@ fn steering_interrupts_streaming_and_continues() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     // 跑几帧让流式开始
     for _ in 0..5 {
@@ -1170,6 +1183,7 @@ fn compaction_preserves_system_prompt_in_req() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     // 跑帧让首次对话完成（含 compaction 触发）→ 回到 Idle
     for _ in 0..60 {
@@ -1232,6 +1246,7 @@ fn compaction_syncs_conv_messages() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     drive_until(&mut app, |app| {
         app.world().resource::<CompactedCollected>().count >= 1
@@ -1303,6 +1318,7 @@ fn length_truncation_pairs_tool_call_and_result_in_conv() {
         text: "do echo".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..80 {
         app.update();
@@ -1420,6 +1436,7 @@ fn tool_call_with_text_preserves_assistant_text_in_req() {
         text: "do echo".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..80 {
         app.update();
@@ -1555,6 +1572,7 @@ fn abort_then_new_conversation_still_streams() {
         text: "first".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     // 让流式开始（delta 到达）
     for _ in 0..10 {
@@ -1580,6 +1598,7 @@ fn abort_then_new_conversation_still_streams() {
         text: "second".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..80 {
         app.update();
@@ -1657,6 +1676,7 @@ fn confirm_decision_sets_tool_running_status() {
         text: "do echo".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
 
     // 轮询到 tool_call 到达 + ConfirmRequest 弹出（固定帧数在负载下追不上异步任务）
@@ -1803,6 +1823,7 @@ fn multi_tool_calls_single_assistant_message() {
         text: "run two".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..80 {
         app.update();
@@ -1939,6 +1960,7 @@ fn stream_none_triggers_retryable_error() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..150 {
         app.update();
@@ -2060,6 +2082,7 @@ fn steering_interrupt_preserves_assistant_text_in_req() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..5 {
         app.update();
@@ -2165,6 +2188,7 @@ fn retry_preserves_partial_assistant_text_in_req() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..150 {
         app.update();
@@ -2235,6 +2259,7 @@ fn abort_interrupts_confirming_state() {
         text: "do echo".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
 
     // 轮询到 tool_call 到达 + ConfirmRequest 弹出（固定帧数在负载下追不上异步任务）
@@ -2339,6 +2364,7 @@ fn normal_completion_backfills_assistant_text_to_req() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     // 跑到第一轮完成（Idle）。轮询直到 Idle，上限 300 帧避免 flaky。
     for _ in 0..300 {
@@ -2466,6 +2492,7 @@ fn tool_loop_stops_at_iteration_ceiling() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..300 {
         app.update();
@@ -2564,6 +2591,7 @@ fn tool_loop_stops_at_token_ceiling() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..300 {
         app.update();
@@ -2631,6 +2659,7 @@ fn abort_cancels_upstream_stream() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     // 等异步 task 真正建流（current_cancel 已设置）再中断，否则 abort 无对象
     for _ in 0..2000 {
@@ -2773,6 +2802,7 @@ fn retrieval_budget_from_config_reaches_context_query() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         app.update();
@@ -2819,6 +2849,7 @@ fn frame_event_cap_defers_events_without_dropping_them() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..200 {
         app.update();
@@ -3040,6 +3071,7 @@ fn probe_app(
         text: "run probes".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     app
 }
@@ -3545,6 +3577,7 @@ fn retrieval_budget_written_to_handle_reaches_next_query() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..50 {
         app.update();
@@ -3615,6 +3648,7 @@ fn frame_event_cap_written_to_handle_is_read_next_frame() {
         text: "hi".into(),
         editor_queries: Vec::new(),
         pinned_context: Vec::new(),
+        removed_context: Vec::new(),
     });
     for _ in 0..200 {
         app.update();

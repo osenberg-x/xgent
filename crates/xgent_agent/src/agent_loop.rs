@@ -83,6 +83,7 @@ pub fn agent_poll_system(
             req,
             editor_queries: ev.editor_queries.clone(),
             pinned_context: ev.pinned_context.clone(),
+            removed_context: ev.removed_context.clone(),
             // 检查点按 (会话, 轮) 归组；取数值 id，不经 Display 反解
             session: conv.id.0,
         });

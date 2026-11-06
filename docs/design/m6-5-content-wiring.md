@@ -318,4 +318,20 @@ parley 的 selection 写回接口需要实测；若 `insert_or_replace_selection
 | Markdown 内联 | 段落内粗体/链接收进 `Inline` 组渲染在同一行；标题/列表项内并入文本；嵌套列表用栈 | `- **A**: b`、`# T **x**` 不再丢内容或错位 |
 | 终稿档位 | Markdown 段落/粗体/链接用 `theme.font_size` + `line_height::for_text` | Done 瞬间不跳字号/行高（`mono_typography` 守护已扩到 `markdown_render.rs`） |
 | pinned 上下文 | 路径改与检索同形（相对项目根）；**用户显式项优先**；合并后仍受 `retrieval_max_tokens` 约束，超出部分截断留痕 | 去重生效、不再注入两遍；打开大文件不会把请求撑爆 |
+
+## 13. 第二轮复审修复（2026-11-06）
+
+只读复审在 M6.5 交付后再次检查当前代码，修复以下行为问题（未改 D1–D6）：
+
+| 主题 | 调整 | 影响 |
+|:---|:---|:---|
+| 工具卡状态 | `ToolStatusLabelMarker`/`ToolStatusDotMarker` 携带 `tool_call_id`；结果到达时按 id 更新孙层状态药丸与状态点 | 工具完成后不再永远显示「执行中」 |
+| 移除上下文 | `StartLoop` 增加 `removed_context`；`remove_excluded_chunks` 在合并后剔除检索命中的已移除路径 | 删除 chip 后，即使 OnDemand 检索再次命中该文件，也不会进入下一轮请求 |
+| 浮层关闭 | `CompletionState.suppress_hold` 在 `queue_edit` 落到新文本前禁止同步重开；点击候选在 IME 组合期直接跳过 | 键盘接受不再闪回浮层；中文组合期点击不会替换错区间 |
+| sidecar 写入 | 全量内容序列化与写盘移到单一后台线程，按变更顺序串行落盘 | 大文件 chip 变更不再阻塞 UI 帧 |
+| token 占比 | 分母使用 `ProviderInfo` 的生效 provider/model 解析窗口，签名包含窗口值 | 项目覆盖模型时百分比不再按全局默认窗口计算 |
+| 虚拟列表 | 会话代次变化时清空 `VirtualList.measured` | 恢复不同行高的会话不再沿用旧高度估算 |
+| Markdown 宽度 | 代码块接横向 `ScrollFrame`；列表正文设置可收缩宽度 | 长代码行与长列表项不再撑破消息列 |
+
+仍未闭环：真实窗口截图/走查（A2/A9 的可视部分）与 A8 的「实现前确认」历史证据；两项需要用户走查或明确降级口径，不能由代码修复替代。
 | sidecar | 写入失败与损坏文件都告警；新增磁盘往返 + 旧数组格式 + 损坏回退测试 | 持久化不再静默失败 |
