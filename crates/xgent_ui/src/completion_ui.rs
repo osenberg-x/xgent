@@ -143,16 +143,12 @@ fn sync_completion_state(
         // 选区索引含 preedit），且用户正在选词，不该重开或关闭浮层。
         return;
     }
-    if state.suppress_hold {
+    if hold_suppresses_popup(&mut state, &text) {
         // `accept_candidate` 的 queue_edit 要到下一帧才生效；在文本真正变成
         // 关闭时的快照前，保持关闭，不能让旧文本把浮层重新拉起。
-        if state.suppress_text.as_deref() == Some(text.as_str()) {
-            state.suppress_hold = false;
-        } else {
-            state.deactivate();
-            close_popup(&mut commands, &mut cache, &q_popups);
-            return;
-        }
+        state.deactivate();
+        close_popup(&mut commands, &mut cache, &q_popups);
+        return;
     }
     if state.suppress_text.as_deref() == Some(text.as_str()) {
         // 用户已主动关闭（Esc/点击/接受）：不但要停用状态，还要把浮层收掉，
@@ -234,6 +230,19 @@ fn close_popup(
     }
 }
 
+/// 主动关闭后的保持期：文本尚未落到关闭快照时返回 `true`。
+fn hold_suppresses_popup(state: &mut CompletionState, text: &str) -> bool {
+    if !state.suppress_hold {
+        return false;
+    }
+    if state.suppress_text.as_deref() == Some(text) {
+        state.suppress_hold = false;
+        false
+    } else {
+        true
+    }
+}
+
 fn signature(state: &CompletionState) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     state.active.hash(&mut hasher);
@@ -285,6 +294,30 @@ mod tests {
     use super::*;
     use crate::chat_panel::ChatInputMarker;
     use crate::completion::{CompletionCandidate, CompletionKind, CompletionState};
+
+    #[test]
+    fn dismiss_holds_until_replacement_text_arrives() {
+        let mut state = CompletionState::default();
+        state.activate(
+            vec![CompletionCandidate {
+                label: "src/main.rs".into(),
+                insert_text: "@file:src/main.rs ".into(),
+                kind: CompletionKind::File,
+            }],
+            3,
+        );
+        state.dismiss("@file:src/main.rs ");
+        assert!(
+            hold_suppresses_popup(&mut state, "hi @fi"),
+            "queue_edit 尚未生效时必须保持关闭"
+        );
+        assert!(state.suppress_hold);
+        assert!(
+            !hold_suppresses_popup(&mut state, "@file:src/main.rs "),
+            "新文本落盘后应解除保持"
+        );
+        assert!(!state.suppress_hold);
+    }
 
     #[test]
     fn enter_is_consumed_and_popup_closes() {
